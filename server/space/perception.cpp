@@ -254,7 +254,22 @@ Scan scan(const space::Space &world, IdentityRead identity, TransformRead transf
   std::vector<space::Nearby> candidates;
   space::near(world, identity, observer.eye, settings.far_m, {observer.body, {}, false},
               candidates);
-  std::sort(candidates.begin(), candidates.end(), [](const auto &a, const auto &b) {
+  const auto angular_size = [&](const space::Nearby &candidate) {
+    const auto object = logical_root(world, identity, parts, candidate.object);
+    const auto bounds = space::bounds(world, identity, object).value_or(candidate.world_bounds);
+    const auto size = bounds.max - bounds.min;
+    return std::max({size.x, size.y, size.z}) / std::max(distance(observer.eye, bounds), .001f);
+  };
+  std::sort(candidates.begin(), candidates.end(), [&](const auto &a, const auto &b) {
+    const bool near_a = a.distance_m <= settings.sight_m;
+    const bool near_b = b.distance_m <= settings.sight_m;
+    if (near_a != near_b)
+      return near_a;
+    if (!near_a) {
+      const auto angle_a = angular_size(a), angle_b = angular_size(b);
+      if (angle_a != angle_b)
+        return angle_a > angle_b;
+    }
     return a.distance_m == b.distance_m ? a.object < b.object : a.distance_m < b.distance_m;
   });
   std::unordered_map<std::uint64_t, float> speeds;
@@ -345,7 +360,7 @@ Scan scan(const space::Space &world, IdentityRead identity, TransformRead transf
     return a.distance_m == b.distance_m ? a.object < b.object : a.distance_m < b.distance_m;
   };
   std::sort(out.things.begin(), out.things.end(), order);
-  std::sort(out.far.begin(), out.far.end(), order);
+
   if (out.things.size() > limit)
     out.things.resize(limit);
   return out;

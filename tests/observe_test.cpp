@@ -55,6 +55,26 @@ void observation_geometry_and_live_light() {
   ob::light_samples(lights, identity(scene.objects), {0, 5, 2}, samples);
   require(samples.empty() && lights.candidates.empty(), "removed light leaves no retained cells");
 }
+void far_salience_prefers_the_dome_over_nearer_chairs() {
+  Scene scene;
+  auto body = scene.character({0, 0, 0});
+  for (int i = 0; i < 20; ++i)
+    scene.box({.6f, .6f, 1.2f}, {float(i % 2 ? -10 : 10), 32.f + i * 1.4f, 0}, sp::Motion::Static,
+              0, false);
+  const auto dome = scene.box({20, 12, 15}, {0, 85, 0}, sp::Motion::Static, 0, false);
+  ob::Lights lights(8);
+  ob::ZoneAmbients ambients;
+  Relation parts;
+  const ob::Settings settings{30, 1.5f, 256, 1, .1f, .1, 40, 8, 40};
+  const auto scan =
+      ob::scan(scene.space, identity(scene.objects), transforms(scene.objects), parts,
+               {body, {0, 0, 1}, {0, 1, 0}, 10}, {}, settings, lights, ambients, {}, 100, 0);
+  const auto found =
+      std::ranges::find_if(scan.far, [&](const auto &row) { return row.object == dome; });
+  require(found != scan.far.end() && found->salience == ob::Seen::Salience::Large &&
+              scan.far.front().object == dome && scan.far.size() == settings.far_max,
+          "far salience keeps the larger dome despite twenty nearer chairs");
+}
 void zones_subscriptions_hearing_and_observation() {
   Scene scene;
   auto receiver = scene.box({.2f, .2f, .2f}, {0, 0, 1}, sp::Motion::Static, 0, false);
@@ -163,6 +183,7 @@ int main(int argc, char **argv) {
       return 0;
     }
     observation_geometry_and_live_light();
+    far_salience_prefers_the_dome_over_nearer_chairs();
     zones_subscriptions_hearing_and_observation();
     std::cout << "observation tests passed\n";
     return 0;
