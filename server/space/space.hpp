@@ -3,6 +3,7 @@
 #include "snap/snap.hpp"
 #include "store/store.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <deque>
 #include <map>
@@ -173,6 +174,7 @@ struct QueryFilter {
   Handle ignore_a, ignore_b;
   bool include_sensors = false;
   std::span<const Handle> ignore = {};
+  std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
 };
 struct Hit {
   Handle object;

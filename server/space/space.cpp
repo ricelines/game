@@ -256,12 +256,19 @@ public:
 class Rays final : public JPH::CastRayCollector {
 public:
   std::vector<JPH::RayCastResult> hits;
-  void AddHit(const JPH::RayCastResult &hit) override { hits.push_back(hit); }
+  std::chrono::steady_clock::time_point deadline;
+  explicit Rays(std::chrono::steady_clock::time_point until) : deadline(until) {}
+  void AddHit(const JPH::RayCastResult &hit) override {
+    if (std::chrono::steady_clock::now() >= deadline)
+      ForceEarlyOut();
+    else
+      hits.push_back(hit);
+  }
 };
 std::vector<Hit> hits(const Space &space, IdentityRead identity, Vec3 from, Vec3 to,
                       QueryFilter filter) {
   auto &n = *space.native;
-  Rays collector;
+  Rays collector(filter.deadline);
   ObjectFilter objects(filter.include_sensors);
   BodyFilter bodies(n, filter, true);
   n.physics.GetNarrowPhaseQuery().CastRay({jv(from), jv(to - from)}, JPH::RayCastSettings{},
@@ -270,6 +277,8 @@ std::vector<Hit> hits(const Space &space, IdentityRead identity, Vec3 from, Vec3
             [](auto a, auto b) { return a.mFraction < b.mFraction; });
   std::vector<Hit> out;
   for (const auto &hit : collector.hits) {
+    if (std::chrono::steady_clock::now() >= filter.deadline)
+      break;
     auto owner = n.handles.find(hit.mBodyID.GetIndexAndSequenceNumber());
     if (owner == n.handles.end() || !identity.valid(owner->second))
       continue;
@@ -1198,12 +1207,21 @@ void near(const Space &space, IdentityRead identity, Vec3 point, float radius, Q
   class Candidates final : public JPH::CollideShapeBodyCollector {
   public:
     std::vector<JPH::BodyID> bodies;
-    void AddHit(const JPH::BodyID &id) override { bodies.push_back(id); }
-  } candidates;
+    std::chrono::steady_clock::time_point deadline;
+    explicit Candidates(std::chrono::steady_clock::time_point until) : deadline(until) {}
+    void AddHit(const JPH::BodyID &id) override {
+      if (std::chrono::steady_clock::now() >= deadline)
+        ForceEarlyOut();
+      else
+        bodies.push_back(id);
+    }
+  } candidates(filter.deadline);
   ObjectFilter objects(filter.include_sensors);
   n.physics.GetBroadPhaseQuery().CollideSphere(jv(point), radius, candidates, {}, objects);
   std::set<std::uint64_t> seen;
   for (auto id : candidates.bodies) {
+    if (std::chrono::steady_clock::now() >= filter.deadline)
+      break;
     auto owner = n.handles.find(id.GetIndexAndSequenceNumber());
     if (owner == n.handles.end())
       continue;

@@ -229,6 +229,26 @@ void exact_queries_do_not_grant_event_authority() {
   require(event.outcome.status == react::RunOutcome::Status::Ok && !f.queues.causal.empty(),
           "the current event sender remains eligible for emitted events");
 }
+void native_query_deadline_keeps_effects_and_step_continues() {
+  test_physical::Fixture f;
+  f.load(R"(return {kind='model',on={['novel.touch']=function(self,_,args)
+    self:set('novel.result', 7)
+    if args and args.loop then while true do world.near(self, 10) end end
+  end}})");
+  const auto result = f.invoke(std::vector<EventField>{{"loop", Value(true)}});
+  require(result.outcome.status == react::RunOutcome::Status::Cutoff &&
+              f.f.properties[2].get(f.f.a.slot())->numeric() == 7,
+          "native query loop cuts off and keeps prior effects");
+  const auto records = f.journal.take();
+  require(std::ranges::count_if(records,
+                                [](const auto &row) {
+                                  return row["kind"] == "system" && row["name"] == "cutoff";
+                                }) == 1,
+          "query cutoff is recorded exactly once");
+  f.tick();
+  require(f.invoke().outcome.status == react::RunOutcome::Status::Ok,
+          "the next step can run a handler after a query cutoff");
+}
 void foreign_avatar_motion_requires_its_own_scope() {
   test_physical::Fixture f;
   f.load("return {kind='model',on={['novel.touch']=function(self)end}}");
@@ -264,6 +284,7 @@ int main(int argc, char **argv) {
     own_motion_queries_and_speech();
     declared_part_batch_and_foreign_rejection();
     exact_queries_do_not_grant_event_authority();
+    native_query_deadline_keeps_effects_and_step_continues();
     foreign_avatar_motion_requires_its_own_scope();
     std::cout << "Ordinary physical actions and own-part Lua primitives passed\n";
   } catch (const std::exception &error) {

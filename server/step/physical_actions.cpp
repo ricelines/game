@@ -597,11 +597,16 @@ int near_binding(lua_State *L) {
   if (radius < 0 || radius > std::numeric_limits<float>::max())
     luaL_error(L, "query radius must be a nonnegative finite float");
   std::vector<space::Nearby> rows;
-  space::near(b.space, b.identity, p, float(radius), {i.self.object, {}, false}, rows);
+  space::near(b.space, b.identity, p, float(radius), {i.self.object, {}, false, {}, i.deadline},
+              rows);
+  if (std::chrono::steady_clock::now() >= i.deadline)
+    luaL_error(L, "handler deadline exceeded");
   lua_createtable(L, 0, 1);
   lua_createtable(L, int(rows.size()), 0);
   int index = 1;
   for (auto row : rows) {
+    if (std::chrono::steady_clock::now() >= i.deadline)
+      luaL_error(L, "handler deadline exceeded");
     i.acquired.push_back(row.object);
     react::push_handle(L, row.object);
     lua_rawseti(L, -2, index++);
@@ -613,7 +618,10 @@ int ray_binding(lua_State *L) {
   auto &b = *static_cast<QueryBinding *>(react::binding_data(L));
   auto &i = react::invocation(L);
   auto from = vec(L, 1), to = vec(L, 2);
-  auto result = space::raycast(b.space, b.identity, from, to, {i.self.object, {}, false});
+  auto result =
+      space::raycast(b.space, b.identity, from, to, {i.self.object, {}, false, {}, i.deadline});
+  if (std::chrono::steady_clock::now() >= i.deadline)
+    luaL_error(L, "handler deadline exceeded");
   lua_createtable(L, 0, 3);
   if (result) {
     auto &hit = *result;
