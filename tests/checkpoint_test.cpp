@@ -114,9 +114,19 @@ void local_capture_filters_authority_and_runtime_rows() {
               captured.parameters.rows[1].parts.at("piece") == 3,
           "catalog capture keeps original ID high water and parameter topology without unrelated "
           "submissions");
-  require(captured.ledger.balance.empty() && captured.profiles.rows.empty() &&
-              captured.profiles.by_key.empty(),
-          "captures contain no balances, profiles, key hashes or connection modes");
+  require(captured.ledger.balance.empty() && captured.profiles.by_key.empty(),
+          "captures contain no balances or authentication key index");
+  for (const auto &row : original.profiles.rows) {
+    if (!row.id)
+      continue;
+    const auto &copy = captured.profiles.rows.at(row.id);
+    if (permission.objects.contains(row.body))
+      require(copy.id == row.id && copy.name == row.name && copy.body == row.body &&
+                  copy.roles == row.roles && copy.connection_modes == 0 && copy.key_hashes.empty(),
+              "captured body keeps player identity and roles without authentication data");
+    else
+      require(copy.id == 0, "profiles whose bodies are outside the capture are absent");
+  }
   require(captured.grants.rows[3].id == 0 && captured.grants.rows[2].parent == 1 &&
               captured.grants.by_key.size() == 2 &&
               captured.players.rows[1].inventory == std::vector<Handle>{original.f.b} &&

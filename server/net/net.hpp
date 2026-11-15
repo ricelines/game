@@ -340,7 +340,7 @@ private:
   void reject(SessionId, std::string);
   void error(SessionId, std::uint64_t, std::string);
 };
-void write_profiles(snap::Output &, const Profiles &, bool capture = false);
+void write_profiles(snap::Output &, const Profiles &, const snap::ObjectSelection * = nullptr);
 void read_profiles(snap::Input &, Profiles &);
 struct PendingView {
   Step step = 0;

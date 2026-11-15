@@ -175,12 +175,15 @@ struct Fixture {
     limits.set(f.a.slot(), perm::bit(perm::Verb::Transfer));
     limits.set(f.c.slot(), perm::bit(perm::Verb::Copy));
     for (PlayerId id = 1; id <= 3; ++id)
-      net::put_profile(profiles, {id,
-                                  "player" + std::to_string(id),
-                                  id == 1 ? f.a : Handle{},
-                                  {},
-                                  net::all_modes,
-                                  {std::string(64, char('a' + id))}});
+      net::put_profile(
+          profiles, {id,
+                     "player" + std::to_string(id),
+                     id == 1   ? f.a
+                     : id == 2 ? f.c
+                               : Handle{},
+                     id == 1 ? std::vector<std::string>{"elaborator"} : std::vector<std::string>{},
+                     net::all_modes,
+                     {std::string(64, char('a' + id))}});
     const record::Origin origin{9, 4, {1, 2}, 1.5, false};
     step::enqueue_event(queues, {f.a, f.b, 6, Value(true), origin}, 1000);
     step::enqueue_event(queues, {f.c, f.b, 6, Value(false), origin}, 1000);

@@ -66,7 +66,7 @@ void write_players(snap::Output &out, const perm::Players &players, const perm::
                    const perm::Plots &plots, const perm::Groups &groups,
                    const net::Profiles &profiles, const perm::SnapshotSelection *selected) {
   perm::write_players(out, players, ledger, plots, groups, selected);
-  net::write_profiles(out, profiles, selected != nullptr);
+  net::write_profiles(out, profiles, selected ? &selected->objects : nullptr);
 }
 void read_players(snap::Input &in, perm::Players &players, perm::Ledger &ledger, perm::Plots &plots,
                   perm::Groups &groups, net::Profiles &profiles) {
