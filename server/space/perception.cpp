@@ -251,26 +251,33 @@ Scan scan(const space::Space &world, IdentityRead identity, TransformRead transf
           double world_lux, std::size_t requested) {
   Scan out;
   space::volumes_at(world, identity, observer.eye, space::VolumeKind::Zone, out.zones);
-  std::vector<space::Nearby> candidates;
-  space::near(world, identity, observer.eye, settings.far_m, {observer.body, {}, false},
-              candidates);
-  const auto angular_size = [&](const space::Nearby &candidate) {
-    const auto object = logical_root(world, identity, parts, candidate.object);
-    const auto bounds = space::bounds(world, identity, object).value_or(candidate.world_bounds);
-    const auto size = bounds.max - bounds.min;
-    return std::max({size.x, size.y, size.z}) / std::max(distance(observer.eye, bounds), .001f);
+  std::vector<space::Nearby> nearby;
+  space::near(world, identity, observer.eye, settings.far_m, {observer.body, {}, false}, nearby);
+  struct Candidate {
+    space::Nearby nearby;
+    Handle object;
+    space::Bounds bounds;
+    float distance_m, angular_size;
   };
+  std::vector<Candidate> candidates;
+  candidates.reserve(nearby.size());
+  for (const auto &row : nearby) {
+    const auto object = logical_root(world, identity, parts, row.object);
+    const auto bounds = space::bounds(world, identity, object).value_or(row.world_bounds);
+    const auto size = bounds.max - bounds.min;
+    const auto dist = distance(observer.eye, bounds);
+    candidates.push_back(
+        {row, object, bounds, dist, std::max({size.x, size.y, size.z}) / std::max(dist, .001f)});
+  }
   std::sort(candidates.begin(), candidates.end(), [&](const auto &a, const auto &b) {
-    const bool near_a = a.distance_m <= settings.sight_m;
-    const bool near_b = b.distance_m <= settings.sight_m;
+    const bool near_a = a.nearby.distance_m <= settings.sight_m;
+    const bool near_b = b.nearby.distance_m <= settings.sight_m;
     if (near_a != near_b)
       return near_a;
-    if (!near_a) {
-      const auto angle_a = angular_size(a), angle_b = angular_size(b);
-      if (angle_a != angle_b)
-        return angle_a > angle_b;
-    }
-    return a.distance_m == b.distance_m ? a.object < b.object : a.distance_m < b.distance_m;
+    if (!near_a && a.angular_size != b.angular_size)
+      return a.angular_size > b.angular_size;
+    return a.nearby.distance_m == b.nearby.distance_m ? a.nearby.object < b.nearby.object
+                                                      : a.nearby.distance_m < b.nearby.distance_m;
   });
   std::unordered_map<std::uint64_t, float> speeds;
   for (auto row : motion)
@@ -280,19 +287,18 @@ Scan scan(const space::Space &world, IdentityRead identity, TransformRead transf
   std::vector<Handle> ignore, zones;
   auto limit = requested ? requested : settings.things_max;
   for (const auto &candidate : candidates) {
-    auto object = logical_root(world, identity, parts, candidate.object);
+    auto object = candidate.object;
     if (object == observer.body || !visited.insert(object.bits).second)
       continue;
-    auto b = space::bounds(world, identity, object).value_or(candidate.world_bounds);
+    auto b = candidate.bounds;
     auto center = (b.min + b.max) * .5f;
-    float dist = distance(observer.eye, b);
+    float dist = candidate.distance_m;
     bool is_held = object == held;
     bool near = dist <= settings.sight_m || is_held;
     if ((near && out.things.size() >= limit) || (!near && out.far.size() >= settings.far_max))
       continue;
     auto size = b.max - b.min;
-    bool large = 2 * std::atan(std::max({size.x, size.y, size.z}) / (2 * std::max(dist, .001f))) *
-                     180 / std::numbers::pi_v<float> >=
+    bool large = 2 * std::atan(candidate.angular_size / 2) * 180 / std::numbers::pi_v<float> >=
                  settings.far_angular_degrees;
     bool moving = speeds[object.bits] >= settings.moving_m_s;
     bool bright = false;
