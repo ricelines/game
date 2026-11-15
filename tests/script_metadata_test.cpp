@@ -60,6 +60,7 @@ struct Fixture {
       models.rows[id].material = id == 2 ? 4 : 3;
       auto &a = assets.rows[models.rows[id].asset];
       a.hash = models.rows[id].asset;
+      a.manifest = nlohmann::json::object();
       a.volume = id == 3 ? 4 : id;
       a.minimum = {};
       a.maximum = {2, 2, 2};
@@ -72,6 +73,12 @@ struct Fixture {
     variant.minimum = {-1, -1, -1};
     variant.maximum = {1, 1, 1};
     variant.manifest = {{"variant_marker", "actual"},
+                        {"capacity", 99.0},
+                        {"capacity_method", "standard_exact"},
+                        {"bounds", {{"min", {-1, -1, -1}}, {"max", {1, 1, 1}}}},
+                        {"size", {2, 2, 2}},
+                        {"volume", 3.0},
+                        {"supports", nlohmann::json::array({{{"height", 1}, {"area", 4.0}}})},
                         {"assembly", {{"bounds", {{"min", {-1, -1, -1}}, {"max", {4, 2, 2}}}}}},
                         {"seats", nlohmann::json::array({{{"position", {1, 2, 3}}}})}};
     parameters.rows.push_back({1, 1, "variant", "{}", {{"new", 3}}});
@@ -154,10 +161,16 @@ void effective_metadata_and_mass() {
     assert(not pcall(function()o.scripts[1]=99 end))
     local a=self:asset()
     assert(a.variant_marker=='actual' and a.seats[1].position[2]==2)
+    assert(a.capacity==nil and a.capacity_method==nil)
+    assert(a.bounds==nil and a.size==nil and a.volume==nil and a.supports==nil)
+    assert(a.assembly==nil)
     assert(not pcall(function()a.seats[1].position[2]=99 end))
     assert(self:material('custom.4','custom.1')==20)
     local m=self:measure_model('m:1',1,4)
     assert(m.mass_kg==100 and m.bounds.min.X==-1 and m.bounds.max.X==4)
+    assert(m.supports[1].height==1 and m.supports[1].area==4)
+    assert(not pcall(function()m.supports[1].area=99 end))
+    assert(m.capacity==nil and m.capacity_m3==nil)
     assert(m.materials[1].material==3 and m.materials[1].mass_kg==40)
     assert(m.materials[2].material==4 and m.materials[2].mass_kg==60)
     local live=self:measure_instance()
@@ -168,7 +181,8 @@ void effective_metadata_and_mass() {
     assert(p.id==1 and p.owner=='p:2' and p.bounds.min[1]==-5 and p.bounds.max[2]==40)
     assert(not pcall(function()p.bounds.min[1]=0 end))
   )");
-  require(f.assets.rows.at("variant").manifest["seats"][0]["position"][1] == 2,
+  require(f.assets.rows.at("variant").manifest["capacity"] == 99.0 &&
+              f.assets.rows.at("variant").manifest["seats"][0]["position"][1] == 2,
           "nested read-only metadata does not alter asset catalog");
   require(f.run("self:measure_model(1,0.5)").status == react::RunOutcome::Status::Error,
           "fractional parameter block cannot silently select another variant");

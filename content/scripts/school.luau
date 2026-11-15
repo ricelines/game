@@ -45,13 +45,14 @@ local function swim(self)
     self:after(0.1, 'aq.swim')
     local tank = self:related('aq.reservoir', 'out')[1]
     if not tank then return end
-    local asset, pose = self:asset(tank), self:object(tank)
-    local low, high = asset.bounds.min, asset.bounds.max
+    local pose = self:object(tank)
+    local bounds = self:measure_model(pose.model, pose.params, pose.material).bounds
+    local low, high = bounds.min, bounds.max
     local water = self.state.water or 0
     local filled = math.clamp(water / math.max(self:measure_instance(tank).capacity_m3, 0.001), 0, 1)
-    local width = (high[1] - low[1]) / 2 - 0.24
-    local depth = (high[2] - low[2]) / 2 - 0.20
-    local bottom, top = low[3] + 0.15, low[3] + (high[3] - low[3]) * filled - 0.15
+    local width = (high.X - low.X) / 2 - 0.24
+    local depth = (high.Y - low.Y) / 2 - 0.20
+    local bottom, top = low.Z + 0.15, low.Z + (high.Z - low.Z) * filled - 0.15
     top = math.max(bottom, top)
     local t, rows = self:now(), {}
     local alive = not self.state.dead

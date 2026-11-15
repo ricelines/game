@@ -195,8 +195,9 @@ double mass(const react::Terms &terms, const react::Materials &materials, TermId
   return asset.volume * density.value.numeric();
 }
 void push_measurements(lua_State *L, ModelId model, std::uint32_t params, TermId material,
-                       const std::map<TermId, double> &masses, Vec3 minimum, Vec3 maximum,
-                       std::optional<double> capacity = {}) {
+                       const std::map<TermId, double> &masses, space::Bounds bounds,
+                       std::optional<double> capacity = {},
+                       const nlohmann::json *supports = nullptr) {
   lua_createtable(L, 0, 6);
   number_field(L, "model", model);
   number_field(L, "params", params);
@@ -218,10 +219,14 @@ void push_measurements(lua_State *L, ModelId model, std::uint32_t params, TermId
   if (capacity)
     number_field(L, "capacity_m3", *capacity);
   lua_createtable(L, 0, 2);
-  vector_field(L, "min", minimum);
-  vector_field(L, "max", maximum);
+  vector_field(L, "min", bounds.min);
+  vector_field(L, "max", bounds.max);
   lua_setreadonly(L, -1, true);
   lua_setfield(L, -2, "bounds");
+  if (supports) {
+    json_value(L, *supports);
+    lua_setfield(L, -2, "supports");
+  }
   lua_setreadonly(L, -1, true);
 }
 int plot_objects_binding(lua_State *L) {
@@ -293,7 +298,11 @@ int asset_binding(lua_State *L) {
   try {
     const auto effective = catalog::resolve_asset(
         b.models, b.parameters, b.identity.model[object.slot()], b.params[object.slot()]);
-    json_value(L, b.assets.rows.at(effective.hash).manifest);
+    auto metadata = b.assets.rows.at(effective.hash).manifest;
+    for (const auto *field :
+         {"bounds", "size", "volume", "supports", "capacity", "capacity_method", "assembly"})
+      metadata.erase(field);
+    json_value(L, metadata);
   } catch (const std::exception &error) {
     luaL_error(L, "%s", error.what());
   }
@@ -334,7 +343,8 @@ int measure_model_binding(lua_State *L) {
       minimum = {min[0], min[1], min[2]};
       maximum = {max[0], max[1], max[2]};
     }
-    push_measurements(L, model, params, root_material, masses, minimum, maximum);
+    const auto supports = asset.manifest.value("supports", nlohmann::json::array());
+    push_measurements(L, model, params, root_material, masses, {minimum, maximum}, {}, &supports);
   } catch (const std::exception &error) {
     luaL_error(L, "%s", error.what());
   }
@@ -378,7 +388,7 @@ int measure_instance_binding(lua_State *L) {
     const auto &inv = react::invocation(L);
     const auto capacity = react::read(b.values, object, b.values.capacity_term, inv.step, inv.hz);
     push_measurements(L, b.identity.model[object.slot()], b.params[object.slot()],
-                      b.identity.material[object.slot()], masses, minimum, maximum,
+                      b.identity.material[object.slot()], masses, {minimum, maximum},
                       capacity.present ? capacity.value.numeric() : 0);
   } catch (const std::exception &error) {
     luaL_error(L, "%s", error.what());

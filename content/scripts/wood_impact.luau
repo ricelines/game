@@ -7,8 +7,9 @@ return {
         local hardness = self:material(self:object().material,'base.hardness')
         local resistance = self:setting('base.impact_resistance')
         local depth = math.max(0,args.energy) * math.max(0,args.hardness) / math.max(0.001,hardness * resistance)
-        local bounds = self:asset().bounds
-        local maximum = math.min(bounds.max[1]-bounds.min[1],bounds.max[2]-bounds.min[2],bounds.max[3]-bounds.min[3]) * 0.25
+        local object = self:object()
+        local bounds = self:measure_model(object.model, object.params, object.material).bounds
+        local maximum = math.min(bounds.max.X-bounds.min.X,bounds.max.Y-bounds.min.Y,bounds.max.Z-bounds.min.Z) * 0.25
         self:set('base.indentation',math.min(maximum,(self:get('base.indentation') or 0)+depth))
     end},
 }
