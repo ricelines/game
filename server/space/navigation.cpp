@@ -27,10 +27,8 @@ Bounds instance_bounds(const NavInstance &entry) {
   }
   return result;
 }
-Path route(const Space::Native &n, Vec3 from, Vec3 to, Deadline deadline) {
+Path route(const Space::Native &n, Vec3 from, Vec3 to) {
   Path result{PathStatus::NoSurface, {}, 0, n.revision};
-  if (expired(deadline))
-    return result;
   auto a = nav(from), b = nav(to);
   const auto &s = n.settings.navigation;
   float extents[]{s.radius_m + s.cell_m, s.height_m, s.radius_m + s.cell_m};
@@ -71,7 +69,7 @@ Path route(const Space::Native &n, Vec3 from, Vec3 to, Deadline deadline) {
     status =
         n.query->findStraightPath(p, target, polys.data() + begin, finish - begin + 1,
                                   points.data(), nullptr, nullptr, &corners, int(polys.size()));
-    if (dtStatusFailed(status) || expired(deadline)) {
+    if (dtStatusFailed(status)) {
       result.status = PathStatus::Unreachable;
       return result;
     }
@@ -261,9 +259,7 @@ void Space::Native::dirty_navigation(Bounds b) {
 NavigationInstall install_ready_navigation(Space &space) {
   auto &n = *space.native;
   NavigationInstall output{n.revision, {}, {}, {}};
-  const auto end = std::chrono::steady_clock::now() +
-                   std::chrono::microseconds(n.settings.tile_install_budget_us);
-  while (std::chrono::steady_clock::now() < end) {
+  for (;;) {
     NavResult result;
     {
       std::lock_guard lock(n.nav_mutex);
@@ -375,7 +371,7 @@ bool travel_blocked(Vec3 a, Vec3 b, std::span<const TravelBoundary> regions) {
   return false;
 }
 Path path(const Space &space, IdentityRead identity, Handle body, const Goal &goal,
-          std::span<const TravelBoundary> forbidden, Deadline deadline) {
+          std::span<const TravelBoundary> forbidden) {
   const auto &n = *space.native;
   Path result{PathStatus::NoSurface, {}, 0, n.revision};
   auto found = n.bodies.find(body.bits);
@@ -403,9 +399,7 @@ Path path(const Space &space, IdentityRead identity, Handle body, const Goal &go
   float shortest = INFINITY;
   bool denied = false;
   for (auto to : candidates) {
-    if (expired(deadline))
-      break;
-    auto attempt = route(n, from, to, deadline);
+    auto attempt = route(n, from, to);
     if (attempt.status != PathStatus::Ready) {
       result.status = attempt.status;
       continue;
@@ -444,10 +438,10 @@ Path path(const Space &space, IdentityRead identity, Handle body, const Goal &go
 }
 
 NavigationReport diagnose_navigation(const Space &space, std::span<const Bounds> regions,
-                                     Vec3 reference, Deadline deadline) {
+                                     Vec3 reference) {
   auto &n = *space.native;
   NavigationReport result{n.revision, false, false, {}};
-  if (!n.dirty_tiles.empty() || expired(deadline))
+  if (!n.dirty_tiles.empty())
     return result;
   auto &cache = n.connectivity;
   if (cache.revision != n.revision) {
@@ -457,8 +451,6 @@ NavigationReport diagnose_navigation(const Space &space, std::span<const Bounds>
   // Labels are derived from the current tile revision. Keep the traversal cursor
   // so a large rebuild can finish over several bounded writer turns.
   while (!cache.complete) {
-    if (expired(deadline))
-      return result;
     if (!cache.frontier.empty()) {
       const auto next = cache.frontier.front();
       cache.frontier.pop_front();
@@ -502,18 +494,11 @@ NavigationReport diagnose_navigation(const Space &space, std::span<const Bounds>
   struct Areas final : dtPolyQuery {
     const Space::Native &native;
     std::uint32_t reference;
-    Deadline deadline;
     std::map<std::uint32_t, NavigationArea> rows;
     Vec3 center;
-    bool complete = true;
-    Areas(const Space::Native &n, std::uint32_t component, Deadline end)
-        : native(n), reference(component), deadline(end) {}
+    Areas(const Space::Native &n, std::uint32_t component) : native(n), reference(component) {}
     void process(const dtMeshTile *, dtPoly **, dtPolyRef *refs, int count) override {
       for (int i = 0; i < count; ++i) {
-        if (expired(deadline)) {
-          complete = false;
-          return;
-        }
         const auto component = native.connectivity.labels.at(refs[i]);
         if (!rows.contains(component)) {
           float point[3];
@@ -523,16 +508,13 @@ NavigationReport diagnose_navigation(const Space &space, std::span<const Bounds>
         }
       }
     }
-  } areas(n, reference_component, deadline);
+  } areas(n, reference_component);
   for (const auto &region : regions) {
-    if (expired(deadline))
-      return result;
     areas.center = nav((region.min + region.max) * .5f);
     const auto extent = (region.max - region.min) * .5f;
     const float pad = s.radius_m + s.cell_m;
     const float extents[]{extent.x + pad, extent.z + s.cell_height_m * 2, extent.y + pad};
-    if (dtStatusFailed(n.query->queryPolygons(&areas.center.x, extents, &filter, &areas)) ||
-        !areas.complete)
+    if (dtStatusFailed(n.query->queryPolygons(&areas.center.x, extents, &filter, &areas)))
       return result;
   }
   for (const auto &[component, area] : areas.rows) {

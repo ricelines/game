@@ -101,6 +101,7 @@ end
 
 return {
     kind = 'model',
+    slots = {'use', 'take', 'move', 'animate', 'camera'},
     watches = {
         'base.attached_to',
         {term='base.charge',thresholds={{predicate='at_most',value=0},{predicate='above',value=0}}},
@@ -174,12 +175,10 @@ return {
             local from = source.bindings.container
             local to = destination.bindings.container
             assert(from and to and from.stored == to.stored, 'These containers do not declare a compatible quantity.')
-            local available = self:read(held, from.stored) or 0
-            local filled = self:read(selected, to.stored) or 0
-            local free = math.max(0, destination.capacity - filled)
-            local amount = math.min(available, free, args.amount or available)
+            local amount = args.amount or source.capacity
             assert(amount >= 0, 'Pour amount must be nonnegative.')
-            checked(self, 'engine.transfer', held, {to=selected,term=from.stored,amount=amount})
+            checked(self, 'engine.transfer', held, {
+                to=selected,term=from.stored,amount=amount,to_max=destination.capacity})
         end,
         ['base.throw'] = function(self, _, args)
             local held = held_item(self)
@@ -216,8 +215,9 @@ return {
         end,
         ['base.recharge'] = function(self, source, args)
             local free = math.max(0, self:setting('base.charge_capacity') - (self:get('base.charge') or 0))
-            local available = self:read(source, 'base.charge') or 0
-            checked(self, 'engine.transfer', source, {to=self.handle,term='base.charge',amount=math.max(0,math.min(free,available,args.amount or free))})
+            checked(self, 'engine.transfer', source, {
+                to=self.handle,term='base.charge',amount=math.max(0,math.min(free,args.amount or free)),
+                to_max=self:setting('base.charge_capacity')})
         end,
         ['base.make_material'] = fabrication_receiver, ['base.place'] = fabrication_receiver,
         ['base.dismantle'] = fabrication_receiver, ['base.reconfigure'] = fabrication_receiver,

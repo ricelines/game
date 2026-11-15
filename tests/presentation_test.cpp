@@ -1,17 +1,12 @@
-#include "bindings/illumination.hpp"
-#include "bindings/metadata/metadata.hpp"
-#include "bindings/presentation.hpp"
-#include "bindings/replication.hpp"
-#include "bindings/viewing/viewing.hpp"
-#include "control/control.hpp"
 #include "space_fixture.hpp"
+#include "step/step.hpp"
 
 #include <chrono>
 #include <iostream>
 #include <numbers>
 
 using namespace amber;
-namespace bi = amber::bindings;
+namespace bi = amber::net;
 namespace re = amber::react;
 namespace ca = amber::catalog;
 namespace ne = amber::net;
@@ -174,14 +169,14 @@ void descriptions_and_roles() {
       "authored zone creates real closed Jolt sensor");
   std::vector<Handle> volumes;
   space::volumes_at(scene.space, identity(scene.objects), {0, 0, 1}, space::VolumeKind::Zone,
-                    space::Deadline::max(), volumes);
+                    volumes);
   require(volumes == std::vector<Handle>{sensor_object}, "authored sensor containment");
 }
 void interested_processes_and_lifecycle() {
   Fixture f;
   auto index = f.index();
   auto h = f.make();
-  f.processes[1].set(h.slot(), re::Process{0, 0, 1, 0, 2, 1});
+  f.processes[1].set(h.slot(), re::Process{0, 0, 1, 0, 2});
   f.properties[2].set(h.slot(), Value(42.));
   f.add(index, h);
   require(f.publish(index, 20).upserts.empty() && !index.rows.at(h.bits).sampled,
@@ -197,7 +192,7 @@ void interested_processes_and_lifecycle() {
   require(f.publish(index, 40).upserts[0].states[0].value == 2 && index.active_processes.empty(),
           "terminal clamp removes recurring sampling");
   require(f.publish(index, 60).upserts.empty(), "clamped process is inert");
-  f.processes[1].set(h.slot(), re::Process{2, 60, -1, 0, 2, 2});
+  f.processes[1].set(h.slot(), re::Process{2, 60, -1, 0, 2});
   bi::value_changed(index, h, 1, f.processes);
   require(f.publish(index, 80).upserts[0].states[0].value == 1,
           "changed rate rearms sampling toward opposite bound");
@@ -233,84 +228,40 @@ void coherent_catalog_publication() {
   using Json = nlohmann::json;
   Fixture f;
   const auto object = f.make(), parent = f.make();
-  const auto values = f.values();
-  ca::Scripts scripts;
-  const auto script = ca::import_script(
-      scripts,
-      ca::prepare_script("return {kind='model',watches={'invented.q1'},"
-                         "on={['invented.q1']=function(self)self.state.seen=true end}}",
-                         f.terms, {{"use"}}, ca::sha256("presentation-registry"), {},
-                         {4096, 50, 5, 64}),
-      9, 0);
-  re::Triggers triggers;
-  re::PriorityLinks priorities;
-  re::Subscriptions subscriptions;
-  observe::LightSubscriptions points{8};
-  bi::viewing::SessionViews views;
-  bi::IlluminanceReads illuminance{points, subscriptions, identity(f.objects),
-                                   transforms(f.objects), 0};
-  bi::MetadataChanges changes{views, illuminance, {}, {}};
-  bi::CatalogPublication publication(
-      f.models, scripts, f.terms, f.materials, f.texts, f.instance_texts, values,
-      authority(f.objects), parents(f.objects), triggers, priorities, changes, {4, 0, 0, 0, 0, 0});
-  const auto &inspection = publication.inspection_terms();
-  const auto &initial = publication.initial_catalog();
-  require(initial["models"].size() == 1 && initial["terms"].size() == 9 &&
-              initial["materials"].size() == 1 && initial["materials"][0]["color"][0] == .25 &&
-              std::find(inspection.begin(), inspection.end(), 1) != inspection.end() &&
-              std::find(inspection.begin(), inspection.end(), 3) == inspection.end(),
-          "initial publication omitted actual definitions or inspected material names as facts");
-  struct Wire {
-    std::vector<std::pair<ne::SessionId, Json>> messages;
-    bool closed = false;
-  } wire;
-  control::Profiles profiles;
-  control::put_profile(profiles, {9,
-                                  "Presentation observer",
-                                  object,
-                                  {},
-                                  control::modes(control::Mode::Watch),
-                                  {control::hash_key("presentation-fixture")}});
-  control::Sessions sessions(profiles, {&wire,
-                                        [](void *local, ne::SessionId id, std::string text) {
-                                          static_cast<Wire *>(local)->messages.emplace_back(
-                                              id, Json::parse(text));
-                                        },
-                                        [](void *local, ne::SessionId, std::uint16_t, std::string) {
-                                          static_cast<Wire *>(local)->closed = true;
-                                        },
-                                        [](void *, ne::SessionId, Vec3) {}});
-  const auto connect = [&](ne::SessionId id) {
-    sessions.accept(ne::Connected{id});
-    sessions.accept(ne::Control{id, Json{{"t", "hello"},
-                                         {"version", 1},
-                                         {"key", "presentation-fixture"},
-                                         {"mode", "watch"},
-                                         {"binary", false}}
-                                        .dump()});
-    require(sessions.principal(id).has_value() && !wire.closed,
-            "publication fixture did not authenticate through actual Sessions");
+  net::Profiles profiles;
+  net::put_profile(profiles, {9,
+                              "Presentation observer",
+                              object,
+                              {},
+                              net::modes(net::Mode::Watch),
+                              {net::hash_key("presentation-fixture")}});
+  net::Sessions sessions(profiles);
+  const auto connect = [&](net::SessionId id) {
+    sessions.accept(net::Connected{id});
+    sessions.accept(net::Control{id, Json{{"t", "hello"},
+                                          {"version", 1},
+                                          {"key", "presentation-fixture"},
+                                          {"mode", "watch"},
+                                          {"binary", false}}
+                                         .dump()});
+    require(sessions.principal(id).has_value(), "actual Sessions authentication failed");
   };
   connect(101);
   connect(102);
-  sessions.accept(ne::Connected{103}); // Connected transport has no authenticated principal.
-  wire.messages.clear();
-  publication.flush(sessions);
-  require(wire.messages.empty(), "an unchanged initial catalog produced unsolicited deltas");
-  sessions.send(101, publication.initial_catalog());
-  require(wire.messages.size() == 1 && wire.messages.front().second == initial,
-          "initial authenticated catalog was not the actual publication cache");
-  wire.messages.clear();
+  sessions.accept(net::Connected{103});
+  std::vector<net::Invocation> requests;
+  std::vector<net::SessionNotice> notices;
+  std::vector<net::SessionOutput> outputs;
+  sessions.drain(requests, notices, outputs);
+  outputs.clear();
+  net::SessionViews views;
+  views.rows[101].body = object;
+  views.rows[101].pending.ready = true;
   auto model = f.models.rows[1];
   model.id = static_cast<ModelId>(f.models.rows.size());
   model.asset = f.variant;
-  model.script = script;
   f.models.rows.push_back(model);
   f.texts.rows[model.id] = {"New definition", "Authored default", ""};
-  const std::array<ModelId, 2> model_changes{model.id, model.id};
-  publication.definitions_changed(model_changes);
-  require(triggers.at(1).by_model.at(model.id).script == script,
-          "definition publication did not project the real validated default script");
   re::Term term;
   term.name = "p9.live_fact";
   term.owner = 9;
@@ -320,70 +271,62 @@ void coherent_catalog_publication() {
   f.processes.resize(f.terms.rows.size());
   f.properties[added].set(object.slot(), Value(123.));
   ca::set_material(f.materials, f.terms, 3, {{4, Value(.75)}});
-  const std::array<TermId, 2> term_changes{added, added}, material_changes{3, 3};
-  publication.registry_changed(term_changes, material_changes);
   f.objects.model[object.slot()] = model.id;
   f.objects.owner[object.slot()] = 10;
   f.objects.parent[object.slot()] = parent;
-  views.rows[101].body = object;
-  views.rows[101].pending.ready = true;
+  step::NativeCompletion changed;
+  changed.changed_models = {model.id, model.id};
+  changed.changed_terms = {added, added};
+  changed.changed_materials = {3, 3};
+  step::publish_catalog_changes(sessions, views, f.models, f.texts, f.terms, f.materials,
+                                {4, 0, 0, 0, 0, 0}, changed);
   const std::array object_changes{object, object};
-  bi::metadata_changed(changes, object_changes, {});
+  step::publish_object_changes(sessions, views, identity(f.objects), authority(f.objects),
+                               parents(f.objects), f.texts, f.instance_texts, object_changes);
   require(!views.rows[101].pending.ready,
-          "changed ownership/parentage left the actual pending observation cache valid");
-  publication.flush(sessions);
-  require(wire.messages.size() == 8,
-          "one flush did not send four coherent deltas to each authenticated observer");
-  const auto rows = [&](ne::SessionId session, std::string_view field) -> const Json & {
-    const auto found = std::find_if(wire.messages.begin(), wire.messages.end(), [&](const auto &m) {
-      return m.first == session && m.second.contains(field);
-    });
-    if (found == wire.messages.end())
-      throw std::runtime_error("expected catalog/metadata delta missing");
-    return found->second.at(field);
+          "definition/authority changes left the actual pending observation valid");
+  sessions.drain(requests, notices, outputs);
+  require(outputs.size() == 8, "four direct deltas did not reach each authenticated observer");
+  const auto rows = [&](net::SessionId id, std::string_view field) -> const Json & {
+    for (const auto &output : outputs)
+      if (const auto *send = std::get_if<net::Send>(&output);
+          send && send->session == id && send->message.contains(field))
+        return send->message.at(field);
+    throw std::runtime_error("expected catalog/metadata delta missing");
   };
-  for (const auto session : {101u, 102u}) {
-    require(rows(session, "models").size() == 1 && rows(session, "models")[0]["id"] == model.id &&
-                rows(session, "models")[0]["asset"] == f.variant &&
-                rows(session, "terms").size() == 1 && rows(session, "terms")[0]["id"] == added &&
-                rows(session, "materials").size() == 1 &&
-                rows(session, "materials")[0]["color"][0] == .75,
-            "coalesced definition/registry publication duplicated or cached old rows");
-    const auto &objects = rows(session, "objects");
+  for (const auto id : {101u, 102u}) {
+    require(rows(id, "models").size() == 1 && rows(id, "models")[0]["id"] == model.id &&
+                rows(id, "models")[0]["asset"] == f.variant && rows(id, "terms").size() == 1 &&
+                rows(id, "terms")[0]["id"] == added && rows(id, "materials").size() == 1 &&
+                rows(id, "materials")[0]["color"][0] == .75,
+            "direct definition publication duplicated or retained old rows");
+    const auto &objects = rows(id, "objects");
     require(objects.size() == 1 && objects[0]["h"] == to_string(object) &&
                 objects[0]["owner"] == "p:10" && objects[0]["parent"] == to_string(parent) &&
                 objects[0]["text"]["name"] == "New definition",
-            "object metadata did not use current authority, parent and model claims");
+            "object publication lost current authority, parent or model claims");
   }
-  require(std::none_of(wire.messages.begin(), wire.messages.end(),
-                       [](const auto &message) { return message.first == 103; }),
-          "catalog publication reached an unauthenticated transport");
-  require(publication.initial_catalog()["models"].size() == 2 &&
-              publication.initial_catalog()["terms"].size() == 10 &&
-              publication.initial_catalog()["materials"][0]["color"][0] == .75 &&
-              std::count(inspection.begin(), inspection.end(), added) == 1,
-          "later clients or existing inspectors retained a stale/duplicated catalog");
+  for (const auto &output : outputs)
+    if (const auto *send = std::get_if<net::Send>(&output))
+      require(send->session != 103, "publication reached an unauthenticated transport");
+  const std::array inspected{added};
   const auto description =
-      bi::describe_object(object, identity(f.objects), f.models, f.parameters, f.assets, f.texts,
-                          f.instance_texts, values, inspection, {}, 0, 20);
+      net::describe_object(object, identity(f.objects), f.models, f.parameters, f.assets, f.texts,
+                           f.instance_texts, f.values(), inspected, {}, 0, 20);
   require(description.measured["values"]["p9.live_fact"] == 123,
-          "live inspection did not consume the updated inspection-term reference");
-  wire.messages.clear();
-  publication.flush(sessions);
-  require(wire.messages.empty() && changes.objects.empty() && changes.models.empty(),
-          "a completed publication left duplicate work for the next boundary");
+          "live inspection did not consume the newly appended quantity");
 }
 void benchmark() {
   Fixture f;
   auto index = f.index();
   for (unsigned i = 0; i < 100000; ++i) {
     auto h = f.make({10000.f + float(i % 1000) * 2, 10000.f + float(i / 1000) * 2, 0});
-    f.processes[1].set(h.slot(), re::Process{0, 0, 1, 0, 100000, 1});
+    f.processes[1].set(h.slot(), re::Process{0, 0, 1, 0, 100000});
     f.add(index, h);
   }
   for (unsigned i = 0; i < 32; ++i) {
     auto h = f.make({float(i % 8), float(i / 8), 0});
-    f.processes[1].set(h.slot(), re::Process{0, 0, 1, 0, 100000, 1});
+    f.processes[1].set(h.slot(), re::Process{0, 0, 1, 0, 100000});
     f.add(index, h);
   }
   f.publish(index, 0);

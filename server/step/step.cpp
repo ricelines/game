@@ -52,18 +52,22 @@ void schedule(TimerWheel &wheel, Timer timer) {
     const auto found = wheel.thresholds.find(key(*timer.threshold));
     if (found != wheel.thresholds.end()) {
       const auto location = found->second;
-      const auto &before = *wheel.levels[location.level][location.bucket][location.index].threshold;
-      // Old snapshots enumerate by due time, not by revision. A later-due
-      // obsolete row must not replace a newer crossing during reconstruction.
-      if (timer.threshold->binding_revision < before.binding_revision ||
-          (timer.threshold->binding_revision == before.binding_revision &&
-           timer.threshold->process_revision < before.process_revision))
-        return;
       remove_timer(wheel, location);
     }
   }
   timer.due = std::max(timer.due, wheel.now + 1);
   put_timer(wheel, std::move(timer));
+}
+void cancel_threshold(TimerWheel &wheel, const ThresholdKey &key) {
+  if (const auto found = wheel.thresholds.find(key); found != wheel.thresholds.end())
+    remove_timer(wheel, found->second);
+}
+void cancel_source_thresholds(TimerWheel &wheel, const react::Subscriptions &subscriptions,
+                              FactKey source) {
+  if (const auto found = subscriptions.rows.find(source); found != subscriptions.rows.end())
+    for (const auto &binding : found->second)
+      cancel_threshold(wheel,
+                       {source, binding.consumer.object, binding.consumer.script, binding.index});
 }
 void promote_due(TimerWheel &wheel, Step now, WorkQueues &queues) {
   while (wheel.now < now) {

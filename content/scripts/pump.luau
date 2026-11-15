@@ -17,8 +17,8 @@ end
 return {
     kind = 'model', contributes = {'base.power_demand', 'aq.aeration'},
     watches = {'base.on', 'base.powered_by', 'aq.reservoir',
-        {term = 'base.power_supply', along = 'base.powered_by'},
-        {term = 'base.power_demand', along = 'base.powered_by'}},
+        'base.power_supply',
+        'base.power_demand'},
     actions = {['base.switch'] = {right = 'use', reach = true}},
     on = {
         ['base.start'] = update, ['base.on'] = update, ['base.powered_by'] = update,

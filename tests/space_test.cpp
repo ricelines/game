@@ -155,9 +155,9 @@ void gravity_visibility_zones_and_snapshot() {
     std::cerr << "support probe base=" << scene.objects.position[falling.slot()].z
               << " bounds=" << b.min.z << "," << b.max.z << "\n";
     auto probe = sp::raycast(scene.space, identity(scene.objects), {0, 0, b.min.z + .015f},
-                             {0, 0, b.min.z - .045f}, {falling, {}, false}, sp::Deadline::max());
-    std::cerr << "support ray=" << (probe.hit ? probe.hit->object.bits : 0)
-              << " floor=" << floor.bits << "\n";
+                             {0, 0, b.min.z - .045f}, {falling, {}, false});
+    std::cerr << "support ray=" << (probe ? probe->object.bits : 0) << " floor=" << floor.bits
+              << "\n";
   }
   require(edge(scene.relations.supports, floor, falling), "support relation absent");
   require(edge(scene.relations.in_zone, falling, zone), "sleeping body lost zone membership");
@@ -177,29 +177,21 @@ void gravity_visibility_zones_and_snapshot() {
   require(edge(scene.relations.in_zone, falling, zone), "restoring sleep lost zone");
   auto glass = scene.box({.1f, 4, 3}, {2, 0, 0}, sp::Motion::Static, 1);
   auto wall = scene.box({.1f, 4, 3}, {4, 0, 0});
-  auto view = sp::visibility(scene.space, identity(scene.objects), {0, 0, 1}, {3, 0, 1}, {}, .01f,
-                             sp::Deadline::max());
+  auto view = sp::visibility(scene.space, identity(scene.objects), {0, 0, 1}, {3, 0, 1}, {}, .01f);
   require(view.clear &&
               std::find(view.through.begin(), view.through.end(), glass) != view.through.end(),
           "transparent material did not pass sight");
-  auto blocked = sp::visibility(scene.space, identity(scene.objects), {0, 0, 1}, {5, 0, 1}, {},
-                                .01f, sp::Deadline::max());
+  auto blocked =
+      sp::visibility(scene.space, identity(scene.objects), {0, 0, 1}, {5, 0, 1}, {}, .01f);
   require(!blocked.clear, "opaque wall passed sight");
-  auto ray = sp::raycast(scene.space, identity(scene.objects), {3, 0, 1}, {5, 0, 1}, {},
-                         sp::Deadline::max());
-  require(ray.hit && ray.hit->object == wall, "ray did not hit real wall");
-  require(!sp::raycast(scene.space, identity(scene.objects), {0, 0, 1}, {5, 0, 1}, {},
-                       sp::Deadline::min())
-               .complete,
-          "expired query was treated as complete");
+  auto ray = sp::raycast(scene.space, identity(scene.objects), {3, 0, 1}, {5, 0, 1}, {});
+  require(ray && ray->object == wall, "ray did not hit real wall");
   scene.objects.position[zone.slot()] = {100, 100, 0};
   scene.tick();
   require(!edge(scene.relations.in_zone, falling, zone), "translated sensor retained old members");
   std::vector<sp::DebugLine> lines;
-  require(sp::debug_lines(scene.space, {{{-20, -20, -1}, {20, 20, 10}}, true, false, false, true},
-                          sp::Deadline::max(), lines) &&
-              !lines.empty(),
-          "idle world debug is empty");
+  sp::debug_lines(scene.space, {{{-20, -20, -1}, {20, 20, 10}}, true, false, false, true}, lines);
+  require(!lines.empty(), "idle world debug is empty");
   std::vector<sp::RelationChange> changes;
   sp::remove(scene.space, identity(scene.objects), floor, parents(scene.objects),
              space_flags(scene.objects), scene.relations, changes);
@@ -239,7 +231,7 @@ void attachments_and_sweep() {
   auto door = scene.box({.15f, 2, 2.4f}, {0, 0, 0}, sp::Motion::Kinematic, 0, false);
   auto chair = scene.box({.6f, .6f, .8f}, {1.5f, 0, 0});
   auto move = sp::translate(scene.space, identity(scene.objects), transforms(scene.objects), door,
-                            {3, 0, 0}, scene.dt, sp::Deadline::max());
+                            {3, 0, 0}, scene.dt);
   require(move.status == sp::Status::Obstructed && move.contact && move.contact->object == chair,
           "chair did not block kinematic sweep");
   require(move.actual.position.x < 1.2f, "sweep tunneled through chair");
@@ -316,9 +308,8 @@ void snapshot_continuation_and_fixed_parts() {
   require(std::abs(restored.objects.position[grandchild.slot()].x - 4) < .001f &&
               std::abs(restored.objects.position[grandchild.slot()].z - 2) < .001f,
           "nested attachments depended on slot order");
-  auto ray = sp::raycast(restored.space, identity(restored.objects), {3, 0, 1}, {5, 0, 1}, {},
-                         sp::Deadline::max());
-  require(ray.hit && ray.hit->object == part, "fixed part became noncollidable when attached");
+  auto ray = sp::raycast(restored.space, identity(restored.objects), {3, 0, 1}, {5, 0, 1}, {});
+  require(ray && ray->object == part, "fixed part became noncollidable when attached");
   auto assembly = sp::bounds(restored.space, identity(restored.objects), root);
   require(assembly && assembly->max.z > 2.1f, "empty root did not include child bounds");
 }
@@ -360,8 +351,8 @@ void crowd_doorway_and_stale_tiles() {
   sp::set_pose(edits.space, identity(edits.objects), transforms(edits.objects), wall,
                {{10, 0, 0}, {}});
   edits.wait_navigation();
-  auto route = sp::path(edits.space, identity(edits.objects), walker, sp::PointGoal{{5, 0, 0}, .1f},
-                        {}, sp::Deadline::max());
+  auto route =
+      sp::path(edits.space, identity(edits.objects), walker, sp::PointGoal{{5, 0, 0}, .1f}, {});
   require(route.status == sp::PathStatus::Ready, "stale worker result restored an obsolete wall");
   sp::MoveRequest gone{walker, 9, sp::ObjectGoal{wall, 1.5f}, {}};
   std::vector<sp::RelationChange> changes;
@@ -425,8 +416,8 @@ void real_stair_navigation() {
   scene.box({5, 5, .2f}, {7.825f, 0, 1.6f});
   auto walker = scene.character({-2, 0, 0});
   scene.wait_navigation();
-  auto route = sp::path(scene.space, identity(scene.objects), walker,
-                        sp::PointGoal{{8, 0, 1.8f}, .15f}, {}, sp::Deadline::max());
+  auto route =
+      sp::path(scene.space, identity(scene.objects), walker, sp::PointGoal{{8, 0, 1.8f}, .15f}, {});
   require(route.status == sp::PathStatus::Ready && route.corners.size() > 1,
           "real staircase has no path");
   sp::MoveRequest move{walker, 1, sp::PointGoal{{8, 0, 1.8f}, .15f}, {}};
@@ -444,15 +435,15 @@ void real_stair_navigation() {
   require(arrived && position.z > 1.7f, "CharacterVirtual failed to climb Detour staircase");
   sp::TravelBoundary closed{{{4, -5, 0}, {5, -5, 0}, {5, 5, 0}, {4, 5, 0}}, -1, 5};
   auto denied = sp::path(scene.space, identity(scene.objects), walker,
-                         sp::PointGoal{{-2, 0, 0}, .1f}, {&closed, 1}, sp::Deadline::max());
+                         sp::PointGoal{{-2, 0, 0}, .1f}, {&closed, 1});
   require(denied.status == sp::PathStatus::AccessDenied, "forbidden entry path accepted");
   auto wall = scene.box({.2f, 20, 4}, {6, 0, 0});
   (void)wall;
   auto revision = sp::navigation_revision(scene.space);
   scene.wait_navigation();
   require(sp::navigation_revision(scene.space) > revision, "construction did not replace tiles");
-  auto unreachable = sp::path(scene.space, identity(scene.objects), walker,
-                              sp::PointGoal{{-2, 0, 0}, .1f}, {}, sp::Deadline::max());
+  auto unreachable =
+      sp::path(scene.space, identity(scene.objects), walker, sp::PointGoal{{-2, 0, 0}, .1f}, {});
   require(unreachable.status == sp::PathStatus::Unreachable,
           "new wall did not invalidate navigation");
 }
@@ -479,8 +470,8 @@ void benchmarks() {
   auto walker = scene.character({-15, -5, 0});
   scene.wait_navigation();
   benchmark("ray_32_objects", 1000, [&] {
-    sp::raycast(scene.space, identity(scene.objects), {-15, -5, 1}, {15, 5, 1}, {walker, {}, false},
-                sp::Deadline::max());
+    sp::raycast(scene.space, identity(scene.objects), {-15, -5, 1}, {15, 5, 1},
+                {walker, {}, false});
   });
   sp::MoveRequest request{walker, 2, sp::PointGoal{{15, -5, 0}, .1f}, {}};
   benchmark("character_step", 100, [&] { scene.tick({&request, 1}); });
@@ -569,9 +560,7 @@ void custody_and_empty_root_updates() {
   require(sp::bounds(scene.space, identity(scene.objects), occupant).has_value() &&
               !scene.objects.parent[occupant.slot()],
           "assembly collection hid an unrelated occupant");
-  require(!sp::raycast(scene.space, identity(scene.objects), {5, -2, .5f}, {5, 2, .5f}, {},
-                       sp::Deadline::max())
-               .hit,
+  require(!sp::raycast(scene.space, identity(scene.objects), {5, -2, .5f}, {5, 2, .5f}, {}),
           "assembly child remained query-visible in custody");
   auto item = scene.box({1, 1, 1}, {8, 0, 0});
   require(sp::custody(scene.space, identity(scene.objects), item, parent, parents(scene.objects),
@@ -581,9 +570,7 @@ void custody_and_empty_root_updates() {
   require(scene.objects.parent[item.slot()] == parent &&
               !sp::bounds(scene.space, identity(scene.objects), item),
           "custody item remained query-visible or lost its custodian");
-  require(!sp::raycast(scene.space, identity(scene.objects), {8, -2, .5f}, {8, 2, .5f}, {},
-                       sp::Deadline::max())
-               .hit,
+  require(!sp::raycast(scene.space, identity(scene.objects), {8, -2, .5f}, {8, 2, .5f}, {}),
           "custody retained native collision geometry");
   require(sp::custody(scene.space, identity(scene.objects), item, {}, parents(scene.objects),
                       space_flags(scene.objects), scene.relations, changes)
@@ -629,9 +616,9 @@ void visible_custody_preserves_scene_and_preflights_capacity() {
               scene.objects.parent[part.slot()] == goods &&
               sp::capacity(scene.space).native_available == available,
           "placed escrow retains actual pose, geometry, native slots and declared attachment");
-  const auto hit = sp::raycast(scene.space, identity(scene.objects), {2, -2, 1.5f}, {2, 2, 1.5f},
-                               {}, sp::Deadline::max());
-  require(hit.hit && hit.hit->object == goods, "visible escrow remains a real ray target");
+  const auto hit =
+      sp::raycast(scene.space, identity(scene.objects), {2, -2, 1.5f}, {2, 2, 1.5f}, {});
+  require(hit && hit->object == goods, "visible escrow remains a real ray target");
   require(apply({goods, holder, true}).status == sp::Status::Ok &&
               scene.objects.parent[goods.slot()] == holder &&
               scene.objects.position[goods.slot()] == original,
@@ -715,7 +702,7 @@ void movable_logical_assembly() {
               .status == sp::Status::Ok,
       "Jolt convex compound construction");
   auto glass = sp::visibility(scene.space, identity(scene.objects), {-.5f, -2, 2.2f},
-                              {-.5f, 2, 2.2f}, {}, .001f, sp::Deadline::max());
+                              {-.5f, 2, 2.2f}, {}, .001f);
   require(glass.clear && std::abs(glass.transmission - .5f) < .01f &&
               glass.through == std::vector<Handle>{first},
           "compound keeps child optical truth without double attenuation");
@@ -841,7 +828,7 @@ void movable_physical_assembly() {
   auto transmission = [&](Handle h) {
     auto p = scene.objects.position[h.slot()] + Vec3{0, 0, .2f};
     return sp::visibility(scene.space, identity(scene.objects), p + Vec3{0, -2, 0},
-                          p + Vec3{0, 2, 0}, {}, .001f, sp::Deadline::max());
+                          p + Vec3{0, 2, 0}, {}, .001f);
   };
   require(std::abs(transmission(root).transmission - .8f) < .01f &&
               std::abs(transmission(first).transmission - .5f) < .01f,

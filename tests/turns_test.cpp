@@ -1,19 +1,31 @@
-#include "checked_actions_fixture.hpp"
-#include "space_fixture.hpp"
-
-#include "bindings/controls/controls.hpp"
-#include "bindings/turns/turns.hpp"
-#include "react/snapshot.hpp"
 #include "runtime_fixture.hpp"
+#include "space_fixture.hpp"
+#include "step/action_private.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 
 using namespace amber;
 using test_runtime::require;
 namespace {
-void only_actual_player_actions_are_chosen_events() {
-  test_runtime::Fixture f;
+// One real invocation segment. Nested actions are exercised by game_actions.py's
+// native process, rather than a second implementation of the execution stack.
+react::CompletedInvocation invoke(test_runtime::Fixture &f, const step::PlannedInvocation &plan,
+                                  const Relation &parts, record::Journal &journal) {
+  react::Invocation invocation;
+  react::CompletedInvocation completed;
+  react::start_invocation(f.vm, f.states, f.random, f.values(), f.triggers, parts, 7,
+                          attribution(f.objects), f.models, f.scripts, journal, plan.handler,
+                          plan.input, invocation, completed);
+  require(completed.outcome.status == react::RunOutcome::Status::Ok,
+          "single-segment test must complete actual Lua without an action continuation");
+  react::finish_invocation(identity(f.objects), attribution(f.objects), f.models, f.scripts,
+                           journal, invocation, completed);
+  return completed;
+}
+void chosen_actions_and_typed_inputs() {
+  test_runtime::Fixture f(250);
   f.objects.owner[f.a.slot()] = 1;
   f.objects.owner[f.b.slot()] = 1;
   f.objects.owner[f.c.slot()] = 2;
@@ -21,14 +33,17 @@ void only_actual_player_actions_are_chosen_events() {
   f.objects.model[f.c.slot()] = 2;
   f.models.rows.resize(3);
   f.models.rows[2].id = 2;
-  const auto script = f.add(R"(return {kind='model',actions={['novel.touch']={right='use'}},
-    on={['novel.touch']=function(self)
+  f.terms.rows[1].dimensions[1] = 1;
+  f.terms.rows[7].inputs = {{"amount", react::InputType::Number, 1, false},
+                            {"note", react::InputType::String, 0, true}};
+  const auto script = f.add(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={
+    ['novel.touch']=function(self,_,args)
       self.state.calls=(self.state.calls or 0)+1
-      if self.state.calls==1 then self:act('novel.touch',self.handle) end
+      self.state.amount=args.amount;self.state.note=args.note or 'omitted'
     end}})",
                             3);
   f.models.rows[1].script = script;
-  install::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
+  react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
   perm::Players players;
   players.rows.resize(3);
   perm::Grants grants;
@@ -38,437 +53,450 @@ void only_actual_player_actions_are_chosen_events() {
       perm::create_grant(grants, players, perm::Holder::player(1),
                          {1, holder, scope, perm::bit(perm::Verb::Use), 0, 0, 1000},
                          {scope, 1, perm::all_rights, 0, false}, {holder, 1, true}, 0);
-  require(bool(grant), "real script action requires its explicit object grant");
-  control::Profiles profiles;
+  require(bool(grant), "installed script requires its explicit object Use grant");
+  net::Profiles profiles;
   profiles.rows.resize(3);
   profiles.rows[1].id = 1;
   profiles.rows[1].body = f.b;
   profiles.rows[2].id = 2;
   profiles.rows[2].body = f.c;
   Relation parts;
-  bindings::Execution execution{f.vm, f.states, f.random, identity(f.objects), parts, 7};
-  drive::Clock clock;
-  clock.step = 12;
-  record::Journal journal(8, {});
+  perm::OwnerLimits limits;
+  react::NativeActions native;
+  step::Intents intents;
   step::WorkQueues queues;
   step::TimerWheel timers;
-  std::vector<FactKey> mutated;
-  std::vector<bindings::GapDraft> gaps;
-  react::MeterRows meters;
-  react::PriorityLinks priorities;
-  bindings::AllocationReconciliation allocation{f.allocations, meters, priorities};
-  bindings::HandlerTurns handlers{
-      execution, f.triggers, *f.projection, {f.subscriptions, f.links, f.scripts, f.rules},
-      journal,   queues,     timers,        mutated,
-      clock,     20,         1000,          allocation};
-  command::NativeActions declarations;
-  drive::NativeOperations native;
-  perm::OwnerLimits limits;
-  step::Intents intents;
-  space::Space physical{testspace::settings()};
-  bindings::ActionTurns actions{handlers,
-                                declarations,
-                                native,
-                                f.models,
-                                f.scripts,
-                                f.installed,
-                                f.rules,
-                                profiles,
-                                authority(f.objects),
-                                transforms(f.objects),
-                                limits,
-                                players,
-                                grants,
-                                physical,
-                                intents,
-                                gaps,
-                                2};
-  const auto root = bindings::perform_action(actions, {PlayerId{1}, 7, f.a, Value{}}, {}, {});
-  require(root.reply.value("effect", "") == "applied" && queues.causal.empty(),
-          "player action finishes its real nested action before returning");
-  record::Origin parent;
+  record::Journal journal(8, {});
+  space::Space space{testspace::settings()};
+  const auto deadline = step::Monotonic::now() + std::chrono::seconds(2);
+  auto root = step::begin_action(
+      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
+      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      intents, journal, 2, {{PlayerId{1}, 7, f.a, Value{}}, {{"amount", 2.5}}, {}, 12, 20, {}}, {},
+      deadline);
+  require(!root.outcome && root.handlers.size() == 1 && root.call.body == f.b,
+          "current player body and actual installed receiver determine the action plan");
+  auto completed = invoke(f, root.handlers.front(), parts, journal);
+  step::accept_handler(root, completed);
+  const auto handler_origin = completed.origin;
+  step::publish_invocation(journal, queues, timers, std::move(completed), root.call.origin, 1000);
+  std::vector<step::GapDraft> gaps;
+  const auto result = step::finish_action(root, intents, space, identity(f.objects),
+                                          transforms(f.objects), journal, gaps);
+  require(result.reply["effect"] == "applied" && gaps.empty(),
+          "actual stored handler effects determine the completed action");
   auto records = journal.take();
-  require(records.size() == 4 && records[0]["kind"] == "action" && records[0]["actor"] == "p:1" &&
+  require(records.size() == 2 && records[0]["kind"] == "action" && records[0]["actor"] == "p:1" &&
               records[0]["agent"] == true && records[0]["cause"].is_null() &&
-              records[0]["root"] == records[0]["id"] && records[0]["result"] == "applied",
-          "player input alone is chosen, with its actual root actor and applied result");
-  require(
-      records[2]["kind"] == "action" && records[2]["actor"] == "s:" + std::to_string(script) &&
-          records[2]["agent"] == false && records[2]["cause"] == records[1]["id"] &&
-          records[2]["root"] == records[0]["id"] && records[2]["result"] == "applied" &&
-          records[3]["cause"] == records[2]["id"] &&
-          std::get<double>(f.states.at({f.a, script}).at(std::string("calls"))) == 2 &&
-          queues.causal.empty(),
-      "real nested script action is nonchosen while actor, handler cause, root and effect survive");
-  parent.cause = records[1]["id"].get<std::uint64_t>();
-  parent.root = records[0]["id"].get<std::uint64_t>();
-  perm::revoke(grants, players, grant.grant);
-  const auto denied =
-      bindings::perform_action(actions, {ScriptHolder{script, f.a}, 7, f.a, Value{}}, {}, parent);
-  require(denied.reply.contains("denied"), "revoked script grant denies the real action pipeline");
-  const auto player_denied =
-      bindings::perform_action(actions, {PlayerId{2}, 7, f.a, Value{}}, {}, {});
-  require(player_denied.reply.contains("denied"), "foreign player without Use is denied");
+              records[0]["root"] == records[0]["id"] && records[0]["result"] == "applied" &&
+              records[1]["kind"] == "handler" && records[1]["cause"] == records[0]["id"],
+          "only the authenticated player action is chosen; its real handler keeps the cause");
+  require(std::get<double>(f.states.at({f.a, script}).at(std::string("amount"))) == 2.5 &&
+              std::get<std::string>(f.states.at({f.a, script}).at(std::string("note"))) ==
+                  "omitted",
+          "raw typed inputs reach actual Lua with optional inputs absent");
+
+  auto child = step::begin_action(
+      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
+      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      intents, journal, 2,
+      {{ScriptHolder{script, f.a}, 7, f.a, Value{}}, {{"amount", 3}}, {}, 12, 20, {}},
+      handler_origin, deadline);
+  require(!child.outcome && child.call.body == Handle{} && child.handlers.size() == 1 &&
+              !child.handlers.front().input.action_body,
+          "ScriptHolder calls have no inherited player body or authority");
+  completed = invoke(f, child.handlers.front(), parts, journal);
+  step::accept_handler(child, completed);
+  step::publish_invocation(journal, queues, timers, std::move(completed), child.call.origin, 1000);
+  step::finish_action(child, intents, space, identity(f.objects), transforms(f.objects), journal,
+                      gaps);
   records = journal.take();
   require(records.size() == 2 && records[0]["agent"] == false &&
               records[0]["actor"] == "s:" + std::to_string(script) &&
-              records[0]["cause"] == parent.cause && records[0]["root"] == parent.root &&
-              records[0]["result"] == "denied" && records[1]["agent"] == true &&
-              records[1]["actor"] == "p:2" && records[1]["cause"].is_null() &&
-              records[1]["result"] == "denied" &&
-              std::get<double>(f.states.at({f.a, script}).at(std::string("calls"))) == 2,
-          "denial preserves chosen classification and causal identity without invoking handlers");
-
-  f.terms.rows[1].dimensions[1] = 1;
-  f.terms.rows[7].inputs = {{"amount", react::InputType::Number, 1, false},
-                            {"note", react::InputType::String, 0, true}};
-  const auto typed = f.add(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={
-    ['novel.touch']=function(self,_,args)
-      self.state.amount=args.amount;self.state.note=args.note or 'omitted'
-    end,
-    ['novel.cue']=function(self) self:act('novel.touch',self.handle,{amount='wrong'}) end,
-  }})");
-  f.models.rows[1].script = typed;
-  install::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
-  const std::string signature = "novel.touch(amount: number [kg], note?: string)";
-  const auto missing = bindings::perform_action(actions, {PlayerId{1}, 7, f.a, Value{}}, {}, {});
-  require(missing.reply["error"] == "bad_input" && missing.reply["signature"] == signature &&
-              missing.reply["problem"].get<std::string>().find("amount") != std::string::npos &&
-              !f.states.contains({f.a, typed}),
-          "typed action validation must return its real signature before calling Lua");
-  const auto accepted = bindings::perform_action(
-      actions, {PlayerId{1}, 7, f.a, std::vector<EventField>{{"amount", Value(2.5)}}}, {}, {});
-  require(accepted.reply["effect"] == "applied" &&
-              std::get<double>(f.states.at({f.a, typed}).at(std::string("amount"))) == 2.5 &&
-              std::get<std::string>(f.states.at({f.a, typed}).at(std::string("note"))) == "omitted",
-          "the advertised typed signature must invoke actual Lua with its optional field absent");
-
-  journal.take();
-  bindings::consume_event(&actions, {step::EventWork{f.a, {}, 6, {}, {}}, {}});
+              records[0]["cause"] == handler_origin.cause &&
+              records[0]["root"] == result.origin.root && records[0]["result"] == "applied" &&
+              records[1]["cause"] == records[0]["id"],
+          "script action retains actual actor/cause/root while remaining nonchosen");
+  perm::revoke(grants, players, grant.grant);
+  auto denied = step::begin_action(
+      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
+      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      intents, journal, 2,
+      {{ScriptHolder{script, f.a}, 7, f.a, Value{}}, {{"amount", 4}}, {}, 12, 20, {}},
+      handler_origin, deadline);
+  auto foreign = step::begin_action(
+      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
+      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      intents, journal, 2, {{PlayerId{2}, 7, f.a, Value{}}, {{"amount", 4}}, {}, 12, 20, {}}, {},
+      deadline);
+  require(denied.outcome && foreign.outcome && denied.handlers.empty() && foreign.handlers.empty(),
+          "revocation and foreign-owner denial happen before handler invocation");
+  for (const auto &outcome : {denied.outcome, foreign.outcome})
+    for (const auto *field : {"need", "on", "why", "fix"})
+      require(outcome->reply.at("denied").contains(field),
+              "S5 denial includes its actionable fields");
   records = journal.take();
-  require(queues.causal.empty() && records.size() == 2 &&
-              records[1]["response"]["error"] == "bad_input" &&
-              records[1]["response"]["signature"] == signature &&
-              std::get<double>(f.states.at({f.a, typed}).at(std::string("amount"))) == 2.5,
-          "actual Lua act returns and records the same typed rejection before continuing");
+  require(records.size() == 2 && records[0]["agent"] == false && records[1]["agent"] == true &&
+              records[0]["result"] == "denied" && records[1]["result"] == "denied" &&
+              std::get<double>(f.states.at({f.a, script}).at(std::string("calls"))) == 2,
+          "real denial retains chosen classification and leaves script state unchanged");
 
-  observe::Hearing hearing;
-  bindings::DoInput input_binding{actions, hearing, 40};
-  drive::Input input;
+  const std::string signature = "novel.touch(amount: number [kg], note?: string)";
+  step::Input input;
   input.caller = PlayerId{1};
   input.body = f.b;
-  journal.take();
-  input.fields = {{"action", "novel.touch"},
-                  {"target", to_string(f.a)},
-                  {"args", {{"amount", "not a number"}}}};
-  const auto action_response = [](nlohmann::json reply) {
-    reply.erase("events");
-    reply.erase("heard");
-    reply.erase("events_omitted");
-    return reply;
-  };
-  const auto decode_error = bindings::do_input(&input_binding, input).fields;
-  require(decode_error["error"] == "bad_input" && decode_error["signature"] == signature &&
-              decode_error["problem"].get<std::string>().find("amount") != std::string::npos,
-          "raw JSON decode failure must include the actual action signature and input name");
-  records = journal.take();
-  require(records.size() == 1 && records[0]["kind"] == "action" && records[0]["actor"] == "p:1" &&
-              records[0]["agent"] == true && records[0]["name"] == "novel.touch" &&
-              records[0]["changed"] == false && records[0]["result"] == "denied" &&
-              records[0]["cause"].is_null() && records[0]["root"] == records[0]["id"] &&
-              records[0]["args"] == input.fields["args"] &&
-              records[0]["raw_target"] == to_string(f.a) && records[0]["things"].empty() &&
-              records[0]["response"] == action_response(decode_error),
-          "accepted malformed DO must record exactly one chosen denial with raw diagnostics");
   for (const auto &fields : std::vector<nlohmann::json>{
            {{"action", "novel.unknown"}, {"target", "not a handle"}, {"args", {{"x", 2}}}},
-           {{"action", "novel.touch"}, {"target", "not a handle"}, {"args", {{"amount", 3}}}},
-           {{"action", "novel.touch"}, {"target", "self"}, {"args", {{"unknown", 3}}}}}) {
+           {{"action", "novel.touch"}, {"target", "not a handle"}, {"args", {{"amount", 3}}}}}) {
     input.fields = fields;
-    const auto invalid = bindings::do_input(&input_binding, input).fields;
+    const auto parsed = step::parse_action_input(input, f.terms, native, journal, 12, 20);
+    require(std::holds_alternative<step::InputReply>(parsed),
+            "accepted unknown action or malformed target fails during actual input parsing");
+    const auto &reply = std::get<step::InputReply>(parsed).fields;
     records = journal.take();
-    require(invalid["error"] == "bad_input" && records.size() == 1 &&
+    require(reply["error"] == "bad_input" && records.size() == 1 &&
                 records[0]["name"] == fields["action"] && records[0]["args"] == fields["args"] &&
-                records[0]["raw_target"] == fields["target"] && records[0]["agent"] == true &&
-                records[0]["result"] == "denied" && records[0]["changed"] == false &&
-                records[0]["things"].empty() &&
-                records[0]["response"] == action_response(invalid) &&
-                std::get<double>(f.states.at({f.a, typed}).at(std::string("amount"))) == 2.5,
-            "unknown action, malformed target or input must retain the exact accepted choice");
-    require(invalid.contains("signature") == (fields["action"] == "novel.touch"),
-            "only known action terms have a truthful signature");
+                records[0]["raw_target"] == fields["target"] && records[0]["things"].empty() &&
+                records[0]["agent"] == true && records[0]["changed"] == false &&
+                records[0]["result"] == "denied" && records[0]["response"] == reply,
+            "parse failure publishes one chosen denial with exact raw diagnostics and no handles");
+    require(reply.contains("signature") == (fields["action"] == "novel.touch"),
+            "only known registered actions advertise a truthful signature");
+  }
+  for (const auto &arguments :
+       std::vector<nlohmann::json>{{{"amount", "not a number"}}, {{"unknown", 3}}}) {
+    input.fields = {{"action", "novel.touch"}, {"target", to_string(f.a)}, {"args", arguments}};
+    const auto parsed = step::parse_action_input(input, f.terms, native, journal, 12, 20);
+    require(std::holds_alternative<step::InputReply>(parsed),
+            "wrong input types and unknown fields fail during actual typed decoding");
+    const auto &reply = std::get<step::InputReply>(parsed).fields;
+    records = journal.take();
+    require(reply["error"] == "bad_input" && reply["signature"] == signature &&
+                records.size() == 1 && records[0]["result"] == "denied" &&
+                records[0]["args"] == arguments && records[0]["raw_target"] == to_string(f.a) &&
+                records[0]["things"].empty() && records[0]["agent"] == true &&
+                records[0]["changed"] == false && records[0]["response"] == reply,
+            "typed decoding publishes one chosen denial with exact raw diagnostics and signature");
   }
   input.fields = {
       {"action", "novel.touch"}, {"target", to_string(f.a)}, {"args", nlohmann::json::object()}};
-  const auto required_error = bindings::do_input(&input_binding, input).fields;
+  const auto parsed = step::parse_action_input(input, f.terms, native, journal, 12, 20);
+  require(std::holds_alternative<step::NativeCall>(parsed),
+          "an absent required field reaches action declaration validation");
+  const auto malformed = step::begin_action(
+      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
+      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      intents, journal, 2, std::get<step::NativeCall>(parsed), {}, deadline);
+  require(malformed.outcome && malformed.outcome->reply["error"] == "bad_input" &&
+              malformed.outcome->reply["signature"] == signature && malformed.handlers.empty(),
+          "missing required input fails before Lua and includes the actual signature");
   records = journal.take();
-  require(required_error["error"] == "bad_input" && records.size() == 1 &&
-              records[0]["result"] == "denied" &&
-              records[0]["response"] == action_response(required_error) &&
-              records[0]["things"] == nlohmann::json::array({to_string(f.a)}),
-          "post-decode action validation must publish its existing denial only once");
-  input.fields["args"] = {{"amount", 4}};
-  const auto valid_input = bindings::do_input(&input_binding, input).fields;
-  records = journal.take();
-  require(valid_input["effect"] == "applied" && records.size() == 2 &&
-              records[0]["kind"] == "action" && records[0]["agent"] == true &&
-              records[0]["result"] == "applied" && records[1]["kind"] == "handler" &&
-              records[1]["cause"] == records[0]["id"] &&
-              std::get<double>(f.states.at({f.a, typed}).at(std::string("amount"))) == 4,
-          "valid accepted DO must execute the actual VM and retain its normal action/handler pair");
-
-  const auto native_id = command::declare_native(
-      declarations, f.terms, "engine.typed_example", "Native descriptor regression", "", false,
-      {{"type", "object"},
-       {"required", {"amount"}},
-       {"properties", {{"amount", {{"type", "integer"}}}}}});
-  drive::register_native(native, native_id,
-                         {[](const nlohmann::json &) { return std::string("amount is missing"); },
-                          [](void *, const drive::NativeCall &) -> drive::NativeCompletion {
-                            throw std::runtime_error(
-                                "native mutation must not run for invalid arguments");
-                          },
-                          nullptr});
-  const auto native_error =
-      bindings::perform_action(actions, {PlayerId{1}, native_id, {}, Value{}}, {}, {});
-  require(native_error.reply["error"] == "bad_input" &&
-              native_error.reply["signature"] == "engine.typed_example(amount: integer)" &&
-              native_error.reply["problem"] == "amount is missing",
-          "native descriptor validation must return the signature before its mutation adapter");
+  require(records.size() == 1 && records[0]["result"] == "denied" && records[0]["args"].empty() &&
+              records[0]["things"] == nlohmann::json::array({to_string(f.a)}) &&
+              records[0]["agent"] == true && records[0]["changed"] == false &&
+              records[0]["response"] == malformed.outcome->reply &&
+              std::get<double>(f.states.at({f.a, script}).at(std::string("calls"))) == 2,
+          "declaration validation records one chosen denial without invoking the handler");
 }
-void canonical_action_results_and_reach() {
-  test_actions::Fixture f;
-  f.load(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={
-    ['novel.touch']=function(self,_,args)
-      self:navigate(vector.create(9,0,0),{speed_m_s=args.mode=='fast' and 9 or .3})
-    end}})");
-  auto result = f.player({}, {{"mode", "fast"}});
+void canonical_results_and_actual_bounds() {
+  test_runtime::Fixture f(250);
+  f.objects.owner[f.a.slot()] = 1;
+  f.objects.owner[f.b.slot()] = 1;
+  f.objects.owner[f.c.slot()] = 2;
+  f.objects.flags[f.a.slot()] = Body;
+  f.objects.model[f.b.slot()] = 2;
+  f.objects.model[f.c.slot()] = 2;
+  f.objects.position[f.b.slot()] = {0, 1, 0};
+  f.models.rows.resize(3);
+  f.models.rows[2].id = 2;
+  const auto script =
+      f.add(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={}})");
+  f.models.rows[1].script = script;
+  react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
+  space::Space space{testspace::settings()};
+  testspace::Box shape({.6f, .6f, 1.8f});
+  const auto geometry = space::import_geometry(space, shape.source());
+  space::BodySpec body{
+      f.a, geometry.geometry, space::Motion::Character, {.6f, 0, 0}, 70, false, false, {}};
+  body.character =
+      space::CharacterSpec{.3f, 1.8f, 70, 100, 1.8f, 8, .24f, std::numbers::pi_v<float> / 4, .3f};
+  require(space::add(space, identity(f.objects), transforms(f.objects), body).status ==
+              space::Status::Ok,
+          "real CharacterVirtual supplies the actual configured movement speed");
+  body.object = f.b;
+  body.motion = space::Motion::Static;
+  body.character.reset();
+  require(space::add(space, identity(f.objects), transforms(f.objects), body).status ==
+              space::Status::Ok,
+          "actual target bounds are queryable for ordinary fallback reach");
+  net::Profiles profiles;
+  profiles.rows.resize(3);
+  profiles.rows[1].id = 1;
+  profiles.rows[1].body = f.a;
+  profiles.rows[2].id = 2;
+  profiles.rows[2].body = f.c;
+  perm::Players players;
+  players.rows.resize(3);
+  perm::Grants grants;
+  perm::OwnerLimits limits;
+  react::NativeActions native;
+  step::Intents intents;
+  record::Journal journal(8, {});
+  std::vector<step::GapDraft> gaps;
+  const auto deadline = step::Monotonic::now() + std::chrono::seconds(2);
+  auto declared = step::begin_action(
+      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
+      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      intents, journal, 2, {{PlayerId{1}, 7, {}, Value{}}, nlohmann::json::object(), {}, 0, 20, {}},
+      {}, deadline);
+  require(!declared.outcome && declared.handlers.empty(),
+          "declared action has no fabricated handler");
+  auto result = step::finish_action(declared, intents, space, identity(f.objects),
+                                    transforms(f.objects), journal, gaps);
+  require(result.reply["effect"] == "none" && result.reply["reason"] == "no_handler" &&
+              gaps.empty(),
+          "declared action without a handler is distinct from an unmodeled action");
+  f.models.rows[1].script = 0;
+  react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
+  auto fallback = step::begin_action(
+      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
+      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      intents, journal, 2,
+      {{PlayerId{1}, 7, f.b, Value{}}, nlohmann::json::object(), {}, 0, 20, {}}, {}, deadline);
+  require(!fallback.outcome && fallback.resolution.route == react::Route::Fallback,
+          "nearby undeclared action remains a real open-use attempt");
+  result = step::finish_action(fallback, intents, space, identity(f.objects), transforms(f.objects),
+                               journal, gaps);
+  require(result.reply["reason"] == "not_modeled" && gaps.size() == 1 && gaps[0].target == f.b,
+          "actual fallback completion preserves the unmodeled target and source attempt");
+  require(space::set_pose(space, identity(f.objects), transforms(f.objects), f.b, {{0, 20, 0}, {}})
+                  .status == space::Status::Ok,
+          "move actual Jolt target beyond reach");
+  auto remote = step::begin_action(
+      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
+      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      intents, journal, 2,
+      {{PlayerId{1}, 7, f.b, Value{}}, nlohmann::json::object(), {}, 0, 20, {}}, {}, deadline);
+  require(remote.outcome && remote.outcome->reply["denied"]["need"] == "reach" && gaps.size() == 1,
+          "fallback cannot create remote gap captures outside actual target bounds");
+  require(step::in_reach({0, 0, 0}, {{-.5f, -1, -1}, {100, 1, 1}}, 2),
+          "closest actual bounds permit large geometry whose center is farther away");
+
+  // Finishing uses the actual newly started intent and CharacterVirtual speed cap.
+  f.models.rows[1].script = script;
+  react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
+  auto moving = step::begin_action(
+      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
+      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      intents, journal, 2, {{PlayerId{1}, 7, {}, Value{}}, nlohmann::json::object(), {}, 0, 20, {}},
+      {}, deadline);
+  step::start_move(intents, f.a, Vec3{9, 0, 0}, moving.call.origin, 9);
+  result = step::finish_action(moving, intents, space, identity(f.objects), transforms(f.objects),
+                               journal, gaps);
   require(result.reply["effect"] == "started" &&
               std::abs(result.reply["eta_s"].get<double>() - 5) < 1e-5,
-          "movement estimate uses the actual character speed clamp");
-  result = f.player({}, {{"mode", "slow"}});
+          "movement estimate clamps requested speed to the actual character configuration");
+  auto slower = step::begin_action(
+      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
+      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      intents, journal, 2, {{PlayerId{1}, 7, {}, Value{}}, nlohmann::json::object(), {}, 0, 20, {}},
+      {}, deadline);
+  step::start_move(intents, f.a, Vec3{9, 0, 0}, slower.call.origin, .3f);
+  result = step::finish_action(slower, intents, space, identity(f.objects), transforms(f.objects),
+                               journal, gaps);
   require(result.reply["effect"] == "started" &&
               std::abs(result.reply["eta_s"].get<double>() - 30) < 1e-5,
-          "movement estimate honors a slower authored intent");
-  f.load(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={}})");
-  result = f.player();
-  require(result.reply["effect"] == "none" && result.reply["reason"] == "no_handler" &&
-              f.gaps.empty(),
-          "declared action without a handler is distinct from an unmodeled gap");
-  f.f.models.rows[2].script = 0;
-  install::project_model(f.f.triggers, f.f.models, f.f.scripts, f.f.terms, 2);
-  result = f.player(f.f.b);
-  require(result.reply["reason"] == "not_modeled" && f.gaps.size() == 1,
-          "undeclared nearby action records an actual unmodeled gap");
-  result = f.player();
-  require(result.reply["reason"] == "not_modeled" && f.gaps.size() == 2,
-          "targetless fallback dispatch reaches the caller's own body for world rules");
-  require(space::set_pose(f.space, identity(f.f.objects), transforms(f.f.objects), f.f.b,
-                          {{0, 20, 0}, {}})
-                  .status == space::Status::Ok,
-          "move actual target beyond reach");
-  result = f.player(f.f.b);
-  require(result.reply["denied"]["need"] == "reach" &&
-              result.reply["denied"]["on"] == to_string(f.f.b) &&
-              result.reply["denied"]["fix"] == "move closer" && f.gaps.size() == 2,
-          "undeclared actions cannot bypass reach or create remote gap captures");
-  result = bindings::perform_action(f.actions, {PlayerId{2}, 7, f.f.b, Value{}}, {}, {});
-  for (const auto *field : {"need", "on", "why", "fix"})
-    require(result.reply["denied"].contains(field), "rights denial has every S5 result field");
+          "movement estimate retains a slower actual authored intent");
 }
-void threshold_turn_uses_current_subscriptions_and_one_rearm(bool benchmark = false) {
-  test_runtime::Fixture f;
+void threshold_plans_use_current_subscriptions(bool benchmark) {
+  test_runtime::Fixture f(250);
   f.state(f.a, 1, 0);
   react::set_rate(f.properties, f.processes, f.terms.rows[1], f.a, 1, 0, 20, 0, 20, f.effects);
-  auto direct = f.add(R"(return {kind='instance',watches={{term='novel.heat',thresholds={
-    {predicate='above',value=1},{predicate='above',value=2},{predicate='above',value=3}}}},
-    on={['novel.heat']=function(self,source,value)
-      assert(type(value)=='number' and value>1)
-      self.state.count=(self.state.count or 0)+1
-      self.state.last=value;self.state.read=self:read(source,'novel.heat')
-    end,['novel.cue']=function(self,_,rate)
-      self:rate('novel.heat',rate,0,20)
+  const auto direct = f.add(R"(return {kind='instance',watches={{term='novel.heat',thresholds={
+    {predicate='above',value=1},{predicate='above',value=2},{predicate='above',value=3}}}},on={
+    ['novel.heat']=function(self,source,value)
+      assert(source==self.handle and value==self:get('novel.heat'))
+      self.state.count=(self.state.count or 0)+1;self.state.last=value
+    end,['novel.cue']=function(self,_,rate) self:rate('novel.heat',rate,0,20) end}})");
+  const auto sibling = f.add(R"(return {kind='instance',watches={{term='novel.heat',
+    thresholds={{predicate='above',value=1},{predicate='above',value=2},
+    {predicate='above',value=3}}}},on={['novel.heat']=function(self,source,value)
+      assert(source==self.handle and type(value)=='number' and value>1)
+      self.state.count=(self.state.count or 0)+1;self.state.last=value
     end}})");
-  auto along =
-      f.add(R"(return {kind='instance',watches={{term='novel.heat',along='novel.link',thresholds={
-    {predicate='above',value=1},{predicate='above',value=2},{predicate='above',value=3}}}},
-    on={['novel.heat']=function(self,source,value)
-      assert(source~=self.handle and type(value)=='number' and value>1)
-      self.state.count=(self.state.count or 0)+1
-      self.state.last=value;self.state.read=self:read(source,'novel.heat')
-    end}})");
-  auto bare = f.add(R"(return {kind='model',on={['novel.heat']=function(self)
-    error('bare quantity handler is not a threshold subscriber')end}})");
+  const auto bare = f.add(R"(return {kind='model',on={['novel.heat']=function(self)
+    error('unwatched quantity handler must not consume threshold work')end}})");
   f.models.rows[1].script = bare;
-  install::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
-  const std::array<ScriptId, 1> own{direct}, followed{along};
-  install::set_instances(f.installed, f.a, own, f.scripts);
-  install::set_instances(f.installed, f.b, followed, f.scripts);
-  install::project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
-  install::project_instance(f.triggers, f.installed, f.scripts, f.terms, f.b);
-  react::set_relation(f.relations.at(3), 3, f.b, f.a, true, f.effects);
+  react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
+  const std::array<ScriptId, 2> consumers{direct, sibling};
+  react::set_instances(f.installed, f.a, consumers, f.scripts);
+  react::project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
   f.bind(direct, f.a);
-  f.bind(along, f.b);
+  f.bind(sibling, f.a);
   step::WorkQueues queues;
   step::TimerWheel timers;
+  Relation parts;
+  record::Journal journal(8, {});
+  journal.restore_next_id(10);
   const record::Origin origin{9, 3, {1, 2}, 1.5, false};
   auto due = react::threshold_timers(f.subscriptions, f.processes, {f.a, 1}, 0, 20, origin);
   require(due.size() == 2 && due[0].due == 21 && due[1].due == 21,
-          "two distinct real bindings arm the same source crossing");
+          "both subscriptions arm the actual process crossing");
   const auto obsolete = due[0];
   for (auto &timer : due)
     step::schedule(timers, std::move(timer));
-  Relation parts;
-  bindings::Execution execution{f.vm, f.states, f.random, identity(f.objects), parts, 7};
-  drive::Clock clock;
-  record::Journal journal(8, {});
-  journal.restore_next_id(10);
-  std::vector<FactKey> mutated;
-  std::vector<bindings::GapDraft> gaps;
-  react::MeterRows meters;
-  react::PriorityLinks priorities;
-  bindings::AllocationReconciliation allocation{f.allocations, meters, priorities};
-  bindings::HandlerTurns handlers{
-      execution, f.triggers, *f.projection, {f.subscriptions, f.links, f.scripts, f.rules},
-      journal,   queues,     timers,        mutated,
-      clock,     20,         1000,          allocation};
-  command::NativeActions declarations;
-  drive::NativeOperations native;
-  control::Profiles profiles;
-  perm::Players players;
-  perm::Grants grants;
-  perm::OwnerLimits limits;
-  step::Intents intents;
-  space::Space physical{testspace::settings()};
-  bindings::ActionTurns actions{handlers,
-                                declarations,
-                                native,
-                                f.models,
-                                f.scripts,
-                                f.installed,
-                                f.rules,
-                                profiles,
-                                authority(f.objects),
-                                transforms(f.objects),
-                                limits,
-                                players,
-                                grants,
-                                physical,
-                                intents,
-                                gaps,
-                                1.5f};
-  auto advance = [&](Step step) {
-    clock.step = step;
-    step::promote_due(timers, step, queues);
-    drive::Frame frame;
-    frame.handler_deadline = drive::Monotonic::now() + std::chrono::seconds(2);
-    drive::drain_foreground(queues, frame, {&actions, bindings::consume_event},
-                            {&actions, bindings::consume_watch}, {});
+  const auto crossing = [&](Step now) {
+    step::promote_due(timers, now, queues);
+    while (auto item = step::pop_foreground(queues)) {
+      if (auto *event = std::get_if<step::EventWork>(&item->work)) {
+        const step::EventTurn turn{*event, item->threshold};
+        if (step::valid_event(turn, identity(f.objects), f.processes, f.subscriptions, now, 20)) {
+          require(turn.threshold.has_value(), "crossing fixture produces threshold events only");
+          step::enqueue_watch(queues, {turn.threshold->source, turn.event.origin});
+        }
+      } else {
+        const auto &watch = std::get<step::WatchWork>(item->work);
+        step::cancel_source_thresholds(timers, f.subscriptions, watch.source);
+        auto planned = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
+                                        f.scripts, watch, now, 20);
+        require(planned.modeled && !planned.shared_gap && planned.invocations.size() == 2,
+                "one source watch plan delivers exactly the two current explicit subscriptions");
+        for (auto &timer : planned.changes.timers)
+          step::schedule(timers, std::move(timer));
+        for (auto &plan : planned.invocations) {
+          plan.input.deadline = step::Monotonic::now() + std::chrono::seconds(2);
+          auto completed = invoke(f, plan, parts, journal);
+          step::publish_invocation(journal, queues, timers, std::move(completed), watch.origin,
+                                   1000);
+        }
+      }
+    }
   };
-  advance(21);
-  for (auto key : std::array<ScriptKey, 2>{{{f.a, direct}, {f.b, along}}}) {
-    const auto &state = f.states.at(key);
-    require(
-        std::get<double>(state.at(std::string("count"))) == 1 &&
-            std::abs(std::get<double>(state.at(std::string("last"))) - 1.05) < 1e-9 &&
-            std::get<double>(state.at(std::string("last"))) ==
-                std::get<double>(state.at(std::string("read"))),
-        "threshold uses the changed scalar payload and acquired followed-source read in real Lua");
-  }
-  require(!f.states.contains({f.a, bare}) && !f.states.contains({f.b, bare}) && gaps.empty(),
-          "timer routing cannot dispatch bare quantity siblings or report a false shared gap");
+  crossing(21);
+  for (auto key : std::array<ScriptKey, 2>{{{f.a, direct}, {f.a, sibling}}})
+    require(std::get<double>(f.states.at(key).at(std::string("count"))) == 1 &&
+                std::abs(std::get<double>(f.states.at(key).at(std::string("last"))) - 1.05) < 1e-9,
+            "both handlers receive the actual sampled source scalar once");
+  require(!f.states.contains({f.a, bare}) && !f.states.contains({f.b, bare}),
+          "bare quantity siblings never consume ordinary threshold work");
   for (const auto &binding : f.subscriptions.rows.at({f.a, 1}))
     require(std::abs(std::get<react::Answer>(binding.last).value.numeric() - 1.05) < 1e-9,
-            "threshold path updates authoritative last-delivered answers");
+            "actual watch planning updates the saved delivered answer");
   auto next = step::timers(timers);
   require(next.size() == 2 && next[0].due == 41 && next[1].due == 41,
-          "sibling due tokens rearm exactly one next timer per binding");
-  advance(41);
+          "coalesced source evaluation rearms one future token per consumer");
+  crossing(41);
   require(std::get<double>(f.states.at({f.a, direct}).at(std::string("count"))) == 2 &&
-              std::get<double>(f.states.at({f.b, along}).at(std::string("count"))) == 2 &&
-              step::timers(timers).size() == 2,
-          "later crossings retain one actual callback and bounded timer count per consumer");
-  bindings::consume_event(&actions, {obsolete.event, obsolete.threshold});
-  require(queues.causal.empty(), "obsolete observed-answer token cannot enqueue another watch");
-  auto binding = f.subscriptions.rows.at({f.a, 1})[0];
-  const auto previous_high_water = f.subscriptions.next_revision;
-  react::unbind_watch(f.subscriptions, binding.consumer, binding.index);
-  react::bind_watch(f.subscriptions, {f.a, 1}, binding);
-  const auto &rebound = f.subscriptions.rows.at({f.a, 1}).back();
-  require(rebound.revision >= previous_high_water &&
-              f.subscriptions.next_revision > rebound.revision,
-          "answer epochs and source rebinding share one monotonic revision high water");
+              std::get<double>(f.states.at({f.a, sibling}).at(std::string("count"))) == 2 &&
+              step::timers(timers).size() == 2 &&
+              !step::valid_event({obsolete.event, obsolete.threshold}, identity(f.objects),
+                                 f.processes, f.subscriptions, 41, 20),
+          "current predicate/last answer reject a stale token without version machinery");
   snap::Buffer bytes;
   snap::Output out{bytes};
   react::write_script_states(out, f.states, f.subscriptions);
   out.adapter().flush();
   bytes.resize(out.adapter().writtenBytesCount());
-  react::ScriptStates loaded_states;
-  react::Subscriptions loaded_subscriptions;
+  react::ScriptStates states;
+  react::Subscriptions subscriptions;
   snap::Input in{bytes.data(), bytes.size()};
-  react::read_script_states(in, loaded_states, loaded_subscriptions);
+  react::read_script_states(in, states, subscriptions);
   snap::check_complete(in);
-  auto rearmed = react::threshold_timers(f.subscriptions, f.processes, {f.a, 1}, 41, 20, origin);
-  require(loaded_subscriptions.next_revision == f.subscriptions.next_revision &&
-              std::all_of(rearmed.begin(), rearmed.end(),
-                          [&](const auto &timer) {
-                            return react::valid_threshold(*timer.threshold, identity(f.objects),
-                                                          f.processes, loaded_subscriptions);
-                          }),
-          "restored observation epochs preserve future timer validity without revision reuse");
+  for (const auto &timer : step::timers(timers))
+    require(react::valid_threshold(*timer.threshold, identity(f.objects), f.processes,
+                                   subscriptions, timer.due, 20),
+            "restored actual subscriptions retain future crossing semantics");
   auto records = journal.take();
   require(records.size() == 4 && records[0]["cause"] == 9 && records[0]["root"] == 3,
-          "threshold-driven handler records retain timer provenance without fake input actions");
+          "threshold handlers retain timer provenance without fake chosen input actions");
+
   const std::size_t rearms = benchmark ? 10000 : 1000;
-  std::vector<double> samples;
-  samples.reserve(rearms / 100);
-  auto sample_start = drive::Monotonic::now();
+  const auto started = step::Monotonic::now();
   for (std::size_t i = 0; i < rearms; ++i) {
-    bindings::consume_event(
-        &actions, {step::EventWork{f.a, {}, 6, Value(i % 2 ? .000001 : .000002), origin}, {}});
-    advance(41);
+    auto plans = step::plan_event(f.triggers, f.values(),
+                                  {f.a, {}, 6, Value(i % 2 ? .000001 : .000002), origin}, 41, 20);
+    require(plans.size() == 1, "only the installed rate handler receives its event");
+    plans.front().input.deadline = step::Monotonic::now() + std::chrono::seconds(2);
+    auto completed = invoke(f, plans.front(), parts, journal);
+    step::cancel_source_thresholds(timers, f.subscriptions, {f.a, 1});
+    const auto changed = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
+                                          f.scripts, {{f.a, 1}, completed.origin}, 41, 20);
+    require(changed.invocations.empty(),
+            "rate changes preserving the sampled value do not wake Lua");
+    for (const auto &timer : changed.changes.timers)
+      completed.effects.ordered.emplace_back(timer);
+    step::publish_invocation(journal, queues, timers, std::move(completed), origin, 1000);
+    // The explicit source evaluation above already consumed this handler's dirty fact.
+    while (auto item = step::pop_foreground(queues))
+      require(std::holds_alternative<step::WatchWork>(item->work),
+              "rate-only handler produces dirty source work, never extra action callbacks");
     require(timers.thresholds.size() == 2,
-            "actual repeated Lua rate changes retain one pending threshold per own/along watch");
-    if ((i + 1) % 100 == 0) {
-      const auto now = drive::Monotonic::now();
-      samples.push_back(std::chrono::duration<double, std::micro>(now - sample_start).count() /
-                        100);
-      sample_start = now;
-    }
+            "actual repeated Lua rates retain one pending token per subscribed script");
   }
   next = step::timers(timers);
   records = journal.take();
   require(next.size() == 2 && next.front().due > 1000000 && records.size() == rearms &&
               next.back().event.origin.cause == records.back()["id"] &&
               std::get<double>(f.states.at({f.a, direct}).at(std::string("count"))) == 2,
-          "far-future replacement keeps exact latest Origin without inventing threshold callbacks");
-  bindings::consume_event(&actions, {step::EventWork{f.a, {}, 6, Value(-.5), origin}, {}});
-  advance(41);
-  const auto crossing = step::timers(timers).front().due;
-  advance(crossing);
-  require(std::get<double>(f.states.at({f.a, direct}).at(std::string("count"))) == 3 &&
-              std::get<double>(f.states.at({f.b, along}).at(std::string("count"))) == 3 &&
-              step::timers(timers).size() == 2,
-          "replacement still delivers the next genuine own/along threshold through real Lua once");
-  if (benchmark) {
-    std::sort(samples.begin(), samples.end());
-    std::cout << "actual Lua rate + watch + Journal + threshold replacement: rearms=" << rearms
-              << " pending=" << timers.thresholds.size()
-              << " us/op p50=" << samples[samples.size() / 2]
-              << " p95=" << samples[samples.size() * 95 / 100] << " max=" << samples.back()
-              << " (100-operation batch means)\n";
+          "far-future replacements retain latest real origin without invented threshold callbacks");
+  auto plans = step::plan_event(f.triggers, f.values(), {f.a, {}, 6, Value(-.5), origin}, 41, 20);
+  plans.front().input.deadline = step::Monotonic::now() + std::chrono::seconds(2);
+  auto completed = invoke(f, plans.front(), parts, journal);
+  step::cancel_source_thresholds(timers, f.subscriptions, {f.a, 1});
+  const auto changed = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
+                                        f.scripts, {{f.a, 1}, completed.origin}, 41, 20);
+  for (const auto &timer : changed.changes.timers)
+    completed.effects.ordered.emplace_back(timer);
+  step::publish_invocation(journal, queues, timers, std::move(completed), origin, 1000);
+  while (step::pop_foreground(queues)) {
   }
+  crossing(step::timers(timers).front().due);
+  require(std::get<double>(f.states.at({f.a, direct}).at(std::string("count"))) == 3 &&
+              std::get<double>(f.states.at({f.a, sibling}).at(std::string("count"))) == 3 &&
+              step::timers(timers).size() == 2,
+          "next real crossing still reaches both scripts exactly once after replacements");
+  // A stopped real process has no future crossing. Its old far-future tokens
+  // must disappear, while unrelated ordinary timers remain independent.
+  step::schedule(timers, {1000000000, {f.c, {}, 6, {}, origin}, {}});
+  const auto stopped_token = step::timers(timers).front();
+  const auto stopped_at = timers.now;
+  plans = step::plan_event(f.triggers, f.values(), {f.a, {}, 6, Value(0.), origin}, stopped_at, 20);
+  plans.front().input.deadline = step::Monotonic::now() + std::chrono::seconds(2);
+  completed = invoke(f, plans.front(), parts, journal);
+  require(f.processes[1].get(f.a.slot())->rate == 0 && timers.thresholds.size() == 2,
+          "actual Lua stopping a process exposes the two pending old crossings");
+  step::cancel_source_thresholds(timers, f.subscriptions, {f.a, 1});
+  const auto stopped = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
+                                        f.scripts, {{f.a, 1}, completed.origin}, stopped_at, 20);
+  require(stopped.changes.timers.empty() && stopped.invocations.empty() &&
+              timers.thresholds.empty() && step::timers(timers).size() == 1 &&
+              step::timers(timers).front().due == 1000000000 &&
+              !step::valid_event({stopped_token.event, stopped_token.threshold},
+                                 identity(f.objects), f.processes, f.subscriptions, 10000, 20),
+          "zero rate cancels current bindings' tokens and preserves unrelated ordinary timers");
+  step::publish_invocation(journal, queues, timers, std::move(completed), origin, 1000);
+  while (auto item = step::pop_foreground(queues))
+    require(std::holds_alternative<step::WatchWork>(item->work) &&
+                std::get<step::WatchWork>(item->work).source == FactKey{f.a, 1},
+            "stopping a process publishes only its actual dirty source");
+  if (benchmark)
+    std::cout
+        << "actual Lua rate + watch planning + Journal + timer replacement: rearms=" << rearms
+        << " pending=" << timers.thresholds.size() << " mean us/op="
+        << std::chrono::duration<double, std::micro>(step::Monotonic::now() - started).count() /
+               rearms
+        << '\n';
 }
 } // namespace
 int main(int argc, char **argv) {
   try {
-    only_actual_player_actions_are_chosen_events();
-    canonical_action_results_and_reach();
     const bool benchmark = argc == 2 && std::string_view(argv[1]) == "--bench";
     require(argc == 1 || benchmark, "usage: turns_test [--bench]");
-    threshold_turn_uses_current_subscriptions_and_one_rearm(benchmark);
+    chosen_actions_and_typed_inputs();
+    canonical_results_and_actual_bounds();
+    threshold_plans_use_current_subscriptions(benchmark);
     std::cout
-        << "Actual action attribution, threshold turn, followed-source and rearm checks passed.\n";
+        << "Actual action planning, attribution, typed inputs, threshold plans and Lua pass.\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return 1;

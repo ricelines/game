@@ -1,4 +1,4 @@
-#include "catalog/catalog.hpp"
+#include "react/react.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -57,7 +57,7 @@ struct Fixture {
   }
   ~Fixture() { std::filesystem::remove_all(root); }
   Hash registry() { return save_registry(root / "registry", terms, materials, rules, bindings); }
-  PreparedAsset asset(std::string source, std::string canonical, double volume, double capacity) {
+  Asset asset(std::string source, std::string canonical, double volume, double capacity) {
     std::string identity = source;
     identity.push_back('\0');
     identity += canonical;
@@ -112,7 +112,7 @@ void models_and_variants() {
   ParameterBlocks params;
   auto base = f.asset("same CAD program", "{\"height\":1.0}", 1, 0.5);
   auto variant = f.asset("same CAD program", "{\"height\":2.0}", 2, 1.5);
-  const auto base_hash = base.asset.hash, variant_hash = variant.asset.hash;
+  const auto base_hash = base.hash, variant_hash = variant.hash;
   import_asset(assets, std::move(base));
   import_asset(assets, std::move(variant));
   ModelSubmission first;
@@ -151,8 +151,7 @@ void models_and_variants() {
           "wrong native artifact version accepted");
   auto broken = assets.rows.at(base_hash);
   broken.manifest["replicated"] = {"unknown.term"};
-  PreparedAsset prepared;
-  prepared.asset = broken;
+  Asset prepared = broken;
   rejects([&] { resolve_manifest_terms(prepared, f.terms); }, "unknown replication term accepted");
   std::filesystem::remove(f.root / "assets" / base_hash / "lod1.glb");
   rejects([&] { read_asset(f.root / "assets", base_hash, "{\"height\":1.0}", f.pins); },
@@ -169,31 +168,30 @@ void topology_changing_variants() {
   auto base = f.asset("parameterized assembly", "{\"height\":1.0}", 1, 0);
   auto changed = f.asset("parameterized assembly", "{\"height\":2.0}", 0, 0);
   auto no_parts = f.asset("parameterized assembly", "{\"height\":3.0}", 0, 0);
-  auto part = [&](PreparedAsset &parent, const std::string &name, double volume) {
+  auto part = [&](Asset &parent, const std::string &name, double volume) {
     auto child = parent;
-    std::string identity = parent.asset.hash;
+    std::string identity = parent.hash;
     identity.push_back('\0');
     identity += "part";
     identity.push_back('\0');
     identity += name;
-    child.asset.hash = sha256(identity);
-    child.asset.parent_asset = parent.asset.hash;
-    child.asset.part_name = name;
-    child.asset.volume = volume;
-    child.asset.manifest["hash"] = child.asset.hash;
-    child.asset.manifest["parent_asset"] = child.asset.parent_asset;
-    child.asset.manifest["part_name"] = name;
-    child.asset.manifest["volume"] = volume;
-    child.asset.manifest["parts"] = nlohmann::json::object();
-    parent.asset.manifest["parts"][name] = {
-        {"asset", child.asset.hash}, {"position", {0, 0, 0}}, {"rotation", {0, 0, 0, 1}}};
+    child.hash = sha256(identity);
+    child.parent_asset = parent.hash;
+    child.part_name = name;
+    child.volume = volume;
+    child.manifest["hash"] = child.hash;
+    child.manifest["parent_asset"] = child.parent_asset;
+    child.manifest["part_name"] = name;
+    child.manifest["volume"] = volume;
+    child.manifest["parts"] = nlohmann::json::object();
+    parent.manifest["parts"][name] = {
+        {"asset", child.hash}, {"position", {0, 0, 0}}, {"rotation", {0, 0, 0, 1}}};
     import_asset(assets, std::move(child));
   };
   part(base, "old_leaf", 2);
   part(changed, "new_leaf", 3);
   part(changed, "knob", 0.5);
-  const auto base_hash = base.asset.hash, changed_hash = changed.asset.hash,
-             empty_hash = no_parts.asset.hash;
+  const auto base_hash = base.hash, changed_hash = changed.hash, empty_hash = no_parts.hash;
   import_asset(assets, std::move(base));
   import_asset(assets, std::move(changed));
   import_asset(assets, std::move(no_parts));
@@ -324,8 +322,8 @@ void presentation_role_validation() {
   f.terms.rows[13].name = "invented.candela";
   f.terms.by_name["invented.candela"] = 13;
   f.terms.rows[13].dimensions = {0, 0, 0, 0, 0, 0, 1, 0};
-  PreparedAsset prepared;
-  prepared.asset.manifest = {
+  Asset prepared;
+  prepared.manifest = {
       {"replicated", nlohmann::json::array()},
       {"bindings",
        {{"observer", {{"eye", {0, 0, 1.6}}, {"forward", {0, 1, 0}}, {"dim_lux", "invented.lux"}}},
@@ -341,25 +339,25 @@ void presentation_role_validation() {
           {"shape", {{"kind", "box"}, {"size", {10, 8, 3}}, {"offset", {0, 0, 1.5}}}}}}}}};
   resolve_manifest_terms(prepared, f.terms);
   const auto valid = prepared;
-  prepared.asset.manifest["bindings"]["observer"]["dim_lux"] = -1;
+  prepared.manifest["bindings"]["observer"]["dim_lux"] = -1;
   rejects([&] { resolve_manifest_terms(prepared, f.terms); },
           "negative observer threshold rejected");
   prepared = valid;
-  prepared.asset.manifest["bindings"]["observer"]["forward"] = {0, 0, 1};
+  prepared.manifest["bindings"]["observer"]["forward"] = {0, 0, 1};
   rejects([&] { resolve_manifest_terms(prepared, f.terms); },
           "vertical-only observer forward rejected");
   prepared = valid;
-  prepared.asset.manifest["bindings"]["observer"]["dim_lux"] = "invented.candela";
+  prepared.manifest["bindings"]["observer"]["dim_lux"] = "invented.candela";
   rejects([&] { resolve_manifest_terms(prepared, f.terms); },
           "observer threshold uses lux dimensions");
   prepared = valid;
-  prepared.asset.manifest["bindings"]["light"]["source_radius_m"] = 0;
+  prepared.manifest["bindings"]["light"]["source_radius_m"] = 0;
   rejects([&] { resolve_manifest_terms(prepared, f.terms); }, "light radius must be positive");
   prepared = valid;
-  prepared.asset.manifest["bindings"]["zone"]["shape"]["size"] = {1, -1, 1};
+  prepared.manifest["bindings"]["zone"]["shape"]["size"] = {1, -1, 1};
   rejects([&] { resolve_manifest_terms(prepared, f.terms); }, "zone dimensions must be positive");
   prepared = valid;
-  prepared.asset.manifest["bindings"]["observer"]["dim_lux"] = 2.5;
+  prepared.manifest["bindings"]["observer"]["dim_lux"] = 2.5;
   resolve_manifest_terms(prepared, f.terms);
 }
 } // namespace

@@ -1,4 +1,4 @@
-#include "bindings/commerce/commerce.hpp"
+#include "step/step.hpp"
 
 #include <chrono>
 #include <iostream>
@@ -6,7 +6,7 @@
 
 int main() {
   using namespace amber;
-  namespace cm = bindings::commerce;
+  namespace cm = step;
   Objects objects;
   perm::Players players;
   players.rows.resize(3);
@@ -14,21 +14,17 @@ int main() {
   ledger.balance = {{perm::Account::player(1), 100}, {perm::Account::player(2), 100}};
   perm::Grants grants;
   perm::Groups groups;
-  cm::PaymentBinding binding{ledger, grants, players, identity(objects), authority(objects),
-                             groups};
-  drive::NativeOperations operations;
-  drive::register_native(operations, 1, {cm::validate_pay, cm::pay, &binding});
   constexpr int count = 100000;
   const auto start = std::chrono::steady_clock::now();
   for (int i = 0; i < count; ++i) {
     const PlayerId from = i % 2 ? 2 : 1, to = i % 2 ? 1 : 2;
-    auto completed =
-        drive::invoke_native(operations, {{from, 1, {}, {}},
-                                          {{"to", "p:" + std::to_string(to)}, {"amount", 1}},
-                                          {},
-                                          Step(i),
-                                          20,
-                                          {}});
+    auto completed = cm::pay(ledger, grants, players, identity(objects), authority(objects), groups,
+                             {{from, 1, {}, {}},
+                              {{"to", "p:" + std::to_string(to)}, {"amount", 1}},
+                              {},
+                              Step(i),
+                              20,
+                              {}});
     if (!completed.changed || completed.records.size() != 1)
       throw std::runtime_error("benchmark did not complete a real transfer and diagnostic draft");
   }

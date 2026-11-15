@@ -1,5 +1,5 @@
-#include "snapshot.hpp"
-#include "snap/codec.hpp"
+#include "snap/snap.hpp"
+#include "space.hpp"
 #include <algorithm>
 
 namespace amber::space {

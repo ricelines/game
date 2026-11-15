@@ -1,8 +1,58 @@
-add_library(amber_step step.cpp snapshot.cpp)
-target_link_libraries(amber_step PUBLIC amber_record amber_snap)
-target_compile_options(amber_step PRIVATE -Wall -Wextra -Wpedantic)
-if(BUILD_TESTING)
-  add_executable(step_test ../../tests/step_test.cpp)
-  target_link_libraries(step_test PRIVATE amber_step)
-  add_test(NAME step COMMAND step_test)
-endif()
+add_library(amber_step STATIC
+  step.cpp
+  actions.cpp
+  handlers.cpp
+  native_actions.cpp
+  native_declarations.cpp
+  publication.cpp
+  controls.cpp
+  run.cpp
+  connections.cpp
+  fixture_cases.cpp
+  lifecycle.cpp
+  snapshot.cpp
+  phase.cpp
+  plans.cpp
+  inputs.cpp
+  construction.cpp
+  replacement.cpp
+  model_definition.cpp
+  goods.cpp
+  finance.cpp
+  authority.cpp
+  authoring_failures.cpp
+  checkpoint.cpp
+  commerce_admin.cpp
+  commerce_custody.cpp
+  commerce_mailbox.cpp
+  commerce_offers.cpp
+  commerce_payments.cpp
+  commerce_placement.cpp
+  commerce_schema.cpp
+  commerce_schema_admin.cpp
+  commerce_trades.cpp
+  editing_claims.cpp
+  editing_properties.cpp
+  editing_registry.cpp
+  editing_schema.cpp
+  editing_scripts.cpp
+  elaboration_operations.cpp
+  elaboration_rules.cpp
+  elaboration_schema.cpp
+  geometry.cpp
+  material.cpp
+  illumination.cpp
+  measurements.cpp
+  metadata.cpp
+  physical_actions.cpp
+  physical_events.cpp
+  physical_snapshot.cpp
+  navigation.cpp
+  travel.cpp
+  start_catalog.cpp
+  start_objects.cpp
+  start_permissions.cpp
+)
+target_include_directories(amber_step PUBLIC ${PROJECT_SOURCE_DIR}/server)
+target_compile_features(amber_step PUBLIC cxx_std_20)
+target_link_libraries(amber_step PUBLIC amber_store amber_record amber_snap amber_react amber_perm amber_space amber_net amber_elaborate PRIVATE Ambergris::Luau.VM Ambergris::TracyClient Threads::Threads)

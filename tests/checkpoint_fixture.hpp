@@ -1,11 +1,10 @@
 #pragma once
 
-#include "bindings/checkpoint/checkpoint.hpp"
 #include "runtime_fixture.hpp"
-#include "snap/objects.hpp"
+#include "step/step.hpp"
 
 namespace amber::checkpoint_test {
-namespace cp = bindings::checkpoint;
+namespace cp = step::checkpoint;
 struct Fixture {
   test_runtime::Fixture f;
   lifecycle::Parts parts;
@@ -26,16 +25,17 @@ struct Fixture {
   perm::Offers offers;
   perm::Trades trades;
   perm::OwnerLimits limits;
-  control::Profiles profiles;
+  net::Profiles profiles;
   step::TimerWheel timers;
   step::WorkQueues queues;
   step::Intents intents;
-  drive::Inputs inputs;
+  step::Inputs inputs;
   elaborate::Requests requests;
   elaborate::GapCounts gaps;
   elaborate::LastGaps last;
   elaborate::CaptureRefs captures;
   std::vector<space::MotionRow> motion;
+  std::vector<step::BodyCauseRow> causes;
   std::uint64_t next_record = 31;
   Handle part;
   ScriptId script = 0, unrelated = 0;
@@ -84,21 +84,20 @@ struct Fixture {
     f.state(f.a, 1, 0);
     f.state(f.c, 1, 20);
     set_rate(f.properties, f.processes, f.terms.rows[1], f.a, 1, 0, 100, 0, 20, f.effects);
-    auto armed = install::sync_watches(f.subscriptions, f.links, f.values(), allocations,
-                                       {f.a, script}, f.scripts.rows[script].declaration, 0, 20, {},
-                                       install::SyncMode::Initial);
+    auto armed = react::sync_watches(f.subscriptions, f.values(), allocations, {f.a, script},
+                                     f.scripts.rows[script].declaration, 0, 20, {},
+                                     react::SyncMode::Initial);
     for (auto &timer : armed.timers)
       step::schedule(timers, std::move(timer));
     f.bind(unrelated, f.c);
     f.states[{f.c, unrelated}][std::string("private")] = std::string("unrelated");
     const std::array<ScriptId, 1> explicit_scripts{script};
-    install::set_instances(f.installed, f.b, explicit_scripts, f.scripts);
+    react::set_instances(f.installed, f.b, explicit_scripts, f.scripts);
     f.shared.resize(5);
     f.shared[4].set(f.a.slot(), Shared{9, {{f.b, 4}, {f.c, 5}}});
     gives.set(f.b.slot(), std::vector<SubjectTerm>{{f.a, 4}});
     gives.set(f.c.slot(), std::vector<SubjectTerm>{{f.a, 4}});
     allocations.values[{f.a, f.b, 4, 0}] = 4;
-    rebuild_allocation_index(allocations);
     meters[{f.a, f.b, 4, 0}] = {1, 0, 2};
     f.instance_settings.columns.resize(2);
     f.instance_settings.columns[1].set(f.a.slot(), Value(2.0));
@@ -172,28 +171,28 @@ struct Fixture {
     offers.rows[1] = {1, 1, 2, f.b, 5, 500, 1, true, {part}};
     offers.rows[2] = {2, 3, 0, f.c, 2, 500, 0, true, {}};
     trades.rows.resize(2);
-    trades.rows[1] = {1, {1, 2}, {{{1, 0, false, {f.b, {}, true}}, {0, 5, false, {}}}}, true};
+    trades.rows[1] = {1, {1, 2}, {{{1, 0, false}, {0, 5, false}}}, true};
     limits.set(f.a.slot(), perm::bit(perm::Verb::Transfer));
     limits.set(f.c.slot(), perm::bit(perm::Verb::Copy));
     for (PlayerId id = 1; id <= 3; ++id)
-      control::put_profile(profiles, {id,
-                                      "player" + std::to_string(id),
-                                      id == 1 ? f.a : Handle{},
-                                      {},
-                                      control::all_modes,
-                                      {std::string(64, char('a' + id))}});
+      net::put_profile(profiles, {id,
+                                  "player" + std::to_string(id),
+                                  id == 1 ? f.a : Handle{},
+                                  {},
+                                  net::all_modes,
+                                  {std::string(64, char('a' + id))}});
     const record::Origin origin{9, 4, {1, 2}, 1.5, false};
     step::enqueue_event(queues, {f.a, f.b, 6, Value(true), origin}, 1000);
     step::enqueue_event(queues, {f.c, f.b, 6, Value(false), origin}, 1000);
     step::enqueue_background(queues, {f.a, 4, script, origin, 2});
     step::start_move(intents, f.a, f.b, origin, 1.2f);
     step::start_move(intents, f.c, Vec3{50, 50, 0}, origin);
-    drive::Input input;
-    input.operation = "authoring-completion";
+    step::Input input;
+    input.kind = net::ControlKind::RegisterScript;
     input.caller = PlayerId{1};
     input.body = f.a;
     input.origin = origin;
-    auto input_work = drive::enqueue_input(inputs, input);
+    auto input_work = step::enqueue_input(inputs, input);
     step::append_inputs(queues, {input_work});
     elaborate::note_gap(gaps, last, requests, {7, {4, 8}, f.a, 1, 1, "capture-local", origin}, 3);
     elaborate::note_gap(gaps, last, requests, {7, {1, 9}, f.c, 3, 1, "capture-remote", origin}, 3);
@@ -202,8 +201,8 @@ struct Fixture {
     captures.rows["capture-remote"] = {
         "capture-remote", "remote.amb.zst", elaborate::CaptureStatus::Ready, {}};
     motion = {{f.a, {1, 2, 3}, {.1f, .2f, .3f}, false}, {f.c, {9, 9, 9}, {}, true}};
-    const install::InvocationPlan cue{{script, "novel.cue", 1, 1, true}, f.a, f.b, 6, {}, {}};
-    f.run(std::span<const install::InvocationPlan>(&cue, 1), 12);
+    const react::InvocationPlan cue{{script, "novel.cue", 1, 1, true}, f.a, f.b, 6, {}, {}};
+    f.run(std::span<const react::InvocationPlan>(&cue, 1), 12);
     for (std::size_t i = 0; i < extra; ++i) {
       ObjectInit object;
       object.model = 2;
@@ -211,82 +210,37 @@ struct Fixture {
       f.properties[1].set(handle.slot(), Value(double(i)));
     }
   }
-  snap::SectionWriters writers(std::optional<std::span<const Handle>> selected = {},
-                               const cp::CatalogSelection *catalog = nullptr,
-                               const perm::SnapshotSelection *permission = nullptr) const {
-    auto filter = selected ? snap::ObjectSelection(*selected) : snap::ObjectSelection{};
-    std::vector<PlotId> plot_ids;
-    if (permission)
-      plot_ids.assign(permission->plots.begin(), permission->plots.end());
-    return {[&objects = f.objects, selected](snap::Output &out) {
-              snap::write_objects(out, objects, selected);
-            },
-            [&p = f.properties, &r = f.processes, &i = f.instance_settings, &m = f.model_settings,
-             &l = f.plots, &w = f.world, filter, catalog, plot_ids, permission](snap::Output &out) {
-              cp::write_prop(out, p, r, i, m, l, w, filter, catalog,
-                             permission ? std::optional<std::span<const PlotId>>(plot_ids)
-                                        : std::nullopt);
-            },
-            [&a = f.relations, &p = physical, &parts = parts, id = identity(f.objects),
-             selected](snap::Output &out) { cp::write_rels(out, a, p, parts, id, selected); },
-            [&s = f.shared, &g = gives, &a = allocations, &m = meters, filter](snap::Output &out) {
-              react::write_shared(out, s, g, a, m, filter);
-            },
-            [&m = f.models, &p = parameters, &s = f.scripts, &mt = model_text, &it = instance_text,
-             &at = authored_text, catalog, selected](snap::Output &out) {
-              cp::write_text(out, m, p, s, mt, it, at, catalog, selected);
-            },
-            [&p = players, &l = ledger, &pl = plots, &g = groups, &pr = profiles, permission](
-                snap::Output &out) { cp::write_players(out, p, l, pl, g, pr, permission); },
-            [&g = grants, &o = offers, &t = trades, &l = limits, permission](snap::Output &out) {
-              perm::write_grants(out, g, o, t, l, permission);
-            },
-            [&s = f.states, &w = f.subscriptions, &i = f.installed, id = identity(f.objects),
-             selected](snap::Output &out) { cp::write_scst(out, s, w, i, id, selected); },
-            [&t = timers, filter](snap::Output &out) { step::write_timers(out, t, filter); },
-            [&q = queues, &i = intents, &in = inputs, next = next_record,
-             filter](snap::Output &out) { cp::write_queues(out, q, i, next, in, filter); },
-            [&r = requests, &g = gaps, &l = last, &c = captures, selected](snap::Output &out) {
-              cp::write_reqs(out, r, g, l, c, selected);
-            },
-            [&r = f.random, filter](snap::Output &out) { react::write_random(out, r, filter); },
-            [&m = motion, filter](snap::Output &out) { space::write_motion(out, m, filter); }};
+  void write(snap::Buffer &bytes, std::optional<std::span<const Handle>> selected = {},
+             const cp::CatalogSelection *catalog = nullptr,
+             const perm::SnapshotSelection *permission = nullptr) const {
+    std::optional<cp::CaptureSelection> filter;
+    if (selected) {
+      filter.emplace();
+      filter->objects.assign(selected->begin(), selected->end());
+      filter->catalog = *catalog;
+      filter->permissions = *permission;
+    }
+    cp::encode_checkpoint(
+        bytes, header, f.objects, f.properties, f.processes, f.instance_settings, f.model_settings,
+        f.plots, f.world, f.relations, physical, parts, f.shared, gives, allocations, meters,
+        f.models, parameters, f.scripts, model_text, instance_text, authored_text, players, ledger,
+        plots, groups, profiles, grants, offers, trades, limits, f.states, f.subscriptions,
+        f.installed, timers, queues, intents, inputs, requests, gaps, last, captures, f.random,
+        motion, causes, next_record, filter ? &*filter : nullptr);
   }
-  snap::SectionReaders readers() {
-    return {[&o = f.objects](snap::Input &in) { snap::read_objects(in, o); },
-            [&p = f.properties, &r = f.processes, &i = f.instance_settings, &m = f.model_settings,
-             &l = f.plots, &w = f.world, &g = f.objects.generation](snap::Input &in) {
-              cp::read_prop(in, p, r, i, m, l, w, g.size());
-            },
-            [&a = f.relations, &p = physical, &parts = parts, id = identity(f.objects),
-             &d = declared, &v = f.relation_view](snap::Input &in) {
-              cp::read_rels(in, a, p, parts, id, d);
-              v.columns.clear();
-              for (const auto &[term, relation] : a)
-                v.columns[term] = &relation;
-            },
-            [&s = f.shared, &g = gives, &a = allocations, &m = meters,
-             &slots = f.objects.generation](snap::Input &in) {
-              react::read_shared(in, s, g, a, m, slots.size());
-            },
-            [&m = f.models, &p = parameters, &s = f.scripts, &mt = model_text, &it = instance_text,
-             &at = authored_text](snap::Input &in) { cp::read_text(in, m, p, s, mt, it, at); },
-            [&p = players, &l = ledger, &pl = plots, &g = groups, &pr = profiles](snap::Input &in) {
-              cp::read_players(in, p, l, pl, g, pr);
-            },
-            [&g = grants, &o = offers, &t = trades, &l = limits, &slots = f.objects.generation](
-                snap::Input &in) { perm::read_grants(in, g, o, t, l, slots.size()); },
-            [&s = f.states, &w = f.subscriptions, &i = f.installed, &slots = f.objects.generation](
-                snap::Input &in) { cp::read_scst(in, s, w, i, slots.size()); },
-            [&t = timers](snap::Input &in) { step::read_timers(in, t); },
-            [&q = queues, &i = intents, &inputs = inputs, &next = next_record](snap::Input &in) {
-              next = cp::read_queues(in, q, i, inputs);
-            },
-            [&r = requests, &g = gaps, &l = last, &c = captures](snap::Input &in) {
-              cp::read_reqs(in, r, g, l, c);
-            },
-            [&r = f.random](snap::Input &in) { react::read_random(in, r); },
-            [&m = motion](snap::Input &in) { space::read_motion(in, m); }};
+  void read(const snap::View &view) {
+    auto decoded = cp::decode_checkpoint(
+        view, f.objects, f.properties, f.processes, f.instance_settings, f.model_settings, f.plots,
+        f.world, f.relations, physical, parts, f.shared, gives, allocations, meters, f.models,
+        parameters, f.scripts, model_text, instance_text, authored_text, players, ledger, plots,
+        groups, profiles, grants, offers, trades, limits, f.states, f.subscriptions, f.installed,
+        timers, queues, intents, inputs, requests, gaps, last, captures, f.random, declared);
+    next_record = decoded.next_record;
+    motion = std::move(decoded.motion);
+    causes = std::move(decoded.causes);
+    f.relation_view.columns.clear();
+    for (const auto &[term, relation] : f.relations)
+      f.relation_view.columns[term] = &relation;
   }
 };
 } // namespace amber::checkpoint_test

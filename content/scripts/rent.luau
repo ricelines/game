@@ -65,10 +65,10 @@ local function salvage(self)
         if object and self:now() >= self.state[until_key] then
             -- Its owner may already have destroyed held goods. There is then
             -- nothing left to salvage or credit; a live refusal retains it.
-            if self:read(object,'base.mass') == nil then
+            local measured = self:measure_instance(object)
+            if not measured then
                 self.state[key],self.state[until_key] = nil,nil
             else
-                local measured = self:measure_instance(object)
                 local result = self:act('engine.destroy',object,{})
                 if result.ok then
                     for _, row in measured.materials do

@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import contextlib
 import json
+import math
 import pathlib
 import stat
 import time
@@ -159,6 +160,41 @@ async def inspect_rule(player, script):
     return inspected["declaration"]
 
 
+async def enter_cafe(player, observation, evidence):
+    rows = observation.get("things", []) + observation.get("far", [])
+    doors = [row["h"] for row in rows if row.get("says", {}).get("name") == "Sliding entrance"]
+    require(len(doors) == 1, "fresh observation must identify the actual entrance")
+    door = doors[0]
+    arrivals = []
+
+    async def move(point):
+        require((await player.act("base.move_to", point=point)).get("ok"), "approach move denied")
+        until = time.perf_counter() + 20
+        while time.perf_counter() < until:
+            current = await player.request("look", limit=1)
+            if current["self"]["intent"] is None:
+                require(
+                    math.dist(current["self"]["at"], point) < 0.65,
+                    "ordinary navigation stopped before the S12 approach goal",
+                )
+                arrivals.append(current["self"]["at"])
+                return
+            await asyncio.sleep(0.05)
+        raise AssertionError("ordinary navigation did not finish the S12 approach")
+
+    await move([-2, -2.7, 0])
+    require((await player.act("base.open", door)).get("ok"), "actual entrance open denied")
+    until = time.perf_counter() + 10
+    while time.perf_counter() < until:
+        if (await player.request("inspect", target=door))["values"]["base.open_fraction"] >= 0.99:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise AssertionError("actual entrance did not open for the S12 approach")
+    await move([0, 4, 0])
+    evidence.checks["target_approach"] = {"door": door, "arrivals": arrivals}
+
+
 async def run(args, evidence):
     async with (
         Player("Mira", args.url, args.mira_key_file, evidence) as mira,
@@ -175,6 +211,8 @@ async def run(args, evidence):
             floor = matches[0]
         target = await mira.request("inspect", target=floor)
         require(target.get("ok") is True, "live original target inspection failed")
+        if not args.target:
+            await enter_cafe(mira, observed, evidence)
         evidence.checks["target"] = floor
         evidence.checks["requester_body"] = mira.welcome["body"]
         gap = await mira.act("base.switch", floor, on=True)

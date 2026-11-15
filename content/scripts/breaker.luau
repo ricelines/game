@@ -7,10 +7,14 @@ local function update(self)
     if self.state.downstream and self.state.downstream ~= downstream then
         self:contribute(self.state.downstream, 'base.power_supply', 0)
     end
+    if self.state.downstream ~= downstream then
+        self.state.downstream_demand = 0
+        if downstream then self:emit(downstream, 'base.demand_request') end
+    end
     self.state.upstream, self.state.downstream = upstream, downstream
     local demand = 0
     if self:get('base.on') and downstream then
-        demand = math.min(self:read(downstream, 'base.power_demand') or 0, self:setting('base.rated_power'))
+        demand = math.min(self.state.downstream_demand or 0, self:setting('base.rated_power'))
     end
     if upstream then self:contribute(upstream, 'base.power_demand', demand) end
     local delivered = upstream and self:get_share(upstream, 'base.power_demand') or 0
@@ -22,13 +26,17 @@ return {
     contributes = {'base.power_supply', 'base.power_demand'},
     watches = {
         'base.on', 'base.powered_by', 'base.feeds',
-        {term = 'base.power_supply', along = 'base.powered_by'},
-        {term = 'base.power_demand', along = 'base.powered_by'},
-        {term = 'base.power_demand', along = 'base.feeds'},
+        'base.power_supply',
+        'base.power_demand',
     },
     actions = {['base.switch'] = {right = 'use', reach = true}},
     on = {
-        ['base.start'] = update, ['base.on'] = update,
+        ['base.start'] = update,
+        ['base.demand_update'] = function(self, sender, value)
+            if sender ~= self:related('base.feeds', 'out')[1] then return end
+            self.state.downstream_demand = value
+            update(self)
+        end, ['base.on'] = update,
         ['base.powered_by'] = update, ['base.feeds'] = update,
         ['base.power_supply'] = update, ['base.power_demand'] = update,
         ['base.switch'] = function(self, _, args)

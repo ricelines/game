@@ -1,5 +1,5 @@
-#include "catalog/snapshot.hpp"
-#include "react/snapshot.hpp"
+#include "react/react.hpp"
+#include "snap/snap.hpp"
 
 #include <iostream>
 #include <stdexcept>
@@ -16,7 +16,7 @@ void reaction_roundtrip_and_capture() {
   props[1].set(a.slot(), Value(3.0));
   props[1].set(outside.slot(), Value(90.0));
   Processes processes(3);
-  processes[1].set(a.slot(), Process{3, 20, -1, 0, 5, 17});
+  processes[1].set(a.slot(), Process{3, 20, -1, 0, 5});
   ScriptStates states;
   states[{a, 4}][std::string("handle")] = b;
   states[{a, 4}][std::int64_t{1}] = 4.0;
@@ -24,7 +24,7 @@ void reaction_roundtrip_and_capture() {
   states[{outside, 4}][std::string("x")] = 99.0;
   Subscriptions subscriptions;
   bind_watch(subscriptions, {a, 1},
-             {{b, 4}, 0, 21, Answer{true, Value(3.0)}, {{Threshold::Predicate::Below, 2}}});
+             {{b, 4}, 0, Answer{true, Value(3.0)}, {1, {{Threshold::Predicate::Below, 2}}}, {}});
   RandomStates random{{a.bits, 345}, {outside.bits, 567}};
   AuthoredRelations relations;
   DeferredEffects effects;
@@ -36,7 +36,6 @@ void reaction_roundtrip_and_capture() {
   AllocationRows allocations;
   MeterRows meters;
   allocations.values[{a, b, 2, false}] = 10;
-  rebuild_allocation_index(allocations);
   meters[{a, b, 2, false}] = {4, 20, 10};
   const std::array<Handle, 2> selected{a, b};
   SnapshotSelection selection(selected);
@@ -68,15 +67,16 @@ void reaction_roundtrip_and_capture() {
   snap::check_complete(in);
   require(loaded_props[1].get(a.slot()) && !loaded_props[1].get(outside.slot()),
           "capture includes selected state only");
-  require(loaded_processes[1].get(a.slot())->revision == 17, "process revision survives snapshot");
+  require(process_value(*loaded_processes[1].get(a.slot()), 40, 20) == 2,
+          "closed-form process fields survive snapshot");
   require(loaded_states.size() == 1 && loaded_states.at({a, 4}) == states.at({a, 4}),
           "flat state tags/keys/handles survive snapshot");
   require(loaded_random.size() == 1 && loaded_random.at(a.bits) == 345,
           "RNG selected full handle restored");
-  require(loaded_subscriptions.rows.at({a, 1})[0].last == subscriptions.rows.at({a, 1})[0].last &&
-              loaded_subscriptions.next_revision == subscriptions.next_revision,
-          "watch answer/revision authoritative");
-  require(loaded_subscriptions.by_consumer.contains({b, 4}), "watch derived index rebuilt");
+  require(loaded_subscriptions.rows.at({a, 1})[0].last == subscriptions.rows.at({a, 1})[0].last,
+          "saved watch answer survives snapshot");
+  require(watch_sources(loaded_subscriptions, ScriptKey{b, 4}) == std::vector<FactKey>{{a, 1}},
+          "consumer lookup finds the restored primary row");
   require(loaded_relations.at(2).in.get(b.slot())->front() == a, "bidirectional relation restored");
   require(loaded_gives.get(b.slot())->front().subject == a, "contribution reverse restored");
   require(metered(loaded_meters.at({a, b, 2, false}), 40, 20) == 14,

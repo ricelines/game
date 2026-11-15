@@ -255,26 +255,13 @@ public:
 };
 class Rays final : public JPH::CastRayCollector {
 public:
-  Deadline deadline;
-  bool complete = true;
   std::vector<JPH::RayCastResult> hits;
-  explicit Rays(Deadline d) : deadline(d) {}
-  void AddHit(const JPH::RayCastResult &hit) override {
-    if (expired(deadline)) {
-      complete = false;
-      ForceEarlyOut();
-    } else
-      hits.push_back(hit);
-  }
+  void AddHit(const JPH::RayCastResult &hit) override { hits.push_back(hit); }
 };
 std::vector<Hit> hits(const Space &space, IdentityRead identity, Vec3 from, Vec3 to,
-                      QueryFilter filter, Deadline deadline, bool &complete) {
+                      QueryFilter filter) {
   auto &n = *space.native;
-  Rays collector(deadline);
-  if (expired(deadline)) {
-    complete = false;
-    return {};
-  }
+  Rays collector;
   ObjectFilter objects(filter.include_sensors);
   BodyFilter bodies(n, filter, true);
   n.physics.GetNarrowPhaseQuery().CastRay({jv(from), jv(to - from)}, JPH::RayCastSettings{},
@@ -293,7 +280,6 @@ std::vector<Hit> hits(const Space &space, IdentityRead identity, Vec3 from, Vec3
       normal = av(lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, jv(position)));
     out.push_back({owner->second, hit.mFraction, position, normal});
   }
-  complete = collector.complete && !expired(deadline);
   return out;
 }
 void erase_value(SparseColumn<std::vector<Handle>> &column, Handle key, Handle value) {
@@ -402,7 +388,7 @@ void membership(Space &space, IdentityRead identity, ParentWrite parents,
         continue;
     }
     std::vector<Handle> containers;
-    volumes_at(space, identity, center, VolumeKind::Container, Deadline::max(), containers);
+    volumes_at(space, identity, center, VolumeKind::Container, containers);
     std::erase(containers, object);
     float smallest = INFINITY;
     Handle immediate;
@@ -1055,7 +1041,10 @@ OperationResult custody(Space &space, IdentityRead identity, Handle object, Hand
   // restore unrelated kinematic occupants to their ordinary dynamic motion.
   for (auto bits : assembly)
     extract_native(n, Handle{bits});
-  release_occupants(space, identity, object, descendants, parents, flags, relations, changes);
+  const auto released =
+      release_occupants(space, identity, object, descendants, parents, flags, relations, changes);
+  if (released.status != Status::Ok)
+    return released;
   for (auto bits : assembly) {
     const Handle member{bits};
     n.attachments.erase(bits);
@@ -1128,8 +1117,8 @@ std::optional<Bounds> volume_bounds(const Space &space, Handle owner, VolumeKind
     return {};
   return shape_bounds(n.geometries[found->spec.geometry]->mesh, found->world);
 }
-bool volumes_at(const Space &space, IdentityRead identity, Vec3 point, VolumeKind kind,
-                Deadline deadline, std::vector<Handle> &out) {
+void volumes_at(const Space &space, IdentityRead identity, Vec3 point, VolumeKind kind,
+                std::vector<Handle> &out) {
   out.clear();
   const auto &n = *space.native;
   class Sensors final : public JPH::ObjectLayerFilter {
@@ -1138,8 +1127,6 @@ bool volumes_at(const Space &space, IdentityRead identity, Vec3 point, VolumeKin
   JPH::AllHitCollisionCollector<JPH::CollideShapeBodyCollector> candidates;
   n.physics.GetBroadPhaseQuery().CollidePoint(jv(point), candidates, {}, sensors);
   for (auto id : candidates.mHits) {
-    if (expired(deadline))
-      return false;
     auto volume = std::ranges::find_if(n.volumes, [&](const Volume &v) { return v.body == id; });
     if (volume != n.volumes.end() && volume->spec.kind == kind &&
         identity.valid(volume->spec.owner) &&
@@ -1148,7 +1135,6 @@ bool volumes_at(const Space &space, IdentityRead identity, Vec3 point, VolumeKin
   }
   std::sort(out.begin(), out.end());
   out.erase(std::unique(out.begin(), out.end()), out.end());
-  return !expired(deadline);
 }
 
 std::optional<Bounds> bounds(const Space &space, IdentityRead identity, Handle object) {
@@ -1179,17 +1165,15 @@ std::optional<Bounds> bounds(const Space &space, IdentityRead identity, Handle o
   };
   return collect(collect, object);
 }
-RayResult raycast(const Space &space, IdentityRead identity, Vec3 from, Vec3 to, QueryFilter filter,
-                  Deadline deadline) {
-  bool complete;
-  auto all = hits(space, identity, from, to, filter, deadline, complete);
-  return {complete, all.empty() ? std::nullopt : std::optional<Hit>(all.front())};
+std::optional<Hit> raycast(const Space &space, IdentityRead identity, Vec3 from, Vec3 to,
+                           QueryFilter filter) {
+  auto all = hits(space, identity, from, to, filter);
+  return all.empty() ? std::nullopt : std::optional<Hit>(all.front());
 }
 Visibility visibility(const Space &space, IdentityRead identity, Vec3 from, Vec3 to,
-                      QueryFilter filter, float minimum, Deadline deadline) {
-  bool complete;
-  auto all = hits(space, identity, from, to, filter, deadline, complete);
-  Visibility result{complete, complete, 1, {}};
+                      QueryFilter filter, float minimum) {
+  auto all = hits(space, identity, from, to, filter);
+  Visibility result{true, 1, {}};
   std::set<std::uint64_t> seen;
   for (const auto &hit : all)
     if (seen.insert(hit.object.bits).second) {
@@ -1207,30 +1191,19 @@ Visibility visibility(const Space &space, IdentityRead identity, Vec3 from, Vec3
     }
   return result;
 }
-bool near(const Space &space, IdentityRead identity, Vec3 point, float radius, QueryFilter filter,
-          Deadline deadline, std::vector<Nearby> &out) {
+void near(const Space &space, IdentityRead identity, Vec3 point, float radius, QueryFilter filter,
+          std::vector<Nearby> &out) {
   const auto &n = *space.native;
   out.clear();
   class Candidates final : public JPH::CollideShapeBodyCollector {
   public:
-    Deadline deadline;
-    bool complete = true;
     std::vector<JPH::BodyID> bodies;
-    explicit Candidates(Deadline d) : deadline(d) {}
-    void AddHit(const JPH::BodyID &id) override {
-      if (expired(deadline)) {
-        complete = false;
-        ForceEarlyOut();
-      } else
-        bodies.push_back(id);
-    }
-  } candidates(deadline);
+    void AddHit(const JPH::BodyID &id) override { bodies.push_back(id); }
+  } candidates;
   ObjectFilter objects(filter.include_sensors);
   n.physics.GetBroadPhaseQuery().CollideSphere(jv(point), radius, candidates, {}, objects);
   std::set<std::uint64_t> seen;
   for (auto id : candidates.bodies) {
-    if (expired(deadline))
-      return false;
     auto owner = n.handles.find(id.GetIndexAndSequenceNumber());
     if (owner == n.handles.end())
       continue;
@@ -1251,29 +1224,20 @@ bool near(const Space &space, IdentityRead identity, Vec3 point, float radius, Q
   }
   std::sort(out.begin(), out.end(),
             [](const auto &a, const auto &b) { return a.distance_m < b.distance_m; });
-  return candidates.complete;
 }
-Illumination illuminance(const Space &space, IdentityRead identity, Handle receiver, Vec3 point,
-                         double ambient, std::span<const LightSample> lights, Deadline deadline) {
-  Illumination result{true, ambient};
+double illuminance(const Space &space, IdentityRead identity, Handle receiver, Vec3 point,
+                   double ambient, std::span<const LightSample> lights) {
+  double result = ambient;
   for (const auto &light : lights) {
-    if (expired(deadline)) {
-      result.complete = false;
-      break;
-    }
     double d2 = (point - light.position).length_squared();
     if (d2 > light.range_m * light.range_m)
       continue;
     auto visible =
         visibility(space, identity, point, light.position, {receiver, light.source, false},
-                   std::numeric_limits<float>::epsilon(), deadline);
-    if (!visible.complete) {
-      result.complete = false;
-      break;
-    }
+                   std::numeric_limits<float>::epsilon());
     if (visible.clear)
-      result.lux += light.intensity_cd * visible.transmission /
-                    std::max(d2, double(light.source_radius_m) * light.source_radius_m);
+      result += light.intensity_cd * visible.transmission /
+                std::max(d2, double(light.source_radius_m) * light.source_radius_m);
   }
   return result;
 }
@@ -1424,32 +1388,23 @@ OperationResult impulse(Space &space, IdentityRead identity, Handle object, Vec3
   n.physics.GetBodyInterface().AddImpulse(body->body, jv(momentum), jv(point));
   return {Status::Ok, {}};
 }
-RayResult sweep(const Space &space, IdentityRead identity, Handle object, Vec3 delta,
-                QueryFilter filter, Deadline deadline) {
+std::optional<Hit> sweep(const Space &space, IdentityRead identity, Handle object, Vec3 delta,
+                         QueryFilter filter) {
   const auto &n = *space.native;
   auto it = n.bodies.find(object.bits);
   if (!identity.valid(object) || it == n.bodies.end())
-    return {true, {}};
-  if (expired(deadline))
-    return {false, {}};
+    return {};
   const auto &body = it->second;
   const auto *shape =
       body.character ? body.character->GetShape() : n.geometries[body.spec.geometry]->hull.GetPtr();
   if (!shape)
-    return {true, {}};
+    return {};
   class Collector final : public JPH::CastShapeCollector {
   public:
-    Deadline deadline;
     JPH::Vec3 direction;
     std::optional<JPH::ShapeCastResult> closest;
-    bool complete = true;
-    Collector(Deadline d, Vec3 v) : deadline(d), direction(jv(v)) {}
+    explicit Collector(Vec3 v) : direction(jv(v)) {}
     void AddHit(const JPH::ShapeCastResult &hit) override {
-      if (expired(deadline)) {
-        complete = false;
-        ForceEarlyOut();
-        return;
-      }
       auto normal = -hit.mPenetrationAxis.NormalizedOr(JPH::Vec3::sZero());
       if (hit.mFraction == 0 && normal.Dot(direction) >= -std::numeric_limits<float>::epsilon())
         return;
@@ -1458,7 +1413,7 @@ RayResult sweep(const Space &space, IdentityRead identity, Handle object, Vec3 d
         UpdateEarlyOutFraction(std::max(0.f, hit.mFraction));
       }
     }
-  } collector(deadline, delta);
+  } collector(delta);
   filter.ignore_a = object;
   SolidObjects objects;
   BodyFilter bodies(n, filter);
@@ -1468,16 +1423,14 @@ RayResult sweep(const Space &space, IdentityRead identity, Handle object, Vec3 d
   n.physics.GetNarrowPhaseQuery().CastShape(cast, JPH::ShapeCastSettings{}, JPH::RVec3::sZero(),
                                             collector, {}, objects, bodies);
   if (!collector.closest)
-    return {collector.complete && !expired(deadline), {}};
+    return {};
   auto hit = *collector.closest;
   auto owner = n.handles.find(hit.mBodyID2.GetIndexAndSequenceNumber());
-  return {collector.complete && !expired(deadline),
-          Hit{owner == n.handles.end() ? Handle{} : owner->second, hit.mFraction,
-              av(hit.mContactPointOn2),
-              av(-hit.mPenetrationAxis.NormalizedOr(JPH::Vec3::sZero()))}};
+  return Hit{owner == n.handles.end() ? Handle{} : owner->second, hit.mFraction,
+             av(hit.mContactPointOn2), av(-hit.mPenetrationAxis.NormalizedOr(JPH::Vec3::sZero()))};
 }
 SweepMove translate(Space &space, IdentityRead identity, TransformWrite transforms, Handle object,
-                    Vec3 delta, float seconds, Deadline deadline, CauseToken cause) {
+                    Vec3 delta, float seconds, CauseToken cause) {
   auto &n = *space.native;
   auto *body = get(n, identity, object);
   if (!body)
@@ -1490,17 +1443,14 @@ SweepMove translate(Space &space, IdentityRead identity, TransformWrite transfor
   auto attachment = n.attachments.find(object.bits);
   if (attachment != n.attachments.end())
     parent = attachment->second.parent;
-  auto cast = sweep(space, identity, object, delta, {object, parent, false}, deadline);
-  if (!cast.complete)
-    return {Status::Obstructed, body->pose, {}};
-  float fraction = cast.hit
-                       ? std::max(0.f, cast.hit->fraction -
-                                           n.settings.sweep_skin_m /
-                                               std::max(delta.length(), n.settings.sweep_skin_m))
-                       : 1.f;
+  auto cast = sweep(space, identity, object, delta, {object, parent, false});
+  float fraction =
+      cast ? std::max(0.f, cast->fraction - n.settings.sweep_skin_m /
+                                                std::max(delta.length(), n.settings.sweep_skin_m))
+           : 1.f;
   Pose actual{body->pose.position + delta * fraction, body->pose.rotation};
   if (actual.position == body->pose.position)
-    return {cast.hit ? Status::Obstructed : Status::Ok, actual, cast.hit};
+    return {cast ? Status::Obstructed : Status::Ok, actual, cast};
   const auto start = body->kinematic_start.value_or(body->pose);
   set_pose(space, identity, transforms, object, actual, cause);
   // Queries see the accepted pose immediately. Physics replays this displacement once
@@ -1512,7 +1462,7 @@ SweepMove translate(Space &space, IdentityRead identity, TransformWrite transfor
   interface.SetPositionAndRotation(body->body, jv(actual.position), jq(actual.rotation),
                                    JPH::EActivation::Activate);
   body->kinematic_start = start;
-  return {cast.hit ? Status::Obstructed : Status::Ok, actual, cast.hit};
+  return {cast ? Status::Obstructed : Status::Ok, actual, cast};
 }
 
 void step(Space &space, IdentityRead identity, TransformWrite transforms, ParentWrite parents,
@@ -1524,7 +1474,6 @@ void step(Space &space, IdentityRead identity, TransformWrite transforms, Parent
   out = {};
   ++n.physics_epoch;
   install_ready_navigation(space);
-  const Deadline unlimited = Deadline::max();
   std::set<std::uint64_t> touched = n.dirty_objects;
   touched.insert(n.character_handles.begin(), n.character_handles.end());
   auto include_active = [&] {
@@ -1580,7 +1529,7 @@ void step(Space &space, IdentityRead identity, TransformWrite transforms, Parent
       body.stuck_s = 0;
     if (body.intent != request.intent || body.path_revision != n.revision ||
         (body.last_goal - goal).length() > n.settings.crowd_correction_m || body.route.empty()) {
-      auto result = path(space, identity, request.body, request.goal, request.forbidden, unlimited);
+      auto result = path(space, identity, request.body, request.goal, request.forbidden);
       body.route = std::move(result.corners);
       body.waypoint = 0;
       body.path_status = result.status;
@@ -1852,9 +1801,9 @@ void step(Space &space, IdentityRead identity, TransformWrite transforms, Parent
                     b.min.z + n.settings.contact_slop_m};
           auto hit =
               raycast(space, identity, from, from + Vec3{0, 0, -n.settings.contact_slop_m * 3},
-                      {{bits}, {}, false}, unlimited);
-          if (hit.hit)
-            support = hit.hit->object;
+                      {{bits}, {}, false});
+          if (hit)
+            support = hit->object;
         }
       }
       auto *reverse = relations.supports.in.get(Handle{bits}.slot());
@@ -2011,8 +1960,7 @@ void rebuild_attachments(Space &space, IdentityRead identity, TransformRead tran
                                                                                             : 1);
   }
 }
-bool debug_lines(const Space &space, const DebugSelection &selection, Deadline deadline,
-                 std::vector<DebugLine> &out) {
+void debug_lines(const Space &space, const DebugSelection &selection, std::vector<DebugLine> &out) {
   auto &n = *space.native;
   out.clear();
   auto wire = [&](const JPH::Shape *shape, Pose pose, std::uint32_t color) {
@@ -2022,8 +1970,6 @@ bool debug_lines(const Space &space, const DebugSelection &selection, Deadline d
                              jq(pose.rotation), JPH::Vec3::sReplicate(1));
     JPH::Float3 vertices[192];
     for (;;) {
-      if (expired(deadline))
-        return false;
       const int triangles = shape->GetTrianglesNext(context, 64, vertices);
       if (!triangles)
         break;
@@ -2034,12 +1980,9 @@ bool debug_lines(const Space &space, const DebugSelection &selection, Deadline d
           out.push_back({{a.x, a.y, a.z}, {b.x, b.y, b.z}, color});
         }
     }
-    return true;
   };
   for (const auto &[key, body] : n.bodies) {
     (void)key;
-    if (expired(deadline))
-      return false;
     auto b = n.world_bounds(body);
     if (!overlaps(b, selection.region))
       continue;
@@ -2048,8 +1991,7 @@ bool debug_lines(const Space &space, const DebugSelection &selection, Deadline d
                    : body.spec.motion == Motion::Static
                        ? n.geometries[body.spec.geometry]->mesh.GetPtr()
                        : n.geometries[body.spec.geometry]->hull.GetPtr();
-      if (!wire(shape, body.pose, 0x44ff66ff))
-        return false;
+      wire(shape, body.pose, 0x44ff66ff);
     }
     if (selection.paths)
       for (std::size_t i = 1; i < body.route.size(); ++i)
@@ -2057,16 +1999,14 @@ bool debug_lines(const Space &space, const DebugSelection &selection, Deadline d
   }
   if (selection.volumes)
     for (const auto &volume : n.volumes) {
-      if (expired(deadline))
-        return false;
       auto shape = n.geometries[volume.spec.geometry]->mesh;
       auto matrix =
           JPH::RMat44::sRotationTranslation(jq(volume.world.rotation), jv(volume.world.position))
               .PreTranslated(shape->GetCenterOfMass());
       auto b = shape->GetWorldSpaceBounds(matrix, JPH::Vec3::sReplicate(1));
       Bounds bounds{av(b.mMin), av(b.mMax)};
-      if (overlaps(bounds, selection.region) && !wire(shape, volume.world, 0x4488ffff))
-        return false;
+      if (overlaps(bounds, selection.region))
+        wire(shape, volume.world, 0x4488ffff);
     }
   if (selection.navigation)
     for (int i = 0; i < n.mesh->getMaxTiles(); ++i) {
@@ -2074,8 +2014,6 @@ bool debug_lines(const Space &space, const DebugSelection &selection, Deadline d
       if (!tile || !tile->header)
         continue;
       for (int p = 0; p < tile->header->polyCount; ++p) {
-        if (expired(deadline))
-          return false;
         const auto &poly = tile->polys[p];
         for (unsigned edge = 0; edge < poly.vertCount; ++edge) {
           auto a = tile->verts + poly.verts[edge] * 3,
@@ -2090,6 +2028,5 @@ bool debug_lines(const Space &space, const DebugSelection &selection, Deadline d
         }
       }
     }
-  return true;
 }
 } // namespace amber::space

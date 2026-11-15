@@ -155,7 +155,6 @@ bool set_state(Properties &props, Processes &processes, const Term &term, Handle
     process->rate = 0;
     process->lo = process->v0;
     process->hi = process->v0;
-    ++process->revision;
   }
   props[term.id].set(self.slot(), value);
   const bool changed = !before.present || !(before.value == value) || stopped;
@@ -174,11 +173,10 @@ bool set_rate(Properties &props, Processes &processes, const Term &term, Handle 
   const auto *old = processes[term.id].get(self.slot());
   if (old && old->rate == rate && old->lo == lo && old->hi == hi)
     return false;
-  const auto revision = old ? old->revision + 1 : 1;
   const bool dynamics_changed =
       old ? old->rate != rate || (rate != 0 && (old->lo != lo || old->hi != hi)) : rate != 0;
   const double initial = std::clamp(current, lo, hi);
-  processes[term.id].set(self.slot(), Process{initial, now, rate, lo, hi, revision});
+  processes[term.id].set(self.slot(), Process{initial, now, rate, lo, hi});
   // Rate changes also re-arm subscribed threshold timers even if the current answer is equal.
   effects.ordered.push_back(step::WatchWork{{self, term.id}, {}});
   const bool changed = !before.present || current != initial || dynamics_changed;
@@ -211,7 +209,6 @@ bool transfer_state(Properties &props, Processes &processes, const Term &term, H
     if (process) {
       process->v0 = value;
       process->step0 = now;
-      ++process->revision;
     }
     props[term.id].set(target.slot(), Value(value));
     dirty(effects, target, term.id);
@@ -378,21 +375,6 @@ std::vector<Demand> divide(const Shared &supply, const Shared &demand, Combine c
   }
   return rows;
 }
-void erase_allocation(AllocationRows &rows, const AllocationKey &key) {
-  rows.values.erase(key);
-  auto &subject = rows.by_subject_term.at({key.subject, key.term});
-  std::erase(subject, key);
-  if (subject.empty())
-    rows.by_subject_term.erase({key.subject, key.term});
-  for (auto object : {key.subject, key.contributor}) {
-    auto found = rows.by_object.find(object.bits);
-    if (found == rows.by_object.end())
-      continue;
-    std::erase(found->second, key);
-    if (found->second.empty())
-      rows.by_object.erase(found);
-  }
-}
 } // namespace
 std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, Combine combine,
                                     const PriorityValues &priority, Handle subject,
@@ -426,26 +408,24 @@ std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, 
       meter->second.rate = rate;
     }
     if (rate == 0) {
-      erase_allocation(allocations, key);
+      allocations.values.erase(key);
     } else if (found == allocations.values.end()) {
       allocations.values.emplace(key, rate);
-      allocations.by_subject_term[{key.subject, key.term}].push_back(key);
-      allocations.by_object[key.subject.bits].push_back(key);
-      if (key.subject != key.contributor)
-        allocations.by_object[key.contributor.bits].push_back(key);
     } else {
       found->second = rate;
     }
     changed.push_back(key);
   };
   auto zero_missing = [&](TermId term, bool supplier) {
-    auto found = allocations.by_subject_term.find({subject, term});
-    if (found == allocations.by_subject_term.end())
-      return;
-    const auto keys = found->second;
+    std::vector<AllocationKey> keys;
+    for (const auto &[key, value] : allocations.values) {
+      (void)value;
+      if (key.subject == subject && key.term == term && key.supplier == supplier &&
+          !next.contains(key))
+        keys.push_back(key);
+    }
     for (auto key : keys)
-      if (key.supplier == supplier && !next.contains(key))
-        update(key, 0);
+      update(key, 0);
   };
   zero_missing(supply_term, true);
   zero_missing(demand_term, false);
@@ -478,24 +458,10 @@ double live_share(const ValueRead &values, Handle subject, TermId demand_term, H
       return row.allocated;
   return 0;
 }
-void rebuild_allocation_index(AllocationRows &rows) {
-  rows.by_subject_term.clear();
-  rows.by_object.clear();
-  for (const auto &[key, value] : rows.values) {
-    (void)value;
-    rows.by_subject_term[{key.subject, key.term}].push_back(key);
-    rows.by_object[key.subject.bits].push_back(key);
-    if (key.subject != key.contributor)
-      rows.by_object[key.contributor.bits].push_back(key);
-  }
-}
 void retire_allocations(AllocationRows &rows, MeterRows &meters, Handle object) {
-  const auto found = rows.by_object.find(object.bits);
-  if (found != rows.by_object.end()) {
-    const auto keys = found->second;
-    for (const auto &key : keys)
-      erase_allocation(rows, key);
-  }
+  std::erase_if(rows.values, [&](const auto &row) {
+    return row.first.subject == object || row.first.contributor == object;
+  });
   // Earned integrals outlive withdrawal, but never either endpoint's lifetime.
   std::erase_if(meters, [&](const auto &row) {
     return row.first.subject == object || row.first.contributor == object;

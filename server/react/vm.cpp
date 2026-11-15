@@ -18,9 +18,36 @@
 namespace amber::react {
 namespace {
 constexpr int handle_tag = 1, state_tag = 2, iterator_tag = 3;
+struct StateBinding {
+  IdentityRead identity;
+  Properties &properties;
+  Processes &processes;
+  const Terms &terms;
+};
+struct RelationBinding {
+  const RelationsRead &relations;
+  const Terms &terms;
+};
+struct ContributionBinding {
+  SharedColumns &shared;
+  GivesTo &gives_to;
+  const Terms &terms;
+  const RelationsRead &relations;
+};
+int get_binding(lua_State *);
+int setting_binding(lua_State *);
+int set_binding(lua_State *);
+int rate_binding(lua_State *);
+int related_binding(lua_State *);
+int contribute_binding(lua_State *);
+int share_binding(lua_State *);
 struct Binding {
   lua_CFunction function;
   void *data;
+  std::shared_ptr<void> owned{};
+};
+struct EventBinding {
+  const Terms &terms;
 };
 struct RunContext {
   Invocation *invocation = nullptr;
@@ -433,7 +460,7 @@ int parts_method(lua_State *L) {
 // Core event methods resolve term names using a read-only registry supplied by register_binding.
 int emit_method(lua_State *L) {
   auto &inv = invocation(L);
-  auto *terms = static_cast<const Terms *>(binding_data(L));
+  const auto *terms = &static_cast<const EventBinding *>(binding_data(L))->terms;
   if (!terms)
     luaL_error(L, "event registry is not bound");
   const auto target = check_handle(L, 2);
@@ -449,7 +476,7 @@ int emit_method(lua_State *L) {
 }
 int after_method(lua_State *L) {
   auto &inv = invocation(L);
-  auto *terms = static_cast<const Terms *>(binding_data(L));
+  const auto *terms = &static_cast<const EventBinding *>(binding_data(L))->terms;
   if (!terms)
     luaL_error(L, "event registry is not bound");
   const auto seconds = luaL_checknumber(L, 2);
@@ -467,7 +494,7 @@ int after_method(lua_State *L) {
 }
 int act_method(lua_State *L) {
   auto &inv = invocation(L);
-  auto *terms = static_cast<const Terms *>(binding_data(L));
+  const auto *terms = &static_cast<const EventBinding *>(binding_data(L))->terms;
   if (!terms)
     luaL_error(L, "action registry is not bound");
   const auto action = term_arg(L, 2, *terms);
@@ -493,8 +520,6 @@ int act_method(lua_State *L) {
   return lua_yield(L, 0);
 }
 int act_result(lua_State *L, int) {
-  if (!context(L).invocation->state)
-    luaL_error(L, "script state was retired during its action");
   push_result(L, *context(L).result);
   return 1;
 }
@@ -677,48 +702,40 @@ struct Vm::Impl {
 };
 Vm::Vm(VmSettings settings) : impl_(std::make_unique<Impl>(settings)) {}
 Vm::~Vm() = default;
-void register_binding(Vm &vm, std::string_view name, int (*function)(lua_State *), void *local) {
+void register_binding(Vm &vm, std::string_view name, int (*function)(lua_State *),
+                      std::shared_ptr<void> local) {
   if (!vm.impl_->scripts.empty())
     throw std::logic_error("register bindings before loading scripts");
-  vm.impl_->bindings[std::string(name)] = {function, local};
+  vm.impl_->bindings[std::string(name)] = {function, local.get(), std::move(local)};
+}
+void bind_values(Vm &vm, const ValueRead &values, Properties &properties, Processes &processes,
+                 SharedColumns &shared, GivesTo &gives_to) {
+  const auto read = std::make_shared<ValueRead>(values);
+  const auto state = std::make_shared<StateBinding>(
+      StateBinding{values.identity, properties, processes, values.terms});
+  const auto relations =
+      std::make_shared<RelationBinding>(RelationBinding{values.relations, values.terms});
+  const auto contribution = std::make_shared<ContributionBinding>(
+      ContributionBinding{shared, gives_to, values.terms, values.relations});
+  register_binding(vm, "get", get_binding, read);
+  register_binding(vm, "setting", setting_binding, read);
+  register_binding(vm, "get_share", share_binding, read);
+  register_binding(vm, "set", set_binding, state);
+  register_binding(vm, "rate", rate_binding, state);
+  register_binding(vm, "related", related_binding, relations);
+  register_binding(vm, "contribute", contribute_binding, contribution);
 }
 void bind_events(Vm &vm, const Terms &terms) {
-  register_binding(vm, "emit", emit_method, const_cast<Terms *>(&terms));
-  register_binding(vm, "after", after_method, const_cast<Terms *>(&terms));
-  register_binding(vm, "act", act_method, const_cast<Terms *>(&terms));
+  const auto events = std::make_shared<EventBinding>(EventBinding{terms});
+  register_binding(vm, "emit", emit_method, events);
+  register_binding(vm, "after", after_method, events);
+  register_binding(vm, "act", act_method, events);
 }
 Invocation &invocation(lua_State *L) {
   return *context(L).invocation;
 }
 EventPayload check_event_payload(lua_State *L, int index) {
   return check_payload(L, index);
-}
-StateKey check_state_key(lua_State *L, int index) {
-  return state_key(L, index);
-}
-StateAtom check_state_atom(lua_State *L, int index) {
-  return state_atom(L, index);
-}
-std::size_t state_entry_bytes(const StateKey &key, const StateAtom &atom) {
-  return key_size(key) + atom_size(atom) + sizeof(void *) * 2;
-}
-std::size_t state_bytes(const ScriptState &state) {
-  return state_size(state);
-}
-std::size_t state_capacity(const Vm &vm, ScriptId script) {
-  const auto &allocator = vm.impl_->allocator;
-  const auto found = allocator.used.find(script);
-  const auto used = found == allocator.used.end() ? 0 : found->second;
-  return used < allocator.limit ? allocator.limit - used : 0;
-}
-std::size_t state_capacity(lua_State *L) {
-  const auto &run = context(L);
-  const auto used = run.heap_bytes ? *run.heap_bytes : 0;
-  return used < run.state_limit ? run.state_limit - used : 0;
-}
-void refresh_state_memory(lua_State *L) {
-  auto &run = context(L);
-  run.state_bytes = state_size(*run.invocation->state);
 }
 void *binding_data(lua_State *L) {
   return lua_tolightuserdata(L, lua_upvalueindex(1));
@@ -857,7 +874,11 @@ RunOutcome Vm::Impl::advance(Invocation &inv) {
   const auto script = inv.self.script;
   allocator.current = script;
   allocator.state_bytes = &run.state_bytes;
-  const int status = lua_resume(L, nullptr, 0);
+  int status = LUA_ERRRUN;
+  if (inv.state)
+    status = lua_resume(L, nullptr, 0);
+  else
+    run.state_bytes = 0;
   RunOutcome result;
   result.memory_bytes = allocator.used[script] + run.state_bytes;
   allocator.state_bytes = nullptr;
@@ -870,7 +891,10 @@ RunOutcome Vm::Impl::advance(Invocation &inv) {
   }
   result.status = run.missing ? RunOutcome::Status::Missing : RunOutcome::Status::Ok;
   if (status) {
-    result.error = lua_tostring(L, -1) ? lua_tostring(L, -1) : "script failure";
+    if (!inv.state)
+      result.error = "script state was retired during its action";
+    else
+      result.error = lua_tostring(L, -1) ? lua_tostring(L, -1) : "script failure";
     result.status = std::chrono::steady_clock::now() >= inv.deadline ? RunOutcome::Status::Cutoff
                                                                      : RunOutcome::Status::Error;
     inv.effects->ordered.push_back(
@@ -926,6 +950,8 @@ RunOutcome resume_handler(Vm &vm, Invocation &inv, const nlohmann::json &result)
   auto &impl = *vm.impl_;
   auto &run = *impl.calls.back();
   assert(run.invocation == &inv);
+  if (inv.state)
+    run.state_bytes = state_size(*inv.state);
   run.result = &result;
   return impl.advance(inv);
 }
@@ -1059,8 +1085,7 @@ struct CallsCheck : Luau::AstVisitor {
     if (name == "set" || name == "rate" || name == "get" || name == "setting" || name == "act" ||
         name == "related")
       index = 0;
-    if (name == "contribute" || name == "get_share" || name == "emit" || name == "after" ||
-        name == "read")
+    if (name == "contribute" || name == "get_share" || name == "emit" || name == "after")
       index = 1;
     if (index < 0 || static_cast<std::size_t>(index) >= call->args.size)
       return true;
@@ -1163,9 +1188,12 @@ ScriptAnalysis analyze_script(std::string_view source, const Terms &terms,
         if (watch.is_string())
           declaration.term = named_term(terms, watch.get<std::string>());
         else {
+          for (const auto &[name, unused] : watch.items()) {
+            (void)unused;
+            if (name != "term" && name != "thresholds")
+              throw std::runtime_error("unknown watch declaration field");
+          }
           declaration.term = named_term(terms, watch.at("term").get<std::string>());
-          if (watch.contains("along"))
-            declaration.along = named_term(terms, watch["along"].get<std::string>());
           if (watch.contains("thresholds"))
             for (const auto &entry : watch["thresholds"]) {
               Threshold t;
@@ -1184,8 +1212,6 @@ ScriptAnalysis analyze_script(std::string_view source, const Terms &terms,
               declaration.thresholds.push_back(t);
             }
         }
-        if (declaration.along && terms.rows[declaration.along].kind != Kind::Relation)
-          throw std::runtime_error("watch along must name a relation");
         d.watches.push_back(std::move(declaration));
       }
     if (data.contains("actions"))
@@ -1247,36 +1273,18 @@ void consult_object(const Invocation &inv, Handle object) {
   if (object && std::find(handles.begin(), handles.end(), object) == handles.end())
     handles.push_back(object);
 }
+namespace {
 int get_binding(lua_State *L) {
-  auto &binding = *static_cast<ReadBinding *>(binding_data(L));
+  const auto &values = *static_cast<const ValueRead *>(binding_data(L));
   auto &inv = invocation(L);
-  const auto id = term_arg(L, 2, binding.values.terms);
-  if (binding.values.terms.rows[id].kind != Kind::Quantity &&
-      binding.values.terms.rows[id].kind != Kind::Flag)
+  const auto id = term_arg(L, 2, values.terms);
+  if (values.terms.rows[id].kind != Kind::Quantity && values.terms.rows[id].kind != Kind::Flag)
     luaL_error(L, "get needs a quantity or flag");
   if (!lua_isnoneornil(L, 3))
-    luaL_error(L, "use read(handle,term) to read another object");
+    luaL_error(L, "get reads this object only");
   const auto target = inv.self.object;
   consult_object(inv, target);
-  auto value = read(binding.values, target, id, inv.step, inv.hz);
-  if (value.present)
-    push_value(L, value.value);
-  else
-    lua_pushnil(L);
-  return 1;
-}
-int read_binding(lua_State *L) {
-  auto &binding = *static_cast<ReadBinding *>(binding_data(L));
-  auto &inv = invocation(L);
-  const auto target = check_handle(L, 2);
-  const auto id = term_arg(L, 3, binding.values.terms);
-  if (!acquired(inv, target))
-    luaL_error(L, "read target was not acquired");
-  const auto kind = binding.values.terms.rows[id].kind;
-  if (kind != Kind::Quantity && kind != Kind::Flag)
-    luaL_error(L, "read needs a quantity or flag");
-  consult_object(inv, target);
-  const auto value = read(binding.values, target, id, inv.step, inv.hz);
+  auto value = read(values, target, id, inv.step, inv.hz);
   if (value.present)
     push_value(L, value.value);
   else
@@ -1284,9 +1292,9 @@ int read_binding(lua_State *L) {
   return 1;
 }
 int setting_binding(lua_State *L) {
-  auto &binding = *static_cast<ReadBinding *>(binding_data(L));
-  const auto id = term_arg(L, 2, binding.values.terms);
-  if (binding.values.terms.rows[id].source != Source::Setting)
+  const auto &values = *static_cast<const ValueRead *>(binding_data(L));
+  const auto id = term_arg(L, 2, values.terms);
+  if (values.terms.rows[id].source != Source::Setting)
     luaL_error(L, "term is not a setting");
   return get_binding(L);
 }
@@ -1304,6 +1312,8 @@ int set_binding(lua_State *L) {
         std::find(inv.parts.begin(), inv.parts.end(), target) == inv.parts.end())
       luaL_error(L, "state target is not an owned part");
   }
+  if (!binding.identity.valid(target))
+    luaL_error(L, "stale state target");
   try {
     set_state(binding.properties, binding.processes, binding.terms.rows[id], target,
               check_value(L, 3), inv.step, inv.hz, *inv.effects);
@@ -1326,6 +1336,8 @@ int rate_binding(lua_State *L) {
         std::find(inv.parts.begin(), inv.parts.end(), target) == inv.parts.end())
       luaL_error(L, "process target is not an owned part");
   }
+  if (!binding.identity.valid(target))
+    luaL_error(L, "stale process target");
   try {
     set_rate(binding.properties, binding.processes, binding.terms.rows[id], target,
              luaL_checknumber(L, 3), luaL_checknumber(L, 4), luaL_checknumber(L, 5), inv.step,
@@ -1397,14 +1409,15 @@ int contribute_binding(lua_State *L) {
   return 0;
 }
 int share_binding(lua_State *L) {
-  auto &binding = *static_cast<ShareBinding *>(binding_data(L));
+  const auto &values = *static_cast<const ValueRead *>(binding_data(L));
   auto &inv = invocation(L);
   const auto subject = check_handle(L, 2);
-  const auto id = term_arg(L, 3, binding.values.terms);
-  const auto &term = binding.values.terms.rows[id];
+  const auto id = term_arg(L, 3, values.terms);
+  const auto &term = values.terms.rows[id];
   if (term.combine != Combine::ShareEqual && term.combine != Combine::SharePriority)
     luaL_error(L, "get_share needs a shared-demand term");
-  lua_pushnumber(L, live_share(binding.values, subject, id, inv.self.object, inv.step, inv.hz));
+  lua_pushnumber(L, live_share(values, subject, id, inv.self.object, inv.step, inv.hz));
   return 1;
 }
+} // namespace
 } // namespace amber::react

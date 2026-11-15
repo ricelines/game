@@ -1,20 +1,10 @@
-add_library(amber_elaborate elaborate.cpp worker.cpp process.cpp snapshot.cpp ../fixture.cpp)
-target_link_libraries(amber_elaborate PUBLIC amber_record amber_snap PRIVATE Ambergris::picosha2 Ambergris::libzstd_static)
-target_compile_options(amber_elaborate PRIVATE -Wall -Wextra -Wpedantic)
-if(BUILD_TESTING)
-  add_executable(elaborate_test ../../tests/elaborate_test.cpp)
-  target_link_libraries(elaborate_test PRIVATE amber_elaborate amber_catalog)
-  add_test(NAME elaborate COMMAND elaborate_test)
-  add_executable(fixture_transport_probe ../../tests/fixture_transport_probe.cpp)
-  target_link_libraries(fixture_transport_probe PRIVATE amber_elaborate)
-  add_executable(elaborate_worker_test ../../tests/elaborate_worker_test.cpp)
-  target_link_libraries(elaborate_worker_test PRIVATE amber_elaborate)
-  add_test(NAME elaborate_worker_transport COMMAND elaborate_worker_test $<TARGET_FILE:fixture_transport_probe>)
-  add_executable(elaborate_bench ../../tests/elaborate_bench.cpp)
-  target_link_libraries(elaborate_bench PRIVATE amber_elaborate)
-  add_executable(fixture_child_probe ../../tests/fixture_child_probe.cpp)
-  target_link_libraries(fixture_child_probe PRIVATE amber_elaborate)
-  add_executable(fixture_supervisor_test ../../tests/fixture_supervisor_test.cpp)
-  target_link_libraries(fixture_supervisor_test PRIVATE amber_elaborate)
-  add_test(NAME fixture_supervisor_transport COMMAND fixture_supervisor_test $<TARGET_FILE:fixture_child_probe>)
-endif()
+add_library(amber_elaborate STATIC
+  elaborate.cpp
+  worker.cpp
+  process.cpp
+  snapshot.cpp
+  fixture.cpp
+)
+target_include_directories(amber_elaborate PUBLIC ${PROJECT_SOURCE_DIR}/server)
+target_compile_features(amber_elaborate PUBLIC cxx_std_20)
+target_link_libraries(amber_elaborate PUBLIC amber_store amber_record amber_snap PRIVATE Ambergris::picosha2 Ambergris::libzstd_static Threads::Threads)

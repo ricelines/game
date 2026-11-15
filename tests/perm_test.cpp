@@ -1,5 +1,4 @@
 #include "perm/perm.hpp"
-#include "perm/snapshot.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -700,13 +699,12 @@ void direct_trade_rechecks_both_sides_resets_confirmation_and_cannot_be_bought_p
   const auto id = open_trade(trades, f.players, 1, 2).trade;
   const auto first_target = f.current();
   auto second_target = target(identity(f.objects), authority(f.objects), f.limits, second);
-  require(static_cast<bool>(change_trade(trades, f.offers, permission_flags(f.objects), f.players,
-                                         f.grants, id, 1, &first_target, 10,
-                                         {f.goods, bodies[0], false}, 2)) &&
-              static_cast<bool>(change_trade(trades, f.offers, permission_flags(f.objects),
-                                             f.players, f.grants, id, 2, &second_target, 5,
-                                             {second, bodies[1], false}, 2)),
-          "direct trade sides were not staged");
+  require(
+      static_cast<bool>(change_trade(trades, f.offers, permission_flags(f.objects), f.players,
+                                     f.grants, id, 1, &first_target, 10, false, 2)) &&
+          static_cast<bool>(change_trade(trades, f.offers, permission_flags(f.objects), f.players,
+                                         f.grants, id, 2, &second_target, 5, false, 2)),
+      "direct trade sides were not offered");
   const auto offered = trades.rows[id].sides[0].offer;
   const Buyer buyer{Holder::player(2), 2, AccountTarget::player(2), bodies[1], true};
   require(f.buy(offered, buyer).reason == Reason::OfferGone,
@@ -725,11 +723,10 @@ void direct_trade_rechecks_both_sides_resets_confirmation_and_cannot_be_bought_p
               f.current().owner == 1,
           "first confirmation changed valuables");
   second_target = targets()[1];
-  require(
-      static_cast<bool>(change_trade(trades, f.offers, permission_flags(f.objects), f.players,
-                                     f.grants, id, 2, &second_target, 6, {second, {}, false}, 3)) &&
-          !trades.rows[id].sides[0].confirmed && !trades.rows[id].sides[1].confirmed,
-      "editing trade did not reset both confirmations");
+  require(static_cast<bool>(change_trade(trades, f.offers, permission_flags(f.objects), f.players,
+                                         f.grants, id, 2, &second_target, 6, false, 3)) &&
+              !trades.rows[id].sides[0].confirmed && !trades.rows[id].sides[1].confirmed,
+          "editing trade did not reset both confirmations");
   require(!confirm(2, bodies).completed && f.current().owner == 1,
           "edit reused a stale confirmation");
   f.ledger.balance[Account::player(1)] = 9;
@@ -748,15 +745,13 @@ void direct_trade_rechecks_both_sides_resets_confirmation_and_cannot_be_bought_p
   require(confirm(1, bodies).reason == Reason::OfferGone, "completed trade applied twice");
   const auto cancel_id = open_trade(trades, f.players, 1, 2).trade;
   const auto returned_target = targets()[1];
-  const auto changed =
-      change_trade(trades, f.offers, permission_flags(f.objects), f.players, f.grants, cancel_id, 1,
-                   &returned_target, 0, {second, bodies[0], false}, 4);
-  require(static_cast<bool>(changed), "second trade could not stage goods");
+  const auto changed = change_trade(trades, f.offers, permission_flags(f.objects), f.players,
+                                    f.grants, cancel_id, 1, &returned_target, 0, false, 4);
+  require(static_cast<bool>(changed), "second trade could not offer goods");
   const auto cancelled = cancel_trade(trades, f.offers, permission_flags(f.objects), cancel_id, 2);
-  require(static_cast<bool>(cancelled) && cancelled.custody.size() == 1 &&
-              cancelled.custody[0].parent == bodies[0] && !(targets()[1].flags & Escrow) &&
-              targets()[1].owner == 1,
-          "cancelling trade did not restore prior custody");
+  require(static_cast<bool>(cancelled) && cancelled.custody.empty() &&
+              !(targets()[1].flags & Escrow) && targets()[1].owner == 1,
+          "cancelling trade changed valuables or attempted custody undo");
 }
 
 void retired_trade_goods_cannot_change_a_reused_slot() {
@@ -765,9 +760,9 @@ void retired_trade_goods_cannot_change_a_reused_slot() {
     Trades trades;
     const auto id = open_trade(trades, f.players, 1, 2).trade;
     const auto current = f.current();
-    const auto staged = change_trade(trades, f.offers, permission_flags(f.objects), f.players,
-                                     f.grants, id, 1, &current, 0, {f.goods, {}, true}, 2);
-    require(static_cast<bool>(staged), "could not stage retiring trade");
+    const auto offered_trade = change_trade(trades, f.offers, permission_flags(f.objects),
+                                            f.players, f.grants, id, 1, &current, 0, true, 2);
+    require(static_cast<bool>(offered_trade), "could not offer retiring trade");
     const auto retired = invalidate_goods_offers(f.offers, trades, identity(f.objects),
                                                  permission_flags(f.objects), f.goods);
     require(retired.size() == 1 && !trades.rows[id].live,
@@ -781,7 +776,7 @@ void retired_trade_goods_cannot_change_a_reused_slot() {
     require(replacement.slot() == f.goods.slot(), "fixture did not reuse slot");
     const auto result = replace_side
                             ? change_trade(trades, f.offers, permission_flags(f.objects), f.players,
-                                           f.grants, id, 1, nullptr, 1, {}, 3)
+                                           f.grants, id, 1, nullptr, 1, false, 3)
                             : cancel_trade(trades, f.offers, permission_flags(f.objects), id, 2);
     require(result.reason == Reason::OfferGone && result.custody.empty() &&
                 (identity(f.objects).flags[replacement.slot()] & Escrow),
@@ -943,9 +938,9 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
   const auto trade = open_trade(trades, f.players, 1, 2).trade;
   const auto goods = f.current();
   change_trade(trades, f.offers, permission_flags(f.objects), f.players, f.grants, trade, 1, &goods,
-               0, {f.goods, {}, true}, 3);
+               0, true, 3);
   change_trade(trades, f.offers, permission_flags(f.objects), f.players, f.grants, trade, 2,
-               nullptr, 10, {}, 3);
+               nullptr, 10, false, 3);
   const auto object_account = Account::object(f.goods);
   const auto group_account = Account::group(1);
   f.ledger.balance[object_account] = 17;

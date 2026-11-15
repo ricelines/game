@@ -48,7 +48,6 @@ inline sp::Settings settings() {
       f(p["SWEEP_SKIN_M"]),
       f(p["CROWD_CORRECTION_M"]),
       f(p["BLOCKED_AFTER_S"]),
-      i(n["INSTALL_BUDGET_US"]),
       i(p["MAX_CHARACTERS"]),
       f(n["CROWD_QUERY_RADIUS_MULTIPLIER"]),
       f(n["CROWD_OPTIMIZE_RADIUS_MULTIPLIER"]),

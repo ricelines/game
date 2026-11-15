@@ -2107,5 +2107,25 @@
       0
     ],
     "description": "Authored land-accounting institution selector"
+  },
+  {
+    "name": "base.demand_request",
+    "kind": "event",
+    "description": "Request the connected distribution demand."
+  },
+  {
+    "name": "base.demand_update",
+    "kind": "event",
+    "description": "Report distribution demand to a connected breaker."
+  },
+  {
+    "name": "aq.condition_request",
+    "kind": "event",
+    "description": "Request water and oxygen conditions."
+  },
+  {
+    "name": "aq.condition_update",
+    "kind": "event",
+    "description": "Report water and oxygen conditions to a connected school."
   }
 ]

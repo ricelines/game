@@ -1,12 +1,11 @@
-#include "control/control.hpp"
-#include "control/snapshot.hpp"
+#include "net/net.hpp"
 
 #include <iostream>
 #include <stdexcept>
 #include <sys/stat.h>
 
 using namespace amber;
-using namespace amber::control;
+using namespace amber::net;
 namespace {
 void require(bool condition, const char *message) {
   if (!condition)
@@ -24,17 +23,30 @@ struct Wire {
   std::vector<std::pair<net::SessionId, Json>> sent;
   std::vector<std::pair<net::SessionId, std::string>> closed;
   std::vector<std::pair<net::SessionId, Vec3>> views;
-  Transport callbacks() {
-    return {this,
-            [](void *ctx, net::SessionId id, std::string text) {
-              static_cast<Wire *>(ctx)->sent.emplace_back(id, Json::parse(text));
-            },
-            [](void *ctx, net::SessionId id, std::uint16_t, std::string reason) {
-              static_cast<Wire *>(ctx)->closed.emplace_back(id, std::move(reason));
-            },
-            [](void *ctx, net::SessionId id, Vec3 pos) {
-              static_cast<Wire *>(ctx)->views.emplace_back(id, pos);
-            }};
+  std::vector<Invocation> drain(Sessions &sessions) {
+    std::vector<Invocation> ready;
+    std::vector<SessionNotice> notices;
+    std::vector<SessionOutput> outputs;
+    sessions.drain(ready, notices, outputs);
+    for (const auto &notice : notices)
+      if (const auto *login = std::get_if<Authenticated>(&notice))
+        sessions.welcome(login->session, {{"asset_root", "/assets"}, {"player", "p:999"}});
+    std::vector<Invocation> more;
+    sessions.drain(more, notices, outputs);
+    require(more.empty(), "welcome must not dispatch game inputs");
+    for (auto &output : outputs)
+      std::visit(
+          [&](auto &row) {
+            using T = std::decay_t<decltype(row)>;
+            if constexpr (std::is_same_v<T, Send>)
+              sent.emplace_back(row.session, std::move(row.message));
+            else if constexpr (std::is_same_v<T, Close>)
+              closed.emplace_back(row.session, std::move(row.reason));
+            else
+              views.emplace_back(row.session, row.position);
+          },
+          output);
+    return ready;
   }
   const Json &last() const { return sent.back().second; }
 };
@@ -61,17 +73,6 @@ void connect(Sessions &sessions, net::SessionId id, std::string key = "fixture-p
 void request(Sessions &sessions, net::SessionId id, Json message) {
   sessions.accept(net::Control{id, message.dump()});
 }
-struct HandlerState {
-  std::vector<Invocation> calls;
-  static Reply deferred(void *ctx, const Invocation &call) {
-    static_cast<HandlerState *>(ctx)->calls.push_back(call);
-    return Reply::pending();
-  }
-  static Reply immediate(void *ctx, const Invocation &call) {
-    static_cast<HandlerState *>(ctx)->calls.push_back(call);
-    return Reply::result({{"ok", true}, {"sequence", call.sequence}});
-  }
-};
 void protocol() {
   require(std::holds_alternative<Hello>(
               parse(R"({"t":"hello","version":1,"key":"x","mode":"play"})").message),
@@ -125,13 +126,9 @@ void protocol() {
 void authentication_and_presentation() {
   auto p = profiles();
   Wire wire;
-  Welcome welcome{nullptr, [](void *, const Principal &) {
-                    return Json{{"t", "spoof"},           {"version", 999},  {"player", "p:999"},
-                                {"body", "o:9.9"},        {"mode", "debug"}, {"binary", true},
-                                {"asset_root", "/assets"}};
-                  }};
-  Sessions sessions(p, wire.callbacks(), welcome);
+  Sessions sessions(p);
   connect(sessions, 1);
+  wire.drain(sessions);
   require(wire.last()["t"] == "welcome" && wire.last()["version"] == 1 &&
               wire.last()["player"] == "p:1" && wire.last()["body"] == "o:17.3" &&
               wire.last()["mode"] == "play" && wire.last()["binary"] == false &&
@@ -139,19 +136,25 @@ void authentication_and_presentation() {
           "welcome extras cannot override auth");
   require(sessions.principal(1)->roles == p.rows[1].roles, "authored roles preserved");
   connect(sessions, 2, "fixture-player", "watch", true);
+  wire.drain(sessions);
   require(sessions.principal(1).has_value(), "watch does not replace controlling session");
   request(sessions, 2, {{"t", "view"}, {"id", 1}, {"pos", {1, 2, 3}}});
+  wire.drain(sessions);
   require(wire.views.size() == 1 && wire.views[0].second == Vec3{1, 2, 3}, "authorized Z-up view");
   connect(sessions, 3, "fixture-player");
+  wire.drain(sessions);
   require(!sessions.principal(1) && sessions.principal(3), "new play replaces old");
   require(wire.closed.back() == std::pair<net::SessionId, std::string>{1, "replaced"},
           "replacement reason");
   connect(sessions, 4, "fixture-watch", "debug");
+  wire.drain(sessions);
   require(wire.closed.back().second == "mode_not_allowed", "game role never grants debug");
   connect(sessions, 5, "invalid-fixture-key");
+  wire.drain(sessions);
   require(wire.closed.back().second == "bad_key", "unknown credential rejected");
   const auto count = wire.sent.size();
   sessions.event_for_player(1, {{"id", 20}, {"kind", "action"}});
+  wire.drain(sessions);
   require(wire.sent.size() == count + 1 && wire.last().at("t") == "event" &&
               wire.sent.back().first == 3,
           "player events reach the live play session and exclude its watch session");
@@ -161,53 +164,47 @@ void authentication_and_presentation() {
 void lanes_and_orphans() {
   auto p = profiles();
   Wire wire;
-  HandlerState state;
-  Sessions sessions(p, wire.callbacks());
-  sessions.register_operation({"register_script", "result", modes(Mode::Play), Lane::Mutation,
-                               validate_register_script, HandlerState::deferred, &state});
-  sessions.register_operation({"do", "result", modes(Mode::Play), Lane::Mutation, validate_do,
-                               HandlerState::immediate, &state});
-  sessions.register_operation(
-      {"look", "obs", all_modes, Lane::Query, validate_look, HandlerState::immediate, &state});
+  Sessions sessions(p);
   connect(sessions, 10);
+  wire.drain(sessions);
   request(sessions, 10, {{"t", "register_script"}, {"id", 1}, {"source", "authored Luau"}});
   request(sessions, 10, {{"t", "do"}, {"id", 2}, {"action", "any.action"}});
   request(sessions, 10, {{"t", "look"}, {"id", 3}});
-  require(state.calls.size() == 2 && state.calls[0].sequence == 1 && state.calls[1].sequence == 3,
-          "read-only query bypasses deferred mutation preserving accepted sequence");
+  auto ready = wire.drain(sessions);
+  require(ready.size() == 2 && ready[0].sequence == 1 && ready[1].sequence == 3 &&
+              ready[0].request.kind == ControlKind::RegisterScript &&
+              ready[1].request.kind == ControlKind::Look,
+          "read-only input bypasses parked mutation with original sequence");
+  sessions.complete(10, 3, {{"ok", true}});
+  wire.drain(sessions);
   require(wire.last()["t"] == "obs" && wire.last()["id"] == 3, "query response correlation");
   sessions.complete(10, 1, {{"ok", true}, {"script", "s:1"}, {"id", 999}, {"t", "spoof"}});
-  require(state.calls.size() == 3 && state.calls.back().sequence == 2 &&
-              state.calls.back().principal.player == 1,
-          "deferred completion releases original FIFO identity");
-  require(wire.sent[wire.sent.size() - 2].second["id"] == 1 &&
-              wire.sent[wire.sent.size() - 2].second["t"] == "result",
-          "reply cannot override envelope");
+  ready = wire.drain(sessions);
+  require(ready.size() == 1 && ready[0].sequence == 2 && ready[0].principal.player == 1 &&
+              ready[0].request.kind == ControlKind::Do,
+          "completion releases original FIFO input");
+  require(wire.last()["id"] == 1 && wire.last()["t"] == "result", "reply cannot override envelope");
+  sessions.complete(10, 2, {{"ok", true}});
+  wire.drain(sessions);
   request(sessions, 10, {{"t", "register_script"}, {"id", 4}, {"source", "pending"}});
-  const auto old_sequence = state.calls.back().sequence;
+  ready = wire.drain(sessions);
+  require(ready.size() == 1, "next mutation is admitted after completion");
+  const auto old_sequence = ready[0].sequence;
   connect(sessions, 11);
+  wire.drain(sessions);
   const auto count = wire.sent.size();
   sessions.complete(10, old_sequence, {{"ok", true}, {"script", "s:orphan"}});
-  require(wire.sent.size() == count && state.calls.back().session == 10,
-          "replaced session completion neither replies nor migrates identity");
+  require(wire.drain(sessions).empty() && wire.sent.size() == count,
+          "orphan completion cannot migrate identity or publish a reply");
   connect(sessions, 12, "fixture-player", "watch");
+  wire.drain(sessions);
   request(sessions, 12, {{"t", "do"}, {"id", 1}, {"action", "any.action"}});
-  require(wire.last()["ok"] == false && state.calls.back().session == 10, "watch cannot mutate");
+  require(wire.drain(sessions).empty() && wire.last()["ok"] == false, "watch cannot mutate");
 }
 void untrusted_manifest() {
   auto p = profiles();
   Wire wire;
-  Json seen;
-  Sessions sessions(p, wire.callbacks());
-  sessions.register_operation(
-      {"register_model", "result", modes(Mode::Play), Lane::Mutation, validate_register_model,
-       [](void *ctx, const Invocation &call) {
-         *static_cast<Json *>(ctx) = call.request.fields;
-         // The catalog binding verifies real artifacts; transport cannot approve a claimed
-         // manifest.
-         return Reply::result({{"ok", false}, {"errors", {"verified artifact does not match"}}});
-       },
-       &seen});
+  Sessions sessions(p);
   connect(sessions, 1);
   Json fields{{"job", "J"},
               {"asset", std::string(64, 'a')},
@@ -219,10 +216,12 @@ void untrusted_manifest() {
   message["t"] = "register_model";
   message["id"] = 1;
   request(sessions, 1, message);
+  const auto ready = wire.drain(sessions);
+  require(ready.size() == 1, "accepted model completion reaches step once");
+  const auto &seen = ready.front().request.fields;
   require(seen == fields && seen["canonical_params"] == "{\"x\":1e-09}",
           "exact canonical bytes and untrusted copy preserved");
-  require(wire.last()["ok"] == false && !wire.last().contains("model"),
-          "transport never approves manifest");
+  require(!wire.last().contains("model"), "transport never approves a manifest");
   fields["variants"] = Json::array({{{"asset", std::string(64, 'b')},
                                      {"canonical_params", "{\"x\":2}"},
                                      {"manifest", {{"volume", 888888}}}}});

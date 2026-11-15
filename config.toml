@@ -132,11 +132,8 @@ POLYGONS_PER_PATH = 4096
 # Detour's 32-bit references require at least ten salt bits: 1024 tiles ×4096 polygons fits.
 MAX_TILES = 1024
 POLYGONS_PER_TILE = 4096
-# Two tile workers keep construction off the writer; installs get 2ms of a 50ms step.
+# Two tile workers keep navigation construction off the writer.
 WORKERS = 2
-INSTALL_BUDGET_US = 2000
-# Connectivity reporting yields and resumes across steps; no construction waits on it.
-DIAGNOSTIC_BUDGET_US = 1000
 
 # Detour steering defaults in body-radius units; tune algorithm reach independently of authored speed.
 CROWD_QUERY_RADIUS_MULTIPLIER = 12.0

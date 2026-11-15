@@ -1,11 +1,10 @@
 #pragma once
 
-#include "install/install.hpp"
+#include "react/react.hpp"
 #include <stdexcept>
 
 namespace amber::test_runtime {
 using namespace react;
-using namespace install;
 inline void require(bool value, const char *message) {
   if (!value)
     throw std::runtime_error(message);
@@ -23,6 +22,7 @@ struct Fixture {
   PlotSettings plots;
   WorldSettings world;
   SharedColumns shared;
+  GivesTo gives_to;
   AllocationRows allocations;
   AuthoredRelations relations;
   RelationsRead relation_view;
@@ -34,13 +34,10 @@ struct Fixture {
   Triggers triggers;
   RuleVersions rules;
   Subscriptions subscriptions;
-  WatchLinks links;
   ScriptStates states;
   RandomStates random;
   DeferredEffects effects;
   std::optional<ValueRead> projection;
-  std::optional<ReadBinding> reads;
-  std::optional<StateBinding> writes;
   Vm vm;
   explicit Fixture(double handler_ms = 5) : vm({4096, 50, handler_ms, 64}) {
     ObjectInit init;
@@ -71,12 +68,7 @@ struct Fixture {
     models.rows.resize(2);
     models.rows[1].id = 1;
     projection.emplace(values());
-    reads.emplace(ReadBinding{*projection});
-    writes.emplace(StateBinding{properties, processes, terms});
-    register_binding(vm, "get", get_binding, &*reads);
-    register_binding(vm, "read", read_binding, &*reads);
-    register_binding(vm, "set", set_binding, &*writes);
-    register_binding(vm, "rate", rate_binding, &*writes);
+    bind_values(vm, *projection, properties, processes, shared, gives_to);
     bind_events(vm, terms);
   }
   ValueRead values() {
@@ -97,9 +89,10 @@ struct Fixture {
             runtime,
             0};
   }
-  ScriptId add(std::string_view source, PlayerId author = 1) {
-    auto prepared = catalog::prepare_script(source, terms, {{"use", "edit"}}, std::string(64, 'a'),
-                                            {}, {4096, 50, 5, 64});
+  ScriptId add(std::string_view source, PlayerId author = 1,
+               RightsDeclaration rights = {{"use", "edit"}}) {
+    auto prepared =
+        catalog::prepare_script(source, terms, rights, std::string(64, 'a'), {}, {4096, 50, 5, 64});
     const auto compiled = prepared.compiled;
     auto id = catalog::import_script(scripts, std::move(prepared), author, 0);
     if (scripts.rows[id].declaration.kind == ScriptDeclaration::Kind::Rule) {
@@ -115,11 +108,11 @@ struct Fixture {
     set_state(properties, processes, terms.rows[term], object, Value(value), now, 20, effects);
   }
   void bind(ScriptId id, Handle object, SyncMode mode = SyncMode::Initial) {
-    (void)sync_watches(subscriptions, links, values(), allocations, {object, id},
+    (void)sync_watches(subscriptions, values(), allocations, {object, id},
                        scripts.rows[id].declaration, 0, 20, {}, mode);
   }
   std::vector<InvocationPlan> changed(FactKey fact, Step now = 0) {
-    auto changes = refresh_dependencies(subscriptions, links, values(), fact, now, 20, {});
+    auto changes = refresh_dependencies(subscriptions, values(), fact, now, 20, {});
     auto result = check_changed(subscriptions, values(), allocations, fact, now, 20, {});
     auto plans = plan_deliveries(result, triggers, scripts, values(), now, 20);
     for (const auto &dirty : changes.dirty) {

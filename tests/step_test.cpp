@@ -1,4 +1,3 @@
-#include "step/snapshot.hpp"
 #include "step/step.hpp"
 #include <iostream>
 #include <stdexcept>
@@ -13,6 +12,31 @@ EventWork event(TermId id) {
   EventWork e;
   e.event = id;
   return e;
+}
+void publication_stamps_completed_origin() {
+  record::Journal journal(8, {});
+  record::Event action;
+  action.kind = record::Kind::Action;
+  action.name = "build";
+  action.changed = true;
+  auto parent = journal.append(action);
+  record::Event handler;
+  handler.kind = record::Kind::Handler;
+  handler.name = "constructor";
+  handler.changed = true;
+  auto origin = journal.append(handler, parent);
+  react::DeferredEffects effects;
+  effects.ordered.push_back(
+      step::EventWork{Handle::make(1, 1), Handle::make(2, 1), 1, Value(1.0), {}});
+  effects.ordered.push_back(
+      step::Timer{3, {Handle::make(1, 1), Handle::make(1, 1), 3, Value{}, {}}, {}});
+  step::WorkQueues q;
+  step::TimerWheel wheel;
+  publish_effects(std::move(effects), origin, 0, q, wheel, journal, 10);
+  auto event = std::get<step::EventWork>(step::pop_foreground(q)->work);
+  require(event.origin.cause == origin.cause && event.origin.root == parent.root,
+          "child stamps completed handler origin");
+  require(step::timers(wheel)[0].event.origin == origin, "timer keeps complete origin");
 }
 void ordering_and_overflow() {
   WorkQueues q;
@@ -90,7 +114,7 @@ void saved_work_continues_in_causal_order_with_typed_payload_and_origin() {
   enqueue_background(q, {body, 12, 8, origin, 6});
   TimerWheel wheel;
   wheel.now = 200;
-  schedule(wheel, {65536, emitted, ThresholdToken{{body, 8}, body, 5, 2, 9, 17}});
+  schedule(wheel, {65536, emitted, ThresholdToken{{body, 8}, body, 5, 2}});
   Intents moving;
   const auto intent = start_move(moving, body, Handle::make(22, 4), origin, .35f);
   snap::Buffer queues, timers;
@@ -123,7 +147,7 @@ void saved_work_continues_in_causal_order_with_typed_payload_and_origin() {
           "opaque external input id survives ordered queue restore");
   promote_due(restored_wheel, 65536, restored);
   const auto fired = pop_foreground(restored);
-  require(fired && fired->threshold && fired->threshold->binding_revision == 17 &&
+  require(fired && fired->threshold && fired->threshold->watch_index == 2 &&
               std::get<EventWork>(fired->work).origin == origin,
           "saved threshold token did not fire with provenance");
   const auto ending = cancel_move(restored_intents, body);
@@ -136,7 +160,7 @@ void threshold_replacement_preserves_other_events_and_cascade_locations() {
   TimerWheel wheel;
   WorkQueues q;
   const auto subject = Handle::make(70, 1), other = Handle::make(71, 1);
-  const ThresholdToken token{{subject, 8}, subject, 5, 2, 1, 1};
+  const ThresholdToken token{{subject, 8}, subject, 5, 2};
   auto threshold = [&](Step due, ThresholdToken version, std::uint64_t cause) {
     auto e = event(8);
     e.receiver = version.consumer;
@@ -150,22 +174,17 @@ void threshold_replacement_preserves_other_events_and_cascade_locations() {
   schedule(wheel, {70000, event(100), {}});
   schedule(wheel, {70000, event(101), {}});
   auto current = token;
+  std::uint64_t cause = 40;
   for (Step due : {Step{65536}, Step{256}, Step{1}, (Step{1} << 24) + 1, Step{257}}) {
-    ++current.process_revision;
-    ++current.binding_revision;
-    schedule(wheel, threshold(due, current, 40 + current.process_revision));
+    schedule(wheel, threshold(due, current, ++cause));
     require(timers(wheel).size() == 4 && wheel.thresholds.size() == 2,
             "rescheduling replaces only its threshold across all wheel levels");
   }
-  schedule(wheel, threshold(90000, token, 99));
   promote_due(wheel, 257, q);
   auto fired = pop_foreground(q);
-  require(fired && fired->threshold &&
-              fired->threshold->process_revision == current.process_revision &&
-              std::get<EventWork>(fired->work).origin.cause == 40 + current.process_revision &&
+  require(fired && fired->threshold && std::get<EventWork>(fired->work).origin.cause == cause &&
               !pop_foreground(q) && wheel.thresholds.size() == 1,
-          "newest crossing fires with its actual cause, despite older later-due scheduling");
-  ++current.process_revision;
+          "newest crossing fires with its actual cause, after replacing each previous due time");
   schedule(wheel, threshold(65536, current, 77));
   promote_due(wheel, 65536, q);
   fired = pop_foreground(q);
@@ -191,13 +210,13 @@ void threshold_replacement_preserves_other_events_and_cascade_locations() {
               distant.thresholds.empty(),
           "level-three cascade and promotion retire the derived threshold location");
 }
-void threshold_identity_and_old_snapshot_revision_order() {
+void threshold_identity_and_exact_cancellation() {
   const auto subject = Handle::make(7, 1);
-  const ThresholdToken first{{subject, 8}, subject, 5, 2, 10, 20};
+  const ThresholdToken first{{subject, 8}, subject, 5, 2};
   auto timer = [&](Step due, ThresholdToken token) {
     auto e = event(8);
     e.receiver = token.consumer;
-    e.origin.cause = token.process_revision;
+    e.origin.cause = due;
     return Timer{due, e, token};
   };
   TimerWheel identities;
@@ -217,41 +236,35 @@ void threshold_identity_and_old_snapshot_revision_order() {
     schedule(identities, timer(10, distinct));
   }
   require(timers(identities).size() == 6 && identities.thresholds.size() == 6,
-          "coalescing identity preserves full source/consumer generations, script and watch index");
-  // A pre-fix snapshot can contain obsolete rows and is sorted by due, not
-  // revision. Construct precisely that historical serialized shape.
-  TimerWheel legacy;
-  auto old_binding = first;
-  old_binding.binding_revision = 19;
-  old_binding.process_revision = 99;
-  auto old_process = first;
-  old_process.process_revision = 9;
-  legacy.levels[0][10].push_back(timer(10, first));
-  legacy.levels[1][80].push_back(timer(20000, old_process));
-  legacy.levels[2][1].push_back(timer(70000, old_binding));
+          "threshold identity includes full source/consumer generations, script and watch index");
+  cancel_threshold(identities, {first.source, first.consumer, first.script, first.watch_index});
+  require(timers(identities).size() == 5,
+          "rate with no crossing cancels precisely its pending key");
+  cancel_threshold(identities, {first.source, first.consumer, first.script, first.watch_index});
   snap::Buffer bytes;
   snap::Output out{bytes};
-  write_timers(out, legacy);
+  write_timers(out, identities);
   bytes.resize(out.adapter().writtenBytesCount());
   TimerWheel restored;
   snap::Input in{bytes.data(), bytes.size()};
   read_timers(in, restored);
   snap::check_complete(in);
-  require(timers(restored).size() == 1 && restored.thresholds.size() == 1 &&
-              timers(restored)[0].threshold->process_revision == 10 &&
-              timers(restored)[0].threshold->binding_revision == 20,
-          "restore keeps the newest binding/process revisions, not the obsolete furthest due time");
+  require(timers(restored).size() == 5 && restored.thresholds.size() == 5,
+          "snapshot restores only current pending keys");
   WorkQueues q;
   promote_due(restored, 10, q);
-  const auto fired = pop_foreground(q);
-  require(fired && fired->threshold && std::get<EventWork>(fired->work).origin.cause == 10 &&
-              restored.thresholds.empty() && !pop_foreground(q),
-          "restored live crossing fires once with its original cause and rebuilt index");
+  unsigned fired = 0;
+  while (auto item = pop_foreground(q)) {
+    require(item->threshold && std::get<EventWork>(item->work).origin.cause == 10,
+            "remaining exact identities retain their cause");
+    ++fired;
+  }
+  require(fired == 5 && restored.thresholds.empty(), "cancelled key never wakes after restore");
 }
 void one_same_due_fixture_continues_after_snapshot() {
   TimerWheel uninterrupted;
   const auto subject = Handle::make(9, 2);
-  ThresholdToken token{{subject, 4}, subject, 3, 1, 1, 1};
+  ThresholdToken token{{subject, 4}, subject, 3, 1};
   auto make_threshold = [&](TermId id, ThresholdToken version) {
     auto e = event(id);
     e.receiver = version.consumer;
@@ -268,7 +281,6 @@ void one_same_due_fixture_continues_after_snapshot() {
   promote_due(uninterrupted, 65000, before);
   require(!pop_foreground(before), "tie snapshot setup did not reach its timers yet");
   schedule(uninterrupted, {70000, event(24), {}});
-  ++token.process_revision;
   schedule(uninterrupted, make_threshold(25, token));
   snap::Buffer bytes;
   snap::Output out{bytes};
@@ -294,7 +306,7 @@ void one_same_due_fixture_continues_after_snapshot() {
 void mixed_due_replacement_preserves_events_across_rebucketing() {
   TimerWheel original;
   const auto subject = Handle::make(15, 3);
-  ThresholdToken token{{subject, 6}, subject, 7, 1, 1, 1};
+  ThresholdToken token{{subject, 6}, subject, 7, 1};
   auto e = event(30);
   e.receiver = subject;
   e.origin.cause = 60;
@@ -314,7 +326,6 @@ void mixed_due_replacement_preserves_events_across_rebucketing() {
   snap::Input in{bytes.data(), bytes.size()};
   read_timers(in, restored);
   snap::check_complete(in);
-  ++token.process_revision;
   e.origin.cause = 63;
   for (auto *wheel : {&original, &restored}) {
     schedule(*wheel, {1200, e, token});
@@ -333,18 +344,18 @@ void mixed_due_replacement_preserves_events_across_rebucketing() {
     promote_due(*wheel, 1200, q);
     const auto actual = pop_foreground(q);
     require(
-        actual && actual->threshold && actual->threshold->process_revision == 2 &&
-            std::get<EventWork>(actual->work).origin.cause == 63 && !pop_foreground(q) &&
-            timers(*wheel).empty(),
+        actual && actual->threshold && std::get<EventWork>(actual->work).origin.cause == 63 &&
+            !pop_foreground(q) && timers(*wheel).empty(),
         "replacement preserves the exact new threshold deadline and latest cause across restore");
   }
 }
 } // namespace
 int main() {
+  publication_stamps_completed_origin();
   ordering_and_overflow();
   timer_cascades();
   threshold_replacement_preserves_other_events_and_cascade_locations();
-  threshold_identity_and_old_snapshot_revision_order();
+  threshold_identity_and_exact_cancellation();
   one_same_due_fixture_continues_after_snapshot();
   mixed_due_replacement_preserves_events_across_rebucketing();
   intents();

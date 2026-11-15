@@ -20,6 +20,35 @@ void require(bool value, const char *text) {
   if (!value)
     throw std::runtime_error(text);
 }
+void canonical_observation() {
+  const auto receiver = Handle::make(1, 1);
+  nt::PreparedThing thing{
+      {receiver, 1, 0, 2, false, false, true, {}, observe::Seen::Salience::Near},
+      {receiver,
+       "arbitrary.model",
+       {{"size", 4}},
+       {"claim", "fictional description", "text"},
+       {"custom.action"}}};
+  nt::SelfDescription self{receiver, {}, {0, 0, 0}, 0, nullptr, {}};
+  std::vector<std::string> actions{"body.custom"};
+  auto render = [&] { return nt::observation(0, 20, self, std::span(&thing, 1), {}, actions, {}); };
+  auto first = render();
+  require(first["things"][0].contains("measured") && first["things"][0]["says"]["name"] == "claim",
+          "measured truth and maker text separate");
+  auto second = render();
+  require(second == first && second.contains("body_actions"),
+          "native observation remains full for gateway-owned session compaction");
+  require(first["self"]["h"] == to_string(receiver) && first["self"]["at"].size() == 3 &&
+              first["self"]["zone"] == "" && first.contains("heard") &&
+              !first["things"][0].contains("lux"),
+          "S5 fields and boolean light projection");
+  thing.description.measured["size"] = 5;
+  auto changed = render();
+  require(changed["things"][0].contains("measured"), "live value invalidates descriptive cache");
+  thing.seen.reachable = false;
+  auto far = render();
+  require(!far["things"][0].contains("actions"), "out-of-reach action discovery hidden");
+}
 struct Reader {
   std::span<const std::uint8_t> bytes;
   std::size_t offset = 0;
@@ -374,6 +403,7 @@ void empty_world_roaming_does_not_retain_streams() {
 } // namespace
 int main() {
   try {
+    canonical_observation();
     golden_and_stream_consistency();
     skipped_drop_is_retried_after_partial_batch();
     quaternion_accuracy();

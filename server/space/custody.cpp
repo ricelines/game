@@ -26,9 +26,10 @@ OperationResult can_release_occupants(const Space &space, Handle root,
   }
   return {Status::Ok, {}};
 }
-void release_occupants(Space &space, IdentityRead identity, Handle root,
-                       std::span<const Handle> descendants, ParentWrite parents, SpaceFlags flags,
-                       PhysicalRelations &relations, std::vector<RelationChange> &changes) {
+OperationResult release_occupants(Space &space, IdentityRead identity, Handle root,
+                                  std::span<const Handle> descendants, ParentWrite parents,
+                                  SpaceFlags flags, PhysicalRelations &relations,
+                                  std::vector<RelationChange> &changes) {
   auto &n = *space.native;
   for (auto it = n.attachments.begin(); it != n.attachments.end();) {
     const Handle h{it->first};
@@ -48,7 +49,7 @@ void release_occupants(Space &space, IdentityRead identity, Handle root,
       mode = body.character ? Motion::Character : Motion::Dynamic;
       const auto ready = update_motion(n, body, mode);
       if (ready.status != Status::Ok)
-        throw std::logic_error("preflighted occupant release failed");
+        return ready;
       n.physics.GetBodyInterface().SetObjectLayer(
           body.body, body.character ? 3 : (body.spec.collision_solid ? layer(mode) : 4));
       n.changed(h, old, n.world_bounds(body), navigates(body));
@@ -57,6 +58,7 @@ void release_occupants(Space &space, IdentityRead identity, Handle root,
     flags_for(flags, h, mode);
     edge(relations.attached_to, RelationKind::AttachedTo, h, parent, false, changes);
   }
+  return {Status::Ok, {}};
 }
 OperationResult can_visible_custody(const Space &space, IdentityRead identity, ParentRead parents,
                                     const VisibleCustody &change,
@@ -94,7 +96,10 @@ OperationResult visible_custody(Space &space, IdentityRead identity, TransformRe
   clear_cause(n, change.goods);
   for (auto child : descendants)
     clear_cause(n, child);
-  release_occupants(space, identity, change.goods, descendants, parents, flags, relations, changes);
+  const auto released = release_occupants(space, identity, change.goods, descendants, parents,
+                                          flags, relations, changes);
+  if (released.status != Status::Ok)
+    return released;
   const auto old = n.attachments.find(change.goods.bits);
   if (old != n.attachments.end()) {
     edge(relations.attached_to, RelationKind::AttachedTo, change.goods, old->second.parent, false,
@@ -111,7 +116,7 @@ OperationResult visible_custody(Space &space, IdentityRead identity, TransformRe
     mode = change.parent && !body.character ? Motion::Kinematic : body.spec.motion;
     const auto ready = update_motion(n, body, mode);
     if (ready.status != Status::Ok)
-      throw std::logic_error("preflighted visible custody failed");
+      return ready;
     const bool attached_query = change.parent && (change.grasp || body.character);
     n.physics.GetBodyInterface().SetObjectLayer(body.body,
                                                 attached_query || !body.spec.collision_solid ? 4

@@ -1,5 +1,4 @@
-#include "objects.hpp"
-#include "codec.hpp"
+#include "snap.hpp"
 
 #include <algorithm>
 

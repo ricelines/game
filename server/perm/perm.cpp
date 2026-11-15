@@ -6,6 +6,38 @@
 #include <unordered_set>
 
 namespace amber::perm {
+std::string_view required_right(std::string_view right, Caller caller, const perm::Target &target) {
+  const auto *script = std::get_if<ScriptHolder>(&caller);
+  return right == "move" && (target.flags & Body) && script && script->object != target.object
+             ? "animate"
+             : right;
+}
+Gate check_right(std::string_view right, Caller caller, const perm::Target &target,
+                 const perm::Players &players, const perm::Grants &grants, Step now) {
+  if (right.empty())
+    return {true, {}};
+  static constexpr std::array<std::string_view, 7> rights{"use",  "take",     "move",   "edit",
+                                                          "copy", "transfer", "destroy"};
+  const auto found = std::find(rights.begin(), rights.end(), right);
+  if (found == rights.end())
+    return {false, "unknown declared right"};
+  const auto holder = std::visit(
+      [](const auto &actor) -> perm::Holder {
+        using T = std::decay_t<decltype(actor)>;
+        if constexpr (std::is_same_v<T, PlayerId>)
+          return perm::Holder::player(actor);
+        else
+          return perm::Holder::script(actor.script, actor.object);
+      },
+      caller);
+  const auto decision =
+      required_right(right, caller, target) == "animate"
+          ? perm::check_scope(holder, perm::Scope::avatar(target.object), 1, grants, now)
+          : perm::check(holder, static_cast<perm::Verb>(found - rights.begin()), target, players,
+                        grants, now);
+  return {bool(decision),
+          decision ? std::string{} : std::string(perm::reason_text(decision.reason))};
+}
 std::vector<Handle> update_plots(IdentityRead identity, TransformRead poses, PlotWrite membership,
                                  const Plots &plots, std::span<const Handle> objects,
                                  bool in_world) {
@@ -671,7 +703,7 @@ OfferResult cancel_offer(Offers &offers, PermissionFlags flags, Holder actor, co
   close_offer(offers, row);
   flags.set(goods.object.slot(), flags.get(goods.object.slot()) & ~Escrow);
   escrow_parts(flags, row.parts, false);
-  return {Reason::Allowed, id, {{goods.object, {}, true}}};
+  return {Reason::Allowed, id, {}};
 }
 
 void rebuild_offer_deadlines(Offers &offers) {
@@ -826,7 +858,7 @@ TradeResult open_trade(Trades &trades, const Players &players, PlayerId first, P
 
 TradeResult change_trade(Trades &trades, Offers &offers, PermissionFlags flags,
                          const Players &players, const Grants &grants, TradeId id, PlayerId actor,
-                         const Target *goods, std::int64_t money, CustodyChange prior, Step now,
+                         const Target *goods, std::int64_t money, bool in_world, Step now,
                          std::span<const Target> parts) {
   if (!id || id >= trades.rows.size() || !trades.rows[id].live)
     return {Reason::OfferGone, id, false, {}, {}};
@@ -856,9 +888,6 @@ TradeResult change_trade(Trades &trades, Offers &offers, PermissionFlags flags,
     const auto components = check_parts(*goods, parts, goods->object == old_goods);
     if (!components)
       return {components.reason, id, false, {}, {}};
-    assert(prior.goods == goods->object);
-    if (goods->object == old_goods)
-      prior = previous.prior_custody;
   }
   TradeResult result{Reason::Allowed, id, false, {}, {}};
   if (previous.offer) {
@@ -866,46 +895,46 @@ TradeResult change_trade(Trades &trades, Offers &offers, PermissionFlags flags,
     if (old_goods && (!goods || old_goods != goods->object)) {
       flags.set(old_goods.slot(), flags.get(old_goods.slot()) & ~Escrow);
       escrow_parts(flags, offers.rows[previous.offer].parts, false);
-      result.custody.push_back(previous.prior_custody);
     }
   }
   const auto offer_id = static_cast<OfferId>(offers.rows.size());
   // Direct-trade money is the amount this side gives, independent of a goods sale price.
   offers.rows.push_back({offer_id, actor, trade.players[1 - side], goods ? goods->object : Handle{},
                          0, 0, id, true, part_handles(parts)});
-  previous = {offer_id, money, false, prior};
+  previous = {offer_id, money, false};
   trade.sides[1 - side].confirmed = false;
   if (goods) {
     flags.set(goods->object.slot(), flags.get(goods->object.slot()) | Escrow);
     escrow_parts(flags, offers.rows.back().parts, true);
-    result.custody.push_back({goods->object, {}, prior.in_world});
+    if (goods->object != old_goods)
+      result.custody.push_back({goods->object, {}, in_world});
   }
   return result;
 }
 
-std::vector<CustodyChange> invalidate_goods_offers(Offers &offers, Trades &trades,
-                                                   [[maybe_unused]] IdentityRead identity,
-                                                   PermissionFlags flags, Handle object) {
-  std::vector<CustodyChange> custody;
+std::vector<Handle> invalidate_goods_offers(Offers &offers, Trades &trades, IdentityRead identity,
+                                            PermissionFlags flags, Handle object) {
+  std::vector<Handle> changed;
   for (auto &row : offers.rows) {
     if (!row.live || (row.goods != object &&
                       std::find(row.parts.begin(), row.parts.end(), object) == row.parts.end()))
       continue;
     if (row.trade) {
-      auto cancelled = cancel_trade(trades, offers, flags, row.trade, row.seller);
-      custody.insert(custody.end(), cancelled.custody.begin(), cancelled.custody.end());
+      for (const auto &side : trades.rows[row.trade].sides)
+        if (side.offer && offers.rows[side.offer].live && offers.rows[side.offer].goods)
+          changed.push_back(offers.rows[side.offer].goods);
+      cancel_trade(trades, offers, flags, row.trade, row.seller);
     } else {
-      assert(identity.valid(row.goods));
-      flags.set(row.goods.slot(), flags.get(row.goods.slot()) & ~Escrow);
-      for (auto part : row.parts) {
-        assert(identity.valid(part));
-        flags.set(part.slot(), flags.get(part.slot()) & ~Escrow);
-      }
-      custody.push_back({row.goods, {}, true});
+      if (identity.valid(row.goods))
+        flags.set(row.goods.slot(), flags.get(row.goods.slot()) & ~Escrow);
+      for (auto part : row.parts)
+        if (identity.valid(part))
+          flags.set(part.slot(), flags.get(part.slot()) & ~Escrow);
+      changed.push_back(row.goods);
       close_offer(offers, row);
     }
   }
-  return custody;
+  return changed;
 }
 
 TradeResult confirm_trade(Trades &trades, Offers &offers, Ledger &ledger, Grants &grants,
@@ -993,7 +1022,6 @@ TradeResult cancel_trade(Trades &trades, Offers &offers, PermissionFlags flags, 
     if (row.goods) {
       flags.set(row.goods.slot(), flags.get(row.goods.slot()) & ~Escrow);
       escrow_parts(flags, row.parts, false);
-      result.custody.push_back(side.prior_custody);
     }
     close_offer(offers, row);
   }

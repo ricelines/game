@@ -1,9 +1,9 @@
-#include "bindings/measurements.hpp"
+#include "step/step.hpp"
 #include <iostream>
 #include <stdexcept>
 using namespace amber;
 namespace re = amber::react;
-namespace bi = amber::bindings;
+namespace bi = amber::step;
 namespace {
 void require(bool ok, const char *message) {
   if (!ok)
@@ -61,7 +61,6 @@ void test_mass_provider() {
   parts.in.set(second.slot(), std::vector<Handle>{root});
   bi::validate_mass_roles(terms, {2, 3});
   bi::AssemblyMasses masses{{2, 3}, {}, {}};
-  bi::MassReconciliation reconciliation{masses, values, parts, runtime};
   re::DeferredEffects effects;
   record::Origin origin{19, 7, {3}, 2.5, false};
   bi::invalidate_mass(masses, identity(objects), parts, std::span(&root, 1));
@@ -79,15 +78,15 @@ void test_mass_provider() {
   require(effects.ordered.empty(), "inert mass provider does no recurring work");
   objects.material[first.slot()] = 11;
   const std::array<FactKey, 1> changed_own{{{first, 2}}};
-  bi::reconcile_mass(reconciliation, changed_own, 20, 20, origin, effects);
-  require(read(first, 3) == 15 && read(root, 3) == 25 && masses.rows.at(root.bits).revision == 2,
+  bi::reconcile_mass(masses, values, parts, runtime, changed_own, 20, 20, origin, effects);
+  require(read(first, 3) == 15 && read(root, 3) == 25,
           "material edit updates only changed node and ancestors");
   require(effects.ordered.size() == 2, "clean sibling is reused without a watch effect");
   auto pending = effects;
   step::WorkQueues queues;
   step::TimerWheel timers;
   record::Journal journal(8, {});
-  re::publish_effects(std::move(pending), origin, 20, queues, timers, journal, 10);
+  step::publish_effects(std::move(pending), origin, 20, queues, timers, journal, 10);
   while (auto next = step::pop_foreground(queues)) {
     const auto &watch = std::get<step::WatchWork>(next->work);
     require(watch.origin.root == origin.root && watch.origin.cause == origin.cause,
@@ -97,21 +96,21 @@ void test_mass_provider() {
   effects = {};
   materials.rows[11][1] = Value(4000.);
   const std::array<FactKey, 1> density_changed{{{first, 1}}};
-  bi::reconcile_mass(reconciliation, density_changed, 20, 20, origin, effects);
+  bi::reconcile_mass(masses, values, parts, runtime, density_changed, 20, 20, origin, effects);
   require(read(root, 3) == 30 && read(first, 3) == 20,
           "intrinsic density notification immediately updates source resolver and ancestor mass");
   materials.rows[11][1] = Value(3000.);
-  bi::reconcile_mass(reconciliation, density_changed, 20, 20, origin, effects);
+  bi::reconcile_mass(masses, values, parts, runtime, density_changed, 20, 20, origin, effects);
   effects = {};
   const std::array<FactKey, 1> aggregate_feedback{{{first, 3}}};
-  bi::reconcile_mass(reconciliation, aggregate_feedback, 20, 20, origin, effects);
+  bi::reconcile_mass(masses, values, parts, runtime, aggregate_feedback, 20, 20, origin, effects);
   require(effects.ordered.empty() && masses.dirty.empty(),
           "derived assembly answer does not create feedback sampling work");
   effects = {};
   bi::invalidate_mass(masses, identity(objects), parts, std::span(&second, 1));
   parts.out.set(root.slot(), std::vector<Handle>{first});
   parts.in.erase(second.slot());
-  bi::reconcile_mass(reconciliation, {}, 20, 20, origin, effects);
+  bi::reconcile_mass(masses, values, parts, runtime, {}, 20, 20, origin, effects);
   require(read(root, 3) == 15 && read(second, 3) == 10,
           "old ancestor invalidation follows removed topology");
   bi::retire_mass(masses, runtime, second);

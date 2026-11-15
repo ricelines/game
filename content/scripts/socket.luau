@@ -17,7 +17,7 @@ end
 return {
     kind='model', contributes={'base.power_demand'},
     watches={'base.powered_by','base.charge',
-        {term='base.power_supply',along='base.powered_by'}, {term='base.power_demand',along='base.powered_by'}},
+        'base.power_supply', 'base.power_demand'},
     on={['base.start']=update,['base.powered_by']=update,['base.power_supply']=update,
         ['base.power_demand']=update,['base.charge']=update,
         ['base.charge_tick']=function(self,_,revision)

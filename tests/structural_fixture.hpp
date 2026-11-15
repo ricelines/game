@@ -1,27 +1,21 @@
 #pragma once
-#include "space_fixture.hpp"
-
-#include "bindings/commerce/commerce.hpp"
-#include "bindings/construction/construction.hpp"
-#include "bindings/installation/installation.hpp"
-#include "bindings/metadata/metadata.hpp"
-#include "bindings/structural/structural.hpp"
-#include "bindings/turns/turns.hpp"
 #include "runtime_fixture.hpp"
-#include "scene_fixture.hpp"
+#include "space_fixture.hpp"
+#include "step/step.hpp"
 
 namespace amber::test_structural {
 using namespace react;
 using test_runtime::require;
+// Actual input tables for direct construction/replacement tests, without an execution stack.
 struct Fixture {
   test_runtime::Fixture f;
   lifecycle::Parts parts;
   Relation declared;
-  lifecycle::Instances instances{f.objects, parts, declared};
   catalog::Assets assets;
   catalog::ParameterBlocks parameters;
+  catalog::ModelTexts texts;
   catalog::InstanceTexts instance_texts;
-  bindings::GeometryAssets geometry;
+  step::GeometryAssets geometry;
   space::PhysicalRelations physical;
   std::vector<space::RelationChange> physical_changes;
   space::Space world;
@@ -30,59 +24,10 @@ struct Fixture {
   perm::Grants grants;
   perm::Plots plots;
   perm::Ledger ledger;
-  bindings::StructuralRights rights;
-  bindings::GeometryInstallation installation;
   perm::Offers offers;
   perm::Trades trades;
-  testscene::Projection projections;
-  testscene::Lifecycle lifecycle;
-  bindings::AssemblyPlacement placement;
-  bindings::CreateOperation creation;
-  bindings::RemoveOperation removal;
-  bindings::ReplaceOperation replacement;
-  bindings::ModelMeasureBinding model_measure{f.terms,    f.materials, f.models,
-                                              parameters, assets,      10};
-  bindings::InstanceMeasureBinding instance_measure{identity(f.objects),
-                                                    transforms(f.objects),
-                                                    f.objects.params,
-                                                    declared,
-                                                    f.terms,
-                                                    f.materials,
-                                                    f.models,
-                                                    parameters,
-                                                    assets,
-                                                    10};
-  bindings::Execution execution{f.vm, f.states, f.random, identity(f.objects), declared, 44};
-  command::NativeActions declarations;
-  drive::NativeOperations operations;
-  drive::Clock clock;
-  record::Journal journal{8, {}};
-  step::WorkQueues queues;
-  step::TimerWheel timers;
-  control::Profiles profiles;
-  std::vector<FactKey> mutated;
-  std::vector<bindings::GapDraft> gaps;
-  bindings::HandlerTurns handlers{
-      execution, f.triggers, *f.projection, {f.subscriptions, f.links, f.scripts, f.rules},
-      journal,   queues,     timers,        mutated,
-      clock,     20,         10000,         lifecycle.allocation};
-  bindings::ActionTurns actions{handlers,
-                                declarations,
-                                operations,
-                                f.models,
-                                f.scripts,
-                                f.installed,
-                                f.rules,
-                                profiles,
-                                authority(f.objects),
-                                transforms(f.objects),
-                                limits,
-                                players,
-                                grants,
-                                world,
-                                lifecycle.intents,
-                                gaps,
-                                5};
+  react::MeterRows meters;
+  react::NativeActions declarations;
   ScriptId script = 0;
   space::GeometryId solid = 0;
   explicit Fixture(std::uint32_t capacity = 64)
@@ -90,46 +35,7 @@ struct Fixture {
           auto settings = testspace::settings();
           settings.max_bodies = capacity;
           return settings;
-        }()),
-        rights{identity(f.objects),
-               authority(f.objects),
-               transforms(f.objects),
-               declared,
-               limits,
-               players,
-               grants,
-               plots,
-               world,
-               5},
-        installation{
-            world,    geometry, *f.projection, transforms(f.objects), space_flags(f.objects),
-            {10, 11}, {.6f, 0}},
-        projections(f.objects, f.models, parameters, assets, *f.projection, f.runtime,
-                    f.subscriptions, declared, {30, 31}),
-        lifecycle(f, world, instances, parts, declared, physical, physical_changes, projections,
-                  players, grants, limits, offers, trades, plots, ledger),
-        placement{world,
-                  identity(f.objects),
-                  transforms(f.objects),
-                  parents(f.objects),
-                  space_flags(f.objects),
-                  declared,
-                  physical,
-                  physical_changes},
-        creation{
-            instances,           {f.models, parameters, assets}, installation, placement, rights,
-            lifecycle.lifecycle, plot_membership(f.objects)},
-        removal{instances, rights, lifecycle.lifecycle}, replacement{instances,
-                                                                     parts,
-                                                                     {f.models, parameters, assets},
-                                                                     installation,
-                                                                     transforms(f.objects),
-                                                                     parents(f.objects),
-                                                                     physical,
-                                                                     physical_changes,
-                                                                     rights,
-                                                                     lifecycle.lifecycle,
-                                                                     plot_membership(f.objects)} {
+        }()) {
     f.terms.rows.resize(32);
     for (auto [id, role] :
          {std::pair{30u, MeasurementRole::Mass}, std::pair{31u, MeasurementRole::Runtime}}) {
@@ -186,16 +92,10 @@ struct Fixture {
     geometry.rows[asset.hash] = {child_geometry.geometry, {}};
     f.assets.rows[1].volume = 1;
     f.assets.rows[2].volume = .016;
-    register_binding(f.vm, "measure_model", bindings::measure_model_binding, &model_measure);
-    register_binding(f.vm, "measure_instance", bindings::measure_instance_binding,
-                     &instance_measure);
-    bindings::register_construction_actions(
-        operations, bindings::declare_construction_actions(f.terms, declarations), creation,
-        removal, replacement);
-    profiles.rows.resize(3);
-    for (PlayerId id = 1; id < 3; ++id)
-      profiles.rows[id].id = id;
-    profiles.rows[1].body = f.a;
+    step::declare_construction_actions(f.terms, declarations);
+    step::bind_metadata(f.vm, identity(f.objects), transforms(f.objects), authority(f.objects),
+                        parents(f.objects), f.objects.params, f.models, f.installed, parameters,
+                        assets, f.terms, f.materials, declared, meters, plots, 10);
     f.objects.position[f.a.slot()] = {0, -2, 0};
     f.state(f.a, 1, 10);
   }
@@ -203,15 +103,29 @@ struct Fixture {
     script = f.add(source);
     f.models.rows[1].script = script;
     f.states[{f.a, script}][std::string("tokens")] = 10.;
-    install::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
+    react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
     return script;
   }
-  bindings::ActionOutcome act(std::string_view name, Handle target = {},
-                              nlohmann::json args = nlohmann::json::object()) {
-    return bindings::perform_action(
-        actions,
-        {ScriptHolder{script, f.a}, f.terms.by_name.at(std::string(name)), target, Value{}},
-        std::move(args), {});
+  step::NativeCall call(Handle target, nlohmann::json arguments = nlohmann::json::object(),
+                        Caller caller = ScriptHolder{}) {
+    if (const auto *holder = std::get_if<ScriptHolder>(&caller); holder && !holder->script)
+      caller = ScriptHolder{script, f.a};
+    return {{caller, 0, target, {}}, std::move(arguments), f.a, 0, 20, {}};
+  }
+  step::NativeCompletion create(nlohmann::json arguments) {
+    return step::create_instance(
+        f.objects, parts, declared, f.models, parameters, assets, geometry, *f.projection, world,
+        transforms(f.objects), parents(f.objects), space_flags(f.objects), physical,
+        physical_changes, authority(f.objects), players, grants, plots, plot_membership(f.objects),
+        {10, 11}, {.6f, 0}, call({}, std::move(arguments)));
+  }
+  step::NativeCompletion replace(Handle target, nlohmann::json arguments) {
+    return step::replace_instance(
+        f.objects, parts, declared, f.models, parameters, assets, geometry, *f.projection, world,
+        transforms(f.objects), parents(f.objects), space_flags(f.objects), physical,
+        physical_changes, authority(f.objects), attribution(f.objects), limits, players, grants,
+        plots, ledger, f.scripts, plot_membership(f.objects), {10, 11}, {.6f, 0},
+        call(target, std::move(arguments)));
   }
   GrantId grant(Handle object, perm::Rights rights) {
     const auto holder = perm::Holder::script(script, f.a);
@@ -236,28 +150,6 @@ struct Fixture {
          10000},
         {scope, 1, perm::all_rights, 0, false}, {holder, 1, true}, 0);
     require(bool(result), "script Build grant");
-  }
-  std::vector<Handle> created(const bindings::ActionOutcome &out) {
-    std::vector<Handle> result;
-    if (out.reply.contains("created"))
-      for (const auto &value : out.reply.at("created"))
-        result.push_back(*parse_handle(value.get<std::string>()));
-    return result;
-  }
-  bindings::CatalogPublication publication(catalog::ModelTexts &texts) {
-    return {f.models,
-            f.scripts,
-            f.terms,
-            f.materials,
-            texts,
-            instance_texts,
-            *f.projection,
-            authority(f.objects),
-            parents(f.objects),
-            f.triggers,
-            lifecycle.priorities,
-            projections.metadata,
-            {}};
   }
   void variants() {
     f.materials.rows[9] = {{10, Value(500.)}, {11, Value(.5)}};

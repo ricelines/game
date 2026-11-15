@@ -1,4 +1,4 @@
-#include "command/command.hpp"
+#include "react/react.hpp"
 
 #include <iostream>
 #include <stdexcept>
@@ -14,8 +14,8 @@ struct Fixture {
   react::Terms terms;
   catalog::Models models;
   catalog::Scripts scripts;
-  command::InstalledScripts installed;
-  command::NativeActions native;
+  react::InstalledScripts installed;
+  react::NativeActions native;
   Handle body, target;
   Fixture() {
     for (auto name : {"invented.turn", "invented.unanswered", "invented.signal"}) {
@@ -44,15 +44,15 @@ struct Fixture {
     init.owner = 2;
     target = create(objects, init);
   }
-  command::Resolution resolve(Caller caller, TermId action, Handle selected) {
-    return command::resolve(native, terms, models, scripts, installed, identity(objects),
-                            {caller, action, selected, Value{}}, body);
+  react::Resolution resolve(Caller caller, TermId action, Handle selected) {
+    return react::resolve(native, terms, models, scripts, installed, identity(objects),
+                          {caller, action, selected, Value{}}, body);
   }
 };
 void body_receiver_never_becomes_the_foreign_permission_target() {
   Fixture f;
   auto result = f.resolve(PlayerId{1}, 1, f.target);
-  require(result && result.route == command::Route::Body && result.receiver == f.body &&
+  require(result && result.route == react::Route::Body && result.receiver == f.body &&
               result.permission_target == f.body && result.right == "use" && result.reach,
           "body action must check its installed receiver and separately require selected reach");
   f.installed.set(f.body.slot(), std::vector<ScriptId>{3});
@@ -61,11 +61,11 @@ void body_receiver_never_becomes_the_foreign_permission_target() {
               result.declaration_script == 3 && result.right == "move",
           "instance action did not override the body declaration");
   f.installed.erase(f.body.slot());
-  require(f.resolve(PlayerId{1}, 1, {}).failure == command::Failure::MissingTarget,
+  require(f.resolve(PlayerId{1}, 1, {}).failure == react::Failure::MissingTarget,
           "reach-required body action silently lost its selected target");
   f.scripts.rows[1].declaration.actions.clear();
   result = f.resolve(PlayerId{1}, 1, f.target);
-  require(result && result.route == command::Route::Selected && result.receiver == f.target &&
+  require(result && result.route == react::Route::Selected && result.receiver == f.target &&
               result.permission_target == f.target && result.right == "edit",
           "removing body handler did not expose selected declaration");
 }
@@ -73,27 +73,29 @@ void script_callers_fallbacks_and_reserved_native_actions_are_distinct() {
   Fixture f;
   const auto script = ScriptHolder{1, f.body};
   auto result = f.resolve(script, 1, f.target);
-  require(result && result.route == command::Route::Selected && result.declaration_script == 2,
+  require(result && result.route == react::Route::Selected && result.declaration_script == 2,
           "script caller borrowed supplied player body");
   result = f.resolve(script, 2, f.target);
-  require(result && result.route == command::Route::Fallback && result.receiver == f.target &&
+  require(result && result.route == react::Route::Fallback && result.receiver == f.target &&
               result.right == "use" && result.reach,
           "undeclared actions keep the ordinary Use and reach checks before rule fallback");
-  require(f.resolve(script, 2, {}).failure == command::Failure::MissingTarget,
+  require(f.resolve(script, 2, {}).failure == react::Failure::MissingTarget,
           "script action invented a player receiver");
-  f.native.rows.emplace(1, command::NativeDeclaration{1, {}, false});
+  f.native.rows.emplace(1,
+                        react::NativeDeclaration{
+                            1, {}, false, nlohmann::json::object(), react::MechanicAction::Grasp});
   result = f.resolve(PlayerId{1}, 1, {});
-  require(result && result.route == command::Route::Native &&
-              command::collides(f.native, f.scripts.rows[1].declaration),
+  require(result && result.route == react::Route::Native &&
+              react::collides(f.native, f.scripts.rows[1].declaration),
           "native action collision was hidden by script declaration");
   const auto old = f.target;
   destroy(f.objects, f.target);
   ObjectInit init;
   init.model = 2;
   f.target = create(f.objects, init);
-  require(f.resolve(PlayerId{1}, 1, old).failure == command::Failure::StaleTarget,
+  require(f.resolve(PlayerId{1}, 1, old).failure == react::Failure::StaleTarget,
           "action accepted a reused selected slot");
-  require(f.resolve(PlayerId{1}, 3, f.target).failure == command::Failure::UnknownAction,
+  require(f.resolve(PlayerId{1}, 3, f.target).failure == react::Failure::UnknownAction,
           "quantity treated as action");
 }
 void typed_inputs_preserve_symbolic_terms_and_reject_ambiguous_payloads() {
@@ -107,7 +109,7 @@ void typed_inputs_preserve_symbolic_terms_and_reject_ambiguous_payloads() {
                                       {"where", Vec3{1, 2, 3}},
                                       {"quantity", std::string("invented.signal")}};
   auto validate = [&](const EventPayload &value) {
-    return command::validate_arguments(f.terms, action, value);
+    return react::validate_arguments(f.terms, action, value);
   };
   require(validate(valid).empty(), "valid symbolic typed inputs rejected");
   auto changed = valid;
@@ -137,10 +139,10 @@ void signatures_follow_authored_units_and_native_schemas() {
   f.terms.rows[3].dimensions[1] = 1;
   f.terms.rows[1].inputs = {{"amount", react::InputType::Number, 3, false},
                             {"note", react::InputType::String, 0, true}};
-  require(command::action_signature(f.terms, f.native, 1) ==
+  require(react::action_signature(f.terms, f.native, 1) ==
               "invented.turn(amount: number [kg], note?: string)",
           "authored signature lost registered units or optional input");
-  command::NativeDeclaration native;
+  react::NativeDeclaration native;
   native.action = 1;
   native.inputs_schema = nlohmann::json::parse(R"({
     "type":"object", "required":["amount"], "properties":{
@@ -149,12 +151,12 @@ void signatures_follow_authored_units_and_native_schemas() {
       "limit":{"oneOf":[{"type":"integer"},{"type":"null"}]}
     }})");
   f.native.rows[1] = native;
-  require(command::action_signature(f.terms, f.native, 1) ==
+  require(react::action_signature(f.terms, f.native, 1) ==
               "invented.turn(amount: number [kg], choices?: array<string>, limit?: integer|null, "
               "note?: string)",
           "native one-line signature differs from its actual structured schema");
-  require(command::format_unit({2, 1, -2, 0, 0, 0, 0, 0}) == "m^2*kg*s^-2" &&
-              command::format_unit({}) == "1",
+  require(react::format_unit({2, 1, -2, 0, 0, 0, 0, 0}) == "m^2*kg*s^-2" &&
+              react::format_unit({}) == "1",
           "shared SI formatting changed registry dimensions");
 }
 } // namespace

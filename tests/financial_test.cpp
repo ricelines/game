@@ -1,6 +1,6 @@
-#include "bindings/commerce/commerce.hpp"
-#include "bindings/finance/finance.hpp"
-#include "checked_actions_fixture.hpp"
+#include "runtime_fixture.hpp"
+#include "space_fixture.hpp"
+#include "step/action_private.hpp"
 
 #include <iostream>
 #include <limits>
@@ -9,52 +9,54 @@ using namespace amber;
 using test_runtime::require;
 namespace {
 struct Fixture {
-  test_actions::Fixture world;
+  test_runtime::Fixture f{1000};
+  space::Space space{testspace::settings()};
+  perm::Players players;
+  perm::Grants grants;
+  perm::OwnerLimits limits;
   perm::Ledger ledger;
   perm::Groups groups;
-  bindings::commerce::BalanceBinding balance{ledger, world.players, identity(world.f.objects),
-                                             authority(world.f.objects), groups};
-  bindings::commerce::PaymentBinding payment{
-      ledger, world.grants, world.players, identity(world.f.objects), authority(world.f.objects),
-      groups};
-  bindings::IssuanceBinding issuance{
-      ledger, world.grants, world.players, identity(world.f.objects), authority(world.f.objects),
-      groups};
+  net::Profiles profiles;
+  react::NativeActions declarations;
+  step::Intents intents;
+  Relation parts;
+  record::Journal journal{8, {}};
+  step::WorkQueues queues;
+  step::TimerWheel timers;
   std::array<TermId, 4> triggers{};
+  ScriptId script = 0;
+  react::Invocation invocation;
+  react::CompletedInvocation completed;
+  Step now = 10;
   Fixture() {
+    players.rows.resize(4);
+    profiles.rows.resize(4);
+    for (PlayerId id = 1; id < 4; ++id)
+      profiles.rows[id].id = id;
     ledger.balance[perm::Account::player(2)] = 100;
     groups.rows.push_back({1, 2, "Institution"});
-    world.f.objects.owner[world.f.a.slot()] = 2;
-    world.f.objects.owner[world.f.b.slot()] = 2;
-    world.f.objects.model[world.f.b.slot()] = 2;
+    f.objects.owner[f.a.slot()] = 2;
+    f.objects.owner[f.b.slot()] = 2;
     for (std::size_t i = 0; i < triggers.size(); ++i) {
       react::Term term;
-      term.id = static_cast<TermId>(world.f.terms.rows.size());
+      term.id = f.terms.rows.size();
       term.name = "arbitrary.finance" + std::to_string(i + 1);
       term.kind = react::Kind::Event;
       triggers[i] = term.id;
-      world.f.terms.by_name.emplace(term.name, term.id);
-      world.f.terms.rows.push_back(std::move(term));
+      f.terms.by_name.emplace(term.name, term.id);
+      f.terms.rows.push_back(std::move(term));
     }
-    const auto declarations =
-        bindings::commerce::declare_commerce(world.f.terms, world.declarations);
-    drive::register_native(world.native, declarations.pay,
-                           {bindings::commerce::validate_pay, bindings::commerce::pay, &payment});
-    drive::register_native(
-        world.native, declarations.balance,
-        {bindings::commerce::validate_balance, bindings::commerce::balance, &balance});
-    bindings::register_issuance_action(world.f.terms, world.declarations, world.native, issuance);
-    world.load(R"(return {kind='model',on={
+    step::declare_commerce(f.terms, declarations);
+    step::declare_issuance_action(f.terms, declarations);
+    script = f.add(R"(return {kind='model',on={
       ['arbitrary.finance1']=function(self,_,args)
         local result=self:act('engine.pay',self.handle,
           {from=args.payer,to=args.to,amount=args.amount})
-        assert(result.ok==args.expect)
-        self.state.returned=true
+        assert(result.ok==args.expect);self.state.returned=true
       end,
       ['arbitrary.finance2']=function(self,_,args)
         local result=self:act('engine.issue',self.handle,{to=args.to,amount=args.amount})
-        assert(result.ok==args.expect)
-        self.state.returned=true
+        assert(result.ok==args.expect);self.state.returned=true
       end,
       ['arbitrary.finance3']=function(self,_,args)
         assert(self:act('engine.balance',nil,{}).balance==args.expected)
@@ -63,36 +65,99 @@ struct Fixture {
       ['arbitrary.finance4']=function(self,_,args)
         assert(self:act('engine.balance',nil,{account=args.wallet}).ok==args.expect)
       end,
-    }})");
+    }})",
+                   2);
+    f.models.rows[1].script = script;
+    react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
   }
-  react::RunOutcome run(unsigned trigger, std::vector<EventField> args, Handle receiver = {},
-                        Step step = 10) {
-    world.clock.step = step;
-    bindings::InvocationInput input;
-    input.receiver = receiver ? receiver : world.f.a;
+  react::RunOutcome start(unsigned trigger, std::vector<EventField> args, Handle receiver = {},
+                          Step step = 10) {
+    now = step;
+    invocation = {};
+    completed = {};
+    react::InvocationInput input;
+    input.receiver = receiver ? receiver : f.a;
     input.trigger = triggers.at(trigger - 1);
     input.step = step;
+    input.hz = 20;
     input.payload = std::move(args);
-    input.action_caller = PlayerId{2};
-    input.action_body = world.f.a;
-    drive::PlannedInvocation plan;
-    plan.handler.script = world.script;
-    plan.handler.function = world.f.terms.rows[input.trigger].name;
-    plan.input = std::move(input);
-    auto completed = bindings::run_invocation(world.actions, plan);
-    auto result = completed.outcome;
-    bindings::publish_invocation(world.journal, world.queues, world.timers, std::move(completed),
-                                 {}, 1000);
-    return result;
+    input.action_caller = PlayerId{2}; // display metadata never grants script Spend/Issue
+    input.action_body = f.a;
+    const auto handlers =
+        react::dispatch(f.triggers, f.values(), input.receiver, input.trigger, step, 20);
+    require(handlers.size() == 1, "financial fixture uses its actual installed handler");
+    react::start_invocation(f.vm, f.states, f.random, f.values(), f.triggers, parts, 7,
+                            attribution(f.objects), f.models, f.scripts, journal, handlers.front(),
+                            std::move(input), invocation, completed);
+    return completed.outcome;
   }
-  void ok(unsigned trigger, std::vector<EventField> args, Handle receiver = {}, Step step = 10) {
-    const auto outcome = run(trigger, std::move(args), receiver, step);
-    require(outcome.status == react::RunOutcome::Status::Ok, outcome.error.c_str());
+  step::ActionRun emitted() {
+    require(completed.outcome.status == react::RunOutcome::Status::Action &&
+                completed.outcome.action,
+            "real Lua reaches its explicit ordinary action call");
+    step::NativeCall call;
+    call.request = completed.outcome.action->request;
+    call.arguments = completed.outcome.action->arguments;
+    call.step = now;
+    call.hz = 20;
+    auto run =
+        step::begin_action(f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers,
+                           declarations, profiles, players, grants, limits, authority(f.objects),
+                           attribution(f.objects), transforms(f.objects), space, intents, journal,
+                           2, std::move(call), invocation.origin, invocation.deadline);
+    require(!run.outcome, "the actual installed script's finance action is admitted");
+    return run;
+  }
+  void resume(step::ActionRun &run, step::NativeCompletion result) {
+    const auto reply = step::finish_native(run, result, identity(f.objects), attribution(f.objects),
+                                           f.models, f.scripts, journal);
+    for (auto &event : result.records)
+      journal.append(std::move(event), reply.origin);
+    completed.outcome = react::resume_handler(f.vm, invocation, reply.reply);
+  }
+  void finish() {
+    react::finish_invocation(identity(f.objects), attribution(f.objects), f.models, f.scripts,
+                             journal, invocation, completed);
+    require(completed.outcome.status == react::RunOutcome::Status::Ok,
+            completed.outcome.error.c_str());
+    step::publish_effects(std::move(completed.effects), completed.origin, now, queues, timers,
+                          journal, 1000);
+  }
+  void pay(std::vector<EventField> args, Handle receiver = {}, Step step = 10) {
+    start(1, std::move(args), receiver, step);
+    auto run = emitted();
+    resume(run, step::pay(ledger, grants, players, identity(f.objects), authority(f.objects),
+                          groups, run.call));
+    finish();
+  }
+  void issue(std::vector<EventField> args, Handle receiver = {}, Step step = 10) {
+    start(2, std::move(args), receiver, step);
+    auto run = emitted();
+    resume(run, step::issue(ledger, grants, players, identity(f.objects), authority(f.objects),
+                            groups, run.call));
+    finish();
+  }
+  void balances(std::vector<EventField> args) {
+    start(3, std::move(args));
+    auto own = emitted();
+    resume(own, step::balance(ledger, players, identity(f.objects), authority(f.objects), groups,
+                              own.call));
+    auto explicit_account = emitted();
+    resume(explicit_account, step::balance(ledger, players, identity(f.objects),
+                                           authority(f.objects), groups, explicit_account.call));
+    finish();
+  }
+  void wallet(std::vector<EventField> args) {
+    start(4, std::move(args));
+    auto run = emitted();
+    resume(run, step::balance(ledger, players, identity(f.objects), authority(f.objects), groups,
+                              run.call));
+    finish();
   }
   GrantId grant(perm::Scope scope, std::int64_t cap, bool architect = false) {
-    const auto holder = perm::Holder::script(world.script, world.f.a);
+    const auto holder = perm::Holder::script(script, f.a);
     const auto granted = perm::create_grant(
-        world.grants, world.players, perm::Holder::player(2), {2, holder, scope, 1, cap, 100, 1000},
+        grants, players, perm::Holder::player(2), {2, holder, scope, 1, cap, 100, 1000},
         {scope, 2, perm::all_rights, 0, architect}, {holder, 2, true}, 0);
     require(bool(granted), "ordinary capped script grant");
     return granted.grant;
@@ -106,42 +171,45 @@ std::vector<EventField> pay_args(double amount, bool expect) {
 }
 void script_spending() {
   Fixture f;
-  f.ok(3, {{"expected", Value(0.)}, {"explicit", Value(100.)}});
-  f.ok(1, pay_args(20, false));
+  f.balances({{"expected", Value(0.)}, {"explicit", Value(100.)}});
+  f.pay(pay_args(20, false));
   require(perm::balance(f.ledger, perm::Account::player(2)) == 100 &&
               perm::balance(f.ledger, perm::Account::player(3)) == 0,
           "descriptive player/body identity did not authorize script spending");
-  f.world.journal.take();
+  f.journal.take();
   const auto grant = f.grant(perm::Scope::account(perm::Account::player(2)), 40);
-  f.ok(1, pay_args(34, true));
+  f.pay(pay_args(34, true));
   require(perm::balance(f.ledger, perm::Account::player(2)) == 66 &&
               perm::balance(f.ledger, perm::Account::player(3)) == 34 &&
-              f.world.grants.rows[grant].spent == 34 &&
-              std::get<bool>(
-                  f.world.f.states.at({f.world.f.a, f.world.script}).at(std::string("returned"))),
+              f.grants.rows[grant].spent == 34 &&
+              std::get<bool>(f.f.states.at({f.f.a, f.script}).at(std::string("returned"))),
           "actual synchronous self.act payment did not return with its capped transfer applied");
-  const auto logs = f.world.journal.take();
+  const auto logs = f.journal.take();
   require(logs.size() == 3 && logs[0]["kind"] == "handler" && logs[1]["name"] == "engine.pay" &&
               logs[1]["cause"] == logs[0]["id"] &&
-              logs[1]["actor"] == "s:" + std::to_string(f.world.script) &&
-              logs[1]["agent"] == false && logs[2]["name"] == "payment" &&
-              logs[2]["cause"] == logs[1]["id"],
+              logs[1]["actor"] == "s:" + std::to_string(f.script) && logs[1]["agent"] == false &&
+              logs[2]["name"] == "payment" && logs[2]["cause"] == logs[1]["id"],
           "actual payment action/effect lost its handler cause or became another player choice");
-  f.ok(1, pay_args(10, false));
-  f.ok(1, pay_args(1, false), f.world.f.b);
+  f.pay(pay_args(10, false));
+  f.pay(pay_args(1, false), f.f.b);
   require(perm::balance(f.ledger, perm::Account::player(3)) == 34 &&
-              f.world.grants.rows[grant].spent == 34,
+              f.grants.rows[grant].spent == 34,
           "cap failure and another installation preserve wallets and allowance");
-  perm::revoke(f.world.grants, f.world.players, grant);
-  f.ok(1, pay_args(1, false));
+  perm::revoke(f.grants, f.players, grant);
+  f.pay(pay_args(1, false));
   const auto larger = f.grant(perm::Scope::account(perm::Account::player(2)), 1000);
-  f.ok(1, pay_args(100, false));
-  f.ok(1, pay_args(-1, false));
-  f.ok(1, pay_args(.5, false));
-  require(f.world.grants.rows[larger].spent == 0 &&
+  f.pay(pay_args(100, false));
+  for (const auto &amount : {nlohmann::json(-1), nlohmann::json(.5)}) {
+    const nlohmann::json arguments{{"from", "p:2"}, {"to", "p:3"}, {"amount", amount}};
+    require(!step::validate_pay(arguments).empty(),
+            "the production payment boundary rejects negative or fractional currency");
+    require(!step::validate_issue({{"to", "p:3"}, {"amount", amount}}).empty(),
+            "the production issuance boundary rejects negative or fractional currency");
+  }
+  require(f.grants.rows[larger].spent == 0 &&
               perm::balance(f.ledger, perm::Account::player(2)) == 66,
           "invalid amount or insufficient funds consumed money/allowance");
-  require(f.run(1, pay_args(std::numeric_limits<double>::infinity(), false)).status ==
+  require(f.start(1, pay_args(std::numeric_limits<double>::infinity(), false)).status ==
               react::RunOutcome::Status::Error,
           "nonfinite action values must not cross the Lua JSON boundary");
 }
@@ -151,31 +219,41 @@ void issuance_and_wallet_identity() {
     return std::vector<EventField>{
         {"to", std::string("p:3")}, {"amount", Value(amount)}, {"expect", Value(expect)}};
   };
-  f.ok(2, args(10, false));
+  f.issue(args(10, false));
   const auto grant = f.grant(perm::Scope::issuance(), 30, true);
-  f.ok(2, args(21, true));
-  f.ok(2, args(10, false));
+  f.issue(args(21, true));
+  f.issue(args(10, false));
   require(perm::balance(f.ledger, perm::Account::player(3)) == 21 &&
-              f.world.grants.rows[grant].spent == 21,
+              f.grants.rows[grant].spent == 21,
           "ordinary engine.issue did not enforce capped issuance authority");
-  f.ok(2, args(20, true), {}, 110);
+  f.issue(args(20, true), {}, 110);
   require(perm::balance(f.ledger, perm::Account::player(3)) == 41 &&
-              f.world.grants.rows[grant].spent == 20,
+              f.grants.rows[grant].spent == 20,
           "issuance period reset is applied once");
-  f.ok(2, args(1, false), {}, 1000);
+  f.issue(args(1, false), {}, 1000);
   require(perm::balance(f.ledger, perm::Account::player(3)) == 41, "expired issuance cannot mint");
-  f.world.f.objects.owner[f.world.f.a.slot()] = 3;
-  f.ok(3, {{"expected", Value(0.)}, {"explicit", Value(100.)}});
-  for (const auto &account : {std::string("group:1"), to_string(f.world.f.a)})
-    f.ok(4, {{"wallet", account}, {"expect", Value(true)}});
-  for (const auto &account :
-       {std::string("group:999"), std::string("p:999"),
-        to_string(Handle::make(f.world.f.a.slot(), f.world.f.a.generation() + 1))})
-    f.ok(4, {{"wallet", account}, {"expect", Value(false)}});
+  f.f.objects.owner[f.f.a.slot()] = 3;
+  f.balances({{"expected", Value(0.)}, {"explicit", Value(100.)}});
+  for (const auto &account : {std::string("group:1"), to_string(f.f.a)})
+    f.wallet({{"wallet", account}, {"expect", Value(true)}});
+  for (const auto &account : {std::string("group:999"), std::string("p:999"),
+                              to_string(Handle::make(f.f.a.slot(), f.f.a.generation() + 1))}) {
+    step::NativeCall call;
+    call.request.caller = ScriptHolder{f.script, f.f.a};
+    call.arguments = {{"account", account}};
+    bool rejected = false;
+    try {
+      step::balance(f.ledger, f.players, identity(f.f.objects), authority(f.f.objects), f.groups,
+                    call);
+    } catch (const std::invalid_argument &) {
+      rejected = true;
+    }
+    require(rejected, "unknown or stale accounts cannot be read as an empty wallet");
+  }
 }
 void object_and_group_payments_use_their_actual_accounts() {
   Fixture f;
-  const auto object = perm::Account::object(f.world.f.a);
+  const auto object = perm::Account::object(f.f.a);
   const auto group = perm::Account::group(1);
   f.ledger.balance[object] = 40;
   f.ledger.balance[group] = 70;
@@ -185,30 +263,27 @@ void object_and_group_payments_use_their_actual_accounts() {
                                    {"amount", Value(amount)},
                                    {"expect", Value(expect)}};
   };
-  const auto name = to_string(f.world.f.a);
-  f.ok(3, {{"expected", Value(40.)}, {"explicit", Value(100.)}});
-  f.ok(1, args(name, "group:1", 15, false));
+  const auto name = to_string(f.f.a);
+  f.balances({{"expected", Value(40.)}, {"explicit", Value(100.)}});
+  f.pay(args(name, "group:1", 15, false));
   const auto object_grant = f.grant(perm::Scope::account(object), 20);
-  f.ok(1, args(name, "group:1", 15, true));
-  f.ok(1, args(name, "group:1", 6, false));
-  f.ok(1, args("group:1", name, 6, false));
+  f.pay(args(name, "group:1", 15, true));
+  f.pay(args(name, "group:1", 6, false));
+  f.pay(args("group:1", name, 6, false));
   f.grant(perm::Scope::account(group), 10);
-  f.ok(1, args("group:1", name, 6, true));
+  f.pay(args("group:1", name, 6, true));
   f.grant(perm::Scope::issuance(), 20, true);
-  f.ok(2, {{"to", name}, {"amount", Value(7.)}, {"expect", Value(true)}});
-  f.ok(2, {{"to", std::string("group:1")}, {"amount", Value(8.)}, {"expect", Value(true)}});
+  f.issue({{"to", name}, {"amount", Value(7.)}, {"expect", Value(true)}});
+  f.issue({{"to", std::string("group:1")}, {"amount", Value(8.)}, {"expect", Value(true)}});
   require(perm::balance(f.ledger, object) == 38 && perm::balance(f.ledger, group) == 87 &&
               perm::balance(f.ledger, perm::Account::player(2)) == 100,
           "actual Lua pay/issue aliased a typed account to the owner's wallet");
-  perm::transfer_owner(authority(f.world.f.objects), f.world.limits,
-                       permission_flags(f.world.f.objects), f.world.grants, f.world.players,
-                       perm::target(identity(f.world.f.objects), authority(f.world.f.objects),
-                                    f.world.limits, f.world.f.a),
-                       3);
-  f.ok(3, {{"expected", Value(38.)}, {"explicit", Value(100.)}});
-  f.ok(1, args(name, "group:1", 1, false));
-  require(!f.world.grants.rows[object_grant].live,
-          "sale left an old account Spend grant installed");
+  perm::transfer_owner(
+      authority(f.f.objects), f.limits, permission_flags(f.f.objects), f.grants, f.players,
+      perm::target(identity(f.f.objects), authority(f.f.objects), f.limits, f.f.a), 3);
+  f.balances({{"expected", Value(38.)}, {"explicit", Value(100.)}});
+  f.pay(args(name, "group:1", 1, false));
+  require(!f.grants.rows[object_grant].live, "sale left an old account Spend grant installed");
 }
 } // namespace
 int main() {

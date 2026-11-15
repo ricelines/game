@@ -1,8 +1,9 @@
-add_library(amber_snap snap.cpp objects.cpp)
-target_link_libraries(amber_snap PUBLIC amber_store Ambergris::bitsery PRIVATE Ambergris::libzstd_static)
-target_link_libraries(amber_snap PRIVATE Ambergris::TracyClient)
-if(BUILD_TESTING)
-  add_executable(snap_test ../../tests/snap_test.cpp)
-  target_link_libraries(snap_test PRIVATE amber_snap)
-  add_test(NAME snap COMMAND snap_test)
-endif()
+add_library(amber_snap STATIC
+  snap.cpp
+  objects.cpp
+  catalog.cpp
+  parts.cpp
+)
+target_include_directories(amber_snap PUBLIC ${PROJECT_SOURCE_DIR}/server)
+target_compile_features(amber_snap PUBLIC cxx_std_20)
+target_link_libraries(amber_snap PUBLIC amber_store Ambergris::bitsery PRIVATE Ambergris::libzstd_static Ambergris::TracyClient)

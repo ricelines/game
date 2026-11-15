@@ -17,7 +17,7 @@ template <class Fn> void bench(const char *name, std::size_t iterations, Fn run)
 } // namespace
 int main() {
   constexpr std::size_t count = 100000;
-  Process process{20, 0, -0.2, 0, 100, 1};
+  Process process{20, 0, -0.2, 0, 100};
   bench("closed_form_threshold", count, [&]() {
     double checksum = 0;
     for (std::size_t i = 0; i < count; ++i) {

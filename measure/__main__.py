@@ -11,7 +11,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("adapter")
     parser.add_argument("--input", type=Path)
-    parser.add_argument("--output", type=Path, default=Path("measure-output"))
+    parser.add_argument("--output", type=Path, default=Path(".cache/measure/output"))
     parser.add_argument("--period", type=float)
     parser.add_argument(
         "--options", type=Path, help="Explicit JSON adapter options such as pages/roles/columns"

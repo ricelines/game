@@ -1,12 +1,12 @@
-#include "bindings/illumination.hpp"
 #include "runtime_fixture.hpp"
 #include "space_fixture.hpp"
+#include "step/step.hpp"
 
 #include <cmath>
 
 namespace {
 using namespace amber;
-namespace bi = bindings;
+namespace bi = step;
 namespace ob = observe;
 namespace re = react;
 using testspace::require;
@@ -47,18 +47,36 @@ void actual_lighting_watch_sampling() {
   ob::track_view(views, 2, {100, 0, 1}, 1);
   ob::take_dirty_views(views);
   ob::Lights lights(8);
-  ob::set_light(lights, {f.c, {}, TermRef{1}, 40, .1f}, transforms(f.objects));
   ob::ZoneAmbients zones;
-  ob::set_zone(zones, {zone, TermRef{5}, 1});
   auto values = f.values();
-  bi::IlluminanceReads reads{points, f.subscriptions, identity(f.objects), transforms(f.objects),
-                             2};
-  bi::IlluminanceSampling sampling{points, world, values, lights, zones, f.runtime, 1, 100};
-  bi::sync_illuminance_reads(reads, std::span(&f.a, 1));
+  bi::IlluminationSources sources;
+  f.models.rows.resize(4);
+  f.objects.model[f.c.slot()] = 2;
+  f.objects.model[zone.slot()] = 3;
+  catalog::ParameterBlocks parameters;
+  catalog::Assets assets;
+  for (ModelId id = 1; id <= 3; ++id) {
+    f.models.rows[id].id = id;
+    f.models.rows[id].asset = std::to_string(id);
+    assets.rows[std::to_string(id)].manifest["bindings"] = nlohmann::json::object();
+  }
+  assets.rows["2"].manifest["bindings"]["light"] = {
+      {"site", {0, 0, 0}}, {"intensity", "novel.heat"}, {"range", 40}};
+  assets.rows["3"].manifest["bindings"]["zone"] = {{"ambient", "novel.ready"}, {"priority", 1}};
+  auto install = [&](Handle object, Step now) {
+    bi::register_illumination(sources, lights, zones, points, views, world, transforms(f.objects),
+                              f.models, parameters, assets, values, std::span(&object, 1), .1f, now,
+                              20);
+  };
+  install(f.c, 0);
+  install(zone, 0);
+  bi::sync_illuminance_reads(points, f.subscriptions, identity(f.objects), transforms(f.objects), 2,
+                             std::span(&f.a, 1));
   require(points.rows.size() == 1, "actual watched runtime term creates one sample point");
   auto sample = [&](Step now) {
     f.effects = {};
-    bi::sample_illuminance(sampling, now, 20, f.effects);
+    bi::sample_illuminance(points, world, identity(f.objects), lights, zones, f.runtime, 1,
+                           f.effects);
     return re::read(values, f.a, 2, now, 20).value.numeric();
   };
   auto near = [](double a, double b) { return std::abs(a - b) < .001; };
@@ -80,57 +98,65 @@ void actual_lighting_watch_sampling() {
           "near-source occluder invalidates and shadows receiver three cells away");
   move_wall({8, 4, 0});
   require(near(sample(2), 12), "moving actual occluder away restores subscribed lux");
-  bi::RunningLights running_lights;
-  bi::RunningZones running_zones;
-  bi::IlluminationProcesses running{running_lights, running_zones, lights, zones, f.processes};
+  const auto changed = [&](Handle object, TermId term, Step now) {
+    const FactKey fact{object, term};
+    bi::illumination_values_changed(sources, lights, zones, points, views, world, values,
+                                    std::span(&fact, 1), now, 20);
+  };
+  const auto advance = [&](Step now) {
+    bi::advance_illumination(sources, lights, zones, points, views, world, values, now, 20);
+  };
   re::set_rate(f.properties, f.processes, f.terms.rows[1], f.c, -9000, 0, 9000, 0, 20, f.effects);
-  bi::register_illumination_processes(running, std::span(&f.c, 1));
-  require(running_lights.sources.contains(f.c.bits),
+  install(f.c, 0);
+  require(sources.running_lights.contains(f.c.bits),
           "restored active light process is indexed without needing a new state mutation");
-  bi::light_value_changed(running_lights, lights, points, views, f.processes, {f.c, 1});
+  changed(f.c, 1, 0);
   require(ob::take_dirty_views(views) == std::vector<std::uint64_t>{1},
           "light changes invalidate actual influenced observers only");
-  bi::advance_running_lights(running_lights, lights, points, views, f.processes, 20, 20);
-  require(running_lights.sources.empty() && near(sample(20), 2),
+  advance(20);
+  require(sources.running_lights.empty() && near(sample(20), 2),
           "terminal process sample publishes darkness before stopping periodic work");
   re::set_rate(f.properties, f.processes, f.terms.rows[1], f.c, 9000, 0, 9000, 20, 20, f.effects);
-  bi::light_value_changed(running_lights, lights, points, views, f.processes, {f.c, 1});
-  bi::advance_running_lights(running_lights, lights, points, views, f.processes, 30, 20);
-  require(!running_lights.sources.empty() && near(sample(30), 7),
+  changed(f.c, 1, 20);
+  advance(30);
+  require(!sources.running_lights.empty() && near(sample(30), 7),
           "reversing a clamped light process rearms visible sampling");
-  bi::advance_running_lights(running_lights, lights, points, views, f.processes, 40, 20);
-  require(running_lights.sources.empty() && near(sample(40), 12), "positive terminal light sample");
+  advance(40);
+  require(sources.running_lights.empty() && near(sample(40), 12), "positive terminal light sample");
   f.state(zone, 5, 20, 40);
-  bi::zone_value_changed(running_zones, zones, points, views, world, f.processes, {zone, 5});
+  changed(zone, 5, 40);
   require(near(sample(40), 30), "live zone ambient state invalidates its real sensor region");
   re::set_rate(f.properties, f.processes, f.terms.rows[5], zone, 20, 0, 40, 40, 20, f.effects);
-  bi::register_illumination_processes(running, std::span(&zone, 1));
-  require(running_zones.sources.contains(zone.bits),
+  install(zone, 40);
+  require(sources.running_zones.contains(zone.bits),
           "restored or rebound ambient process is indexed from current binding");
-  bi::zone_value_changed(running_zones, zones, points, views, world, f.processes, {zone, 5});
-  bi::advance_running_zones(running_zones, zones, points, views, world, f.processes, 60, 20);
-  require(running_zones.sources.empty() && near(sample(60), 50),
+  changed(zone, 5, 40);
+  advance(60);
+  require(sources.running_zones.empty() && near(sample(60), 50),
           "live ambient process samples its terminal bound and stops");
   std::vector<space::RelationChange> changes;
   space::PhysicalRelations relations;
   space::remove(world, identity(f.objects), zone, parents(f.objects), space_flags(f.objects),
                 relations, changes);
-  ob::remove_zone(zones, zone);
+  bi::retire_illumination(sources, lights, zones, points, views, world, std::span(&zone, 1));
   space::StepResult physics;
   space::step(world, identity(f.objects), transforms(f.objects), parents(f.objects),
               space_flags(f.objects), relations, 61, .05f, {}, physics);
   ob::dirty_geometry(points, lights, physics.dirty_bounds);
   require(near(sample(61), 11), "removing real ambient sensor restores world ambient");
-  ob::dirty_light(points, {0, 0, 1}, 40);
-  sampling.query_ms = 0;
-  require(near(sample(62), 11) && !points.dirty.empty(),
-          "incomplete geometry query retains prior answer and schedules retry");
-  sampling.query_ms = 100;
-  sample(62);
-  require(points.dirty.empty(), "completed retry clears dirty point");
-  bi::retire_illuminance_reads(reads, f.runtime, std::span(&f.a, 1));
+  bi::retire_illuminance_reads(points, f.runtime, 2, std::span(&f.a, 1));
   require(points.rows.empty() && !f.runtime.values.contains({f.a, 2}),
           "retirement removes exact-generation subscription and runtime answer");
+  const auto second = f.add(R"(return {kind='model', watches={'novel.result'},
+    on={['novel.result']=function(self)end}})");
+  f.bind(second, f.c, re::SyncMode::Change);
+  bi::sync_illuminance_reads(points, f.subscriptions, identity(f.objects), transforms(f.objects), 2,
+                             std::span(&f.c, 1));
+  require(points.rows.contains({f.c.bits, 2}), "own runtime watch creates its actual sample point");
+  re::remove_watches(f.subscriptions, {f.c, second});
+  bi::sync_illuminance_reads(points, f.subscriptions, identity(f.objects), transforms(f.objects), 2,
+                             std::span(&f.c, 1));
+  require(points.rows.empty(), "removing own runtime watch removes its sample point");
 }
 } // namespace
 int main() {

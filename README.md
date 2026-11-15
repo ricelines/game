@@ -77,9 +77,15 @@ Snapshots are written under the selected data directory. Starting again with the
   --catalog .runtime --data .runtime-resumed
 ```
 
+The current runtime is `ambergris-0.3`. Earlier snapshot layouts are incompatible
+and are rejected before decoding. Use a fresh data directory for a new world;
+existing saves are not migrated.
+
 Restore rebuilds real VM programs, collision, navigation, attachments, watches and runtime projections. Captures use the same thirteen owner encoders with selected rows. Rule approval launches fresh instances of this server for every candidate/baseline test; a candidate must pass all tests and improve at least one baseline result. `bin/amb fixture CAPTURE --job JOB.json --result RESULT.json --catalog DATA_DIRECTORY` exposes that runner directly.
 
 For bounded headless runs, use `--no-network --unpaced --steps N --report PATH --snapshot-at-end`. World time still advances by the fixed simulation quantum; the report contains actual resolved values.
+Omitting `--steps` runs continuously. Explicit `--steps 0` loads and reports the
+world at its saved boundary without advancing it.
 
 ## Verify
 
@@ -93,8 +99,8 @@ python3 bake/run.py -m pytest
 The content-dependent importer and authoring checks require the prepared plan and actual assets; run them separately from CTest:
 
 ```sh
-.build/release/server/bindings/start/start_test "$PWD/.cache/content/seeded-plan.json" "$PWD/assets" /path/to/current-world/registry/HASH.json
-.build/release/server/bindings/authoring/authoring_test "$PWD/.cache/content/seeded-plan.json" "$PWD/assets"
+.build/release/tests/start_test "$PWD/.cache/content/seeded-plan.json" "$PWD/assets" /path/to/current-world/registry/HASH.json
+.build/release/tests/authoring_test "$PWD/.cache/content/seeded-plan.json" "$PWD/assets"
 ```
 
 The native suites use real Luau, Jolt and Recast/Detour. Performance records distinguish module benchmarks, live server/socket tests, model-driven world events and the browser hardware used. An unavailable dataset or failed hardware gate remains reported as such.

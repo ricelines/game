@@ -1,5 +1,4 @@
-#include "snap/codec.hpp"
-#include "snap/objects.hpp"
+#include "snap/snap.hpp"
 
 #include <chrono>
 #include <fstream>
@@ -26,11 +25,12 @@ snap::Buffer snapshot(const Objects &objects, Step step,
   snap::Buffer bytes;
   snap::Output out{bytes};
   snap::begin(out, {"test-runtime", step, {}});
-  for (auto tag : snap::tags)
-    snap::section(out, tag, [&](snap::Output &s) {
-      if (tag == snap::tags[0])
-        snap::write_objects(s, objects, selection);
-    });
+  for (auto tag : snap::tags) {
+    const auto marker = snap::begin_section(out, tag);
+    if (tag == snap::tags[0])
+      snap::write_objects(out, objects, selection);
+    snap::end_section(out, marker);
+  }
   snap::finish(out, bytes);
   return bytes;
 }

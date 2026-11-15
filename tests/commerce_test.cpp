@@ -1,19 +1,25 @@
 #include "space_fixture.hpp"
 
-#include "bindings/commerce/commerce.hpp"
 #include "runtime_fixture.hpp"
-#include "scene_fixture.hpp"
+#include "step/action_private.hpp"
 
 namespace {
 using namespace amber;
-namespace cm = bindings::commerce;
+namespace cm = step;
 using test_runtime::require;
+template <class F> void rejects(F action, const char *message) {
+  try {
+    action();
+  } catch (const std::invalid_argument &) {
+    return;
+  }
+  throw std::runtime_error(message);
+}
 struct Fixture {
   test_runtime::Fixture f;
   space::Space world;
   lifecycle::Parts parts;
   Relation declared;
-  lifecycle::Instances instances{f.objects, parts, declared};
   std::vector<space::RelationChange> physical_changes;
   space::PhysicalRelations physical;
   perm::Groups groups;
@@ -25,102 +31,20 @@ struct Fixture {
   perm::OwnerLimits limits;
   perm::Plots plots;
   react::MeterRows meters;
-  react::PriorityLinks priorities;
-  bindings::AllocationReconciliation allocation{f.allocations, meters, priorities};
   catalog::Assets assets;
   catalog::ParameterBlocks parameters;
-  bindings::GeometryAssets geometry;
-  bindings::DeliveryTargets delivery;
-  testscene::Projection projections;
-  testscene::Lifecycle lifecycle;
-  cm::Custody custody;
-  command::NativeActions declarations;
-  drive::NativeOperations operations;
-  cm::Declarations ids;
-  cm::PaymentBinding payment;
-  cm::BalanceBinding balance;
-  cm::InventoryBinding inventory;
-  cm::GiveBinding giver;
-  cm::OfferBinding seller;
-  cm::OffersBinding offer_reads;
-  cm::AcceptBinding buyer;
-  cm::TradeOpenBinding opener;
-  cm::TradeChangeBinding changer;
-  cm::TradeConfirmBinding confirmer;
-  cm::TradeCancelBinding canceller;
-  cm::ExistingPlacementBinding placement;
+  step::GeometryAssets geometry;
+  step::DeliveryTargets delivery;
+  react::NativeActions declarations;
+  cm::CommerceDeclarations ids;
+  std::size_t mailbox_max = 1;
   std::array<Handle, 2> bodies;
   explicit Fixture(std::uint32_t capacity = 64)
       : world([&] {
           auto s = testspace::settings();
           s.max_bodies = capacity;
           return s;
-        }()),
-        projections(f.objects, f.models, parameters, assets, *f.projection, f.runtime,
-                    f.subscriptions, declared, {30, 31}),
-        lifecycle(f, world, instances, parts, declared, physical, physical_changes, projections,
-                  players, grants, limits, offers, trades, plots, ledger),
-        custody{world,
-                identity(f.objects),
-                transforms(f.objects),
-                parents(f.objects),
-                space_flags(f.objects),
-                physical,
-                parts,
-                declared,
-                {0, 0, 3, 0},
-                projections.scene,
-                plot_membership(f.objects),
-                plots},
-        payment{ledger, grants, players, identity(f.objects), authority(f.objects), groups},
-        balance{ledger, players, identity(f.objects), authority(f.objects), groups},
-        inventory{players},
-        giver{players,  grants, authority(f.objects), permission_flags(f.objects), limits, custody,
-              delivery, 1},
-        seller{offers, permission_flags(f.objects), players, grants, authority(f.objects), limits,
-               custody},
-        offer_reads{offers, players, identity(f.objects), authority(f.objects)},
-        buyer{offers,
-              ledger,
-              grants,
-              players,
-              authority(f.objects),
-              permission_flags(f.objects),
-              limits,
-              custody,
-              delivery,
-              1,
-              groups},
-        opener{trades, players, identity(f.objects), delivery},
-        changer{trades, offers, permission_flags(f.objects), players, grants, authority(f.objects),
-                limits, custody},
-        confirmer{trades,
-                  offers,
-                  ledger,
-                  grants,
-                  players,
-                  authority(f.objects),
-                  permission_flags(f.objects),
-                  limits,
-                  custody,
-                  delivery},
-        canceller{trades, offers, permission_flags(f.objects), custody},
-        placement{custody,
-                  transforms(f.objects),
-                  plot_membership(f.objects),
-                  players,
-                  grants,
-                  authority(f.objects),
-                  limits,
-                  plots,
-                  geometry,
-                  f.models,
-                  parameters,
-                  assets,
-                  *f.projection,
-                  {10, 11},
-                  {.6f, 0},
-                  allocation} {
+        }()) {
     players.rows.resize(4);
     ledger.balance = {{perm::Account::player(1), 100}, {perm::Account::player(2), 100}};
     plots.rows.resize(3);
@@ -169,22 +93,6 @@ struct Fixture {
     ids = cm::declare_commerce(f.terms, declarations);
     const auto again = cm::declare_commerce(f.terms, declarations);
     require(again.pay == ids.pay, "native declaration restore is idempotent");
-    auto add = [&](TermId id, auto validate, auto run, auto *binding) {
-      drive::register_native(operations, id, {validate, run, binding});
-    };
-    add(ids.pay, cm::validate_pay, cm::pay, &payment);
-    add(ids.balance, cm::validate_balance, cm::balance, &balance);
-    add(ids.inventory, cm::validate_inventory, cm::inventory, &inventory);
-    add(ids.give, cm::validate_give, cm::give, &giver);
-    add(ids.offer, cm::validate_offer, cm::offer, &seller);
-    add(ids.offers, cm::validate_offers, cm::offers, &offer_reads);
-    add(ids.accept, cm::validate_accept, cm::accept, &buyer);
-    add(ids.cancel_offer, cm::validate_cancel_offer, cm::cancel_offer, &seller);
-    add(ids.trade_open, cm::validate_trade_open, cm::trade_open, &opener);
-    add(ids.trade_change, cm::validate_trade_change, cm::trade_change, &changer);
-    add(ids.trade_confirm, cm::validate_trade_confirm, cm::trade_confirm, &confirmer);
-    add(ids.trade_cancel, cm::validate_trade_cancel, cm::trade_cancel, &canceller);
-    add(ids.place_existing, cm::validate_place_existing, cm::place_existing, &placement);
     bodies = {single(1, {-10, 10, 0}, true), single(2, {10, 10, 0}, true)};
     delivery.present_bodies = {{1, bodies[0]}, {2, bodies[1]}};
   }
@@ -228,10 +136,10 @@ struct Fixture {
       const auto model = f.objects.model[h.slot()];
       const auto &asset = assets.rows.at(f.models.rows[model].asset);
       const auto definition =
-          bindings::describe_physics(geometry, asset, *f.projection, {model, 0, 8, init.plot, h},
-                                     Static, {10, 11}, {.6f, 0}, 0, 20);
-      bindings::install_physics(world, identity(f.objects), transforms(f.objects),
-                                space_flags(f.objects), h, definition);
+          step::describe_physics(geometry, asset, *f.projection, {model, 0, 8, init.plot, h},
+                                 Static, {10, 11}, {.6f, 0}, 0, 20);
+      step::install_physics(world, identity(f.objects), transforms(f.objects),
+                            space_flags(f.objects), h, definition);
       permission_flags(f.objects).set(h.slot(), NoCopy);
       if (h != created.root) {
         std::vector<space::RelationChange> changes;
@@ -247,13 +155,31 @@ struct Fixture {
     }
     return created;
   }
-  drive::NativeCompletion call(TermId action, Caller actor, nlohmann::json args = {},
-                               Handle target = {}) {
+  step::NativeCompletion call(TermId action, Caller actor, nlohmann::json args = {},
+                              Handle target = {}) {
     if (args.is_null())
       args = nlohmann::json::object();
-    return drive::invoke_native(operations,
-                                {{actor, action, target, {}}, std::move(args), {}, 20, 20, {}});
+    const auto operation = std::get<react::ExchangeAction>(declarations.rows.at(action).operation);
+    auto out = step::native_exchange(
+        parts, declared, players, groups, grants, ledger, limits, offers, trades, world, delivery,
+        identity(f.objects), parents(f.objects), authority(f.objects), authority(f.objects),
+        space_flags(f.objects), permission_flags(f.objects), mailbox_max, operation,
+        {{actor, action, target, {}}, std::move(args), {}, 20, 20, {}});
+    const auto custody = std::move(out.custody);
+    step::apply_custody(world, identity(f.objects), transforms(f.objects), parents(f.objects),
+                        space_flags(f.objects), physical, parts, {0, 0, 3, 0},
+                        plot_membership(f.objects), plots, custody, out);
+    return out;
   }
+  step::NativeCompletion place(Caller actor, nlohmann::json args, Handle target) {
+    return step::place_existing(
+        world, identity(f.objects), transforms(f.objects), parents(f.objects),
+        space_flags(f.objects), physical, parts, declared, {0, 0, 3, 0}, plot_membership(f.objects),
+        plots, players, grants, authority(f.objects), limits, geometry, f.models, parameters,
+        assets, *f.projection, {10, 11}, {.6f, 0}, f.allocations, meters,
+        {{actor, ids.place_existing, target, {}}, std::move(args), {}, 20, 20, {}});
+  }
+
   bool visible(Handle h) { return space::bounds(world, identity(f.objects), h).has_value(); }
   void store(Handle h, PlayerId owner) {
     auto closure = lifecycle::collect(parts, identity(f.objects), h);
@@ -290,8 +216,8 @@ void wallet_native_authority_is_explicit() {
       !f.call(f.ids.pay, ScriptHolder{77, f.f.b}, {{"from", "p:1"}, {"to", "p:2"}, {"amount", 1}})
            .changed,
       "Spend leaked across installations");
-  require(!f.call(f.ids.pay, PlayerId{1}, {{"to", "group:1"}, {"amount", 1}}).reply.at("ok"),
-          "non-player wallet accepted");
+  rejects([&] { f.call(f.ids.pay, PlayerId{1}, {{"to", "group:1"}, {"amount", 1}}); },
+          "unknown group account accepted");
   require(f.call(f.ids.balance, script).reply.at("balance") == 0,
           "script default balance is its distinct installed-object account");
 }
@@ -307,7 +233,7 @@ void actual_assembly_sale_and_inventory_reveal_preserve_identity() {
                          {perm::Scope::account(perm::Account::player(1)), 1, 1, 0, false},
                          {perm::Holder::script(77, child), 1, true}, 1);
   require(bool(granted), "installed part grant fixture");
-  require(!f.call(f.ids.offer, PlayerId{1}, {{"price", 40}}, child).reply.at("ok"),
+  rejects([&] { f.call(f.ids.offer, PlayerId{1}, {{"price", 40}}, child); },
           "internal part sold separately");
   const auto offered = f.call(f.ids.offer, PlayerId{1}, {{"price", 40}}, item.root);
   require(offered.changed && f.visible(item.root) && f.visible(child) &&
@@ -336,21 +262,21 @@ void actual_assembly_sale_and_inventory_reveal_preserve_identity() {
           "native sale failed complete physical/financial/grant transfer");
   const auto blocker_a = f.single(1, {-10, -10, 0}), blocker_b = f.single(1, {-8, -10, 0});
   const auto before = f.f.objects.position[item.root.slot()];
-  auto placed = f.call(f.ids.place_existing, PlayerId{2}, {{"position", {4, 5, 0}}}, item.root);
-  require(!placed.changed && f.f.objects.position[item.root.slot()] == before &&
-              !f.visible(item.root) && f.players.rows[2].inventory.size() == 1,
+  rejects([&] { f.place(PlayerId{2}, {{"position", {4, 5, 0}}}, item.root); },
+          "full native body pool accepted an inventory reveal");
+  require(f.f.objects.position[item.root.slot()] == before && !f.visible(item.root) &&
+              f.players.rows[2].inventory.size() == 1,
           "native capacity failure moved or lost inventory");
   std::vector<space::RelationChange> changes;
   for (auto h : {blocker_a, blocker_b})
     space::remove(f.world, identity(f.f.objects), h, parents(f.f.objects), space_flags(f.f.objects),
                   f.physical, changes);
-  require(
-      !f.call(f.ids.place_existing, PlayerId{2}, {{"position", {-4, 5, 0}}}, item.root).changed &&
-          !f.visible(item.root),
-      "foreign land Build denial changed custody");
-  placed = f.call(f.ids.place_existing, PlayerId{2},
-                  {{"position", {4, 5, 0}}, {"rotation", {0, 0, std::sqrt(.5), std::sqrt(.5)}}},
-                  item.root);
+  require(!f.place(PlayerId{2}, {{"position", {-4, 5, 0}}}, item.root).changed &&
+              !f.visible(item.root),
+          "foreign land Build denial changed custody");
+  const auto placed = f.place(
+      PlayerId{2}, {{"position", {4, 5, 0}}, {"rotation", {0, 0, std::sqrt(.5), std::sqrt(.5)}}},
+      item.root);
   require(placed.changed && f.visible(item.root) && f.visible(child) &&
               f.players.rows[2].inventory.empty() &&
               f.f.objects.maker[item.root.slot()] == original_maker &&
@@ -360,10 +286,8 @@ void actual_assembly_sale_and_inventory_reveal_preserve_identity() {
               (f.f.objects.position[child.slot()] - Vec3{4, 6, 0}).length() < .001f &&
               f.f.objects.plot[child.slot()] == 2,
           "existing placement failed rigid closure or changed identity/attribution");
-  const auto ray = space::raycast(f.world, identity(f.f.objects), {4, 4, .5f}, {4, 5.5f, .5f}, {},
-                                  space::Deadline::max());
-  require(ray.hit && ray.hit->object == item.root,
-          "revealed inventory has no actual Jolt query shape");
+  const auto ray = space::raycast(f.world, identity(f.f.objects), {4, 4, .5f}, {4, 5.5f, .5f}, {});
+  require(ray && ray->object == item.root, "revealed inventory has no actual Jolt query shape");
   require(space::body_motion(f.world, identity(f.f.objects), child)->motion ==
               space::Motion::Kinematic,
           "authored moving part became static on reveal");
@@ -378,19 +302,21 @@ void ordinary_offer_expiry_releases_actual_assembly_without_moving_it() {
   require(offered.changed && f.offers.expiring.size() == 1,
           "actual native ordinary offer registers its finite deadline");
   const auto id = f.offers.expiring.begin()->second;
-  cm::OfferExpiryBinding expiry{f.offers, identity(f.f.objects), permission_flags(f.f.objects)};
-  require(cm::advance_offer_expiry(expiry, 29, 256).empty(),
+  require(cm::advance_offer_expiry(f.offers, identity(f.f.objects), permission_flags(f.f.objects),
+                                   29, 256)
+              .empty(),
           "native sale expired before its due step");
   for (auto h : item.objects)
     require((f.f.objects.flags[h.slot()] & Escrow) && f.visible(h),
             "ordinary sale keeps its actual root and part visible in escrow");
-  const auto scene_changes = f.projections.metadata.objects.size();
-  const auto expired = cm::advance_offer_expiry(expiry, 30, 256);
+  const auto expired = cm::advance_offer_expiry(f.offers, identity(f.f.objects),
+                                                permission_flags(f.f.objects), 30, 256);
   require(expired.size() == 1 && expired[0].offer == id && expired[0].seller == 1 &&
               expired[0].goods == item.root && expired[0].cleared == item.objects &&
               !f.offers.rows[id].live && f.offers.expiring.empty() &&
-              f.projections.metadata.objects.size() == scene_changes &&
-              cm::advance_offer_expiry(expiry, 31, 256).empty(),
+              cm::advance_offer_expiry(f.offers, identity(f.f.objects),
+                                       permission_flags(f.f.objects), 31, 256)
+                  .empty(),
           "exact deadline returns one narrow seller notice and never changes scene custody");
   for (auto h : item.objects) {
     const auto slot = h.slot();
@@ -405,7 +331,7 @@ void ordinary_offer_expiry_releases_actual_assembly_without_moving_it() {
   require(f.call(f.ids.offer, PlayerId{1}, {{"price", 10}}, item.root).changed,
           "expired actual goods are immediately available for a new ordinary offer");
 }
-void trade_changes_cancel_restore_and_complete_one_swap() {
+void trade_changes_cancel_and_complete_one_swap() {
   Fixture f;
   const auto a = f.item(1, {-4, 0, 0}, false), b = f.item(2, {4, 0, 0}, false);
   f.store(b.root, 2);
@@ -428,9 +354,9 @@ void trade_changes_cancel_restore_and_complete_one_swap() {
   require(!f.trades.rows[1].sides[0].confirmed && !f.trades.rows[1].sides[1].confirmed,
           "native edit retained confirmation");
   require(f.call(f.ids.trade_cancel, PlayerId{1}, {{"trade", id}}).changed && f.visible(a.root) &&
-              !f.visible(b.root) && f.f.objects.parent[b.root.slot()] == f.bodies[1] &&
+              !f.visible(b.root) && !f.f.objects.parent[b.root.slot()] &&
               !(f.f.objects.flags[a.root.slot()] & Escrow),
-          "cancel lost prior native custody");
+          "cancel must keep the escrow custody effect and clear its quote");
   const auto next = f.call(f.ids.trade_open, PlayerId{1}, {{"other", "p:2"}}).reply.at("trade");
   f.call(f.ids.trade_change, PlayerId{1},
          {{"trade", next}, {"money", 10}, {"goods", to_string(a.root)}});
@@ -474,7 +400,7 @@ void gifts_bounce_and_keep_unrelated_seated_bodies_alive() {
           "gift removed an ordinary seated occupant or lost offline delivery");
 }
 
-void cancelling_a_visible_held_trade_restores_actual_attachment() {
+void cancelling_a_visible_held_trade_keeps_its_escrow_pose() {
   Fixture f;
   const auto item = f.item(1, {-4, 0, 0}, false);
   std::vector<space::RelationChange> changes;
@@ -491,12 +417,12 @@ void cancelling_a_visible_held_trade_restores_actual_attachment() {
                   .changed &&
               f.visible(item.root) && !f.f.objects.parent[item.root.slot()] &&
               !(f.f.objects.flags[item.root.slot()] & Held),
-          "visible grasped trade side did not enter placed escrow");
+          "quoting visible goods clears the grasp without changing their world pose");
   require(f.call(f.ids.trade_cancel, PlayerId{1}, {{"trade", id}}).changed &&
-              f.visible(item.root) && f.f.objects.parent[item.root.slot()] == f.bodies[0] &&
-              (f.f.objects.flags[item.root.slot()] & Held) &&
+              f.visible(item.root) && !f.f.objects.parent[item.root.slot()] &&
+              !(f.f.objects.flags[item.root.slot()] & Held) &&
               f.f.objects.position[item.root.slot()] == position,
-          "trade cancellation lost actual held attachment or teleported the item");
+          "trade cancellation must leave the completed detach applied without teleporting goods");
 }
 
 void moving_between_equal_priority_plots_rebinds_future_dependencies() {
@@ -529,17 +455,16 @@ void moving_between_equal_priority_plots_rebinds_future_dependencies() {
   react::set_contribution(f.f.shared, gives, f.f.terms.rows[supply], f.f.c, f.f.a, 1, effects);
   react::set_contribution(f.f.shared, gives, f.f.terms.rows[demand], item.root, f.f.a, 1, effects);
   react::set_contribution(f.f.shared, gives, f.f.terms.rows[demand], f.f.b, f.f.a, 1, effects);
-  react::rebuild_priorities(f.priorities, *f.f.projection);
-  bindings::reconcile_allocations(*f.f.projection, f.allocation, effects, 20, 20);
+  react::reconcile_allocations(*f.f.projection, f.f.allocations, f.meters, effects, 20, 20);
   require(react::get_share(f.f.allocations, f.f.a, demand, item.root) == 1,
           "initial priority allocation");
   f.plots.rows[2].preset = 1;
-  require(f.call(f.ids.place_existing, PlayerId{1}, {{"position", {4, 5, 0}}}, item.root).changed,
+  require(f.place(PlayerId{1}, {{"position", {4, 5, 0}}}, item.root).changed,
           "authorized equal-priority placement");
   f.f.plots.rows[2][priority] = Value(3.);
   effects = {};
-  bindings::reconcile_priority(*f.f.projection, f.allocation,
-                               {react::SettingKey::Scope::Plot, 2, priority}, effects, 21, 20);
+  react::reconcile_priority(*f.f.projection, f.f.allocations, f.meters,
+                            {react::SettingKey::Scope::Plot, 2, priority}, effects, 21, 20);
   require(react::get_share(f.f.allocations, f.f.a, demand, item.root) == 0 &&
               react::get_share(f.f.allocations, f.f.a, demand, f.f.b) == 1,
           "same effective priority on placement left a stale old-plot dependency");
@@ -552,14 +477,12 @@ void logical_inventory_root_reveals_its_actual_declared_part() {
   f.geometry.rows[asset.hash].collision = 0;
   const auto item = f.item(1, {-4, 0, 0});
   f.store(item.root, 1);
-  const auto result =
-      f.call(f.ids.place_existing, PlayerId{1}, {{"position", {-4, 5, 0}}}, item.root);
+  const auto result = f.place(PlayerId{1}, {{"position", {-4, 5, 0}}}, item.root);
   require(result.changed && space::is_logical_root(f.world, identity(f.f.objects), item.root) &&
               f.visible(item.objects[1]) && !f.players.rows[1].inventory.size(),
           "existing logical root lost its visible physical part on reveal");
-  const auto ray = space::raycast(f.world, identity(f.f.objects), {-3, 4, .2f}, {-3, 6, .2f}, {},
-                                  space::Deadline::max());
-  require(ray.hit && ray.hit->object == item.objects[1],
+  const auto ray = space::raycast(f.world, identity(f.f.objects), {-3, 4, .2f}, {-3, 6, .2f}, {});
+  require(ray && ray->object == item.objects[1],
           "logical assembly child is absent from native queries");
 }
 
@@ -569,26 +492,24 @@ void script_inventory_placement_uses_its_own_grants() {
   f.store(item.root, 1);
   const ScriptHolder script{99, f.f.a};
   const auto args = nlohmann::json{{"position", {-4, 5, 0}}};
-  require(!f.call(f.ids.place_existing, script, args, item.root).changed && !f.visible(item.root),
+  require(!f.place(script, args, item.root).changed && !f.visible(item.root),
           "script borrowed the inventory owner's Move/Build authority");
   const auto holder = perm::Holder::script(script.script, script.object);
   const auto move = perm::create_grant(
       f.grants, f.players, perm::Holder::player(1),
       {1, holder, perm::Scope::object(item.root), perm::bit(perm::Verb::Move), 0, 0, 500},
       {perm::Scope::object(item.root), 1, perm::all_rights, 1, false}, {holder, 1, true}, 1);
-  require(bool(move) && !f.call(f.ids.place_existing, script, args, item.root).changed &&
-              !f.visible(item.root),
+  require(bool(move) && !f.place(script, args, item.root).changed && !f.visible(item.root),
           "script Move grant borrowed owner's land Build");
   const auto build = perm::create_grant(
       f.grants, f.players, perm::Holder::player(1), {1, holder, perm::Scope::plot(1), 1, 0, 0, 500},
       {perm::Scope::plot(1), 1, 7, 1, false}, {holder, 1, true}, 1);
-  require(bool(build) && f.call(f.ids.place_existing, script, args, item.root).changed &&
-              f.visible(item.root) && f.f.objects.owner[item.root.slot()] == 1 &&
-              f.players.rows[1].inventory.empty(),
+  require(bool(build) && f.place(script, args, item.root).changed && f.visible(item.root) &&
+              f.f.objects.owner[item.root.slot()] == 1 && f.players.rows[1].inventory.empty(),
           "authorized script did not place existing owner's item under its actual grants");
 }
 
-void retirement_restores_the_surviving_trade_side_before_free() {
+void retirement_keeps_the_surviving_trade_side_before_free() {
   Fixture f;
   const auto a = f.item(1, {-4, 0, 0}), b = f.item(2, {4, 0, 0});
   f.store(b.root, 2);
@@ -598,15 +519,20 @@ void retirement_restores_the_surviving_trade_side_before_free() {
   f.call(f.ids.trade_change, PlayerId{2},
          {{"trade", id}, {"money", 0}, {"goods", to_string(b.root)}});
   const std::array<Handle, 1> doomed{a.root};
-  const auto closure = f.instances.closure(doomed);
-  std::string error;
-  require(bindings::can_retire_objects(f.lifecycle.lifecycle, closure, error), error.c_str());
-  react::DeferredEffects pending;
-  bindings::retire_objects(f.lifecycle.lifecycle, closure, {}, pending);
+  const auto closure = lifecycle::collect(f.parts, identity(f.f.objects), doomed);
+  step::NativeCompletion cleanup;
+  step::retire_commerce(f.ledger, f.offers, f.trades, f.grants, f.players, f.limits,
+                        identity(f.f.objects), authority(f.f.objects),
+                        permission_flags(f.f.objects), closure, 20, cleanup);
+  std::vector<space::RelationChange> changes;
+  for (auto h : closure)
+    space::remove(f.world, identity(f.f.objects), h, parents(f.f.objects), space_flags(f.f.objects),
+                  f.physical, changes);
+  lifecycle::release_rows(f.f.objects, f.parts, f.declared, closure);
   require(!identity(f.f.objects).valid(a.root) && identity(f.f.objects).valid(b.root) &&
               !f.trades.rows[1].live && !(f.f.objects.flags[b.root.slot()] & Escrow) &&
-              !f.visible(b.root) && f.f.objects.parent[b.root.slot()] == f.bodies[1] &&
-              f.players.rows[2].inventory == std::vector<Handle>{b.root} && pending.changed,
+              !f.visible(b.root) && !f.f.objects.parent[b.root.slot()] &&
+              f.players.rows[2].inventory == std::vector<Handle>{b.root} && cleanup.changed,
           "retirement cancelled money rows but lost surviving physical custody");
 }
 void rebind_invalidates_only_affected_sales_with_actual_new_parts() {
@@ -632,36 +558,32 @@ void rebind_invalidates_only_affected_sales_with_actual_new_parts() {
   const auto old_pose = f.f.objects.position[item.root.slot()];
   const auto balances = f.ledger.balance;
   const std::array<Handle, 1> rebound{item.root};
-  cm::RebindOffersBinding binding{f.offers, f.trades, permission_flags(f.f.objects), f.custody};
-  bindings::InvocationInput invocation;
-  invocation.step = 30;
-  react::DeferredEffects effects;
-  cm::rebind_offers(binding, rebound, invocation, effects);
+  auto cancellation = cm::rebind_offers(f.offers, f.trades, permission_flags(f.f.objects),
+                                        identity(f.f.objects), f.parts, rebound, 30);
   require(!f.offers.rows[1].live && f.offers.rows[2].live &&
               (f.f.objects.flags[untouched.root.slot()] & Escrow) &&
               !(f.f.objects.flags[item.root.slot()] & Escrow) &&
               !(f.f.objects.flags[item.objects[1].slot()] & Escrow) &&
               !(f.f.objects.flags[added.slot()] & Escrow) && f.visible(item.root) &&
               f.visible(added) && f.f.objects.position[item.root.slot()] == old_pose &&
-              f.ledger.balance == balances && effects.changed,
+              f.ledger.balance == balances && cancellation.changed,
           "definition invalidation used stale parts, moved goods, or cancelled unrelated sale");
-  step::WorkQueues queues;
-  step::TimerWheel timers;
   record::Journal journal(100, {});
   record::Origin origin;
   origin.cause = 91;
-  react::publish_effects(std::move(effects), origin, 30, queues, timers, journal, 1000);
+  for (auto &row : cancellation.records)
+    journal.append(std::move(row), origin);
   const auto records = journal.take();
   require(records.size() == 1 && records[0]["name"] == "goods_offers_invalidated" &&
               records[0]["cause"] == 91 && records[0]["reason"] == "definition_changed" &&
               records[0]["offers"] == nlohmann::json::array({"offer:1"}) &&
               records[0]["things"].size() == 3,
           "changed sale lacks causal reason or actual new part closure");
-  effects = {};
-  cm::rebind_offers(binding, rebound, invocation, effects);
-  require(!effects.changed && effects.ordered.empty(), "rebind cancellation was replayed");
+  cancellation = cm::rebind_offers(f.offers, f.trades, permission_flags(f.f.objects),
+                                   identity(f.f.objects), f.parts, rebound, 31);
+  require(!cancellation.changed && cancellation.records.empty(), "quote cancellation was replayed");
 }
-void rebind_trade_restores_visible_grasp_and_hidden_inventory_at_full_capacity() {
+void rebind_trade_keeps_current_custody_at_full_capacity() {
   Fixture f;
   const auto held = f.item(1, {-4, 0, 0});
   const auto stored = f.item(2, {4, 0, 0});
@@ -688,66 +610,72 @@ void rebind_trade_restores_visible_grasp_and_hidden_inventory_at_full_capacity()
   const auto balance = f.ledger.balance;
   const auto stored_inventory = f.players.rows[2].inventory;
   const std::array<Handle, 2> rebound{held.root, stored.root};
-  cm::RebindOffersBinding binding{f.offers, f.trades, permission_flags(f.f.objects), f.custody};
-  react::DeferredEffects effects;
-  cm::rebind_offers(binding, rebound, {}, effects);
-  require(
-      !f.trades.rows[1].live && !f.trades.rows[1].sides[0].confirmed &&
-          !f.trades.rows[1].sides[1].confirmed && !f.offers.rows[1].live &&
-          !f.offers.rows[2].live && f.visible(held.root) && !f.visible(stored.root) &&
-          f.f.objects.parent[held.root.slot()] == f.bodies[0] &&
-          f.f.objects.parent[stored.root.slot()] == f.bodies[1] &&
-          (f.f.objects.flags[held.root.slot()] & Held) &&
-          !(f.f.objects.flags[held.root.slot()] & Escrow) &&
-          !(f.f.objects.flags[stored.root.slot()] & Escrow) &&
-          f.f.objects.position[held.root.slot()] == position &&
-          f.players.rows[2].inventory == stored_inventory && f.ledger.balance == balance &&
-          space::capacity(f.world).native_available == 0,
-      "rebinding trade goods lost prior custody, confirmations, money, or needed native capacity");
+  const auto cancellation = cm::rebind_offers(f.offers, f.trades, permission_flags(f.f.objects),
+                                              identity(f.f.objects), f.parts, rebound, 20);
+  require(cancellation.changed && !f.trades.rows[1].live && !f.trades.rows[1].sides[0].confirmed &&
+              !f.trades.rows[1].sides[1].confirmed && !f.offers.rows[1].live &&
+              !f.offers.rows[2].live && f.visible(held.root) && !f.visible(stored.root) &&
+              !f.f.objects.parent[held.root.slot()] && !f.f.objects.parent[stored.root.slot()] &&
+              !(f.f.objects.flags[held.root.slot()] & Held) &&
+              !(f.f.objects.flags[held.root.slot()] & Escrow) &&
+              !(f.f.objects.flags[stored.root.slot()] & Escrow) &&
+              f.f.objects.position[held.root.slot()] == position &&
+              f.players.rows[2].inventory == stored_inventory && f.ledger.balance == balance &&
+              space::capacity(f.world).native_available == 0,
+          "rebinding trade goods undid custody, retained confirmations or changed money/capacity");
 }
 void login_delivers_complete_mailbox_without_native_capacity_or_identity_changes() {
   Fixture f;
   const auto first = f.item(1, {-4, 0, 0}), second = f.item(1, {-8, 0, 0}, false);
   f.delivery.present_bodies.erase(2);
-  f.giver.mailbox_max = 10;
+  f.mailbox_max = 10;
   require(f.call(f.ids.give, PlayerId{1}, {{"recipient", "p:2"}}, first.root).changed &&
               f.call(f.ids.give, PlayerId{1}, {{"recipient", "p:2"}}, second.root).changed,
           "actual gifts create recipient's hidden mailbox custody");
   const auto mailbox = f.players.rows[2].mailbox;
-  cm::MailboxDelivery delivery{f.players, authority(f.f.objects), f.custody};
-  react::DeferredEffects effects;
+  step::NativeCompletion delivered;
+  auto deliver = [&](Handle body, Step now) {
+    delivered =
+        cm::deliver_mailbox(f.players, authority(f.f.objects), f.world, identity(f.f.objects),
+                            parents(f.f.objects), f.parts, 2, body, now);
+    const auto custody = std::move(delivered.custody);
+    cm::apply_custody(f.world, identity(f.f.objects), transforms(f.f.objects), parents(f.f.objects),
+                      space_flags(f.f.objects), f.physical, f.parts, {0, 0, 3, 0},
+                      plot_membership(f.f.objects), f.plots, custody, delivered);
+    return delivered.reply.at("delivered").get<unsigned>();
+  };
   bool wrong_body = false;
   try {
-    cm::deliver_mailbox(delivery, 2, f.bodies[0], 21, {}, effects);
+    deliver(f.bodies[0], 21);
   } catch (const std::invalid_argument &) {
     wrong_body = true;
   }
   require(wrong_body && f.players.rows[2].mailbox == mailbox &&
-              f.players.rows[2].inventory.empty() && effects.ordered.empty(),
+              f.players.rows[2].inventory.empty() && delivered.records.empty(),
           "foreign body cannot collect recipient's mailbox");
   f.players.rows[2].mailbox.back() = f.bodies[1];
   bool custody_cycle = false;
   try {
-    cm::deliver_mailbox(delivery, 2, f.bodies[1], 21, {}, effects);
+    deliver(f.bodies[1], 21);
   } catch (const std::invalid_argument &) {
     custody_cycle = true;
   }
   require(custody_cycle && f.players.rows[2].inventory.empty() &&
               f.players.rows[2].mailbox.front() == first.root &&
-              !f.f.objects.parent[first.root.slot()] && effects.ordered.empty(),
+              !f.f.objects.parent[first.root.slot()] && delivered.records.empty(),
           "real Space cycle preflight failure on a later entry cannot consume an earlier item");
   // A later bad full identity must not consume an earlier valid item.
   const auto bad = Handle::make(second.root.slot(), second.root.generation() + 1);
   f.players.rows[2].mailbox.back() = bad;
   bool failed = false;
   try {
-    cm::deliver_mailbox(delivery, 2, f.bodies[1], 21, {}, effects);
+    deliver(f.bodies[1], 21);
   } catch (const std::invalid_argument &) {
     failed = true;
   }
   require(failed && f.players.rows[2].mailbox.front() == first.root &&
               f.players.rows[2].mailbox.back() == bad && f.players.rows[2].inventory.empty() &&
-              !f.f.objects.parent[first.root.slot()] && effects.ordered.empty(),
+              !f.f.objects.parent[first.root.slot()] && delivered.records.empty(),
           "failed whole-mailbox preflight preserves every earlier valuable and physical parent");
   f.players.rows[2].mailbox = mailbox;
   while (space::capacity(f.world).native_available)
@@ -758,8 +686,8 @@ void login_delivers_complete_mailbox_without_native_capacity_or_identity_changes
   const auto flags = f.f.objects.flags[first.root.slot()];
   record::Origin origin;
   origin.cause = 81;
-  require(cm::deliver_mailbox(delivery, 2, f.bodies[1], 22, origin, effects) == 2 &&
-              f.players.rows[2].mailbox.empty() && f.players.rows[2].inventory == mailbox &&
+  require(deliver(f.bodies[1], 22) == 2 && f.players.rows[2].mailbox.empty() &&
+              f.players.rows[2].inventory == mailbox &&
               f.f.objects.parent[first.root.slot()] == f.bodies[1] &&
               f.f.objects.parent[second.root.slot()] == f.bodies[1] && !f.visible(first.root) &&
               !f.visible(first.objects[1]) && f.f.objects.maker[first.root.slot()] == maker &&
@@ -769,17 +697,14 @@ void login_delivers_complete_mailbox_without_native_capacity_or_identity_changes
               space::capacity(f.world).native_available == 0,
           "login delivers full declared goods at full native capacity with immutable identities "
           "intact");
-  step::WorkQueues queues;
-  step::TimerWheel timers;
   record::Journal journal(100, {});
-  react::publish_effects(std::move(effects), origin, 22, queues, timers, journal, 1000);
+  for (auto &row : delivered.records)
+    journal.append(std::move(row), origin);
   const auto records = journal.take();
   require(records.size() == 1 && records[0]["name"] == "mailbox_delivery" &&
-              records[0]["cause"] == 81 && records[0]["changed"] == true,
-          "login delivery emits one causal completed System record");
-  effects = {};
-  require(cm::deliver_mailbox(delivery, 2, f.bodies[1], 23, {}, effects) == 0 &&
-              effects.ordered.empty(),
+              records[0]["cause"] == 81 && records[0]["changed"] == true && !records[0]["agent"],
+          "login delivery emits one causal derived System record");
+  require(deliver(f.bodies[1], 23) == 0 && delivered.records.empty(),
           "repeated authenticated hello cannot duplicate delivered goods or records");
 }
 } // namespace
@@ -788,15 +713,15 @@ int main() {
     wallet_native_authority_is_explicit();
     actual_assembly_sale_and_inventory_reveal_preserve_identity();
     ordinary_offer_expiry_releases_actual_assembly_without_moving_it();
-    trade_changes_cancel_restore_and_complete_one_swap();
+    trade_changes_cancel_and_complete_one_swap();
     gifts_bounce_and_keep_unrelated_seated_bodies_alive();
-    cancelling_a_visible_held_trade_restores_actual_attachment();
+    cancelling_a_visible_held_trade_keeps_its_escrow_pose();
     moving_between_equal_priority_plots_rebinds_future_dependencies();
     logical_inventory_root_reveals_its_actual_declared_part();
     script_inventory_placement_uses_its_own_grants();
-    retirement_restores_the_surviving_trade_side_before_free();
+    retirement_keeps_the_surviving_trade_side_before_free();
     rebind_invalidates_only_affected_sales_with_actual_new_parts();
-    rebind_trade_restores_visible_grasp_and_hidden_inventory_at_full_capacity();
+    rebind_trade_keeps_current_custody_at_full_capacity();
     login_delivers_complete_mailbox_without_native_capacity_or_identity_changes();
     std::cout << "native commerce tests passed\n";
   } catch (const std::exception &error) {

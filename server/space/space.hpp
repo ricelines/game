@@ -1,16 +1,18 @@
 #pragma once
 
+#include "snap/snap.hpp"
 #include "store/store.hpp"
 
-#include <chrono>
 #include <cstddef>
+#include <deque>
+#include <map>
 #include <memory>
+#include <set>
 #include <span>
 #include <variant>
 
 namespace amber::space {
 using GeometryId = std::uint32_t;
-using Deadline = std::chrono::steady_clock::time_point;
 struct Pose {
   Vec3 position;
   Quat rotation;
@@ -60,7 +62,6 @@ struct Settings {
   NavSettings navigation;
   std::uint32_t max_bodies, max_body_pairs, max_contacts, physics_temp_bytes;
   float contact_slop_m, sweep_skin_m, crowd_correction_m, blocked_after_s;
-  std::uint32_t tile_install_budget_us;
   std::uint32_t max_characters;
   float crowd_query_radius_multiplier, crowd_optimize_radius_multiplier, crowd_separation_weight;
 };
@@ -166,7 +167,7 @@ struct VolumeSpec {
   VolumeKind kind;
 };
 OperationResult add_volume(Space &, IdentityRead, TransformRead, const VolumeSpec &);
-bool volumes_at(const Space &, IdentityRead, Vec3, VolumeKind, Deadline, std::vector<Handle> &);
+void volumes_at(const Space &, IdentityRead, Vec3, VolumeKind, std::vector<Handle> &);
 std::optional<Bounds> volume_bounds(const Space &, Handle, VolumeKind);
 struct QueryFilter {
   Handle ignore_a, ignore_b;
@@ -178,12 +179,8 @@ struct Hit {
   float fraction;
   Vec3 position, normal;
 };
-struct RayResult {
-  bool complete;
-  std::optional<Hit> hit;
-};
 struct Visibility {
-  bool complete, clear;
+  bool clear;
   float transmission;
   std::vector<Handle> through;
 };
@@ -192,11 +189,10 @@ struct Nearby {
   float distance_m;
   Bounds world_bounds;
 };
-RayResult raycast(const Space &, IdentityRead, Vec3, Vec3, QueryFilter, Deadline);
+std::optional<Hit> raycast(const Space &, IdentityRead, Vec3, Vec3, QueryFilter);
 Visibility visibility(const Space &, IdentityRead, Vec3, Vec3, QueryFilter,
-                      float minimum_transmission, Deadline);
-bool near(const Space &, IdentityRead, Vec3, float radius_m, QueryFilter, Deadline,
-          std::vector<Nearby> &);
+                      float minimum_transmission);
+void near(const Space &, IdentityRead, Vec3, float radius_m, QueryFilter, std::vector<Nearby> &);
 std::optional<Bounds> bounds(const Space &, IdentityRead, Handle);
 struct LightSample {
   Handle source;
@@ -204,12 +200,8 @@ struct LightSample {
   double intensity_cd;
   float range_m, source_radius_m;
 };
-struct Illumination {
-  bool complete;
-  double lux;
-};
-Illumination illuminance(const Space &, IdentityRead, Handle receiver, Vec3, double ambient_lux,
-                         std::span<const LightSample>, Deadline);
+double illuminance(const Space &, IdentityRead, Handle receiver, Vec3, double ambient_lux,
+                   std::span<const LightSample>);
 struct Attachment {
   Handle subject, parent;
   Pose local_pose;
@@ -228,13 +220,13 @@ OperationResult detach(Space &, IdentityRead, TransformWrite, ParentWrite, Space
                        CauseToken cause = 0);
 OperationResult impulse(Space &, IdentityRead, Handle, Vec3 newton_seconds, Vec3 world_point,
                         CauseToken cause = 0);
-RayResult sweep(const Space &, IdentityRead, Handle, Vec3 translation_m, QueryFilter, Deadline);
+std::optional<Hit> sweep(const Space &, IdentityRead, Handle, Vec3 translation_m, QueryFilter);
 struct SweepMove {
   Status status;
   Pose actual;
   std::optional<Hit> contact;
 };
-SweepMove translate(Space &, IdentityRead, TransformWrite, Handle, Vec3, float seconds, Deadline,
+SweepMove translate(Space &, IdentityRead, TransformWrite, Handle, Vec3, float seconds,
                     CauseToken cause = 0);
 struct PointGoal {
   Vec3 point;
@@ -264,8 +256,7 @@ struct Path {
   float length_m;
   std::uint64_t navigation_revision;
 };
-Path path(const Space &, IdentityRead, Handle, const Goal &, std::span<const TravelBoundary>,
-          Deadline);
+Path path(const Space &, IdentityRead, Handle, const Goal &, std::span<const TravelBoundary>);
 enum class IntentState { Moving, WaitingNavigation, Arrived, Blocked, TargetGone };
 struct IntentProgress {
   Handle body;
@@ -349,7 +340,7 @@ struct NavigationReport {
   std::vector<NavigationArea> areas;
 };
 NavigationReport diagnose_navigation(const Space &, std::span<const Bounds> changed_regions,
-                                     Vec3 reference, Deadline);
+                                     Vec3 reference);
 struct DebugLine {
   Vec3 from, to;
   std::uint32_t rgba;
@@ -358,5 +349,140 @@ struct DebugSelection {
   Bounds region;
   bool collision, navigation, paths, volumes;
 };
-bool debug_lines(const Space &, const DebugSelection &, Deadline, std::vector<DebugLine> &);
+void debug_lines(const Space &, const DebugSelection &, std::vector<DebugLine> &);
+void write_physical_relations(snap::Output &, const PhysicalRelations &,
+                              const snap::ObjectSelection & = {});
+void read_physical_relations(snap::Input &, PhysicalRelations &, std::size_t slots);
+void write_motion(snap::Output &, const std::vector<MotionRow> &,
+                  const snap::ObjectSelection & = {});
+void read_motion(snap::Input &, std::vector<MotionRow> &);
+
 } // namespace amber::space
+
+namespace amber::observe {
+using Cell = std::array<std::int32_t, 2>;
+struct Observer {
+  Handle body;
+  Vec3 eye, forward;
+  double dim_lux;
+};
+struct Settings {
+  float sight_m, reach_m, far_m, far_angular_degrees, moving_m_s;
+  double far_source_lux;
+  std::size_t things_max, far_max, events_per_response;
+};
+struct LightBinding {
+  Handle source;
+  Vec3 local_site;
+  double intensity_cd;
+  float radius_m, source_radius_m;
+};
+struct ZoneAmbient {
+  Handle zone;
+  double ambient_lux;
+  int priority;
+};
+struct Lights {
+  struct Row {
+    LightBinding binding;
+    Vec3 position;
+    std::vector<Cell> cells;
+  };
+  float cell_m;
+  std::unordered_map<std::uint64_t, Row> rows;
+  std::map<Cell, std::vector<Handle>> candidates;
+  explicit Lights(float cell_m);
+};
+struct ZoneAmbients {
+  SparseColumn<ZoneAmbient> rows;
+};
+void set_light(Lights &, const LightBinding &, TransformRead);
+void move_light(Lights &, Handle, TransformRead);
+void remove_light(Lights &, Handle);
+void set_zone(ZoneAmbients &, ZoneAmbient);
+void remove_zone(ZoneAmbients &, Handle);
+void light_samples(const Lights &, IdentityRead, Vec3 point, std::vector<space::LightSample> &);
+double ambient_at(const ZoneAmbients &, std::span<const Handle>, double world_lux);
+double illuminate(const space::Space &, IdentityRead, Handle receiver, Vec3, double ambient_lux,
+                  std::span<const space::LightSample>);
+struct LightPoint {
+  Handle subject;
+  Vec3 position;
+  TermId measured_term;
+};
+struct LightSubscriptions {
+  float cell_m;
+  std::map<std::pair<std::uint64_t, TermId>, LightPoint> rows;
+  std::map<Cell, std::set<std::pair<std::uint64_t, TermId>>> cells;
+  std::set<std::pair<std::uint64_t, TermId>> dirty;
+  explicit LightSubscriptions(float cell_m);
+};
+void subscribe(LightSubscriptions &, LightPoint);
+void unsubscribe(LightSubscriptions &, Handle, TermId);
+void dirty_points(LightSubscriptions &, std::span<const space::Bounds>);
+struct ActiveViews;
+void dirty_geometry(LightSubscriptions &, const Lights &, std::span<const space::Bounds>,
+                    ActiveViews *views = nullptr);
+void dirty_light(LightSubscriptions &, Vec3, float radius_m);
+std::vector<LightPoint> take_dirty(LightSubscriptions &);
+struct ActiveViews {
+  struct View {
+    Vec3 eye;
+    float radius_m;
+    std::vector<Cell> cells;
+  };
+  float cell_m;
+  std::unordered_map<std::uint64_t, View> rows;
+  std::map<Cell, std::set<std::uint64_t>> cells;
+  std::set<std::uint64_t> dirty;
+  explicit ActiveViews(float cell_m);
+};
+void track_view(ActiveViews &, std::uint64_t session, Vec3 eye, float radius_m);
+void remove_view(ActiveViews &, std::uint64_t session);
+void dirty_views(ActiveViews &, std::span<const space::Bounds>);
+std::vector<std::uint64_t> take_dirty_views(ActiveViews &);
+struct MotionSample {
+  Handle object;
+  Vec3 velocity;
+};
+struct Seen {
+  Handle object;
+  float distance_m, bearing_degrees;
+  double lux;
+  bool held, lit, reachable;
+  std::vector<Handle> through;
+  enum class Salience { Near, Large, Moving, Bright } salience;
+};
+struct Scan {
+  std::vector<Seen> things, far;
+  std::vector<Handle> zones;
+};
+Scan scan(const space::Space &, IdentityRead, TransformRead, const Relation &declared_parts,
+          const Observer &, Handle held, const Settings &, const Lights &, const ZoneAmbients &,
+          std::span<const MotionSample>, double world_ambient_lux, std::size_t requested_limit);
+struct Sound {
+  Handle source;
+  Vec3 at;
+  float radius_m;
+  EventPayload payload;
+  PlayerId speaker;
+  record::Origin origin;
+  std::string name{};
+  bool speech = false;
+};
+struct Listener {
+  std::uint64_t session;
+  Handle body;
+  Vec3 ear;
+};
+struct Heard {
+  Sound sound;
+  float distance_m;
+};
+struct Hearing {
+  std::unordered_map<std::uint64_t, std::deque<Heard>> queues;
+};
+void emit_sound(Hearing &, const Sound &, std::span<const Listener>);
+std::vector<Heard> take_heard(Hearing &, std::uint64_t, std::size_t limit, std::size_t &omitted);
+void remove_listener(Hearing &, std::uint64_t);
+} // namespace amber::observe

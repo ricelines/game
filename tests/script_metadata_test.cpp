@@ -1,4 +1,4 @@
-#include "bindings/metadata/metadata.hpp"
+#include "step/step.hpp"
 
 #include <iostream>
 #include <stdexcept>
@@ -30,24 +30,6 @@ struct Fixture {
   react::ScriptState state;
   react::DeferredEffects effects;
   ScriptId next = 100;
-  bindings::ObjectBinding object{identity(objects), transforms(objects), authority(objects),
-                                 parents(objects),  objects.params,      models,
-                                 instances};
-  bindings::AssetReadBinding asset{identity(objects), objects.params, models, parameters, assets};
-  bindings::MaterialReadBinding material{terms, materials};
-  bindings::ModelMeasureBinding measure_model{terms, materials, models, parameters, assets, 1};
-  bindings::InstanceMeasureBinding measure_instance{identity(objects),
-                                                    transforms(objects),
-                                                    objects.params,
-                                                    parts,
-                                                    terms,
-                                                    materials,
-                                                    models,
-                                                    parameters,
-                                                    assets,
-                                                    1};
-  bindings::MeterReadBinding meter{meters, terms, identity(objects)};
-  bindings::PlotReadBinding plot{plots, authority(objects)};
   Fixture() {
     terms.rows.resize(6);
     for (TermId i = 1; i < terms.rows.size(); ++i) {
@@ -107,14 +89,9 @@ struct Fixture {
     meters[{root, part, 2, false}] = {2, 0, 3};
     players.rows.resize(4);
     plots.rows.push_back({1, 2, 0, 7, {-5, -4, 30, 40}, {}});
-    react::register_binding(vm, "object", bindings::object_binding, &object);
-    react::register_binding(vm, "asset", bindings::asset_binding, &asset);
-    react::register_binding(vm, "material", bindings::material_binding, &material);
-    react::register_binding(vm, "measure_model", bindings::measure_model_binding, &measure_model);
-    react::register_binding(vm, "measure_instance", bindings::measure_instance_binding,
-                            &measure_instance);
-    react::register_binding(vm, "meter", bindings::meter_binding, &meter);
-    react::register_binding(vm, "plot", bindings::plot_binding, &plot);
+    step::bind_metadata(vm, identity(objects), transforms(objects), authority(objects),
+                        parents(objects), objects.params, models, instances, parameters, assets,
+                        terms, materials, parts, meters, plots, 1);
   }
   react::RunOutcome run(std::string_view body) {
     const auto source = "return {on={run=function(self,from,args) " + std::string(body) + " end}}";

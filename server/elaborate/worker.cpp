@@ -1,5 +1,5 @@
 #include "elaborate.hpp"
-#include "process.hpp"
+#include "private.hpp"
 
 #include <picosha2.h>
 #include <zstd.h>

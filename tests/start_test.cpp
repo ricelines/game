@@ -1,4 +1,4 @@
-#include "bindings/start/start.hpp"
+#include "step/start_private.hpp"
 
 #include <chrono>
 #include <fstream>
@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 
 using namespace amber;
-using namespace amber::bindings::start;
+using namespace amber::step::start;
 namespace {
 void require(bool value, const char *message) {
   if (!value)
@@ -78,9 +78,8 @@ int main(int argc, char **argv) {
     Objects objects;
     lifecycle::Parts parts;
     Relation declared_parts;
-    lifecycle::Instances instances(objects, parts, declared_parts);
-    const auto created =
-        install_objects(plan, symbols, models, parameters, assets, terms, instances, 0);
+    const auto created = install_objects(plan, symbols, models, parameters, assets, terms, objects,
+                                         parts, declared_parts, 0);
     std::size_t expected_children = 0;
     for (const auto &row : plan.at("objects"))
       expected_children +=
@@ -105,7 +104,7 @@ int main(int argc, char **argv) {
     perm::Plots plots;
     perm::Groups groups;
     perm::Players players;
-    control::Profiles profiles;
+    net::Profiles profiles;
     auto profile_plan = plan;
     for (auto &profile : profile_plan["profiles"])
       profile["key_file"] = "keys/" + std::to_string(profile.at("id").get<PlayerId>()) + ".key";
@@ -130,7 +129,7 @@ int main(int argc, char **argv) {
     react::RuleVersions rules;
     for (const auto &script : scripts.rows)
       if (script.id && script.declaration.kind == react::ScriptDeclaration::Kind::Rule)
-        install::add_rule(rules, scripts, terms, script.id);
+        react::add_rule(rules, scripts, terms, script.id);
     react::AssetMeasurements measurements;
     react::SharedColumns shared;
     react::RuntimeMeasurements runtime;
@@ -150,13 +149,46 @@ int main(int argc, char **argv) {
                                   relation_read,
                                   runtime,
                                   0};
-    const install::InstanceScripts installations;
+    const react::InstanceScripts installations;
     const perm::OwnerLimits limits;
     perm::Grants grants;
     install_grants(plan, symbols, values, authority(std::as_const(objects)), limits, models,
                    scripts, installations, rules, plots, profiles, grants, players, 0, 20, groups);
     require(grants.rows.size() == plan.at("grants").size() + 1,
             "every initial grant passed real permission creation");
+    auto missing_body_choices = plan;
+    for (auto &profile : missing_body_choices["profiles"])
+      if (profile.contains("body")) {
+        profile.erase("body_installs");
+        break;
+      }
+    auto rejected_players = players;
+    perm::Grants missing_grants;
+    rejects(
+        [&] {
+          provision_body_grants(missing_body_choices, symbols, models, scripts, identity(objects),
+                                authority(std::as_const(objects)), limits, plots, groups, profiles,
+                                rejected_players, missing_grants, 0, 20);
+        },
+        "a starting body with unfilled declared slots silently started");
+    provision_body_grants(plan, symbols, models, scripts, identity(objects),
+                          authority(std::as_const(objects)), limits, plots, groups, profiles,
+                          players, grants, 0, 20);
+    for (const auto &profile : plan["profiles"])
+      if (profile.contains("body")) {
+        const auto player = profile.at("id").get<PlayerId>();
+        const auto body = symbols.objects.at(profile.at("body").get<std::string>());
+        const auto script = models.rows[objects.model[body.slot()]].script;
+        const auto holder = perm::Holder::script(script, body);
+        require(bool(perm::check_scope(holder, perm::Scope::avatar(body), 3, grants, 0)),
+                "starting body cannot use its authored avatar grants");
+        for (const auto &plot : plots.rows)
+          if (plot.id)
+            for (const auto verb : {perm::Verb::Use, perm::Verb::Take, perm::Verb::Move})
+              require(bool(perm::check_scope(holder, perm::Scope::owned_on_plot(player, plot.id),
+                                             perm::bit(verb), grants, 0)),
+                      "starting body cannot use its owner's goods on an authored plot");
+      }
     auto wrong_owner = plan;
     wrong_owner["grants"] = Json::array({plan.at("grants")[0]});
     wrong_owner["grants"][0]["issuer"] = 3;

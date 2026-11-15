@@ -48,9 +48,7 @@ class World:
         while time.perf_counter() < until:
             observed = await self.look(player, 1)
             own = observed["self"]
-            trace.append(
-                {"step": observed["step"], "position": own["pos"], "intent": own["intent"]}
-            )
+            trace.append({"step": observed["step"], "position": own["at"], "intent": own["intent"]})
             if own["intent"] is None:
                 return observed, intent
             await asyncio.sleep(0.05)
@@ -68,7 +66,7 @@ class World:
     async def move(self, player, point, label, timeout=60):
         observed, intent = await self.motion(player, point, label, timeout)
         require(
-            math.dist(observed["self"]["pos"], point) < 0.65,
+            math.dist(observed["self"]["at"], point) < 0.65,
             f"{label}: normal navigation stopped before its actual goal",
         )
         self.terminal_event(player, intent, "arrived", label)
@@ -88,7 +86,7 @@ class World:
 async def stairs(world, mira):
     door = await world.find(mira, "Sliding entrance")
     observed, intent = await world.motion(mira, [0, 4, 0], "closed entrance blocks navigation", 10)
-    require(observed["self"]["pos"][1] < -2.3, "avatar passed through closed physical glass leaf")
+    require(observed["self"]["at"][1] < -2.3, "avatar passed through closed physical glass leaf")
     world.terminal_event(mira, intent, "blocked", "closed entrance blocks navigation")
     await world.move(mira, [-2, -2.7, 0], "entrance approach")
     require((await mira.act("base.open", door)).get("ok"), "actual entrance open denied")
@@ -247,7 +245,7 @@ async def optics(world, mira, door, mezzanine):
         (row["dist_m"] for row in opaque.get("things", []) + opaque.get("far", [])), default=0
     )
     require(
-        hidden and (opaque["complete"] or farthest > visible[target]["dist_m"] + 0.1),
+        hidden and (len(opaque["things"]) < 1000 or farthest > visible[target]["dist_m"] + 0.1),
         "opaque sight comparison was occluded or incomplete without sufficient scan coverage",
     )
     require(
@@ -269,7 +267,8 @@ async def optics(world, mira, door, mezzanine):
         "glass_leaf": leaf,
         "transmission": leaf_record["values"]["base.transparent"],
         "opaque_item": mezzanine,
-        "opaque_scan_complete": opaque["complete"],
+        "opaque_returned_near": len(opaque["things"]),
+        "requested_near_limit": 1000,
         "opaque_scan_farthest_m": farthest,
     }
 

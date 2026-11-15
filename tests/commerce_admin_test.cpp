@@ -1,23 +1,20 @@
-#include "bindings/commerce/admin.hpp"
 #include "runtime_fixture.hpp"
+#include "step/action_private.hpp"
 
 #include <chrono>
 #include <iostream>
 
 using namespace amber;
 using test_runtime::require;
-namespace ad = amber::bindings::commerce;
+namespace ad = amber::step;
 using Json = nlohmann::json;
 namespace {
-drive::NativeCall call(PlayerId player, TermId action, Handle target, Json arguments) {
+step::NativeCall call(PlayerId player, TermId action, Handle target, Json arguments) {
   return {{player, action, target, {}}, std::move(arguments), {}, 10, 20, {}};
 }
-void changed(void *local) {
-  ++*static_cast<unsigned *>(local);
-}
-GrantId grant_id(const drive::NativeCompletion &result) {
+GrantId grant_id(const step::NativeCompletion &result) {
   require(result.reply.value("ok", false), result.reply.dump().c_str());
-  return bindings::authority::identifier(result.reply.at("grant"), "grant:");
+  return step::identifier(result.reply.at("grant"), "g:");
 }
 } // namespace
 int main() {
@@ -30,66 +27,39 @@ int main() {
     perm::OwnerLimits limits;
     perm::Plots plots;
     plots.rows.push_back({1, 1, 0, 0, {-10, -10, 10, 10}, {}});
-    control::Profiles profiles;
-    profiles.rows.resize(5);
-    for (PlayerId id = 1; id < profiles.rows.size(); ++id)
-      profiles.rows[id].id = id;
-    profiles.rows[4].roles = {"architect"};
     f.objects.owner[f.a.slot()] = 1;
     f.objects.owner[f.b.slot()] = 2;
     f.objects.owner[f.c.slot()] = 3;
     f.objects.plot[f.a.slot()] = 1;
     f.objects.plot[f.b.slot()] = 1;
     f.objects.plot[f.c.slot()] = 1;
-    unsigned invalidations = 0;
-    const ad::AdminInvalidation sink{&invalidations, changed};
     const auto values = f.values();
-    const bindings::authority::ScopeRead scopes{
-        identity(f.objects), authority(f.objects), limits, players, plots, profiles, groups};
-    ad::GrantBinding grant_binding{grants,      players, scopes, f.models, f.scripts,
-                                   f.installed, f.rules, values, sink};
-    ad::RevokeBinding revoke_binding{grants, players, scopes, sink};
-    ad::ListGrantsBinding list_binding{grants, players};
-    ad::PresetBinding preset_binding{{f.objects.group, f.objects.preset},
-                                     permission_flags(f.objects),
-                                     identity(f.objects),
-                                     authority(f.objects),
-                                     limits,
-                                     players,
-                                     groups,
-                                     sink};
-    ad::GroupCreateBinding create_binding{groups, players, sink};
-    ad::GroupMemberBinding member_binding{groups, players, sink};
-    ad::PlotPermissionsBinding plot_binding{plots, players, groups, sink};
-    command::NativeActions native;
+    react::NativeActions native;
     const auto ids = ad::declare_admin(f.terms, native);
     const auto count = f.terms.rows.size();
     require(ad::declare_admin(f.terms, native).grant == ids.grant && f.terms.rows.size() == count &&
                 native.rows.size() == 7,
             "administration declarations changed registry identities on restore");
-    drive::NativeOperations operations;
-    drive::register_native(operations, ids.grant, {ad::validate_grant, ad::grant, &grant_binding});
-    drive::register_native(operations, ids.revoke,
-                           {ad::validate_revoke, ad::revoke, &revoke_binding});
-    drive::register_native(operations, ids.list_grants,
-                           {ad::validate_list_grants, ad::list_grants, &list_binding});
-    drive::register_native(operations, ids.preset,
-                           {ad::validate_preset, ad::preset, &preset_binding});
-    drive::register_native(operations, ids.group_create,
-                           {ad::validate_group_create, ad::group_create, &create_binding});
-    drive::register_native(operations, ids.group_member,
-                           {ad::validate_group_member, ad::group_member, &member_binding});
-    drive::register_native(operations, ids.plot_permissions,
-                           {ad::validate_plot_permissions, ad::plot_permissions, &plot_binding});
+    auto invoke = [&](step::NativeCall input) {
+      const auto *player = std::get_if<PlayerId>(&input.request.caller);
+      const bool architect = player && *player == 4;
+      return step::native_permissions(
+          f.models, f.scripts, values, f.rules, f.installed, players, groups, plots, grants, limits,
+          identity(f.objects), authority(f.objects), permission_flags(f.objects), architect,
+          f.objects.group, f.objects.preset,
+          std::get<react::PermissionAction>(native.rows.at(input.request.action).operation), input);
+    };
     auto run = [&](PlayerId player, TermId action, Handle object, Json input) {
-      return drive::invoke_native(operations, call(player, action, object, std::move(input)));
+      return invoke(call(player, action, object, std::move(input)));
     };
     require(!ad::validate_grant({{"holder", "p:2"},
                                  {"scope", {{"account", "p:1"}}},
                                  {"rights", {"spend"}},
                                  {"unexpected", 1}})
                     .empty() &&
-                !ad::validate_revoke({{"grant", "grant:1"}, {"holder", "p:2"}}).empty() &&
+                ad::validate_revoke({{"grant", "g:1"}}).empty() &&
+                !ad::validate_revoke({{"grant", "grant:1"}}).empty() &&
+                !ad::validate_revoke({{"grant", "g:1"}, {"holder", "p:2"}}).empty() &&
                 !ad::validate_plot_permissions({{"plot", -1}}).empty() &&
                 !ad::validate_group_create({{"name", " \t"}}).empty() &&
                 !ad::validate_group_member({{"group", "g:1"}, {"player", "p:2"}, {"member", true}})
@@ -254,7 +224,7 @@ int main() {
                 ledger.balance.at(object_account) == 35 && ledger.balance.at(group_account) == 40 &&
                 ledger.balance.at(perm::Account::player(1)) == 170,
             "ordinary account grant must debit exactly the selected object's bounded balance");
-    require(run(1, ids.revoke, f.a, {{"grant", "grant:" + std::to_string(object_grant)}}).changed,
+    require(run(1, ids.revoke, f.a, {{"grant", "g:" + std::to_string(object_grant)}}).changed,
             "explicit object-account grant revocation");
     const auto group_denial = run(2, ids.grant, f.b,
                                   {{"holder", "p:2"},
@@ -272,12 +242,12 @@ int main() {
             "indexed grants leaked foreign rows or reported the wrong shared allowance");
     auto after_expiry = call(2, ids.list_grants, f.b, Json::object());
     after_expiry.step = grants.rows[parent].expires_step;
-    require(drive::invoke_native(operations, after_expiry).reply["held"].empty(),
+    require(invoke(after_expiry).reply["held"].empty(),
             "listing reported expired grant before cleanup");
-    require(!run(3, ids.revoke, f.c, {{"grant", "grant:" + std::to_string(parent)}}).reply["ok"] &&
+    require(!run(3, ids.revoke, f.c, {{"grant", "g:" + std::to_string(parent)}}).reply["ok"] &&
                 grants.rows[parent].live,
             "foreign caller revoked another issuer's grant");
-    const auto revoked = run(4, ids.revoke, f.c, {{"grant", "grant:" + std::to_string(parent)}});
+    const auto revoked = run(4, ids.revoke, f.c, {{"grant", "g:" + std::to_string(parent)}});
     require(revoked.changed && revoked.reply["revoked"].size() == 2 && !grants.rows[parent].live &&
                 !grants.rows[child].live && players.rows[2].grants_held.empty() &&
                 players.rows[2].grants_given.empty(),
@@ -293,13 +263,13 @@ int main() {
             "holder revocation removed a different issuer's grants");
     auto script_call = call(1, ids.group_create, f.a, {{"name", "No borrowed controller"}});
     script_call.request.caller = ScriptHolder{script, f.a};
-    const auto player_only = drive::invoke_native(operations, script_call).reply;
+    const auto player_only = invoke(script_call).reply;
     require(player_only.at("ok") == false && player_only.at("denied").at("need") == "player_caller",
             "script caller receives the actual player-only policy denial");
     auto script_run = [&](ScriptHolder actor, TermId action, Json arguments) {
       auto input = call(1, action, actor.object, std::move(arguments));
       input.request.caller = actor;
-      return drive::invoke_native(operations, std::move(input));
+      return invoke(std::move(input));
     };
     require(!script_run({script, f.c}, ids.grant,
                         {{"holder", "p:1"},
@@ -324,11 +294,11 @@ int main() {
             "ordinary institutional script could not delegate its explicit grant to a tenant");
     const auto listing = script_run({script, f.a}, ids.list_grants, Json::object()).reply;
     require(listing["held"].size() == 1 &&
-                listing["held"][0]["id"] == "grant:" + std::to_string(institution) &&
+                listing["held"][0]["id"] == "g:" + std::to_string(institution) &&
                 listing["given"].size() == 1 &&
-                listing["given"][0]["id"] == "grant:" + std::to_string(lease),
+                listing["given"][0]["id"] == "g:" + std::to_string(lease),
             "script grant listing borrowed owner's grants or lost its actual issued child");
-    require(!script_run({script, f.c}, ids.revoke, {{"grant", "grant:" + std::to_string(lease)}})
+    require(!script_run({script, f.c}, ids.revoke, {{"grant", "g:" + std::to_string(lease)}})
                     .reply["ok"] &&
                 grants.rows[lease].live,
             "a foreign script revoked the institution's child grant");
@@ -339,14 +309,13 @@ int main() {
     require(!script_run({script, f.a}, ids.revoke, {{"holder", "p:2"}, {"scope", {{"plot", 1}}}})
                  .changed,
             "repeated exact-scope revocation invented a mutation");
-    require(
-        script_run({script, f.a}, ids.revoke, {{"grant", "grant:" + std::to_string(institution)}})
-            .changed,
-        "script could not relinquish its own held root grant");
+    require(script_run({script, f.a}, ids.revoke, {{"grant", "g:" + std::to_string(institution)}})
+                .changed,
+            "script could not relinquish its own held root grant");
     f.objects.flags[f.b.slot()] |= Body;
     const auto seat = f.add("return {kind='instance',on={}}", 3);
     const std::array<ScriptId, 1> seats{seat};
-    install::set_instances(f.installed, f.c, seats, f.scripts);
+    react::set_instances(f.installed, f.c, seats, f.scripts);
     const auto consent = grant_id(run(2, ids.grant, f.b,
                                       {{"holder", script_holder},
                                        {"scope", {{"avatar", to_string(f.b)}}},
@@ -373,7 +342,7 @@ int main() {
         expect={subject='target',term='novel.ready',equals=true}}},
       on={['novel.cue']=function(self)end}})");
     f.state(f.a, 5, 1);
-    install::add_rule(f.rules, f.scripts, f.terms, rule);
+    react::add_rule(f.rules, f.scripts, f.terms, rule);
     const auto rule_grant =
         run(1, ids.grant, f.a,
             {{"holder", {{"script", "s:" + std::to_string(rule)}, {"on", to_string(f.a)}}},
@@ -393,7 +362,8 @@ int main() {
     destroy(f.objects, f.a);
     require(!run(1, ids.preset, stale, {{"everyone", {"use"}}}).reply["ok"],
             "preset edit accepted a stale generation");
-    require(invalidations >= 10, "permission-dependent view invalidation was omitted");
+    require(created_group.permissions_changed && settings.permissions_changed,
+            "successful permission edits omitted their actual invalidation delta");
     const auto begin = std::chrono::steady_clock::now();
     std::size_t total_rows = 0;
     for (unsigned iteration = 0; iteration < 1000; ++iteration)
@@ -408,24 +378,22 @@ int main() {
                                         {"cap", 20},
                                         {"period_s", 60},
                                         {"expires_s", 5}}));
-    ad::GrantMaintenance maintenance{grants, players, sink};
-    auto reminders = ad::advance_grants(maintenance, 90, 20, 20, 16);
+    auto reminders = ad::advance_grants(grants, players, 90, 20, 20, 16);
     require(reminders.notices.size() == 1 && reminders.notices[0].recipient == 1 &&
                 reminders.notices[0].event["kind"] == "grant_expiring" &&
-                reminders.notices[0].event["id"] == "grant:" + std::to_string(expiring) &&
+                reminders.notices[0].event["id"] == "g:" + std::to_string(expiring) &&
                 reminders.records.size() == 1 && !reminders.records[0].changed &&
                 reminders.records[0].detail["agent"] == false &&
-                reminders.records[0].detail["grant"] == "grant:" + std::to_string(expiring),
+                reminders.records[0].detail["grant"] == "g:" + std::to_string(expiring),
             "real maintenance did not deliver the issuer's exact expiring grant");
-    require(ad::advance_grants(maintenance, 91, 20, 20, 16).notices.empty(),
+    require(ad::advance_grants(grants, players, 91, 20, 20, 16).notices.empty(),
             "real maintenance repeated a grant reminder");
-    const auto before_expiry = invalidations;
-    auto expired = ad::advance_grants(maintenance, 110, 20, 20, 16);
+    auto expired = ad::advance_grants(grants, players, 110, 20, 20, 16);
     require(expired.notices.size() == 1 && expired.notices[0].recipient == 1 &&
                 expired.notices[0].event["kind"] == "grant_expired" &&
                 expired.notices[0].event["expires_in_s"] == 0 && !grants.rows[expiring].live &&
-                invalidations == before_expiry + 1 && expired.records.size() == 1 &&
-                expired.records[0].changed && expired.records[0].detail["agent"] == false,
+                expired.records.size() == 1 && expired.records[0].changed &&
+                expired.records[0].detail["agent"] == false,
             "real maintenance did not expire authority and invalidate permission views");
     record::Journal journal(8, {});
     for (auto &event : reminders.records)
@@ -434,9 +402,8 @@ int main() {
       journal.append(std::move(event));
     const auto written = journal.take();
     require(written.size() == 2 && written[0]["id"] == 1 && written[0]["kind"] == "system" &&
-                written[0]["grant"] == "grant:" + std::to_string(expiring) &&
-                written[1]["id"] == 2 && written[1]["name"] == "grant_expired" &&
-                written[1]["agent"] == false,
+                written[0]["grant"] == "g:" + std::to_string(expiring) && written[1]["id"] == 2 &&
+                written[1]["name"] == "grant_expired" && written[1]["agent"] == false,
             "grant deadline producer overwrote reserved S7 metadata");
     std::cout << "commerce administration passed: native discovery/validation, real installed and "
                  "rule holders, shared caps, nested revocation, inherited presets, groups, land "

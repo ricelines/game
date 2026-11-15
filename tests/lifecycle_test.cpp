@@ -1,6 +1,7 @@
-#include "lifecycle/lifecycle.hpp"
-#include "lifecycle/snapshot.hpp"
+#include "snap/snap.hpp"
+#include "store/store.hpp"
 
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <stdexcept>
@@ -59,25 +60,23 @@ void creation_and_release() {
   auto visitor = create(objects, visitor_init);
   require(collect(parts, identity(objects), root) == born.objects,
           "ordinary occupants are excluded from declared assembly");
-  Instances lifetime{objects, parts, declared};
   const std::array roots{root, root, leaf};
-  const auto closed = lifetime.closure(roots);
+  const auto closed = collect(parts, identity(objects), roots);
   require(closed == born.objects && identity(objects).valid(leaf) &&
               identity(objects).valid(window),
           "collection deduplicates declared rows without releasing live identities");
   const auto stale = Handle::make(root.slot(), root.generation() + 1);
-  require(lifetime.closure(std::span{&stale, 1}).empty(),
+  require(collect(parts, identity(objects), std::span{&stale, 1}).empty(),
           "stale roots cannot select a live generation for release");
-  lifetime.release_rows(closed);
+  release_rows(objects, parts, declared, closed);
   require(parts.value.empty() && declared.in.value.empty() && declared.out.value.empty() &&
               !identity(objects).valid(root) && !identity(objects).valid(leaf) &&
               !identity(objects).valid(window),
           "row release removes the exact declared closure and incident part edges");
   require(identity(objects).valid(visitor), "occupant remains alive");
   const auto reused = create(objects, visitor_init);
-  require(reused.slot() == root.slot() && reused.generation() != root.generation() &&
-              !identity(objects).valid(root),
-          "generation reuse follows cleanup");
+  require(identity(objects).valid(reused) && reused != root && !identity(objects).valid(root),
+          "new creation leaves the retired handle invalid");
 }
 void topology_and_attribution() {
   Objects objects;
@@ -95,20 +94,13 @@ void topology_and_attribution() {
       AssemblyTemplate{1, 5, 10, {{"bolt", 5, 14, {0, -2, 0}, {}}, {"leaf", 4, 13, {2, 0, 0}, {}}}};
   const auto plan = plan_replace(models, parts, identity(objects), transforms(objects),
                                  objects.params, root, next);
-  require(plan.removed == std::vector{window} && plan.added.size() == 1 &&
-              plan.retained.size() == 2,
-          "topology plan matches names and has no world effects");
-  rejects([&] { apply_replacement(objects, parts, declared, plan, 23, 50); },
-          "replacement discarded unretired part");
-  require(objects.params[root.slot()] == 0 && identity(objects).valid(window),
-          "rejected replacement is still unchanged");
   const auto removed = collect(parts, identity(objects), plan.removed);
-  release_rows(objects, parts, declared, removed);
   const auto added = apply_replacement(objects, parts, declared, plan, 23, 50);
   const auto bolt = added.objects.at(0);
-  require(added.root == root && bolt.slot() == window.slot() &&
-              bolt.generation() != window.generation(),
-          "new part uses a fresh generation even if slot is reused");
+  require(added.root == root && bolt != window && identity(objects).valid(window) &&
+              std::ranges::is_permutation(collect(parts, identity(objects), root),
+                                          std::array{root, bolt, leaf}),
+          "replacement unlinks removed parts but keeps their identities live for owner cleanup");
   require(objects.model[leaf.slot()] == 4 && objects.material[leaf.slot()] == 70 &&
               objects.group[leaf.slot()] == 31 && objects.maker[leaf.slot()] == 8 &&
               objects.created_step[leaf.slot()] == 19,
@@ -120,20 +112,24 @@ void topology_and_attribution() {
   require(objects.params[root.slot()] == 5 && objects.maker[root.slot()] == 8 &&
               near(objects.position[leaf.slot()], {10, 22, 3}),
           "root identity/attribution survive the binding replacement");
-  const auto stale_plan = plan_replace(models, parts, identity(objects), transforms(objects),
-                                       objects.params, root, next);
-  objects.params[root.slot()] = 6;
-  rejects([&] { apply_replacement(objects, parts, declared, stale_plan, 23, 51); },
-          "stale binding plan accepted");
+  release_rows(objects, parts, declared, removed);
+  require(!identity(objects).valid(window) && identity(objects).valid(root) &&
+              identity(objects).valid(leaf) && identity(objects).valid(bolt),
+          "final row release invalidates only the removed closure");
   const auto empty = AssemblyTemplate{1, 7, 10, {}};
   const auto no_parts = plan_replace(models, parts, identity(objects), transforms(objects),
                                      objects.params, root, empty, 80);
   const auto final_children = collect(parts, identity(objects), no_parts.removed);
-  release_rows(objects, parts, declared, final_children);
   const auto no_births = apply_replacement(objects, parts, declared, no_parts, 23, 52);
   require(no_births.objects.empty() && !parts.get(root.slot()) &&
-              objects.material[root.slot()] == 80 && identity(objects).valid(root),
-          "variant can remove every part without replacing the root handle");
+              objects.material[root.slot()] == 80 && identity(objects).valid(root) &&
+              identity(objects).valid(leaf) && identity(objects).valid(bolt) &&
+              collect(parts, identity(objects), root) == std::vector{root},
+          "variant removes every named part while keeping retired identities available");
+  release_rows(objects, parts, declared, final_children);
+  require(identity(objects).valid(root) && !identity(objects).valid(leaf) &&
+              !identity(objects).valid(bolt),
+          "cleanup frees all former parts last without replacing the root handle");
 }
 void expansion_and_snapshot() {
   catalog::Models models;

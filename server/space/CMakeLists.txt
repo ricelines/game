@@ -1,10 +1,13 @@
-add_library(amber_space space.cpp assembly.cpp custody.cpp properties.cpp navigation.cpp snapshot.cpp causality.cpp)
+add_library(amber_space STATIC
+  space.cpp
+  assembly.cpp
+  custody.cpp
+  properties.cpp
+  navigation.cpp
+  snapshot.cpp
+  causality.cpp
+  perception.cpp
+)
 target_include_directories(amber_space PUBLIC ${PROJECT_SOURCE_DIR}/server)
-target_link_libraries(amber_space PUBLIC amber_store PRIVATE amber_snap Ambergris::Jolt Ambergris::Recast Ambergris::Detour Ambergris::DetourCrowd)
-target_link_libraries(amber_space PRIVATE Ambergris::TracyClient)
-if(BUILD_TESTING)
-  add_executable(space_test ../../tests/space_test.cpp)
-  target_link_libraries(space_test PRIVATE amber_space amber_perm Ambergris::Jolt Ambergris::tomlplusplus)
-  target_compile_definitions(space_test PRIVATE AMBER_CONFIG_PATH="${PROJECT_SOURCE_DIR}/config.toml")
-  add_test(NAME space COMMAND space_test)
-endif()
+target_compile_features(amber_space PUBLIC cxx_std_20)
+target_link_libraries(amber_space PUBLIC amber_store amber_snap PRIVATE Ambergris::Jolt Ambergris::Recast Ambergris::Detour Ambergris::DetourCrowd Ambergris::TracyClient)

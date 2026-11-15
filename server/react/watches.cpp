@@ -103,8 +103,6 @@ std::vector<WatchDelivery> check_watch(Subscriptions &subscriptions, FactKey sou
     const auto own = answers.by_consumer.find(binding.consumer);
     const WatchAnswer &answer = own == answers.by_consumer.end() ? common : own->second;
     bool changed = binding.last != answer;
-    if (changed)
-      binding.revision = subscriptions.next_revision++;
     auto scalar = [](const WatchAnswer &value) -> const Answer * {
       if (const auto *shared = std::get_if<SharedWatchAnswer>(&value))
         return &shared->aggregate;
@@ -116,13 +114,14 @@ std::vector<WatchDelivery> check_watch(Subscriptions &subscriptions, FactKey sou
     const auto *new_share = std::get_if<SharedWatchAnswer>(&answer);
     const bool share_changed =
         old_share && new_share && old_share->own_allocation != new_share->own_allocation;
-    if (!binding.thresholds.empty() && before && after && before->present && after->present &&
-        before->value.is_numeric() && after->value.is_numeric()) {
-      changed = share_changed || std::any_of(binding.thresholds.begin(), binding.thresholds.end(),
-                                             [&](const Threshold &t) {
-                                               return t.test(before->value.numeric()) !=
-                                                      t.test(after->value.numeric());
-                                             });
+    if (!binding.declaration.thresholds.empty() && before && after && before->present &&
+        after->present && before->value.is_numeric() && after->value.is_numeric()) {
+      changed =
+          share_changed ||
+          std::any_of(binding.declaration.thresholds.begin(), binding.declaration.thresholds.end(),
+                      [&](const Threshold &t) {
+                        return t.test(before->value.numeric()) != t.test(after->value.numeric());
+                      });
     }
     std::vector<RelationDelta> deltas;
     if (changed)
@@ -148,123 +147,90 @@ std::vector<WatchDelivery> check_watch(Subscriptions &subscriptions, FactKey sou
   return out;
 }
 bool valid_threshold(const step::ThresholdToken &token, IdentityRead identity,
-                     const Processes &processes, const Subscriptions &subscriptions) {
+                     const Processes &processes, const Subscriptions &subscriptions, Step now,
+                     double hz) {
   if (!identity.valid(token.source.subject) || !identity.valid(token.consumer) ||
       token.source.term >= processes.size())
     return false;
   const auto *process = processes[token.source.term].get(token.source.subject.slot());
-  if (!process || process->revision != token.process_revision)
+  if (!process)
     return false;
-  auto found = subscriptions.rows.find(token.source);
+  const auto found = subscriptions.rows.find(token.source);
   if (found == subscriptions.rows.end())
     return false;
-  return std::any_of(found->second.begin(), found->second.end(), [&](const auto &binding) {
-    return binding.consumer.object == token.consumer && binding.consumer.script == token.script &&
-           binding.index == token.watch_index && binding.revision == token.binding_revision;
-  });
+  for (const auto &binding : found->second) {
+    if (binding.consumer != ScriptKey{token.consumer, token.script} ||
+        binding.index != token.watch_index)
+      continue;
+    const auto *before = std::get_if<Answer>(&binding.last);
+    if (!before || !before->present || !before->value.is_numeric())
+      return false;
+    const auto current = process_value(*process, now, hz);
+    return std::any_of(binding.declaration.thresholds.begin(), binding.declaration.thresholds.end(),
+                       [&](const Threshold &threshold) {
+                         return threshold.test(before->value.numeric()) != threshold.test(current);
+                       });
+  }
+  return false;
 }
-namespace {
-template <class T> void unique_push(std::vector<T> &values, const T &value) {
-  if (std::find(values.begin(), values.end(), value) == values.end())
-    values.push_back(value);
+std::vector<FactKey> watch_sources(const Subscriptions &subscriptions, ScriptKey consumer) {
+  std::vector<FactKey> result;
+  for (const auto &[source, bindings] : subscriptions.rows)
+    if (std::any_of(bindings.begin(), bindings.end(),
+                    [&](const auto &binding) { return binding.consumer == consumer; }))
+      result.push_back(source);
+  return result;
 }
-void index_binding(Subscriptions &subscriptions, FactKey source, ScriptKey consumer) {
-  unique_push(subscriptions.by_subject[source.subject.bits], source);
-  unique_push(subscriptions.by_consumer[consumer], source);
-  unique_push(subscriptions.consumers_on[consumer.object.bits], consumer);
+std::vector<FactKey> watch_sources(const Subscriptions &subscriptions, Handle subject) {
+  std::vector<FactKey> result;
+  for (const auto &[source, bindings] : subscriptions.rows) {
+    (void)bindings;
+    if (source.subject == subject)
+      result.push_back(source);
+  }
+  return result;
 }
-void unindex_consumer(Subscriptions &subscriptions, FactKey source, ScriptKey consumer) {
-  auto found = subscriptions.by_consumer.find(consumer);
-  if (found == subscriptions.by_consumer.end())
-    return;
-  std::erase(found->second, source);
-  if (!found->second.empty())
-    return;
-  subscriptions.by_consumer.erase(found);
-  auto object = subscriptions.consumers_on.find(consumer.object.bits);
-  std::erase(object->second, consumer);
-  if (object->second.empty())
-    subscriptions.consumers_on.erase(object);
+std::vector<ScriptKey> watch_consumers(const Subscriptions &subscriptions, Handle object) {
+  std::vector<ScriptKey> result;
+  for (const auto &[source, bindings] : subscriptions.rows) {
+    (void)source;
+    for (const auto &binding : bindings)
+      if (binding.consumer.object == object &&
+          std::find(result.begin(), result.end(), binding.consumer) == result.end())
+        result.push_back(binding.consumer);
+  }
+  return result;
 }
-void unindex_source(Subscriptions &subscriptions, FactKey source) {
-  auto found = subscriptions.by_subject.find(source.subject.bits);
-  std::erase(found->second, source);
-  if (found->second.empty())
-    subscriptions.by_subject.erase(found);
-}
-} // namespace
 void bind_watch(Subscriptions &subscriptions, FactKey source, WatchBinding binding) {
   auto &rows = subscriptions.rows[source];
   auto found = std::find_if(rows.begin(), rows.end(), [&](const auto &row) {
     return row.consumer == binding.consumer && row.index == binding.index;
   });
-  binding.revision = std::max(subscriptions.next_revision, binding.revision);
-  subscriptions.next_revision = binding.revision + 1;
-  index_binding(subscriptions, source, binding.consumer);
   if (found == rows.end())
     rows.push_back(std::move(binding));
   else
     *found = std::move(binding);
 }
 void unbind_watch(Subscriptions &subscriptions, ScriptKey consumer, std::uint32_t index) {
-  auto found = subscriptions.by_consumer.find(consumer);
-  if (found == subscriptions.by_consumer.end())
-    return;
-  const auto sources = found->second;
-  for (auto source : sources) {
-    auto row = subscriptions.rows.find(source);
-    std::erase_if(row->second, [&](const auto &binding) {
+  for (auto row = subscriptions.rows.begin(); row != subscriptions.rows.end();) {
+    std::erase_if(row->second, [&](const WatchBinding &binding) {
       return binding.consumer == consumer && binding.index == index;
     });
-    if (std::none_of(row->second.begin(), row->second.end(),
-                     [&](const auto &binding) { return binding.consumer == consumer; }))
-      unindex_consumer(subscriptions, source, consumer);
-    if (row->second.empty()) {
-      subscriptions.rows.erase(row);
-      unindex_source(subscriptions, source);
-    }
+    if (row->second.empty())
+      row = subscriptions.rows.erase(row);
+    else
+      ++row;
   }
 }
 void retire_subscriptions(Subscriptions &subscriptions, Handle object) {
-  if (auto found = subscriptions.by_subject.find(object.bits);
-      found != subscriptions.by_subject.end()) {
-    const auto sources = found->second;
-    for (auto source : sources) {
-      auto row = subscriptions.rows.find(source);
-      for (const auto &binding : row->second)
-        unindex_consumer(subscriptions, source, binding.consumer);
-      subscriptions.rows.erase(row);
-    }
-    subscriptions.by_subject.erase(object.bits);
+  for (auto row = subscriptions.rows.begin(); row != subscriptions.rows.end();) {
+    std::erase_if(row->second,
+                  [&](const WatchBinding &binding) { return binding.consumer.object == object; });
+    if (row->first.subject == object || row->second.empty())
+      row = subscriptions.rows.erase(row);
+    else
+      ++row;
   }
-  if (auto found = subscriptions.consumers_on.find(object.bits);
-      found != subscriptions.consumers_on.end()) {
-    const auto consumers = found->second;
-    for (auto consumer : consumers) {
-      const auto sources = subscriptions.by_consumer.at(consumer);
-      for (auto source : sources) {
-        auto row = subscriptions.rows.find(source);
-        std::erase_if(row->second,
-                      [&](const auto &binding) { return binding.consumer == consumer; });
-        if (row->second.empty()) {
-          subscriptions.rows.erase(row);
-          unindex_source(subscriptions, source);
-        }
-      }
-      subscriptions.by_consumer.erase(consumer);
-    }
-    subscriptions.consumers_on.erase(object.bits);
-  }
-}
-void rebuild_subscription_index(Subscriptions &subscriptions) {
-  subscriptions.by_subject.clear();
-  subscriptions.by_consumer.clear();
-  subscriptions.consumers_on.clear();
-  for (const auto &[source, rows] : subscriptions.rows)
-    for (const auto &binding : rows) {
-      index_binding(subscriptions, source, binding.consumer);
-      subscriptions.next_revision = std::max(subscriptions.next_revision, binding.revision + 1);
-    }
 }
 std::vector<step::Timer> threshold_timers(const Subscriptions &subscriptions,
                                           const Processes &processes, FactKey source, Step now,
@@ -280,63 +246,17 @@ std::vector<step::Timer> threshold_timers(const Subscriptions &subscriptions,
     return timers;
   for (const auto &binding : found->second) {
     std::optional<Step> first;
-    for (const auto &threshold : binding.thresholds) {
+    for (const auto &threshold : binding.declaration.thresholds) {
       auto due = next_crossing(*process, threshold, now, hz);
       if (due && (!first || *due < *first))
         first = due;
     }
     if (first)
-      timers.push_back(
-          {*first,
-           {binding.consumer.object, source.subject, source.term, Value{}, origin},
-           step::ThresholdToken{source, binding.consumer.object, binding.consumer.script,
-                                binding.index, process->revision, binding.revision}});
+      timers.push_back({*first,
+                        {binding.consumer.object, source.subject, source.term, Value{}, origin},
+                        step::ThresholdToken{source, binding.consumer.object,
+                                             binding.consumer.script, binding.index}});
   }
   return timers;
-}
-void publish_effects(DeferredEffects &&effects, const record::Origin &origin, Step now,
-                     step::WorkQueues &queues, step::TimerWheel &wheel, record::Journal &journal,
-                     std::size_t event_limit) {
-  auto overflow = [&]() {
-    record::Event event;
-    event.step = now;
-    event.kind = record::Kind::System;
-    event.name = "overflow";
-    journal.append(std::move(event), origin);
-  };
-  for (auto &item : effects.background) {
-    item.origin = origin;
-    step::enqueue_background(queues, std::move(item));
-  }
-  for (auto &effect : effects.ordered)
-    std::visit(
-        [&](auto &item) {
-          using T = std::decay_t<decltype(item)>;
-          if constexpr (std::is_same_v<T, step::EventWork>) {
-            item.origin = origin;
-            if (step::enqueue_event(queues, std::move(item), event_limit) ==
-                step::PushResult::Overflow)
-              overflow();
-          } else if constexpr (std::is_same_v<T, step::WatchWork>) {
-            item.origin = origin;
-            step::enqueue_watch(queues, std::move(item));
-          } else if constexpr (std::is_same_v<T, step::Timer>) {
-            item.event.origin = origin;
-            step::schedule(wheel, std::move(item));
-          } else if constexpr (std::is_same_v<T, Diagnostic>) {
-            record::Event event;
-            event.step = now;
-            event.kind = record::Kind::System;
-            event.name = item.name;
-            event.detail["message"] = item.message;
-            journal.append(std::move(event), origin);
-          } else if constexpr (std::is_same_v<T, record::Event>) {
-            item.step = now;
-            journal.append(std::move(item), origin);
-          } else if constexpr (std::is_same_v<T, ContributionChange>) {
-            throw std::logic_error("reconcile contribution changes before publishing effects");
-          }
-        },
-        effect);
 }
 } // namespace amber::react

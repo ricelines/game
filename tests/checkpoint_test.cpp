@@ -11,48 +11,52 @@ void round_trip_and_real_vm_continuation() {
   require(step::timers(original.timers).size() == 1 && step::timers(original.timers)[0].due == 41,
           "snapshot fixture includes an actual pending process-threshold timer");
   snap::Buffer bytes;
-  snap::encode(bytes, original.header, original.writers());
+  original.write(bytes);
   const std::array<std::string_view, 1> versions{"checkpoint-fixture"};
   auto view = snap::parse(bytes, versions);
   Fixture loaded;
-  snap::decode(view, loaded.readers());
+  loaded.read(view);
   require(view.sections.size() == 13 && loaded.next_record == 31 &&
               loaded.inputs.rows.size() == 1 && loaded.motion.size() == 2 &&
               loaded.parts.get(original.f.b.slot()),
           "all thirteen owner sections restore their actual nonempty tables");
-  require(loaded.f.processes[1].get(original.f.a.slot())->revision ==
-                  original.f.processes[1].get(original.f.a.slot())->revision &&
+  require(loaded.f.processes[1].get(original.f.a.slot())->rate == 1 &&
+              loaded.f.processes[1].get(original.f.a.slot())->step0 == 0 &&
+              react::read_state(loaded.f.properties, loaded.f.processes, original.f.a, 1, 20, 20)
+                      .value.numeric() == 1 &&
               step::timers(loaded.timers).size() == step::timers(original.timers).size() &&
-              loaded.f.subscriptions.next_revision == original.f.subscriptions.next_revision &&
+              loaded.f.subscriptions.rows.at({original.f.a, 1}).front().last ==
+                  original.f.subscriptions.rows.at({original.f.a, 1}).front().last &&
               loaded.profiles.by_key == original.profiles.by_key &&
               loaded.grants.by_key == original.grants.by_key,
-          "restore rebuilds indexes without changing authoritative process/watch revisions");
+          "restore preserves the live closed-form process, pending crossing and last watch answer");
   require(loaded.parameters.rows.size() == original.parameters.rows.size() &&
               loaded.parameters.rows[1].model == original.parameters.rows[1].model &&
               loaded.parameters.rows[1].asset == original.parameters.rows[1].asset &&
               loaded.parameters.rows[1].parts == original.parameters.rows[1].parts &&
               loaded.offers.rows[1].parts == original.offers.rows[1].parts &&
               loaded.trades.rows[1].live && loaded.limits.get(original.f.a.slot()) &&
-              loaded.authored_text.details_by_target.size() == 2,
-          "parameter topology, complete offers/trades, owner limits and text indexes survive");
+              loaded.authored_text.rows.size() == original.authored_text.rows.size() &&
+              loaded.authored_text.rows[1].target == original.f.a &&
+              loaded.authored_text.rows[2].target == original.f.c,
+          "parameter topology, complete offers/trades, owner limits and attributed text survive");
   for (const auto &[id, code] : original.f.code) {
     auto outcome = react::load_script(loaded.f.vm, code, loaded.f.scripts.rows[id].declaration);
     require(outcome.status == react::RunOutcome::Status::Ok,
             "fresh VM loads the same immutable compiled fixture artifacts");
   }
-  auto before = loaded.f.subscriptions.next_revision;
-  auto changes = install::sync_watches(loaded.f.subscriptions, loaded.f.links, loaded.f.values(),
-                                       loaded.allocations, {original.f.a, original.script},
-                                       loaded.f.scripts.rows[original.script].declaration, 12, 20,
-                                       {}, install::SyncMode::Restore);
-  require(
-      changes.dirty.empty() && changes.timers.empty() &&
-          loaded.f.subscriptions.next_revision == before,
-      "runtime watch-link rehydration preserves saved last answers and does not duplicate timers");
-  const install::InvocationPlan cue{
+  const auto before = loaded.f.subscriptions.rows.at({original.f.a, 1}).front().last;
+  auto changes = react::sync_watches(loaded.f.subscriptions, loaded.f.values(), loaded.allocations,
+                                     {original.f.a, original.script},
+                                     loaded.f.scripts.rows[original.script].declaration, 12, 20, {},
+                                     react::SyncMode::Restore);
+  require(changes.dirty.empty() && changes.timers.empty() &&
+              loaded.f.subscriptions.rows.at({original.f.a, 1}).front().last == before,
+          "runtime watch rehydration preserves saved last answers and does not duplicate timers");
+  const react::InvocationPlan cue{
       {original.script, "novel.cue", 1, 1, true}, original.f.a, original.f.b, 6, {}, {}};
-  original.f.run(std::span<const install::InvocationPlan>(&cue, 1), 13);
-  loaded.f.run(std::span<const install::InvocationPlan>(&cue, 1), 13);
+  original.f.run(std::span<const react::InvocationPlan>(&cue, 1), 13);
+  loaded.f.run(std::span<const react::InvocationPlan>(&cue, 1), 13);
   require(original.f.states.at({original.f.a, original.script}) ==
                   loaded.f.states.at({original.f.a, original.script}) &&
               original.f.random == loaded.f.random,
@@ -83,11 +87,10 @@ void local_capture_filters_authority_and_runtime_rows() {
                                             original.players, original.plots, original.groups,
                                             original.grants, original.offers, original.trades);
   snap::Buffer bytes;
-  snap::encode(bytes, original.header,
-               original.writers(std::span<const Handle>(objects), &catalog, &permission));
+  original.write(bytes, std::span<const Handle>(objects), &catalog, &permission);
   const std::array<std::string_view, 1> versions{"checkpoint-fixture"};
   Fixture captured;
-  snap::decode(snap::parse(bytes, versions), captured.readers());
+  captured.read(snap::parse(bytes, versions));
   require(identity(captured.f.objects).valid(original.f.a) &&
               !identity(captured.f.objects).valid(original.f.c) &&
               !captured.f.properties[1].get(original.f.c.slot()) &&

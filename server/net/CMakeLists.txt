@@ -1,12 +1,18 @@
-add_library(amber_net replication.cpp server.cpp)
+add_library(amber_net STATIC
+  replication.cpp
+  server.cpp
+  profiles.cpp
+  profiles_snapshot.cpp
+  protocol.cpp
+  sessions.cpp
+  presentation.cpp
+  perception_format.cpp
+  scene_replication.cpp
+  read_actions.cpp
+  read_events.cpp
+  read_inspect.cpp
+  read_look.cpp
+)
 target_include_directories(amber_net PUBLIC ${PROJECT_SOURCE_DIR}/server)
-target_link_libraries(amber_net PUBLIC amber_store PRIVATE Ambergris::WebSockets Ambergris::bitsery)
-target_link_libraries(amber_net PRIVATE Ambergris::TracyClient)
-if(BUILD_TESTING)
-  add_executable(net_test ../../tests/net_test.cpp)
-  target_link_libraries(net_test PRIVATE amber_net)
-  add_test(NAME net COMMAND net_test)
-  add_executable(net_probe ../../tests/net_probe.cpp)
-  target_link_libraries(net_probe PRIVATE amber_net Ambergris::nlohmann_json Ambergris::tomlplusplus)
-  target_compile_definitions(net_probe PRIVATE AMBER_CONFIG_PATH="${PROJECT_SOURCE_DIR}/config.toml")
-endif()
+target_compile_features(amber_net PUBLIC cxx_std_20)
+target_link_libraries(amber_net PUBLIC amber_store amber_snap amber_react amber_perm amber_space PRIVATE Ambergris::WebSockets Ambergris::bitsery Ambergris::picosha2 Ambergris::TracyClient Threads::Threads)

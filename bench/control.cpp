@@ -1,38 +1,47 @@
-#include "control/control.hpp"
+#include "net/net.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <iostream>
 
 using namespace amber;
-using namespace amber::control;
+using namespace amber::net;
 int main() {
   using Clock = std::chrono::steady_clock;
   std::size_t bytes = 0;
   Profiles profiles;
   put_profile(profiles, {1, "Benchmark", {}, {}, all_modes, {hash_key("benchmark-only")}});
-  Transport transport{&bytes,
-                      [](void *context, net::SessionId, std::string output) {
-                        *static_cast<std::size_t *>(context) += output.size();
-                      },
-                      [](void *, net::SessionId, std::uint16_t, std::string) {},
-                      [](void *, net::SessionId, Vec3) {}};
-  Sessions sessions(profiles, transport);
-  sessions.register_operation(
-      {"look", "obs", all_modes, Lane::Query, validate_look,
-       [](void *, const Invocation &) { return Reply::result({{"things", Json::array()}}); },
-       nullptr});
+  Sessions sessions(profiles);
+  auto complete = [&] {
+    std::vector<Invocation> ready;
+    std::vector<SessionNotice> notices;
+    std::vector<SessionOutput> outputs;
+    sessions.drain(ready, notices, outputs);
+    for (const auto &notice : notices)
+      if (const auto *login = std::get_if<Authenticated>(&notice))
+        sessions.welcome(login->session, Json::object());
+    for (const auto &input : ready)
+      sessions.complete(input.session, input.sequence, {{"things", Json::array()}});
+    ready.clear();
+    notices.clear();
+    sessions.drain(ready, notices, outputs);
+    for (const auto &output : outputs)
+      if (const auto *send = std::get_if<Send>(&output))
+        bytes += send->message.dump().size();
+  };
   for (net::SessionId id = 1; id <= 500; ++id) {
     sessions.accept(net::Connected{id});
     sessions.accept(net::Control{
         id, R"({"t":"hello","version":1,"key":"benchmark-only","mode":"watch","binary":false})"});
   }
+  complete();
   std::vector<double> samples;
   constexpr int repetitions = 101;
   for (int sample = 0; sample < repetitions; ++sample) {
     const auto began = Clock::now();
     for (net::SessionId id = 1; id <= 500; ++id)
       sessions.accept(net::Control{id, R"({"t":"look","id":1,"limit":40})"});
+    complete();
     const auto elapsed = std::chrono::duration<double, std::milli>(Clock::now() - began).count();
     if (sample)
       samples.push_back(elapsed);

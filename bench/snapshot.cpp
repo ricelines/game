@@ -1,4 +1,4 @@
-#include "snap/objects.hpp"
+#include "snap/snap.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -25,11 +25,12 @@ int main() {
     const auto start = Clock::now();
     snap::Output out{bytes};
     snap::begin(out, {std::string(versions[0]), 123, {}});
-    for (auto tag : snap::tags)
-      snap::section(out, tag, [&](snap::Output &s) {
-        if (tag == snap::tags[0])
-          snap::write_objects(s, objects);
-      });
+    for (auto tag : snap::tags) {
+      const auto section = snap::begin_section(out, tag);
+      if (tag == snap::tags[0])
+        snap::write_objects(out, objects);
+      snap::end_section(out, section);
+    }
     snap::finish(out, bytes);
     const auto encoded = Clock::now();
     const auto view = snap::parse(bytes, versions);

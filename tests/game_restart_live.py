@@ -71,7 +71,7 @@ class Native:
             await asyncio.sleep(0.05)
         raise AssertionError("separate native restart listener did not become ready")
 
-    async def stop(self):
+    async def stop(self, *, script_errors=0):
         if self.process is None:
             return None
         if self.process.poll() is None:
@@ -90,8 +90,9 @@ class Native:
         require(self.report.exists(), f"{self.label} native did not retain its final state report")
         state = json.loads(self.report.read_text())
         require(
-            state["script_errors"] == 0,
-            f"{self.label} had {state['script_errors']} handler errors/cutoffs; reports retained",
+            state["script_errors"] == script_errors,
+            f"{self.label} had {state['script_errors']} handler errors/cutoffs, expected "
+            f"{script_errors}; reports retained",
         )
         return state
 

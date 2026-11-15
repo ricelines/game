@@ -1,104 +1,80 @@
-#include "allocation.hpp"
+#include "react.hpp"
 
 #include <algorithm>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace amber::react {
 namespace {
 bool sharing(Combine combine) {
   return combine == Combine::ShareEqual || combine == Combine::SharePriority;
 }
-template <class T> void unique(std::vector<T> &rows, const T &value) {
-  if (std::find(rows.begin(), rows.end(), value) == rows.end())
-    rows.push_back(value);
-}
-void unlink(PriorityLinks &links, FactKey pair) {
-  auto old = links.by_pair.find(pair);
-  if (old == links.by_pair.end())
-    return;
-  for (const auto &key : old->second) {
-    auto &pairs = links.by_setting.at(key);
-    std::erase(pairs, pair);
-    if (pairs.empty())
-      links.by_setting.erase(key);
-  }
-  links.by_pair.erase(old);
-  auto &subjects = links.by_subject.at(pair.subject.bits);
-  std::erase(subjects, pair);
-  if (subjects.empty())
-    links.by_subject.erase(pair.subject.bits);
-}
-void link(PriorityLinks &links, const ValueRead &values, FactKey pair) {
-  const auto &term = values.terms.rows.at(pair.term);
-  if (!term.priority || term.combine != Combine::SharePriority) {
-    unlink(links, pair);
-    return;
-  }
-  std::vector<SettingKey> keys;
-  if (pair.term < values.shared.size())
-    if (const auto *demand = values.shared[pair.term].get(pair.subject.slot()))
-      for (const auto &part : demand->parts)
-        if (values.identity.valid(part.from)) {
-          unique(keys, {SettingKey::Scope::Instance, part.from.bits, term.priority});
-          unique(keys, {SettingKey::Scope::Model, values.identity.model[part.from.slot()],
-                        term.priority});
-          unique(keys, {SettingKey::Scope::Plot, values.plots[part.from.slot()], term.priority});
-          unique(keys, {SettingKey::Scope::World, 0, term.priority});
-        }
-  if (const auto old = links.by_pair.find(pair); old != links.by_pair.end() && old->second == keys)
-    return;
-  unlink(links, pair);
-  for (auto key : keys)
-    links.by_setting[key].push_back(pair);
-  links.by_pair.emplace(pair, std::move(keys));
-  links.by_subject[pair.subject.bits].push_back(pair);
-}
 } // namespace
-std::size_t SettingKeyHash::operator()(const SettingKey &key) const {
-  return FactKeyHash{}({Handle{key.subject}, key.term}) ^
-         (static_cast<std::size_t>(key.scope) * 0x9e3779b9U);
-}
-void rebuild_priorities(PriorityLinks &links, const ValueRead &values) {
-  links = {};
-  for (const auto &term : values.terms.rows) {
+void validate_shared_terms(const Terms &terms) {
+  std::vector<TermId> paired;
+  for (const auto &term : terms.rows) {
     if (!sharing(term.combine))
       continue;
-    if (!term.paired || term.paired >= values.terms.rows.size())
+    if (!term.paired || term.paired >= terms.rows.size())
       throw std::invalid_argument("shared demand requires a paired supply term");
-    const auto &supply = values.terms.rows[term.paired];
+    const auto &supply = terms.rows[term.paired];
     if (term.kind != Kind::Quantity || supply.kind != Kind::Quantity ||
         supply.combine == Combine::None || sharing(supply.combine) ||
         supply.dimensions != term.dimensions)
       throw std::invalid_argument("allocation requires compatible combined supply and demand");
-    if (links.demands_by_input.contains(term.paired))
+    if (std::find(paired.begin(), paired.end(), term.paired) != paired.end())
       throw std::invalid_argument("one supply term pairs with one demand term");
-    if (term.priority && (term.priority >= values.terms.rows.size() ||
-                          values.terms.rows[term.priority].source != Source::Setting ||
-                          values.terms.rows[term.priority].kind != Kind::Quantity))
+    paired.push_back(term.paired);
+    if (term.priority && (term.priority >= terms.rows.size() ||
+                          terms.rows[term.priority].source != Source::Setting ||
+                          terms.rows[term.priority].kind != Kind::Quantity))
       throw std::invalid_argument("allocation priority requires a quantity setting");
-    links.demands_by_input[term.id].push_back(term.id);
-    links.demands_by_input[term.paired].push_back(term.id);
-    if (term.id < values.shared.size())
-      for (const auto slot : values.shared[term.id].slot_of) {
-        const auto subject = Handle::make(slot, values.identity.generation.at(slot));
-        if (values.identity.valid(subject))
-          link(links, values, {subject, term.id});
-      }
   }
 }
-std::vector<FactKey> allocation_inputs(const PriorityLinks &links, FactKey source) {
+std::vector<FactKey> allocation_inputs(const Terms &terms, FactKey source) {
   std::vector<FactKey> pairs;
-  if (auto found = links.demands_by_input.find(source.term); found != links.demands_by_input.end())
-    for (auto demand : found->second)
-      pairs.push_back({source.subject, demand});
+  for (const auto &term : terms.rows)
+    if (sharing(term.combine) && (term.id == source.term || term.paired == source.term))
+      pairs.push_back({source.subject, term.id});
   return pairs;
 }
-std::vector<FactKey> priority_inputs(const PriorityLinks &links, SettingKey key) {
-  auto found = links.by_setting.find(key);
-  return found == links.by_setting.end() ? std::vector<FactKey>{} : found->second;
+std::vector<FactKey> priority_inputs(const ValueRead &values, SettingKey key) {
+  std::vector<FactKey> pairs;
+  for (const auto &term : values.terms.rows) {
+    if (term.combine != Combine::SharePriority || term.priority != key.term ||
+        term.id >= values.shared.size())
+      continue;
+    const auto &column = values.shared[term.id];
+    for (std::size_t row = 0; row < column.slot_of.size(); ++row) {
+      const auto &demand = column.value[row];
+      const bool affected =
+          std::any_of(demand.parts.begin(), demand.parts.end(), [&](const Contribution &part) {
+            if (!values.identity.valid(part.from))
+              return false;
+            switch (key.scope) {
+            case SettingKey::Scope::Instance:
+              return part.from.bits == key.subject;
+            case SettingKey::Scope::Model:
+              return values.identity.model[part.from.slot()] == key.subject;
+            case SettingKey::Scope::Plot:
+              return values.plots[part.from.slot()] == key.subject;
+            case SettingKey::Scope::World:
+              return true;
+            }
+            return false;
+          });
+      if (affected) {
+        const auto slot = column.slot_of[row];
+        const auto subject = values.identity.at(slot);
+        if (values.identity.valid(subject))
+          pairs.push_back({subject, term.id});
+      }
+    }
+  }
+  return pairs;
 }
 bool reconcile_allocation(const ValueRead &values, AllocationRows &allocations, MeterRows &meters,
-                          PriorityLinks &links, FactKey pair, Step now, double hz) {
+                          FactKey pair, Step now, double hz) {
   if (!values.identity.valid(pair.subject))
     return false;
   const auto &term = values.terms.rows.at(pair.term);
@@ -118,15 +94,52 @@ bool reconcile_allocation(const ValueRead &values, AllocationRows &allocations, 
     }
   const auto changed = allocate(row(term.paired), demand, term.combine, priority, pair.subject,
                                 term.paired, term.id, allocations, meters, now, hz);
-  link(links, values, pair);
   return std::any_of(changed.begin(), changed.end(), [](const auto &key) { return !key.supplier; });
 }
-void retire_priorities(PriorityLinks &links, Handle subject) {
-  const auto found = links.by_subject.find(subject.bits);
-  if (found == links.by_subject.end())
-    return;
-  const auto pairs = found->second;
+} // namespace amber::react
+
+namespace amber::react {
+namespace {
+using Pairs = std::unordered_set<FactKey, FactKeyHash>;
+void add(Pairs &pairs, std::vector<FactKey> inputs) {
+  pairs.insert(inputs.begin(), inputs.end());
+}
+void reconcile(const ValueRead &values, AllocationRows &allocations, MeterRows &meters,
+               const Pairs &pairs, react::DeferredEffects &effects, Step now, double hz) {
   for (const auto pair : pairs)
-    unlink(links, pair);
+    if (react::reconcile_allocation(values, allocations, meters, pair, now, hz))
+      effects.ordered.emplace_back(step::WatchWork{pair, {}});
+}
+} // namespace
+void reconcile_allocations(const ValueRead &values, AllocationRows &allocations, MeterRows &meters,
+                           react::DeferredEffects &effects, Step now, double hz) {
+  Pairs pairs;
+  for (const auto &effect : effects.ordered)
+    if (const auto *changed = std::get_if<react::ContributionChange>(&effect))
+      add(pairs, react::allocation_inputs(values.terms, changed->source));
+    else if (const auto *dirty = std::get_if<step::WatchWork>(&effect))
+      add(pairs, react::priority_inputs(values, {react::SettingKey::Scope::Instance,
+                                                 dirty->source.subject.bits, dirty->source.term}));
+  std::erase_if(effects.ordered, [](const auto &effect) {
+    return std::holds_alternative<react::ContributionChange>(effect);
+  });
+  reconcile(values, allocations, meters, pairs, effects, now, hz);
+}
+void reconcile_priority(const ValueRead &values, AllocationRows &allocations, MeterRows &meters,
+                        react::SettingKey scope, react::DeferredEffects &effects, Step now,
+                        double hz) {
+  Pairs pairs;
+  add(pairs, react::priority_inputs(values, scope));
+  reconcile(values, allocations, meters, pairs, effects, now, hz);
+}
+void reconcile_object_priorities(const ValueRead &values, AllocationRows &allocations,
+                                 MeterRows &meters, Handle object, react::DeferredEffects &effects,
+                                 Step now, double hz) {
+  Pairs pairs;
+  for (const auto &term : values.terms.rows)
+    if (term.combine == react::Combine::SharePriority && term.priority)
+      add(pairs, react::priority_inputs(
+                     values, {react::SettingKey::Scope::Instance, object.bits, term.priority}));
+  reconcile(values, allocations, meters, pairs, effects, now, hz);
 }
 } // namespace amber::react

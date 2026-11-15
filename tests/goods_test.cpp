@@ -1,12 +1,12 @@
-#include "bindings/goods.hpp"
-#include "scene_fixture.hpp"
+#include "react/react.hpp"
 #include "space_fixture.hpp"
+#include "step/step.hpp"
 
 #include <chrono>
 #include <iostream>
 
 using namespace testspace;
-namespace bi = amber::bindings;
+namespace st = amber::step;
 namespace pe = amber::perm;
 namespace re = amber::react;
 struct Fixture {
@@ -16,77 +16,41 @@ struct Fixture {
   pe::Plots plots;
   pe::OwnerLimits limits;
   Relation parts;
-  bi::DeliveryTargets delivery;
+  st::DeliveryTargets delivery;
+  lifecycle::Parts named_parts;
   std::vector<sp::RelationChange> changes;
-  test_runtime::Fixture data;
+  catalog::Models models;
+  re::Terms terms;
+  re::Materials materials;
+  re::InstanceScripts installed;
+  re::MeterRows meters;
   catalog::ParameterBlocks parameters;
   catalog::Assets assets;
-  re::ValueRead values;
-  testscene::Projection projections;
   Handle controller, root, child, body;
   re::Vm vm{{4096, 100, 5, 64}};
   re::ScriptState state;
   re::DeferredEffects effects;
-  bi::PlotObjectsBinding query;
-  bi::HoldGoodsBinding hold;
-  command::NativeActions declarations;
-  drive::NativeOperations operations;
+  re::NativeActions declarations;
+  bool changed = false;
+  std::vector<Handle> hidden;
   nlohmann::json reply;
   TermId action = 0;
   Fixture()
-      : values{data.terms,
-               identity(scene.objects),
-               scene.objects.plot,
-               scene.objects.params,
-               data.materials,
-               data.assets,
-               data.properties,
-               data.processes,
-               data.instance_settings,
-               data.model_settings,
-               data.plots,
-               data.world,
-               data.shared,
-               data.relation_view,
-               data.runtime,
-               0},
-        projections(scene.objects, data.models, parameters, assets, values, data.runtime,
-                    data.subscriptions, parts, {1, 2}),
-        controller(scene.box({.2f, .2f, .2f}, {20, 0, 0}, sp::Motion::Static, 0, false)),
+      : controller(scene.box({.2f, .2f, .2f}, {20, 0, 0}, sp::Motion::Static, 0, false)),
         root(scene.box({1, 1, .5f}, {}, sp::Motion::Static, 0, false)),
         child(scene.box({.2f, .2f, .2f}, {0, 0, .5f}, sp::Motion::Kinematic, 0, false)),
-        body(scene.character({0, -1, 0})),
-        query{identity(scene.objects), scene.objects.plot, parts, plots},
-        hold{scene.space,
-             identity(scene.objects),
-             authority(scene.objects),
-             parents(scene.objects),
-             space_flags(scene.objects),
-             scene.relations,
-             parts,
-             limits,
-             grants,
-             players,
-             delivery,
-             1,
-             changes,
-             projections.scene,
-             transforms(scene.objects),
-             plot_membership(scene.objects),
-             plots} {
-    data.models.rows.resize(3);
+        body(scene.character({0, -1, 0})) {
+    models.rows.resize(3);
     const auto asset_hash = catalog::sha256("goods fixture");
     for (auto id : {1u, 2u}) {
-      data.models.rows[id].id = id;
-      data.models.rows[id].asset = asset_hash;
+      models.rows[id].id = id;
+      models.rows[id].asset = asset_hash;
     }
     catalog::Asset asset;
     asset.hash = asset_hash;
     asset.canonical_params = "{}";
     asset.manifest = {{"bindings", nlohmann::json::object()}};
     assets.rows[asset_hash] = asset;
-    const std::array visible{root, child, body};
-    bi::register_replication_projection(projections.replication, visible);
     players.rows.resize(3);
     plots.rows.resize(3);
     plots.rows[1].id = 1;
@@ -99,15 +63,19 @@ struct Fixture {
     scene.objects.plot[controller.slot()] = 2;
     parts.out.set(root.slot(), std::vector<Handle>{child});
     parts.in.set(child.slot(), std::vector<Handle>{root});
+    named_parts.set(root.slot(), std::vector<lifecycle::NamedPart>{{"part", child}});
     require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
                        parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
                        scene.relations.supports, scene.relations.attached_to,
                        {child, root, {{0, 0, .5f}, {}}, false}, changes)
                     .status == sp::Status::Ok,
             "fixture declared child attachment");
-    re::register_binding(vm, "plot_objects", bi::plot_objects_binding, &query);
-    bi::register_hold_goods_action(data.terms, declarations, operations, hold);
-    action = data.terms.by_name.at("engine.hold_goods");
+    st::bind_metadata(vm, identity(scene.objects), transforms(scene.objects),
+                      authority(scene.objects), parents(scene.objects), scene.objects.params,
+                      models, installed, parameters, assets, terms, materials, parts, meters, plots,
+                      0);
+    st::declare_hold_goods_action(terms, declarations);
+    action = terms.by_name.at("engine.hold_goods");
     auto code = re::compile_script(R"(
       return {
         inspect=function(self) self.state.count=#self:plot_objects(1) end
@@ -139,20 +107,25 @@ struct Fixture {
     const auto result = re::run_handler(vm, {1, "inspect"}, i);
     require(result.status == re::RunOutcome::Status::Ok, result.error.c_str());
   }
-  void collect(Handle target = {}, Step step = 1, Handle installation = {},
-               nlohmann::json args = nlohmann::json::object()) {
-    drive::NativeCall call;
+  void collect(Handle target = {}, Step step = 1, Handle installation = {}) {
+    st::NativeCall call;
     call.request = {ScriptHolder{1, installation ? installation : controller},
                     action,
                     target ? target : root,
                     {}};
-    call.arguments = std::move(args);
+    call.arguments = nlohmann::json::object();
     call.step = step;
     call.hz = 20;
-    auto result = drive::invoke_native(operations, std::move(call));
+    auto result = st::hold_goods(players, grants, limits, identity(scene.objects),
+                                 authority(scene.objects), parents(scene.objects),
+                                 space_flags(scene.objects), parts, delivery, scene.space, 1, call);
+    st::apply_custody(scene.space, identity(scene.objects), transforms(scene.objects),
+                      parents(scene.objects), space_flags(scene.objects), scene.relations,
+                      named_parts, {}, plot_membership(scene.objects), plots, result.custody,
+                      result);
+    hidden = result.hidden_objects;
+    changed = result.changed;
     reply = std::move(result.reply);
-    effects = std::move(result.effects);
-    effects.changed |= result.changed;
   }
 };
 void explicit_authority_and_online_assembly() {
@@ -194,12 +167,12 @@ void explicit_authority_and_online_assembly() {
                                         f.limits, f.root),
                              f.players, f.grants, 1)),
           "custody retains owner, ceilings and explicit later salvage grant");
-  require(!f.projections.replicas.rows.contains(f.root.bits) &&
-              !f.projections.replicas.rows.contains(f.child.bits) &&
-              f.projections.replicas.rows.contains(f.body.bits) && f.effects.changed,
-          "custody immediately removes real goods replicas while preserving the avatar");
+  require(std::ranges::find(f.hidden, f.root) != f.hidden.end() &&
+              std::ranges::find(f.hidden, f.child) != f.hidden.end() &&
+              std::ranges::find(f.hidden, f.body) == f.hidden.end() && f.changed,
+          "custody reports hidden goods closure while preserving the avatar");
   f.collect();
-  require(f.players.rows[1].inventory.size() == 1 && !f.effects.changed,
+  require(f.players.rows[1].inventory.size() == 1 && !f.changed,
           "repeated custody is idempotent and reports no state change");
   f.inspect();
   require(std::get<double>(f.state.at(std::string("count"))) == 0,
@@ -208,9 +181,8 @@ void explicit_authority_and_online_assembly() {
 void denials_and_offline_delivery() {
   Fixture f;
   auto id = f.grant(pe::Scope::object(f.root), pe::bit(pe::Verb::Transfer), 10);
-  f.collect({}, 1, {}, {{"recipient", "p:2"}});
-  require(!f.reply.value("ok", false) && f.players.rows[2].mailbox.empty(),
-          "recipient must remain owner");
+  require(!st::validate_hold_goods({{"recipient", "p:2"}}).empty(),
+          "caller cannot redirect custody to a different owner");
   f.collect({}, 10);
   require(!f.reply.value("ok", false), "expired goods grant denied");
   f.collect({}, 1, f.body);
@@ -239,7 +211,7 @@ void denials_and_offline_delivery() {
               !f.scene.objects.parent[f.root.slot()] && f.grants.rows[id].live,
           "offline custody stores one root without revoking grants");
   f.collect();
-  require(f.reply.value("ok", false) && f.players.rows[1].mailbox.size() == 1 && !f.effects.changed,
+  require(f.reply.value("ok", false) && f.players.rows[1].mailbox.size() == 1 && !f.changed,
           "full mailbox accepts same already stored root idempotently");
   pe::revoke(f.grants, f.players, id);
   f.collect();

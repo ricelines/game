@@ -1,7 +1,9 @@
-#include "catalog/snapshot.hpp"
-#include "elaborate/snapshot.hpp"
+#include "elaborate/elaborate.hpp"
+#include "react/react.hpp"
 
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 using namespace amber;
@@ -126,6 +128,22 @@ void lifecycle_and_fixture_acceptance() {
   require(!refusal.requester && table.rows[1].status == Status::Refused,
           "anonymous refusal closes without inventing requester");
   rejects([&] { validate_tests(nlohmann::json::array()); }, "empty suite rejected");
+  for (const nlohmann::json &steps :
+       {nlohmann::json(0), nlohmann::json(1.0), nlohmann::json(std::numeric_limits<Step>::max())}) {
+    auto integral_steps = suite();
+    integral_steps[0]["when"]["steps"] = steps;
+    validate_tests(integral_steps);
+  }
+  for (const nlohmann::json &steps :
+       {nlohmann::json(-1), nlohmann::json(1.5),
+        nlohmann::json(std::numeric_limits<double>::infinity()),
+        nlohmann::json(std::numeric_limits<double>::quiet_NaN()),
+        nlohmann::json(std::ldexp(1., std::numeric_limits<Step>::digits)), nlohmann::json("1")}) {
+    auto invalid_steps = suite();
+    invalid_steps[0]["when"]["steps"] = steps;
+    rejects([&] { validate_tests(invalid_steps); },
+            "fractional, negative, nonfinite or out-of-range fixture steps accepted");
+  }
   auto malformed = suite();
   malformed[0]["when"]["action"] = {{"term", "x.touch"}};
   rejects([&] { validate_tests(malformed); }, "ambiguous when rejected");
@@ -207,7 +225,8 @@ void snapshot_and_attributed_text() {
   catalog::append_authored_text(texts, outside, 7, 13, catalog::AuthoredTextKind::Refusal,
                                 "not modeled");
   require(maker.rows[1].description == "maker description" && texts.rows[detail].author == 6 &&
-              texts.details_by_target.at(target.bits) == std::vector<catalog::TextId>{detail},
+              texts.rows[detail].target == target &&
+              texts.rows[detail].kind == catalog::AuthoredTextKind::Detail,
           "elaboration attribution leaves maker text separate");
   snap::Buffer text_bytes;
   snap::Output text_out{text_bytes};
@@ -219,9 +238,10 @@ void snapshot_and_attributed_text() {
   catalog::read_authored_texts(text_in, restored);
   snap::check_complete(text_in);
   require(restored.rows.size() == texts.rows.size() && !restored.rows.back().id &&
-              restored.details_by_target.at(target.bits).front() == detail &&
-              restored.rows[detail].created_s == 12.5,
-          "selected attributed text and index restore");
+              restored.rows[detail].target == target && restored.rows[detail].author == 6 &&
+              restored.rows[detail].kind == catalog::AuthoredTextKind::Detail &&
+              restored.rows[detail].created_s == 12.5 && restored.rows[detail].text == "new detail",
+          "selected attributed text restores its identity and provenance without excluded text");
 }
 } // namespace
 int main() {

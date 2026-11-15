@@ -73,8 +73,10 @@ void capture(const std::filesystem::path &directory) {
   snap::Buffer bytes;
   snap::Output out{bytes};
   snap::begin(out, {"capture-test", 50, {}});
-  for (const auto &tag : snap::tags)
-    snap::section(out, tag, [](snap::Output &) {});
+  for (const auto &tag : snap::tags) {
+    const auto marker = snap::begin_section(out, tag);
+    snap::end_section(out, marker);
+  }
   snap::finish(out, bytes);
   CaptureWriter writer(directory, 3);
   auto hash = writer.submit(bytes);

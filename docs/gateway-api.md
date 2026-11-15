@@ -33,6 +33,9 @@ default includes the newest 40 events; callers can request more. `heard` contain
 the body's actual spatial speech observations. Closed/replaced connections report
 their actual failure rather than generating gameplay.
 
+Grant identifiers use `g:N` in grant results, parent references, revocation,
+listings and expiry notices. Group identifiers use `group:N`.
+
 Native LOOK supplies current full descriptions and body/player action lists.
 `Session.compact_observation` compares descriptions without distance/bearing;
 unchanged things become `{h,dist_m,bearing}`, and unchanged action lists are
@@ -54,6 +57,36 @@ or `none` with `no_effect`, `no_handler` or `not_modeled`. Policy denials contai
 `denied:{need,on,why,fix}`; bad inputs contain `error:"bad_input"`, `problem`, and a
 signature when the action is known. Accepted malformed action requests produce
 an actual denied S7 attempt; malformed transport rejected before enqueue does not.
+
+## Starting bodies and later installation consent
+
+A starting player receives its configured body with authored slot grants already
+issued. The profile's `body_installs` choices use the same declared-slot, scope,
+rights and finite-expiry checks as ordinary `engine.install`. The shipped resident
+profiles provide Use/Take/Move on their owned objects in the configured plots and
+Avatar Animate/Camera; no player setup is needed. Initial provisioning rejects a
+body profile that leaves one of its script's declared slots unchosen. Public
+account registration and body claiming are not exposed.
+
+Authentication selects the existing body. Login, relogin and snapshot restore do
+not issue grants, so revoked or expired starting grants stay revoked or expired.
+Later installation consent remains explicit: inspect `self` for its script, call
+`engine.install` without choices to preview slots, then supply chosen scopes,
+rights and a finite `expires_s`. This also works for an already installed model
+default. New goods outside a chosen scope need another grant. No installation
+owner's authority is inherited, and revocation or expiry governs the next action.
+
+Slots sharing a holder and scope produce one grant with their combined chosen
+rights. Their cap, period and expiry must agree; conflicting choices are rejected.
+Avatar Animate/Camera consent can therefore share one bounded grant, which the
+body may narrowly delegate to a seat's script and revoke when standing.
+
+Pouring transfers a conserved quantity, not ownership: it checks Move on the
+source and Use on the receiver. The body's handler passes the receiver's actual
+measured capacity as `engine.transfer`'s optional `to_max` bound, in the transferred
+term's SI units. The action also respects existing process bounds, clamps to the
+amount available and room remaining, and returns the amount actually moved.
+A script that gives or sells ownership still needs a separate Transfer grant.
 
 ## Pinned MCP transport
 

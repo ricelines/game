@@ -1,5 +1,5 @@
 // Exercises the supervisor/process protocol only; this is not a game simulator.
-#include "fixture.hpp"
+#include "elaborate/elaborate.hpp"
 
 #include <fstream>
 #include <map>

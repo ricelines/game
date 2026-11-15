@@ -1,22 +1,17 @@
-#include "bindings/causality_snapshot.hpp"
-#include "bindings/physical.hpp"
-#include "checked_actions_fixture.hpp"
+#include "physical_fixture.hpp"
 #include "space_fixture.hpp"
-
-#include <set>
+#include "step/step.hpp"
 
 using namespace testspace;
-namespace bi = amber::bindings;
+namespace bi = amber::step;
 namespace re = amber::react;
 namespace pe = amber::perm;
 namespace {
-struct Fixture : test_actions::Fixture {
+struct Fixture : test_physical::Fixture {
   Handle body = f.a, object = f.b, wall;
   sp::StepResult last;
-  bi::PhysicalPublication publication{causes, queues, journal, {14, {20, 21, 22, 23}},
-                                      10000,  20,     {}};
   explicit Fixture(sp::Settings config = settings(), sp::Motion mode = sp::Motion::Dynamic)
-      : test_actions::Fixture(config, mode) {
+      : test_physical::Fixture(config, mode) {
     sp::set_pose(space, identity(f.objects), transforms(f.objects), body, {{-3, 0, 0}, {}});
     sp::set_pose(space, identity(f.objects), transforms(f.objects), object, {{0, 0, 1}, {}});
     wall = box({.4f, 3, 3}, {3, 0, 0});
@@ -29,34 +24,33 @@ struct Fixture : test_actions::Fixture {
         if a.mode=='route' then self:navigate(vector.create(2,0,0))
         elseif a.mode=='reroute' then self:navigate(vector.create(1,1,0))
         elseif a.mode=='cancel' then self:cancel_motion()
-        elseif a.mode=='hold' then assert(self:act('engine.grasp',object,{local_pose={position=vector.create(3,0,1)}}).ok)
-        elseif a.mode=='drop' then assert(self:act('engine.release',object,{linear=vector.create(6,0,0)}).ok)
-        elseif a.mode=='push' or a.mode=='partial' then
-          assert(self:act('engine.impulse',object,{momentum=vector.create(if a.mode=='push' then 60 else 1,0,0),point=self:object(object).position}).ok)
-          if a.mode=='partial' then error('after completed operation') end
         elseif a.mode=='read_only' then local p=self:object(object).position
-        elseif a.mode=='slide' then self:sweep(object,vector.create(0.2,0,0)) end
+        elseif a.mode=='slide' or a.mode=='partial' then
+          self:sweep(object,vector.create(0.2,0,0))
+          if a.mode=='partial' then error('after completed operation') end
+        end
       end}})",
          2);
     grant(object, pe::bit(pe::Verb::Take) | pe::bit(pe::Verb::Move));
-    attachment.reach_m = 10;
-    actions.reach_m = 10;
+    reach_m = 10;
   }
-  struct Result {
-    record::Origin origin;
-    bool changed;
-  };
-  Result run(const char *name, const record::Origin &parent = {}, bool expect_error = false) {
-    auto result =
-        bi::perform_action(actions, {PlayerId{1}, 7, object, Value{}}, {{"mode", name}}, parent);
-    require(result.reply.contains("script_errors") == expect_error,
-            "actual ordinary action status");
-    return {result.origin, result.reply.value("effect", "") == "applied"};
+  HandlerResult run(const char *name, const record::Origin &parent = {},
+                    bool expect_error = false) {
+    auto result = invoke(std::vector<EventField>{{"mode", std::string(name)}}, object, parent);
+    require((result.outcome.status == re::RunOutcome::Status::Error) == expect_error,
+            "actual Lua primitive handler status");
+    return result;
+  }
+  bi::ActionOutcome push(const record::Origin &parent = {}, double momentum = 60) {
+    const auto p = f.objects.position[object.slot()];
+    return impulse(object, {{"momentum", {momentum, 0, 0}}, {"point", {p.x, p.y, p.z}}}, parent);
   }
   void tick(std::span<const sp::MoveRequest> requests = {}) {
     sp::step(space, identity(f.objects), transforms(f.objects), parents(f.objects),
              space_flags(f.objects), physical, ++clock.step, .05f, requests, last);
-    bi::publish_physical(publication, last, clock.step);
+    bi::publish_physical(causes, queues, journal, {14, {20, 21, 22, 23}}, 10000, 20,
+                         identity(f.objects), attribution(f.objects), f.models, f.scripts, last,
+                         clock.step);
     bi::collect_physical_causes(causes, space);
   }
 };
@@ -65,37 +59,32 @@ void final_navigation_and_immediate_relations() {
   auto moved = f.run("route");
   require(!moved.changed, "own navigation remains outside changed-world numerator");
   auto &intent = f.intents.moving.at(f.body.bits);
-  require(intent.origin.cause == moved.origin.cause + 1 && intent.origin.root == moved.origin.root,
+  require(intent.origin.cause == moved.origin.cause && intent.origin.root == moved.origin.root,
           "navigation receives final handler origin, not its empty incoming origin");
   const auto old = intent.id;
   auto replacement = f.run("reroute");
   require(f.endings.size() == 1 && f.endings[0].intent.id == old &&
-              f.endings[0].intent.origin.cause == replacement.origin.cause + 1,
+              f.endings[0].intent.origin.cause == replacement.origin.cause,
           "replacement ending receives the exact replacing handler origin");
   auto cancelled = f.run("cancel");
   require(f.intents.moving.empty() && f.endings.back().intent.origin.root == cancelled.origin.root,
           "cancellation ending receives the cancelling handler origin");
-  auto held = f.run("hold");
-  require(held.changed && f.f.objects.parent[f.object.slot()] == f.body,
+  auto held = f.grasp(f.object, {{"local_pose", {{"position", {3, 0, 1}}}}}, moved.origin);
+  require(held.reply.at("effect") == "applied" && f.f.objects.parent[f.object.slot()] == f.body,
           "real grasp updates native attachment and authoritative parent");
   bool found = false;
   while (auto item = step::pop_foreground(f.queues))
     if (auto *watch = std::get_if<step::WatchWork>(&item->work)) {
-      require(watch->origin.root == held.origin.root &&
-                  watch->origin.cause == held.origin.cause + 2,
-              "immediate attachment relation watches carry the completed handler origin");
+      require(watch->origin.root == held.origin.root && watch->origin.cause == held.origin.cause,
+              "immediate attachment relation watches carry the accepted native action origin");
       found |= watch->source.subject == f.object && watch->source.term == 22;
     }
   require(found, "actual attachment relation produced its fact watch");
-  f.publication.credits = {
-      &f.wall, [](const void *context, std::span<const Handle> objects, ScriptId, double) {
-        std::vector<record::Credit> result;
-        if (std::ranges::find(objects, *static_cast<const Handle *>(context)) != objects.end())
-          result.push_back({77, 2., false});
-        return result;
-      }};
-  auto released = f.run("drop");
-  require(released.changed && !f.f.objects.parent[f.object.slot()], "real release detaches");
+  f.f.objects.maker[f.wall.slot()] = 77;
+  f.f.objects.created_step[f.wall.slot()] = 40;
+  auto released = f.release(f.object, {{"linear", {6, 0, 0}}}, held.origin);
+  require(released.reply.at("effect") == "applied" && !f.f.objects.parent[f.object.slot()],
+          "real release detaches");
   bool contact = false;
   for (int step = 0; step < 20 && !contact; ++step) {
     f.tick();
@@ -110,19 +99,23 @@ void final_navigation_and_immediate_relations() {
       if (auto *event = std::get_if<step::EventWork>(&item->work);
           event && event->receiver == f.wall && event->sender == f.object)
         require(event->origin.root == released.origin.root &&
-                    event->origin.cause == released.origin.cause + 2 &&
+                    event->origin.cause == released.origin.cause &&
                     std::ranges::find(event->origin.authors, PlayerId{77}) !=
                         event->origin.authors.end(),
-                "delayed release impact retains the exact release handler cause");
+                "delayed release impact retains the exact accepted release cause");
   }
   require(contact, "released real Jolt rigid body hits real wall");
 }
-void impulse_ambiguity_and_completed_failure() {
+void impulse_ambiguity_and_partial_lua_failure() {
   auto config = settings();
   config.gravity_m_s2 = {};
   Fixture f(config);
-  const auto first = f.run("push");
-  const auto second = f.run("partial", {}, true);
+  auto admitted = f.begin_as(PlayerId{1}, "engine.impulse", f.object,
+                             {{"momentum", {60, 0, 0}}, {"point", {0, 0, 1}}});
+  require(!admitted.outcome, "actual player-owned impulse is admitted");
+  const auto first = f.finish(
+      admitted, bi::impulse_action(f.space, identity(f.f.objects), f.causes, admitted.call));
+  const auto second = f.push({}, 1);
   const auto token = sp::motion_cause(f.space, identity(f.f.objects), f.object);
   auto summary = f.causes.lookup(token);
   require(summary.ambiguous && !summary.origin.root && !summary.origin.cause &&
@@ -162,36 +155,38 @@ void impulse_ambiguity_and_completed_failure() {
   summary = f.causes.lookup(sp::motion_cause(f.space, identity(f.f.objects), f.object));
   require(summary.ambiguous && summary.origin.more && summary.origin.authors.size() == 3,
           "many actual impulses keep AUTHORS_MAX and overflow marker");
+  Fixture partial(config, sp::Motion::Kinematic);
+  const auto before = partial.f.objects.position[partial.object.slot()];
+  const auto failed = partial.run("partial", {}, true);
+  require(failed.changed && partial.f.objects.position[partial.object.slot()].x > before.x,
+          "a later Lua error retains the same handler's accepted real shape sweep");
+  require(
+      partial.causes
+              .lookup(sp::motion_cause(partial.space, identity(partial.f.objects), partial.object))
+              .origin.cause == failed.origin.cause,
+      "partial failure preserves the operation-time handler cause");
 }
 void operation_time_credits_do_not_look_ahead() {
   auto config = settings();
   config.gravity_m_s2 = {};
-  Fixture f(config);
-  f.execution.credits = {
-      &f.f.c, [](const void *context, std::span<const Handle> objects, ScriptId, double) {
-        const auto foreign = *static_cast<const Handle *>(context);
-        std::vector<record::Credit> result;
-        if (std::ranges::find(objects, foreign) != objects.end())
-          result.push_back({77, 5., false});
-        return result;
-      }};
+  Fixture f(config, sp::Motion::Kinematic);
+  f.f.objects.maker[f.f.c.slot()] = 77;
+  f.f.objects.created_step[f.f.c.slot()] = 100;
   f.load(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={
     ['novel.touch']=function(self,object,args)
-      assert(self:act('engine.impulse',object,{momentum=vector.create(1,0,0),point=vector.zero}).ok)
+      self:sweep(object,vector.create(.2,0,0))
       local other = self:object(args.target)
       assert(other.owner=='p:2')
     end}})",
          2);
-  f.grant(f.object, pe::bit(pe::Verb::Move));
-  const auto reply = bi::perform_action(f.actions, {PlayerId{1}, 7, f.object, Value{}},
-                                        {{"target", to_string(f.f.c)}}, {});
-  if (reply.reply.contains("script_errors"))
-    throw std::runtime_error("real post-action foreign read: " + reply.reply.dump());
+  const auto reply = f.invoke(std::vector<EventField>{{"target", Value(f.f.c)}}, f.object);
+  if (reply.outcome.status != re::RunOutcome::Status::Ok)
+    throw std::runtime_error(reply.outcome.error);
   const auto summary = f.causes.lookup(sp::motion_cause(f.space, identity(f.f.objects), f.object));
-  require(summary.origin.cause == reply.origin.cause + 2 &&
+  require(summary.origin.cause == reply.origin.cause &&
               std::ranges::find(summary.origin.authors, PlayerId{77}) ==
                   summary.origin.authors.end(),
-          "a later read cannot retroactively credit an earlier accepted native impulse");
+          "a later read cannot retroactively credit an earlier accepted own-part sweep");
   bool later_credit = false;
   for (const auto &row : f.journal.take())
     if (row["kind"] == "handler")
@@ -222,7 +217,7 @@ void pose_sleep_lifecycle_and_capture() {
                          {f.object, sp::Motion::Dynamic, {}, {}}, transitions)
                       .status == sp::Status::Ok,
           "actual grasp/release creates dynamic motion");
-  f.run("push");
+  f.push();
   std::vector<bi::BodyCauseRow> rows;
   bi::capture_motion_causes(f.causes, f.space, identity(f.f.objects), {}, rows);
   require(rows.empty(), "empty selected capture means empty, never whole world");
@@ -246,6 +241,13 @@ void pose_sleep_lifecycle_and_capture() {
   require(saved.origin == rows[0].summary.origin && saved.ambiguous == rows[0].summary.ambiguous,
           "MOVE codec restores exact root, authors, oldest and overflow using fresh native token");
   Fixture restarted(config);
+  restarted.f.objects.created_step[restarted.object.slot()] = 400;
+  restarted.f.objects.maker[restarted.wall.slot()] = 77;
+  restarted.f.objects.created_step[restarted.wall.slot()] = 40;
+  restarted.f.models.rows[1].created_s = 20;
+  auto impact_origin = rows[0].summary.origin;
+  impact_origin.authors.push_back(77);
+  impact_origin.oldest = 2;
   std::vector<sp::MotionRow> velocities;
   sp::capture_motion(f.space, identity(f.f.objects), selected, velocities);
   sp::restore_motion(restarted.space, identity(restarted.f.objects), velocities);
@@ -258,8 +260,8 @@ void pose_sleep_lifecycle_and_capture() {
       if (auto *event = std::get_if<step::EventWork>(&item->work);
           event && event->receiver == restarted.wall && event->sender == restarted.object) {
         resumed = true;
-        require(event->origin == rows[0].summary.origin,
-                "fresh Jolt world continues in-flight collision cause after MOVE restore");
+        require(event->origin == impact_origin,
+                "restored in-flight collision retains its cause and credits the actual wall");
       }
   }
   require(resumed, "restored moving body produces actual future impact");
@@ -318,14 +320,25 @@ void copied_pose_callbacks_and_compound_scope() {
                {{-2, 0, 2}, {}}, causes.intern(newer));
   step::WorkQueues queues;
   record::Journal journal(3, {});
-  bi::PhysicalPublication publication{causes, queues, journal, {14, {10, 11, 12, 13}}, 100, 20, {}};
-  bi::publish_physical(publication, scene.result, scene.clock);
+  catalog::Models models;
+  models.rows.resize(2);
+  catalog::Scripts scripts;
+  bi::publish_physical(causes, queues, journal, {14, {10, 11, 12, 13}}, 100, 20,
+                       identity(scene.objects), attribution(scene.objects), models, scripts,
+                       scene.result, scene.clock);
   bool captured = false;
   while (auto item = step::pop_foreground(queues))
     if (auto *event = std::get_if<step::EventWork>(&item->work);
         event && event->receiver == cargo && event->sender == pusher) {
       captured = true;
-      require(event->origin == old, "callback token keeps exact pre-expiry, pre-replacement cause");
+      require(event->origin.cause == old.cause && event->origin.root == old.root &&
+                  std::ranges::find(event->origin.authors, PlayerId{2}) !=
+                      event->origin.authors.end() &&
+                  std::ranges::find(event->origin.authors, PlayerId{3}) ==
+                      event->origin.authors.end(),
+              "captured contact keeps its accepted cause rather than the later pose command");
+      require(event->origin.oldest && *event->origin.oldest <= *old.oldest,
+              "contact endpoint credits retain or extend the causal age");
     }
   require(captured, "actual pose collision emitted real event work");
   bi::collect_physical_causes(causes, scene.space);
@@ -396,12 +409,18 @@ void character_contacts_and_fact_reduction() {
           "grounded idle character loses old navigation cause before unrelated contacts");
   step::WorkQueues queues;
   record::Journal journal(3, {});
-  bi::PhysicalPublication publication{causes, queues, journal, {14, {10, 11, 12, 13}}, 100, 20, {}};
+  catalog::Models models;
+  models.rows.resize(3);
+  models.rows[1].id = 1;
+  models.rows[2].id = 2;
+  catalog::Scripts scripts;
   sp::StepResult physical;
   auto other = causes.intern({93, 92, {3}, 5., false});
   physical.relations = {{sp::RelationKind::Contains, body, {999}, true, {token, 0}},
                         {sp::RelationKind::Contains, body, {998}, false, {other, 0}}};
-  bi::publish_physical(publication, physical, scene.clock);
+  bi::publish_physical(causes, queues, journal, {14, {10, 11, 12, 13}}, 100, 20,
+                       identity(scene.objects), attribution(scene.objects), models, scripts,
+                       physical, scene.clock);
   bool reduced = false;
   while (auto item = step::pop_foreground(queues))
     if (auto *watch = std::get_if<step::WatchWork>(&item->work);
@@ -409,12 +428,14 @@ void character_contacts_and_fact_reduction() {
       reduced = true;
       require(watch->origin.root != origin.root && watch->origin.root != 92 &&
                   watch->origin.authors == std::vector<PlayerId>({2, 3}) &&
-                  watch->origin.oldest == 5.,
-              "same-publication fact coalescence explicitly merges distinct causes");
+                  watch->origin.oldest == 0.,
+              "fact coalescence merges distinct causes and the actual receiver's birth age");
     }
   require(reduced, "physics fact reduction actually queues watch");
   step::enqueue_watch(queues, {{body, 10}, origin});
-  bi::publish_physical(publication, physical, scene.clock);
+  bi::publish_physical(causes, queues, journal, {14, {10, 11, 12, 13}}, 100, 20,
+                       identity(scene.objects), attribution(scene.objects), models, scripts,
+                       physical, scene.clock);
   auto first = step::pop_foreground(queues);
   require(std::get<step::WatchWork>(first->work).origin == origin,
           "already queued watch retains its first scheduling cause by documented convention");
@@ -429,11 +450,14 @@ void contact_overflow_is_recorded() {
   const auto origin = journal.append(std::move(action));
   journal.take();
   const auto token = causes.intern(origin);
-  bi::PhysicalPublication publication{causes, queues, journal, {14, {10, 11, 12, 13}}, 1, 20, {}};
+  Objects objects;
+  catalog::Models models;
+  catalog::Scripts scripts;
   sp::StepResult physical;
   const auto first = Handle::make(1, 1), second = Handle::make(2, 1);
   physical.contacts.push_back({first, second, {}, {1, 0, 0}, true, {token, 0}});
-  bi::publish_physical(publication, physical, 7);
+  bi::publish_physical(causes, queues, journal, {14, {10, 11, 12, 13}}, 1, 20, identity(objects),
+                       attribution(objects), models, scripts, physical, 7);
   const auto records = journal.take();
   require(queues.emitted_events == 1 && records.size() == 1 && records[0]["kind"] == "system" &&
               records[0]["name"] == "overflow" && records[0]["queue"] == "events" &&
@@ -503,7 +527,7 @@ int main(int argc, char **argv) {
       return 0;
     }
     final_navigation_and_immediate_relations();
-    impulse_ambiguity_and_completed_failure();
+    impulse_ambiguity_and_partial_lua_failure();
     operation_time_credits_do_not_look_ahead();
     pose_sleep_lifecycle_and_capture();
     copied_pose_callbacks_and_compound_scope();

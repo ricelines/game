@@ -67,7 +67,7 @@ def test_school_uses_declared_parts_with_one_script(authored):
     assert all(g["expires_s"] > 0 for g in plan["grants"])
 
 
-def test_leases_and_avatar_consent_have_real_root_and_child_grants(authored):
+def test_leases_and_starting_body_choices_have_real_scopes(authored):
     for stakes in (True, False):
         plan = select(authored, "seeded", stakes)
         assert all(plot["owner"] == 1 for plot in plan["plots"])
@@ -83,13 +83,21 @@ def test_leases_and_avatar_consent_have_real_root_and_child_grants(authored):
             assert len(roots) == 1 and row["expires_s"] <= roots[0]["expires_s"]
             assert set(row["rights"]) <= set(roots[0]["rights"])
         assert sum(isinstance(row["holder"], str) for row in leases) == 6
-        avatars = [row for row in plan["grants"] if "avatar" in row["scope"]]
-        assert len(avatars) == 6
-        assert all(
-            row["holder"] == {"script": "body", "on": row["scope"]["avatar"]}
-            and row["rights"] == ["animate", "camera"]
-            for row in avatars
-        )
+        assert not any("avatar" in row["scope"] for row in plan["grants"])
+        for profile in plan["profiles"]:
+            if "body" not in profile:
+                continue
+            choices = [choice for group in profile["body_installs"] for choice in group]
+            for plot in plan["plots"]:
+                owner_scope = {"owned_on_plot": {"owner": profile["id"], "plot": plot["id"]}}
+                assert {row["slot"] for row in choices if row["scope"] == owner_scope} == {
+                    "use",
+                    "take",
+                    "move",
+                }
+            avatar = [row for row in choices if row["scope"] == {"avatar": profile["body"]}]
+            assert {row["slot"] for row in avatar} == {"animate", "camera"}
+            assert all(row["rights"] == [row["slot"]] and row["expires_s"] > 0 for row in choices)
 
 
 def test_institution_account_has_an_explicit_script_allowance(authored):
@@ -221,7 +229,7 @@ def test_door_entire_authored_sweep_clears_actual_curved_shell():
 
 
 def test_all_sources_pass_actual_luau_declaration_worker(tmp_path, baked_plan):
-    worker = ROOT / ".build/release/server/catalog/amb_script_validate"
+    worker = ROOT / ".build/release/server/react/amb_script_validate"
     assert worker.exists(), "Build the Release targets before the content gate"
     # Get reserved engine declarations from the real composition, rather than
     # maintaining a second copy of native signatures in this Python test.
@@ -267,7 +275,7 @@ def test_all_sources_pass_actual_luau_declaration_worker(tmp_path, baked_plan):
     pin = final.stem
     start = subprocess.run(
         [
-            str(ROOT / ".build/release/server/bindings/start/start_test"),
+            str(ROOT / ".build/release/tests/start_test"),
             str(plan_file),
             str(ROOT / "assets"),
             str(final),

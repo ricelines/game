@@ -43,9 +43,6 @@ inline Vec3 nav(Vec3 v) {
 inline Vec3 world(Vec3 v) {
   return {v.x, -v.z, v.y};
 }
-inline bool expired(Deadline d) {
-  return std::chrono::steady_clock::now() >= d;
-}
 inline Pose compose(Pose a, Pose b) {
   return {a.position + av(jq(a.rotation) * jv(b.position)), aq(jq(a.rotation) * jq(b.rotation))};
 }
@@ -249,6 +246,7 @@ void sensor_contact_changed(Space::Native &, const CachedContact &, bool added);
 bool has_sensor_contact(const Space::Native &, const CachedContact &);
 OperationResult can_release_occupants(const Space &, Handle, std::span<const Handle>,
                                       bool retiring_body);
-void release_occupants(Space &, IdentityRead, Handle, std::span<const Handle>, ParentWrite,
-                       SpaceFlags, PhysicalRelations &, std::vector<RelationChange> &);
+OperationResult release_occupants(Space &, IdentityRead, Handle, std::span<const Handle>,
+                                  ParentWrite, SpaceFlags, PhysicalRelations &,
+                                  std::vector<RelationChange> &);
 } // namespace amber::space

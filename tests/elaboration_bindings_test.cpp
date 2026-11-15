@@ -1,16 +1,12 @@
-#include "bindings/elaboration/elaboration.hpp"
+#include "runtime_fixture.hpp"
+#include "step/step.hpp"
 
 #include <iostream>
-#include <stdexcept>
 
 using namespace amber;
-namespace e = amber::bindings::elaboration;
 using Json = nlohmann::json;
+using test_runtime::require;
 namespace {
-void require(bool value, const char *message) {
-  if (!value)
-    throw std::runtime_error(message);
-}
 template <class F> void rejects(F action, const char *message) {
   bool rejected = false;
   try {
@@ -21,54 +17,37 @@ template <class F> void rejects(F action, const char *message) {
   require(rejected, message);
 }
 Json tests() {
-  return Json::array({{{"given", {{"subject", "target"}}},
-                       {"when", {{"steps", 1}}},
-                       {"expect", {{"subject", "target"}, {"term", "x.charge"}, {"equals", 7}}}}});
+  return Json::array(
+      {{{"given", {{"subject", "target"}}},
+        {"when", {{"steps", 1}}},
+        {"expect", {{"subject", "target"}, {"term", "novel.heat"}, {"equals", 7}}}}});
 }
-struct Activation {
-  unsigned calls = 0;
-  e::RuleUpdate last = e::RuleUpdate::Disable;
-  record::Origin origin;
-  static void apply(void *p, ScriptId id, e::RuleUpdate update, Step, double,
-                    const record::Origin &origin, react::DeferredEffects &effects) {
-    auto &self = *static_cast<Activation *>(p);
-    require(id == 1, "activation retains immutable script identity");
-    ++self.calls;
-    self.last = update;
-    self.origin = origin;
-    effects.changed = true;
-  }
-  e::RuleActivation hook() { return {this, apply}; }
-};
 struct Fixture {
+  test_runtime::Fixture reactive;
   elaborate::Requests requests;
   elaborate::GapCounts gaps;
   elaborate::LastGaps last;
   elaborate::CaptureRefs captures;
   elaborate::PendingFixtures pending;
-  control::Profiles profiles;
-  catalog::Scripts scripts;
   catalog::AuthoredTexts texts;
-  drive::Inputs inputs;
-  Activation activation;
-  Handle target = Handle::make(21, 9), body = Handle::make(22, 9);
+  step::Inputs inputs;
+  step::WorkQueues queues;
+  ScriptId candidate;
+  Handle target = reactive.a, body = reactive.b;
   Fixture() {
-    control::put_profile(profiles, {1, "Requester", body, {}, control::all_modes, {}});
-    control::put_profile(profiles, {2, "Elaborator", {}, {"elaborator"}, control::all_modes, {}});
-    control::put_profile(profiles, {3, "Other", {}, {"elaborator"}, control::all_modes, {}});
+    candidate = reactive.add(R"(return {kind='rule',applies_to={material='novel.mat'},
+      on={['novel.cue']=function(self)end},tests={{given={subject='target'},when={steps=1},
+      expect={subject='target',term='novel.heat',equals=7}}}})");
+    auto &script = reactive.scripts.rows[candidate];
+    script.declaration.approved = false;
+    script.declaration.active = false;
+    react::set_activation(reactive.vm, candidate, false, false);
     elaborate::note_gap(gaps, last, requests, {8, {9, 10}, target, 1, 11, std::string(64, 'a'), {}},
                         0);
     elaborate::complete_capture(captures, {std::string(64, 'a'), "normal", {}});
-    catalog::Script script;
-    script.id = 1;
-    script.artifact = std::string(64, 'b');
-    script.registry_pin = std::string(64, 'c');
-    script.declaration.kind = react::ScriptDeclaration::Kind::Rule;
-    script.tests = tests();
-    scripts.rows.push_back(script);
   }
-  drive::NativeCall call(PlayerId who, Json args) {
-    drive::NativeCall out;
+  step::NativeCall call(PlayerId who, Json args) {
+    step::NativeCall out;
     out.request.caller = who;
     out.arguments = std::move(args);
     out.step = 20;
@@ -77,30 +56,30 @@ struct Fixture {
     return out;
   }
   elaborate::RequestId request() {
-    e::RequestBinding binding{requests, last};
-    auto result = e::request_model(&binding, call(1, {{"note", "Model this behavior"}}));
-    require(result.changed && result.records[0].things[0] == target,
-            "native request records actual historical target");
+    const auto out =
+        step::request_model(requests, last, call(1, {{"note", "Model this behavior"}}));
+    require(out.changed && out.records[0].things[0] == target,
+            "request did not retain actual historical target");
     return static_cast<elaborate::RequestId>(requests.rows.size() - 1);
   }
   void claim(elaborate::RequestId id) {
-    e::ClaimBinding binding{requests, profiles};
-    e::claim(&binding, call(2, {{"request", "request:" + std::to_string(id)}}));
+    step::claim(requests, true, call(2, {{"request", "request:" + std::to_string(id)}}));
   }
   std::pair<elaborate::FixtureJob, elaborate::FixtureResult> pending_job(elaborate::RequestId id) {
     claim(id);
-    elaborate::RuleCandidate candidate{
-        scripts.rows[1].artifact, scripts.rows[1].registry_pin, 1, "runtime", tests(),
-        {{"body", body}}};
-    auto job = elaborate::begin_rule_answer(pending, requests, captures, {2, true}, id, candidate,
+    const auto &script = reactive.scripts.rows[candidate];
+    elaborate::RuleCandidate declaration{script.artifact, script.registry_pin, candidate,
+                                         "runtime",       script.tests,        {{"body", body}}};
+    auto job = elaborate::begin_rule_answer(pending, requests, captures, {2, true}, id, declaration,
                                             {"30", 4}, {1000, 64, 65536});
-    drive::Input input;
+    step::Input input;
+    input.kind = net::ControlKind::Do;
     input.caller = PlayerId{2};
     input.session = 30;
     input.sequence = 4;
     input.request = 98;
     input.origin.cause = 123;
-    const auto work = drive::enqueue_input(inputs, input);
+    const auto work = step::enqueue_input(inputs, input);
     inputs.rows.at(work.id).awaiting = true;
     elaborate::FixtureResult result;
     result.job = job.id;
@@ -112,51 +91,60 @@ struct Fixture {
     result.tests = {{{true, 7, {}}, {false, 0, {}}}};
     return {job, result};
   }
+  step::FixtureCompletion complete(const elaborate::FixtureResult &result, Step now,
+                                   bool has_role = true) {
+    return step::complete_fixture(requests, pending, inputs, reactive.scripts, reactive.rules,
+                                  reactive.triggers, reactive.subscriptions, queues, reactive.vm,
+                                  reactive.values(), reactive.allocations, {2, has_role}, result,
+                                  now, 20);
+  }
 };
 void synchronous_workflow() {
   Fixture f;
   const auto id = f.request();
-  e::RequestsBinding list{f.requests, f.gaps, f.profiles, 10};
-  rejects([&] { e::requests(&list, f.call(1, Json::object())); }, "listing requires current role");
-  require(e::requests(&list, f.call(2, Json::object())).reply["requests"].size() == 1,
-          "native request list exposes exact unresolved rows");
+  rejects([&] { step::requests(f.requests, f.gaps, false, 10, f.call(1, Json::object())); },
+          "listing requires current role");
+  require(step::requests(f.requests, f.gaps, true, 10, f.call(2, Json::object()))
+                  .reply["requests"]
+                  .size() == 1,
+          "request list did not expose exact unresolved rows");
   f.claim(id);
-  e::DetailBinding detail{f.requests, f.texts, f.profiles, {}};
   const Json answer{{"request", "request:1"}, {"kind", "detail"}, {"text", "Authored explanation"}};
-  rejects([&] { e::answer_detail(&detail, f.call(3, answer)); }, "foreign claim cannot close");
-  require(f.texts.rows.size() == 1, "failed authorization cannot append orphan authored text");
-  const auto out = e::answer_detail(&detail, f.call(2, answer));
-  require(out.changed && f.texts.rows.size() == 2 && f.texts.rows[1].author == 2 &&
+  rejects([&] { step::answer_detail(f.requests, f.texts, true, f.call(3, answer)); },
+          "foreign claim cannot close");
+  require(f.texts.rows.size() == 1, "failed authorization appended orphan authored text");
+  const auto out = step::answer_detail(f.requests, f.texts, true, f.call(2, answer));
+  require(out.action.changed && f.texts.rows.size() == 2 && f.texts.rows[1].author == 2 &&
               f.texts.rows[1].target == f.target &&
               f.requests.rows[id].status == elaborate::Status::Answered,
-          "detail closes request and appends independently attributed target text");
-  require(!e::validate_answer(
+          "detail did not retain target attribution or close the actual request");
+  require(!step::validate_answer(
                {{"request", "request:1"}, {"kind", "rule"}, {"script", "s:1"}, {"tests", tests()}})
                .empty(),
-          "caller supplied fixture expectations are rejected");
-  require(!e::validate_answer({{"request", "request:1"},
-                               {"kind", "rule"},
-                               {"script", "s:1"},
-                               {"subjects", {{"body", to_string(f.target)}}}})
+          "caller supplied fixture expectations were accepted");
+  require(!step::validate_answer({{"request", "request:1"},
+                                  {"kind", "rule"},
+                                  {"script", "s:1"},
+                                  {"subjects", {{"body", to_string(f.target)}}}})
                .empty(),
-          "caller cannot override original requester's captured body");
+          "caller could override the original requester's body");
 }
 void fixture_completion() {
   Fixture f;
   const auto id = f.request();
   const auto [job, result] = f.pending_job(id);
   (void)job;
-  e::CompletionBinding binding{f.requests, f.pending,  f.inputs,
-                               f.scripts,  f.profiles, f.activation.hook()};
-  auto completed = e::complete(binding, result, 40, 20);
+  const auto completed = f.complete(result, 40);
+  const auto &script = f.reactive.scripts.rows[f.candidate];
   require(completed.input && completed.input->session == 30 && completed.input->sequence == 4 &&
               completed.input->request == 98 && completed.input->fields["ok"] == true &&
-              completed.notification->requester == 1 && f.activation.calls == 1 &&
-              f.activation.last == e::RuleUpdate::Validated && f.activation.origin.cause == 123 &&
-              f.requests.rows[id].status == elaborate::Status::Answered && f.inputs.rows.empty(),
-          "verified completion activates once with original input cause and exact reply identity");
-  require(!e::complete(binding, result, 41, 20).input && f.activation.calls == 1,
-          "duplicate worker completion cannot reactivate or send another reply");
+              completed.notification->requester == 1 && script.declaration.approved &&
+              script.declaration.active && completed.origin.cause == 123 &&
+              f.requests.rows[id].status == elaborate::Status::Answered && f.inputs.rows.empty() &&
+              completed.changed_scripts == std::vector<ScriptId>{f.candidate},
+          "verified completion failed actual rule activation or exact original reply routing");
+  require(!f.complete(result, 41).input,
+          "duplicate subprocess completion reactivated or sent a second reply");
   for (int mode = 0; mode < 4; ++mode) {
     Fixture bad;
     const auto request = bad.request();
@@ -164,19 +152,16 @@ void fixture_completion() {
     (void)unused;
     if (mode == 0)
       report.tests[0].baseline.passed = true;
-    if (mode == 1)
-      bad.profiles.rows[2].roles.clear();
     if (mode == 2)
       bad.requests.rows[request].claimed_by = 3;
     if (mode == 3)
-      bad.scripts.rows[1].tests = Json::array();
-    e::CompletionBinding b{bad.requests, bad.pending,  bad.inputs,
-                           bad.scripts,  bad.profiles, bad.activation.hook()};
-    const auto denied = e::complete(b, report, 50, 20);
-    require(denied.input && denied.input->fields["ok"] == false && bad.activation.calls == 0 &&
+      bad.reactive.scripts.rows[bad.candidate].tests = Json::array();
+    const auto denied = bad.complete(report, 50, mode != 1);
+    require(denied.input && denied.input->fields["ok"] == false &&
+                !bad.reactive.scripts.rows[bad.candidate].declaration.approved &&
                 bad.requests.rows[request].status == elaborate::Status::Claimed &&
                 bad.pending.rows.empty(),
-            "vacuous test, revoked role, changed claim or candidate cannot activate or close");
+            "vacuous fixture, revoked role, changed claim or candidate activated or closed");
   }
 }
 void async_submission(const std::filesystem::path &executable, const std::filesystem::path &dir) {
@@ -184,42 +169,54 @@ void async_submission(const std::filesystem::path &executable, const std::filesy
   const auto id = f.request();
   f.claim(id);
   elaborate::FixtureWorker worker(executable, dir, 1);
-  e::RuleBinding binding{f.requests, f.pending, f.captures,        f.scripts,
-                         f.profiles, worker,    "transport-probe", {1000, 64, 65536}};
   auto call = f.call(2, {{"request", "request:1"}, {"kind", "rule"}, {"script", "s:1"}});
-  rejects([&] { e::answer_rule(&binding, call); }, "rule answer requires explicit ordered input");
-  call.order = drive::InputOrder{9, 30, 4, 98};
-  const auto started = e::answer_rule(&binding, call);
+  const auto answer = [&] {
+    return step::answer_rule(f.requests, f.pending, f.captures, f.reactive.scripts, worker,
+                             "transport-probe", {1000, 64, 65536}, true, f.body, call);
+  };
+  rejects(answer, "rule answer requires explicit ordered input");
+  call.order = step::InputOrder{9, 30, 4, 98};
+  const auto started = answer();
   const auto &job = f.pending.rows.begin()->second;
-  require(started.deferred && !started.changed && job.candidate.tests == f.scripts.rows[1].tests &&
+  require(started.deferred && !started.changed &&
+              job.candidate.tests == f.reactive.scripts.rows[f.candidate].tests &&
               job.candidate.subjects.at("target") == f.target &&
               job.candidate.subjects.at("body") == f.body,
-          "async worker receives immutable verified tests and historical target/requester body");
+          "async worker lost immutable verified tests or actual historical subjects");
   worker.finish();
   const auto reports = worker.take();
   require(reports.size() == 1 && reports[0].status == elaborate::FixtureStatus::Completed,
-          "copied fixture subprocess protocol completes (transport probe only)");
-  e::ActivationBinding activate{f.scripts, f.profiles, f.activation.hook()};
+          "copied fixture subprocess protocol failed (transport probe only)");
   auto change = f.call(2, {{"script", "s:1"}, {"active", true}});
-  rejects([&] { e::rule_activation(&activate, change); }, "manual enable cannot approve new code");
-  f.scripts.rows[1].declaration.approved = true;
-  require(e::rule_activation(&activate, change).changed &&
-              f.activation.last == e::RuleUpdate::Enable,
-          "approved historical rule enable uses explicit registry activation path");
+  const auto activate = [&] {
+    return step::rule_activation(f.reactive.scripts, f.reactive.rules, f.reactive.triggers,
+                                 f.reactive.subscriptions, f.queues, f.reactive.vm,
+                                 f.reactive.values(), f.reactive.allocations, true, change);
+  };
+  rejects(activate, "manual enable approved untested code");
+  f.reactive.scripts.rows[f.candidate].declaration.approved = true;
+  require(activate().changed && f.reactive.scripts.rows[f.candidate].declaration.active,
+          "approved historical rule enable did not update the actual registry/VM");
   change.arguments["active"] = false;
-  e::rule_activation(&activate, change);
-  require(f.activation.last == e::RuleUpdate::Disable, "disable is separate from fixture approval");
+  activate();
+  require(!f.reactive.scripts.rows[f.candidate].declaration.active,
+          "disable failed to change the actual approved rule");
 }
 } // namespace
 int main(int argc, char **argv) {
   if (argc != 2)
     return 2;
-  const auto directory = std::filesystem::current_path() / "elaboration-bindings-jobs";
-  std::filesystem::remove_all(directory);
-  synchronous_workflow();
-  fixture_completion();
-  async_submission(argv[1], directory);
-  std::filesystem::remove_all(directory);
-  std::cout
-      << "native elaboration, immutable fixture admission and ordered completion checks passed\n";
+  try {
+    const auto directory = std::filesystem::current_path() / "elaboration-bindings-jobs";
+    std::filesystem::remove_all(directory);
+    synchronous_workflow();
+    fixture_completion();
+    async_submission(argv[1], directory);
+    std::filesystem::remove_all(directory);
+    std::cout
+        << "Direct elaboration, actual rule activation and subprocess completion checks passed\n";
+  } catch (const std::exception &problem) {
+    std::cerr << problem.what() << '\n';
+    return 1;
+  }
 }

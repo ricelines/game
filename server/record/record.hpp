@@ -7,57 +7,17 @@
 #include <nlohmann/json.hpp>
 #include <span>
 
+namespace amber::catalog {
+struct Models;
+struct Scripts;
+} // namespace amber::catalog
+
 namespace amber::record {
 
 // Carried by queued work and timers; no later record lookup is needed.
-struct Origin {
-  std::uint64_t cause = 0;
-  std::uint64_t root = 0;
-  std::vector<PlayerId> authors;
-  std::optional<double> oldest;
-  bool more = false;
-  bool operator==(const Origin &) const = default;
-};
 
-struct Credit {
-  PlayerId author = 0;
-  std::optional<double> created_s;
-  bool seed = false;
-};
-
-enum class Kind {
-  Action,
-  Handler,
-  Gap,
-  Denial,
-  Speech,
-  Observation,
-  Create,
-  Destroy,
-  Registry,
-  System
-};
-enum class Result { None, Applied, NoEffect, NoHandler, NotModeled, Denied };
-
-struct Actor {
-  enum class Kind { System, Player, Script } kind = Kind::System;
-  std::uint32_t id = 0;
-  static Actor player(PlayerId id) { return {Kind::Player, id}; }
-  static Actor script(ScriptId id) { return {Kind::Script, id}; }
-};
-
-struct Event {
-  Step step = 0;
-  Kind kind = Kind::System;
-  Actor actor;
-  std::string name;
-  Result result = Result::None;
-  bool changed = false;
-  std::vector<Handle> things;
-  std::optional<PlayerId> script_author;
-  nlohmann::json detail = nlohmann::json::object();
-  std::vector<Credit> credits{};
-};
+std::vector<Credit> credits(IdentityRead, AttributionRead, const catalog::Models &,
+                            const catalog::Scripts &, std::span<const Handle>, ScriptId, double hz);
 
 // The writer receives completed event values, never game tables.
 class Journal {

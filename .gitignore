@@ -20,5 +20,3 @@ runs/
 *.key
 client/node_modules/
 client/tests/node_modules/
-reports/
-measure/results/

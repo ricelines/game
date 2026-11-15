@@ -20,6 +20,12 @@
       "world_rule": false
     },
     {
+      "key": "circuit",
+      "file": "scripts/circuit.luau",
+      "author": 1,
+      "world_rule": false
+    },
+    {
       "key": "lamp",
       "file": "scripts/lamp.luau",
       "author": 1,
@@ -299,7 +305,8 @@
         "name": "Distribution junction",
         "description": "A shared quantity subject with no appliance-specific native logic."
       },
-      "author": 1
+      "author": 1,
+      "script": "circuit"
     },
     {
       "key": "breaker",
@@ -536,7 +543,364 @@
         "play"
       ],
       "key_file": ".runtime/keys/mira.key",
-      "body": "resident.mira"
+      "body": "resident.mira",
+      "body_installs": [
+        [
+          {
+            "slot": "animate",
+            "scope": {
+              "avatar": "resident.mira"
+            },
+            "rights": [
+              "animate"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "camera",
+            "scope": {
+              "avatar": "resident.mira"
+            },
+            "rights": [
+              "camera"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 2,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ]
+      ]
     },
     {
       "id": 3,
@@ -546,7 +910,364 @@
         "play"
       ],
       "key_file": ".runtime/keys/sol.key",
-      "body": "resident.sol"
+      "body": "resident.sol",
+      "body_installs": [
+        [
+          {
+            "slot": "animate",
+            "scope": {
+              "avatar": "resident.sol"
+            },
+            "rights": [
+              "animate"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "camera",
+            "scope": {
+              "avatar": "resident.sol"
+            },
+            "rights": [
+              "camera"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 3,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ]
+      ]
     },
     {
       "id": 4,
@@ -556,7 +1277,364 @@
         "play"
       ],
       "key_file": ".runtime/keys/ivo.key",
-      "body": "resident.ivo"
+      "body": "resident.ivo",
+      "body_installs": [
+        [
+          {
+            "slot": "animate",
+            "scope": {
+              "avatar": "resident.ivo"
+            },
+            "rights": [
+              "animate"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "camera",
+            "scope": {
+              "avatar": "resident.ivo"
+            },
+            "rights": [
+              "camera"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 4,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ]
+      ]
     },
     {
       "id": 5,
@@ -566,7 +1644,364 @@
         "play"
       ],
       "key_file": ".runtime/keys/nia.key",
-      "body": "resident.nia"
+      "body": "resident.nia",
+      "body_installs": [
+        [
+          {
+            "slot": "animate",
+            "scope": {
+              "avatar": "resident.nia"
+            },
+            "rights": [
+              "animate"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "camera",
+            "scope": {
+              "avatar": "resident.nia"
+            },
+            "rights": [
+              "camera"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 5,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ]
+      ]
     },
     {
       "id": 6,
@@ -578,7 +2013,364 @@
         "play"
       ],
       "key_file": ".runtime/keys/rue.key",
-      "body": "resident.rue"
+      "body": "resident.rue",
+      "body_installs": [
+        [
+          {
+            "slot": "animate",
+            "scope": {
+              "avatar": "resident.rue"
+            },
+            "rights": [
+              "animate"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "camera",
+            "scope": {
+              "avatar": "resident.rue"
+            },
+            "rights": [
+              "camera"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 6,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ]
+      ]
     },
     {
       "id": 7,
@@ -588,7 +2380,364 @@
         "play"
       ],
       "key_file": ".runtime/keys/oren.key",
-      "body": "resident.oren"
+      "body": "resident.oren",
+      "body_installs": [
+        [
+          {
+            "slot": "animate",
+            "scope": {
+              "avatar": "resident.oren"
+            },
+            "rights": [
+              "animate"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "camera",
+            "scope": {
+              "avatar": "resident.oren"
+            },
+            "rights": [
+              "camera"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 1
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 2
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 3
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 4
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 5
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 6
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ],
+        [
+          {
+            "slot": "use",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "use"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "take",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "take"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          },
+          {
+            "slot": "move",
+            "scope": {
+              "owned_on_plot": {
+                "owner": 7,
+                "plot": 7
+              }
+            },
+            "rights": [
+              "move"
+            ],
+            "expires_s": 31536000,
+            "cap": 0,
+            "period_s": 0
+          }
+        ]
+      ]
     }
   ],
   "plots": [
@@ -3483,44 +5632,6 @@
     {
       "issuer": 2,
       "holder": {
-        "script": "body",
-        "on": "resident.mira"
-      },
-      "scope": {
-        "avatar": "resident.mira"
-      },
-      "rights": [
-        "animate",
-        "camera"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 2,
-      "holder": {
-        "script": "body",
-        "on": "resident.mira"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 2,
-          "plot": 1
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 2,
-      "holder": {
         "script": "stakes",
         "on": "resident.mira"
       },
@@ -3559,27 +5670,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 2,
-      "holder": {
-        "script": "body",
-        "on": "resident.mira"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 2,
-          "plot": 2
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 2,
@@ -3626,27 +5716,6 @@
     {
       "issuer": 2,
       "holder": {
-        "script": "body",
-        "on": "resident.mira"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 2,
-          "plot": 3
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 2,
-      "holder": {
         "script": "stakes",
         "on": "resident.mira"
       },
@@ -3685,27 +5754,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 2,
-      "holder": {
-        "script": "body",
-        "on": "resident.mira"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 2,
-          "plot": 4
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 2,
@@ -3752,27 +5800,6 @@
     {
       "issuer": 2,
       "holder": {
-        "script": "body",
-        "on": "resident.mira"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 2,
-          "plot": 5
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 2,
-      "holder": {
         "script": "stakes",
         "on": "resident.mira"
       },
@@ -3815,27 +5842,6 @@
     {
       "issuer": 2,
       "holder": {
-        "script": "body",
-        "on": "resident.mira"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 2,
-          "plot": 6
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 2,
-      "holder": {
         "script": "stakes",
         "on": "resident.mira"
       },
@@ -3874,27 +5880,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 2,
-      "holder": {
-        "script": "body",
-        "on": "resident.mira"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 2,
-          "plot": 7
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 2,
@@ -3941,44 +5926,6 @@
     {
       "issuer": 3,
       "holder": {
-        "script": "body",
-        "on": "resident.sol"
-      },
-      "scope": {
-        "avatar": "resident.sol"
-      },
-      "rights": [
-        "animate",
-        "camera"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 3,
-      "holder": {
-        "script": "body",
-        "on": "resident.sol"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 3,
-          "plot": 1
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 3,
-      "holder": {
         "script": "stakes",
         "on": "resident.sol"
       },
@@ -4017,27 +5964,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 3,
-      "holder": {
-        "script": "body",
-        "on": "resident.sol"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 3,
-          "plot": 2
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 3,
@@ -4084,27 +6010,6 @@
     {
       "issuer": 3,
       "holder": {
-        "script": "body",
-        "on": "resident.sol"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 3,
-          "plot": 3
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 3,
-      "holder": {
         "script": "stakes",
         "on": "resident.sol"
       },
@@ -4143,27 +6048,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 3,
-      "holder": {
-        "script": "body",
-        "on": "resident.sol"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 3,
-          "plot": 4
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 3,
@@ -4210,27 +6094,6 @@
     {
       "issuer": 3,
       "holder": {
-        "script": "body",
-        "on": "resident.sol"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 3,
-          "plot": 5
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 3,
-      "holder": {
         "script": "stakes",
         "on": "resident.sol"
       },
@@ -4273,27 +6136,6 @@
     {
       "issuer": 3,
       "holder": {
-        "script": "body",
-        "on": "resident.sol"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 3,
-          "plot": 6
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 3,
-      "holder": {
         "script": "stakes",
         "on": "resident.sol"
       },
@@ -4332,27 +6174,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 3,
-      "holder": {
-        "script": "body",
-        "on": "resident.sol"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 3,
-          "plot": 7
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 3,
@@ -4399,44 +6220,6 @@
     {
       "issuer": 4,
       "holder": {
-        "script": "body",
-        "on": "resident.ivo"
-      },
-      "scope": {
-        "avatar": "resident.ivo"
-      },
-      "rights": [
-        "animate",
-        "camera"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 4,
-      "holder": {
-        "script": "body",
-        "on": "resident.ivo"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 4,
-          "plot": 1
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 4,
-      "holder": {
         "script": "stakes",
         "on": "resident.ivo"
       },
@@ -4475,27 +6258,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 4,
-      "holder": {
-        "script": "body",
-        "on": "resident.ivo"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 4,
-          "plot": 2
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 4,
@@ -4542,27 +6304,6 @@
     {
       "issuer": 4,
       "holder": {
-        "script": "body",
-        "on": "resident.ivo"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 4,
-          "plot": 3
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 4,
-      "holder": {
         "script": "stakes",
         "on": "resident.ivo"
       },
@@ -4601,27 +6342,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 4,
-      "holder": {
-        "script": "body",
-        "on": "resident.ivo"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 4,
-          "plot": 4
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 4,
@@ -4668,27 +6388,6 @@
     {
       "issuer": 4,
       "holder": {
-        "script": "body",
-        "on": "resident.ivo"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 4,
-          "plot": 5
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 4,
-      "holder": {
         "script": "stakes",
         "on": "resident.ivo"
       },
@@ -4731,27 +6430,6 @@
     {
       "issuer": 4,
       "holder": {
-        "script": "body",
-        "on": "resident.ivo"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 4,
-          "plot": 6
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 4,
-      "holder": {
         "script": "stakes",
         "on": "resident.ivo"
       },
@@ -4790,27 +6468,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 4,
-      "holder": {
-        "script": "body",
-        "on": "resident.ivo"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 4,
-          "plot": 7
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 4,
@@ -4857,44 +6514,6 @@
     {
       "issuer": 5,
       "holder": {
-        "script": "body",
-        "on": "resident.nia"
-      },
-      "scope": {
-        "avatar": "resident.nia"
-      },
-      "rights": [
-        "animate",
-        "camera"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 5,
-      "holder": {
-        "script": "body",
-        "on": "resident.nia"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 5,
-          "plot": 1
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 5,
-      "holder": {
         "script": "stakes",
         "on": "resident.nia"
       },
@@ -4933,27 +6552,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 5,
-      "holder": {
-        "script": "body",
-        "on": "resident.nia"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 5,
-          "plot": 2
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 5,
@@ -5000,27 +6598,6 @@
     {
       "issuer": 5,
       "holder": {
-        "script": "body",
-        "on": "resident.nia"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 5,
-          "plot": 3
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 5,
-      "holder": {
         "script": "stakes",
         "on": "resident.nia"
       },
@@ -5059,27 +6636,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 5,
-      "holder": {
-        "script": "body",
-        "on": "resident.nia"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 5,
-          "plot": 4
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 5,
@@ -5126,27 +6682,6 @@
     {
       "issuer": 5,
       "holder": {
-        "script": "body",
-        "on": "resident.nia"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 5,
-          "plot": 5
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 5,
-      "holder": {
         "script": "stakes",
         "on": "resident.nia"
       },
@@ -5189,27 +6724,6 @@
     {
       "issuer": 5,
       "holder": {
-        "script": "body",
-        "on": "resident.nia"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 5,
-          "plot": 6
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 5,
-      "holder": {
         "script": "stakes",
         "on": "resident.nia"
       },
@@ -5248,27 +6762,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 5,
-      "holder": {
-        "script": "body",
-        "on": "resident.nia"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 5,
-          "plot": 7
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 5,
@@ -5315,44 +6808,6 @@
     {
       "issuer": 6,
       "holder": {
-        "script": "body",
-        "on": "resident.rue"
-      },
-      "scope": {
-        "avatar": "resident.rue"
-      },
-      "rights": [
-        "animate",
-        "camera"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 6,
-      "holder": {
-        "script": "body",
-        "on": "resident.rue"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 6,
-          "plot": 1
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 6,
-      "holder": {
         "script": "stakes",
         "on": "resident.rue"
       },
@@ -5391,27 +6846,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 6,
-      "holder": {
-        "script": "body",
-        "on": "resident.rue"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 6,
-          "plot": 2
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 6,
@@ -5458,27 +6892,6 @@
     {
       "issuer": 6,
       "holder": {
-        "script": "body",
-        "on": "resident.rue"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 6,
-          "plot": 3
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 6,
-      "holder": {
         "script": "stakes",
         "on": "resident.rue"
       },
@@ -5517,27 +6930,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 6,
-      "holder": {
-        "script": "body",
-        "on": "resident.rue"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 6,
-          "plot": 4
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 6,
@@ -5584,27 +6976,6 @@
     {
       "issuer": 6,
       "holder": {
-        "script": "body",
-        "on": "resident.rue"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 6,
-          "plot": 5
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 6,
-      "holder": {
         "script": "stakes",
         "on": "resident.rue"
       },
@@ -5647,27 +7018,6 @@
     {
       "issuer": 6,
       "holder": {
-        "script": "body",
-        "on": "resident.rue"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 6,
-          "plot": 6
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 6,
-      "holder": {
         "script": "stakes",
         "on": "resident.rue"
       },
@@ -5706,27 +7056,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 6,
-      "holder": {
-        "script": "body",
-        "on": "resident.rue"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 6,
-          "plot": 7
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 6,
@@ -5773,44 +7102,6 @@
     {
       "issuer": 7,
       "holder": {
-        "script": "body",
-        "on": "resident.oren"
-      },
-      "scope": {
-        "avatar": "resident.oren"
-      },
-      "rights": [
-        "animate",
-        "camera"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 7,
-      "holder": {
-        "script": "body",
-        "on": "resident.oren"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 7,
-          "plot": 1
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 7,
-      "holder": {
         "script": "stakes",
         "on": "resident.oren"
       },
@@ -5849,27 +7140,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 7,
-      "holder": {
-        "script": "body",
-        "on": "resident.oren"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 7,
-          "plot": 2
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 7,
@@ -5916,27 +7186,6 @@
     {
       "issuer": 7,
       "holder": {
-        "script": "body",
-        "on": "resident.oren"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 7,
-          "plot": 3
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 7,
-      "holder": {
         "script": "stakes",
         "on": "resident.oren"
       },
@@ -5975,27 +7224,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 7,
-      "holder": {
-        "script": "body",
-        "on": "resident.oren"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 7,
-          "plot": 4
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 7,
@@ -6042,27 +7270,6 @@
     {
       "issuer": 7,
       "holder": {
-        "script": "body",
-        "on": "resident.oren"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 7,
-          "plot": 5
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 7,
-      "holder": {
         "script": "stakes",
         "on": "resident.oren"
       },
@@ -6105,27 +7312,6 @@
     {
       "issuer": 7,
       "holder": {
-        "script": "body",
-        "on": "resident.oren"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 7,
-          "plot": 6
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
-    },
-    {
-      "issuer": 7,
-      "holder": {
         "script": "stakes",
         "on": "resident.oren"
       },
@@ -6164,27 +7350,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 7,
-      "holder": {
-        "script": "body",
-        "on": "resident.oren"
-      },
-      "scope": {
-        "owned_on_plot": {
-          "owner": 7,
-          "plot": 7
-        }
-      },
-      "rights": [
-        "use",
-        "take",
-        "move"
-      ],
-      "cap": 0,
-      "period_s": 0,
-      "expires_s": 31536000
     },
     {
       "issuer": 7,

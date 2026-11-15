@@ -1,5 +1,4 @@
-#include "install/install.hpp"
-#include "react/snapshot.hpp"
+#include "react/react.hpp"
 #include "runtime_fixture.hpp"
 
 #include <iostream>
@@ -7,7 +6,6 @@
 
 using namespace amber;
 using namespace amber::react;
-using namespace amber::install;
 namespace {
 void require(bool value, const char *message) {
   if (!value)
@@ -67,46 +65,11 @@ void real_watch_drives_authored_state() {
   f.run(plans);
   require(read(f.values(), f.a, 2, 0, 20).value.numeric() == 20,
           "all authored handlers execute in declared dispatch order");
-  remove_watches(f.subscriptions, f.links, {f.a, extra});
+  remove_watches(f.subscriptions, {f.a, extra});
   set_instances(f.installed, f.a, {}, f.scripts);
   project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
   f.state(f.a, 1, 6);
   require(f.changed({f.a, 1}).size() == 2, "removed instance contributes no subscription/handler");
-}
-void along_rebind_preserves_answer_and_foreign_receiver() {
-  Fixture f;
-  f.state(f.b, 1, 3);
-  f.state(f.c, 1, 3);
-  auto id = f.add(
-      R"(return {kind='model',watches={{term='novel.heat',along='novel.link',thresholds={{predicate='above',value=4}}}},
-    on={['novel.heat']=function(self,source,value)
-      self.state.value=value
-      if value~=nil then self.state.read=self:read(source,'novel.heat') end
-      self.state.runs=(self.state.runs or 0)+1
-    end}})");
-  f.models.rows[1].script = id;
-  project_model(f.triggers, f.models, f.scripts, f.terms, 1);
-  set_relation(f.relations.at(3), 3, f.a, f.b, true, f.effects);
-  f.bind(id, f.a);
-  set_relation(f.relations.at(3), 3, f.a, f.b, false, f.effects);
-  set_relation(f.relations.at(3), 3, f.a, f.c, true, f.effects);
-  require(f.changed({f.a, 3}).empty(),
-          "same value on new first endpoint does not wake threshold consumer");
-  f.state(f.c, 1, 5);
-  auto plans = f.changed({f.c, 1});
-  require(plans.size() == 1 && plans[0].receiver == f.a && plans[0].sender == f.c,
-          "followed source does not become script receiver");
-  f.run(plans);
-  require(std::get<double>(f.states.at({f.a, id}).at(StateKey{std::string("read")})) == 5,
-          "acquired foreign read works in actual handler");
-  f.properties[1].set(0, Value(999.0));
-  set_relation(f.relations.at(3), 3, f.a, f.c, false, f.effects);
-  plans = f.changed({f.a, 3});
-  require(plans.size() == 1 && !std::get<Value>(plans[0].payload).present(),
-          "missing explicit along endpoint is absence, never slot zero");
-  f.run(plans);
-  require(!f.states.at({f.a, id}).contains(StateKey{std::string("value")}),
-          "nil absence removes saved state value");
 }
 void term_fallback_tracks_own_row_existence() {
   Fixture f;
@@ -118,7 +81,7 @@ void term_fallback_tracks_own_row_existence() {
   f.models.rows[1].script = id;
   project_model(f.triggers, f.models, f.scripts, f.terms, 1);
   f.bind(id, f.a);
-  require(f.links.rows.at({{f.a, id}, 0}).source.subject == f.b,
+  require(watch_sources(f.subscriptions, ScriptKey{f.a, id}) == std::vector<FactKey>{{f.b, 4}},
           "Term.along fallback bound to first outgoing subject");
   f.shared[4].set(f.a.slot(), Shared{0, {}});
   auto plans = f.changed({f.a, 4});
@@ -141,13 +104,14 @@ void threshold_restore_and_selected_instance_codec() {
   set_instances(f.installed, f.b, ids, f.scripts);
   project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
   set_rate(f.properties, f.processes, f.terms.rows[1], f.a, 1, 0, 10, 0, 20, f.effects);
-  auto changes = sync_watches(f.subscriptions, f.links, f.values(), f.allocations, {f.a, id},
+  auto changes = sync_watches(f.subscriptions, f.values(), f.allocations, {f.a, id},
                               f.scripts.rows[id].declaration, 0, 20, {}, SyncMode::Initial);
   require(changes.timers.size() == 1 && changes.timers[0].due == 41,
           "real process threshold schedules strict boundary");
   const auto timer = changes.timers[0];
-  require(valid_threshold(*timer.threshold, identity(f.objects), f.processes, f.subscriptions),
-          "armed revision valid");
+  require(
+      valid_threshold(*timer.threshold, identity(f.objects), f.processes, f.subscriptions, 41, 20),
+      "scheduled predicate crosses at its due step");
   snap::Buffer bytes;
   snap::Output out{bytes};
   const std::array<Handle, 1> chosen{f.a};
@@ -164,21 +128,22 @@ void threshold_restore_and_selected_instance_codec() {
   snap::check_complete(in);
   require(loaded.get(f.a.slot()) && !loaded.get(f.b.slot()),
           "selected installation snapshot excludes unrelated object");
-  WatchLinks restored_links;
-  auto restored = sync_watches(loaded_subs, restored_links, f.values(), f.allocations, {f.a, id},
+  auto restored = sync_watches(loaded_subs, f.values(), f.allocations, {f.a, id},
                                f.scripts.rows[id].declaration, 0, 20, {}, SyncMode::Restore);
-  require(restored.dirty.empty() && restored.timers.empty() &&
-              valid_threshold(*timer.threshold, identity(f.objects), f.processes, loaded_subs),
-          "restore preserves answer/revision and does not duplicate timers");
+  require(
+      restored.dirty.empty() && restored.timers.empty() &&
+          valid_threshold(*timer.threshold, identity(f.objects), f.processes, loaded_subs, 41, 20),
+      "restore preserves answers and does not duplicate timers");
   auto result = check_changed(loaded_subs, f.values(), f.allocations, {f.a, 1}, 41, 20, {});
   auto plans = plan_deliveries(result, f.triggers, f.scripts, f.values(), 41, 20);
   require(plans.size() == 1, "restored crossing yields actual invocation");
   f.run(plans, 41);
   require(std::get<bool>(f.states.at({f.a, id}).at(StateKey{std::string("crossed")})),
           "threshold invokes real Luau after restore");
+  check_changed(loaded_subs, f.values(), f.allocations, {f.a, 1}, 41, 20, {});
   set_rate(f.properties, f.processes, f.terms.rows[1], f.a, -1, 0, 10, 41, 20, f.effects);
-  require(!valid_threshold(*timer.threshold, identity(f.objects), f.processes, loaded_subs),
-          "rate change invalidates old threshold revision");
+  require(!valid_threshold(*timer.threshold, identity(f.objects), f.processes, loaded_subs, 41, 20),
+          "unchanged predicate suppresses a previously delivered crossing");
   require(
       check_changed(loaded_subs, f.values(), f.allocations, {f.a, 1}, 41, 20, {}).timers[0].due ==
           42,
@@ -211,7 +176,7 @@ void rule_versions_partial_replacement_and_catchup() {
           "catchup source validity is distinct from current consumer selector filtering");
   step::WorkQueues queue;
   for (const auto &item : items)
-    step::enqueue_background(queue, item);
+    queue.background.push_back(item);
   set_rule_enabled(f.rules, {4, 8, false}, false);
   cancel_catch_up(queue, signal);
   require(queue.background.empty() && !catch_up_valid(items[0], f.rules, f.values(), 0, 20),
@@ -225,10 +190,11 @@ void rule_versions_partial_replacement_and_catchup() {
   const auto allowed = rule_watch_terms(f.rules, f.values(), f.a, old, 0, 20);
   require(allowed == std::vector<TermId>{4},
           "partial replacement preserves old script's other active trigger");
-  sync_watches(f.subscriptions, f.links, f.values(), f.allocations, {f.a, old},
+  sync_watches(f.subscriptions, f.values(), f.allocations, {f.a, old},
                f.scripts.rows[old].declaration, 0, 20, {}, SyncMode::Change,
                std::span<const TermId>(allowed));
-  require(f.links.rows.size() == 1 && f.links.rows.begin()->first.index == 1,
+  require(f.subscriptions.rows.size() == 1 && f.subscriptions.rows.begin()->second.size() == 1 &&
+              f.subscriptions.rows.begin()->second[0].index == 1,
           "only retired watch removed, original watch index retained");
   add_rule(f.rules, f.scripts, f.terms, old);
   require(!catch_up_valid(items[0], f.rules, f.values(), 0, 20),
@@ -261,8 +227,8 @@ void selector_changes_publish_after_subscription_rebinding() {
   f.effects = {};
   f.state(f.a, 1, 5); // Deliberately dirties quantity before the selector in one invocation.
   f.state(f.a, 5, 1);
-  auto synced = sync_rule_watches(f.subscriptions, f.links, f.values(), f.allocations, f.scripts,
-                                  f.rules, f.effects.ordered, 0, 20, {});
+  auto synced = sync_rule_watches(f.subscriptions, f.values(), f.allocations, f.scripts, f.rules,
+                                  f.effects.ordered, 0, 20, {});
   require(synced.dirty.size() == 1 && synced.dirty[0].source == FactKey{f.a, 1},
           "new applicable rule subscription queues its current fact before any dirty publication");
   auto plans = f.changed({f.a, 1});
@@ -272,24 +238,23 @@ void selector_changes_publish_after_subscription_rebinding() {
   require(read(f.values(), f.a, 2, 0, 20).value.numeric() == 45 &&
               std::get<double>(f.states.at({f.a, rule}).at(std::string("count"))) == 1,
           "new flag-selected watch executes the actual current-state Luau handler once");
-  auto unchanged = sync_rule_watches(f.subscriptions, f.links, f.values(), f.allocations, f.scripts,
-                                     f.rules, f.effects.ordered, 0, 20, {});
+  auto unchanged = sync_rule_watches(f.subscriptions, f.values(), f.allocations, f.scripts, f.rules,
+                                     f.effects.ordered, 0, 20, {});
   require(unchanged.dirty.empty(), "existing applicable subscriptions do not get replayed");
   f.effects = {};
   f.state(f.a, 5, 0);
-  sync_rule_watches(f.subscriptions, f.links, f.values(), f.allocations, f.scripts, f.rules,
+  sync_rule_watches(f.subscriptions, f.values(), f.allocations, f.scripts, f.rules,
                     f.effects.ordered, 0, 20, {});
-  require(!f.subscriptions.by_consumer.contains({f.a, rule}),
+  require(watch_sources(f.subscriptions, ScriptKey{f.a, rule}).empty(),
           "false selector removes the formerly applicable world-rule consumer");
 }
 } // namespace
 int main() {
   real_watch_drives_authored_state();
-  along_rebind_preserves_answer_and_foreign_receiver();
   term_fallback_tracks_own_row_existence();
   threshold_restore_and_selected_instance_codec();
   rule_versions_partial_replacement_and_catchup();
   unwatched_quantity_never_creates_catchup();
   selector_changes_publish_after_subscription_rebinding();
-  std::cout << "installation, along watches, real VM, catch-up and restore checks passed\n";
+  std::cout << "installation, shared fallback, real VM, catch-up and restore checks passed\n";
 }

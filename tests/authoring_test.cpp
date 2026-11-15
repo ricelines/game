@@ -1,7 +1,5 @@
-#include "bindings/authoring/authoring.hpp"
-#include "bindings/authoring/failures.hpp"
-#include "bindings/start/start.hpp"
-#include "drive/drive.hpp"
+#include "react/react.hpp"
+#include "step/step.hpp"
 
 #include <chrono>
 #include <fstream>
@@ -9,7 +7,7 @@
 #include <thread>
 
 using namespace amber;
-using namespace amber::bindings::authoring;
+using namespace amber::react::authoring;
 namespace {
 void require(bool condition, const char *message) {
   if (!condition)
@@ -41,30 +39,15 @@ std::vector<Completion> wait_for(Worker &worker, std::size_t count) {
   require(completed.size() == count, "background authoring did not complete");
   return completed;
 }
-struct GeometryProbe {
-  std::size_t calls = 0;
-  bool fail = false;
-};
-void geometry(void *local, const catalog::Asset &asset) {
-  auto &probe = *static_cast<GeometryProbe *>(local);
-  require(catalog::valid_hash(asset.hash) && asset.manifest.at("hash") == asset.hash,
-          "geometry hook did not receive an actual verified asset");
-  ++probe.calls;
-  if (probe.fail)
-    throw std::runtime_error("test geometry unavailable");
-}
 void failed_submissions_have_authenticated_records_without_catalog_ids() {
   record::Journal journal(8, {});
-  drive::Clock clock;
-  clock.step = 91;
-  FailedAuthoring binding{journal, clock};
-  drive::Input input;
+  step::Input input;
   input.caller = PlayerId{7};
   input.fields = {{"job", "failed-cad-job"},
                   {"operation", "model"},
                   {"source_hash", std::string(64, 'a')},
                   {"errors", {"Actual worker rejected CAD"}}};
-  const auto reply = failed_authoring(&binding, input);
+  const auto reply = step::failed_authoring(journal, 91, input);
   const auto records = journal.take();
   require(reply.fields.at("record_id") == 1 && records.size() == 1,
           "failed authoring did not return its actual journal receipt");
@@ -76,7 +59,7 @@ void failed_submissions_have_authenticated_records_without_catalog_ids() {
           "failed CAD fabricated an identity, lost authenticated attribution or became a change");
   input.fields["operation"] = "variant";
   input.fields["job"] = "failed-variant-job";
-  (void)failed_authoring(&binding, input);
+  (void)step::failed_authoring(journal, 91, input);
   const auto variant = journal.take().front();
   require(variant.at("kind") == "action" && variant.at("of") == "model_variant" &&
               variant.at("id") == 2,
@@ -89,14 +72,14 @@ int main(int argc, char **argv) {
     if (argc != 3)
       throw std::invalid_argument("authoring_test PLAN ASSET_ROOT");
     const auto started = std::chrono::steady_clock::now();
-    const auto plan = bindings::start::read_plan(argv[1]);
+    const auto plan = step::start::read_plan(argv[1]);
     const auto directory = std::filesystem::current_path() / ".cache/authoring-test";
     std::filesystem::remove_all(directory);
     react::Terms terms;
     react::Materials materials;
     catalog::MechanicalBindings mechanical;
     const auto registry =
-        bindings::start::load_registry(plan, directory / "registry", terms, materials, mechanical);
+        step::start::load_registry(plan, directory / "registry", terms, materials, mechanical);
     const auto &model = named(plan.at("models"), "door");
     std::ifstream metadata(std::filesystem::path(argv[2]) / model.at("asset").get<std::string>() /
                            "manifest.json");
@@ -118,30 +101,9 @@ int main(int argc, char **argv) {
     invalid["canonical_params"] = "[]";
     rejects([&] { (void)model_request(invalid, terms); }, "non-object parameters accepted");
     Worker worker({argv[2], pins, limits});
-    SubmissionQueue submission{worker, terms, registry};
-    drive::InputOperations operations;
-    register_inputs(operations, submission);
-    require(operations.rows.size() == 3, "authoring operations were not registered together");
-    drive::Inputs pending;
-    pending.next_id = 100;
-    drive::Input input;
-    input.operation = "register_model";
-    input.caller = PlayerId{9};
-    input.fields = request;
-    input.fields["material"] = "missing.material";
-    const auto malformed =
-        drive::invoke_input(pending, operations, drive::enqueue_input(pending, input));
-    require(malformed && !malformed->fields.at("ok").get<bool>() && pending.rows.empty(),
-            "submission decode failure did not preserve immediate input rejection");
-    input.fields = request;
-    require(!drive::invoke_input(pending, operations, drive::enqueue_input(pending, input)) &&
-                pending.rows.at(101).awaiting,
-            "model submission did not retain its accepted deferred identity");
-    input.operation = "register_script";
-    input.fields = {{"source", named(plan.at("scripts"), "lamp").at("source")}};
-    require(!drive::invoke_input(pending, operations, drive::enqueue_input(pending, input)) &&
-                pending.rows.at(102).awaiting,
-            "script submission did not use the shared registered queue");
+    worker.submit(101, decoded, {terms, registry.hash});
+    worker.submit(102, ScriptRequest{named(plan.at("scripts"), "lamp").at("source")},
+                  {terms, registry.hash});
     worker.submit(103, ScriptRequest{"return {on={['missing.event']=function() end}}"},
                   {terms, registry.hash});
     auto wrong_params = decoded;
@@ -158,67 +120,52 @@ int main(int argc, char **argv) {
                 std::holds_alternative<Failure>(completed[3].result),
             "real artifact/VM validation outcomes incorrect");
     auto prepared = std::get<PreparedModel>(std::move(completed[0].result));
-    require(prepared.assets.size() == 2 && prepared.assets[0].asset.volume != 999999,
+    require(prepared.assets.size() == 2 && prepared.assets[0].volume != 999999,
             "transported manifest replaced real root/part geometry");
     catalog::Assets assets;
     catalog::Models models;
     catalog::ModelTexts texts;
     react::ModelSettings settings;
     react::AssetMeasurements measured;
-    bindings::viewing::PublicSources sources;
     catalog::Scripts scripts;
     catalog::ParameterBlocks parameters;
-    GeometryProbe probe;
-    CatalogInstall install{assets,
-                           models,
-                           parameters,
-                           texts,
-                           settings,
-                           measured,
-                           sources,
-                           scripts,
-                           terms,
-                           {terms.by_name.at("base.volume"), terms.by_name.at("base.capacity")},
-                           {&probe, geometry}};
-    auto failing = prepared;
-    probe.fail = true;
-    require(!install_model(std::move(failing), 9, 12, install).at("ok").get<bool>() &&
-                models.rows.size() == 1,
-            "failed geometry exposed a usable model");
-    probe.fail = false;
-    probe.calls = 0;
-    const auto first = install_model(prepared, 9, 12, install);
-    const auto second = install_model(prepared, 10, 15, install);
+    const catalog::MeasurementBindings measured_terms{terms.by_name.at("base.volume"),
+                                                      terms.by_name.at("base.capacity")};
+    auto model_install = [&](PreparedModel model, PlayerId author, double created_s) {
+      return install_model(std::move(model), author, created_s, assets, models, parameters, texts,
+                           settings, measured, scripts, terms, measured_terms);
+    };
+    auto variant_install = [&](PreparedVariant variant) {
+      return install_variant(std::move(variant), assets, models, parameters, texts, settings,
+                             measured, scripts, terms, measured_terms);
+    };
+    const auto first = model_install(prepared, 9, 12).reply;
+    const auto second = model_install(prepared, 10, 15).reply;
     require(first.at("ok") && second.at("ok") && first.at("model") != second.at("model"),
             "duplicate geometry merged model identity");
-    require(models.rows.size() == 5 && probe.calls == 2 && sources.assets.size() == 2 &&
-                measured.rows.size() == 4 && models.rows[1].author == 9 &&
-                models.rows[3].author == 10 && models.rows[1].created_s == 12,
+    require(models.rows.size() == 5 && assets.rows.size() == 2 &&
+                !assets.rows.at(decoded.asset).source.empty() && measured.rows.size() == 4 &&
+                models.rows[1].author == 9 && models.rows[3].author == 10 &&
+                models.rows[1].created_s == 12,
             "actual parts, public source, measurements or authorship lost");
     require(first.at("measured") == assets.rows.at(decoded.asset).manifest,
             "reply measurements came from submitted claims");
     Json variant_fields = {
         {"model", "m:1"}, {"asset", decoded.asset}, {"canonical_params", decoded.canonical_params}};
     const auto variant_request_value = variant_request(variant_fields);
-    pending.next_id = 106;
-    input.operation = "register_variant";
-    input.fields = variant_fields;
-    require(!drive::invoke_input(pending, operations, drive::enqueue_input(pending, input)) &&
-                pending.rows.at(106).awaiting,
-            "variant submission did not use the shared registered queue");
+    worker.submit(106, variant_request_value, {terms, registry.hash});
     auto variants = wait_for(worker, 1);
     require(std::holds_alternative<PreparedVariant>(variants[0].result),
             "variant worker must load the verified immutable artifact");
     auto variant = std::get<PreparedVariant>(std::move(variants[0].result));
-    const auto completed_variant = variant;
     const auto source_before = models.rows[1].source_hash;
     models.rows[1].source_hash = catalog::sha256("a different current model source");
     const auto count_before_variant = models.rows.size();
-    require(!install_variant(variant, install).at("ok").get<bool>() &&
+    require(!variant_install(variant).reply.at("ok").get<bool>() &&
                 models.rows.size() == count_before_variant && parameters.rows.size() == 1,
             "a verified variant from another source must not alter model/parameter identities");
     models.rows[1].source_hash = source_before;
-    const auto registered_variant = install_variant(std::move(variant), install);
+    const auto registered_variant = variant_install(std::move(variant)).reply;
     require(registered_variant.at("ok") && registered_variant.at("params") == 1 &&
                 registered_variant.at("model") == "m:1" && parameters.rows[1].model == 1 &&
                 parameters.rows[1].parts.size() == 1 &&
@@ -248,8 +195,7 @@ int main(int argc, char **argv) {
                 std::holds_alternative<Failure>(staged[2].result),
             "batched worker lost actual source or unique canonical-set checks");
     auto staged_model = std::get<PreparedModel>(std::move(staged[0].result));
-    const auto completed_model = staged_model;
-    require(staged_model.variants.size() == 1 && staged_model.variants[0][0].asset.volume != 888888,
+    require(staged_model.variants.size() == 1 && staged_model.variants[0][0].volume != 888888,
             "batch transported manifest replaced actual variant measurements");
     auto invalid_staged = staged_model;
     // A late invalid prepared row exercises catalog preflight, independently of
@@ -257,11 +203,11 @@ int main(int argc, char **argv) {
     invalid_staged.variants.push_back(prepared.assets);
     const auto models_before_batch = models.rows.size();
     const auto params_before_batch = parameters.rows.size();
-    require(!install_model(std::move(invalid_staged), 9, 22, install).at("ok").get<bool>() &&
+    require(!model_install(std::move(invalid_staged), 9, 22).reply.at("ok").get<bool>() &&
                 models.rows.size() == models_before_batch &&
                 parameters.rows.size() == params_before_batch,
             "bad final staged variant exposed a partial model family");
-    const auto staged_reply = install_model(std::move(staged_model), 9, 22, install);
+    const auto staged_reply = model_install(std::move(staged_model), 9, 22).reply;
     require(staged_reply.at("ok") && staged_reply.at("variants").size() == 1 &&
                 staged_reply.at("variants")[0].at("params") == params_before_batch &&
                 models.rows.size() == models_before_batch + 1 &&
@@ -269,16 +215,17 @@ int main(int argc, char **argv) {
                 measured.parameter_rows.contains(params_before_batch),
             "one batched model install did not expose its complete measured parameter set");
     react::Vm vm(limits);
-    command::NativeActions native;
-    ScriptInstall script_install{scripts, vm, sources, native, directory / "scripts"};
+    react::NativeActions native;
+    auto script_install = [&](catalog::PreparedScript script) {
+      return install_script(std::move(script), 9, 12, scripts, vm, native, directory / "scripts");
+    };
     const auto actual_script = std::get<catalog::PreparedScript>(std::move(completed[1].result));
-    native.rows.emplace(terms.by_name.at("base.switch"), command::NativeDeclaration{});
-    require(!install_script(actual_script, 9, 12, script_install).at("ok").get<bool>() &&
-                scripts.rows.size() == 1,
+    native.rows.emplace(terms.by_name.at("base.switch"), react::NativeDeclaration{});
+    require(!script_install(actual_script).reply.at("ok").get<bool>() && scripts.rows.size() == 1,
             "reserved native action collision accepted");
     native.rows.clear();
-    const auto script_result = install_script(actual_script, 9, 12, script_install);
-    require(script_result.at("ok") && sources.scripts.at(1) == actual_script.source &&
+    const auto script_result = script_install(actual_script).reply;
+    require(script_result.at("ok") && scripts.rows[1].source == actual_script.source &&
                 scripts.rows[1].author == 9,
             "actual compiled script installation or public source missing");
     auto rule = std::get<catalog::PreparedScript>(std::move(completed[4].result));
@@ -286,8 +233,8 @@ int main(int argc, char **argv) {
             "worker approved a remote world rule");
     rule.declaration.active = true;
     rule.declaration.approved = true;
-    require(install_script(std::move(rule), 9, 12, script_install).at("ok") &&
-                !scripts.rows[2].declaration.active && !scripts.rows[2].declaration.approved,
+    require(script_install(std::move(rule)).reply.at("ok") && !scripts.rows[2].declaration.active &&
+                !scripts.rows[2].declaration.approved,
             "completion bypassed remote approval workflow");
     const react::RightsDeclaration rights{
         {"use", "take", "move", "edit", "copy", "transfer", "destroy"}};
@@ -295,66 +242,6 @@ int main(int argc, char **argv) {
                                                 registry.hash, terms, rights);
     require(persisted.source == actual_script.source && persisted.compiled.bytecode.size() > 0,
             "persisted compiled artifact did not verify");
-    record::Journal journal(8, {});
-    input.id = 2000;
-    input.caller = PlayerId{11};
-    input.operation = "register_model";
-    input.origin.cause = 701;
-    input.origin.root = 700;
-    const auto before_completion = models.rows.size();
-    const auto applied = complete_authoring(input, {input.id, completed_model}, true, install,
-                                            script_install, journal, 500, 20, {});
-    auto records = journal.take();
-    require(applied.reply.at("ok") && applied.reply.at("record_id") == 1 &&
-                applied.added_model_ids ==
-                    std::vector<ModelId>{static_cast<ModelId>(before_completion)} &&
-                applied.reply.at("variants").size() == 1 && records.size() == 1 &&
-                records[0].at("kind") == "create" && records[0].at("of") == "model" &&
-                records[0].at("actor") == "p:11" && records[0].at("root") == 700 &&
-                records[0].at("cause") == 701 && records[0].at("changed") == true &&
-                models.rows[before_completion].author == 11 &&
-                models.rows[before_completion].created_s == 25,
-            "batched completion lost one chosen record, accepted cause or added definitions");
-    input.operation = "register_variant";
-    input.fields = variant_fields;
-    const auto unchanged = complete_authoring(input, {input.id, completed_variant}, true, install,
-                                              script_install, journal, 501, 20, {});
-    records = journal.take();
-    require(unchanged.reply.at("ok") && unchanged.reply.at("record_id") == 2 &&
-                unchanged.added_model_ids.empty() && records.size() == 1 &&
-                records[0].at("kind") == "action" && records[0].at("of") == "model_variant" &&
-                records[0].at("result") == "no_effect" && records[0].at("changed") == false &&
-                records[0].at("authors") == Json::array({"p:11", "p:9"}) &&
-                records[0].at("oldest") == 12,
-            "duplicate variant completion lost its source credit or became another change");
-    input.operation = "register_script";
-    const auto completed_script = complete_authoring(input, {input.id, actual_script}, true,
-                                                     install, script_install, journal, 502, 20, {});
-    records = journal.take();
-    require(completed_script.reply.at("ok") && completed_script.added_model_ids.empty() &&
-                records.size() == 1 && records[0].at("of") == "script" &&
-                records[0].at("result") == "applied",
-            "script completion did not use its distinct VM capability");
-    const auto before_closed = models.rows.size();
-    input.operation = "register_model";
-    const auto closed = complete_authoring(input, {input.id, completed_model}, false, install,
-                                           script_install, journal, 503, 20, {});
-    records = journal.take();
-    require(!closed.reply.at("ok").get<bool>() &&
-                closed.reply.at("errors")[0] == "session_closed" &&
-                closed.reply.at("record_id") == 4 && closed.added_model_ids.empty() &&
-                models.rows.size() == before_closed && records.size() == 1 &&
-                records[0].at("result") == "denied" && records[0].at("changed") == false &&
-                !records[0].contains("model"),
-            "closed-session completion installed a model or lost the one failed-attempt receipt");
-    const auto rejected = complete_authoring(input, {input.id, Failure{"actual worker rejection"}},
-                                             true, install, script_install, journal, 504, 20, {});
-    records = journal.take();
-    require(!rejected.reply.at("ok").get<bool>() && rejected.reply.at("record_id") == 5 &&
-                rejected.added_model_ids.empty() && records.size() == 1 &&
-                records[0].at("errors")[0] == "actual worker rejection" &&
-                records[0].at("result") == "denied" && records[0].at("changed") == false,
-            "worker failure fabricated identity or lost its single completion receipt");
     const auto batch_started = std::chrono::steady_clock::now();
     for (std::uint64_t index = 0; index < 50; ++index)
       worker.submit(1000 + index, decoded, {terms, registry.hash});

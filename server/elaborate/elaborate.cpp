@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace amber::elaborate {
@@ -177,9 +178,19 @@ void validate_tests(const nlohmann::json &tests) {
     if (!when.is_object() || when.size() != 1 ||
         (!when.contains("steps") && !when.contains("action")))
       throw std::invalid_argument("fixture when needs either steps or action");
-    if (when.contains("steps") &&
-        (!when["steps"].is_number_integer() || when["steps"].get<std::int64_t>() < 0))
-      throw std::invalid_argument("fixture steps must be a nonnegative integer");
+    if (when.contains("steps")) {
+      const auto &steps = when["steps"];
+      bool valid = steps.is_number_unsigned();
+      if (steps.is_number_integer() && !valid)
+        valid = steps.get<std::int64_t>() >= 0;
+      if (steps.is_number_float()) {
+        const auto value = steps.get<double>();
+        valid = std::isfinite(value) && value >= 0 && std::trunc(value) == value &&
+                value < std::ldexp(1., std::numeric_limits<Step>::digits);
+      }
+      if (!valid)
+        throw std::invalid_argument("fixture steps must be a nonnegative integer in Step range");
+    }
     if (when.contains("action") &&
         (!when["action"].is_object() || !when["action"].contains("term") ||
          !when["action"]["term"].is_string()))

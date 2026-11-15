@@ -39,15 +39,16 @@ void begin(Output &out, const Header &header) {
   out.container1b(header.registry_hash);
   out.value4b(static_cast<std::uint32_t>(tags.size()));
 }
-void section(Output &out, Tag tag, const std::function<void(Output &)> &write) {
+std::size_t begin_section(Output &out, Tag tag) {
   out.container1b(tag);
   const auto length_at = out.adapter().currentWritePos();
   out.value8b(std::uint64_t{0});
-  const auto start = out.adapter().currentWritePos();
-  write(out);
+  return length_at;
+}
+void end_section(Output &out, std::size_t length_at) {
   const auto end = out.adapter().currentWritePos();
   out.adapter().currentWritePos(length_at);
-  out.value8b(static_cast<std::uint64_t>(end - start));
+  out.value8b(static_cast<std::uint64_t>(end - length_at - sizeof(std::uint64_t)));
   out.adapter().currentWritePos(end);
 }
 void finish(Output &out, Buffer &buffer) {
@@ -55,22 +56,12 @@ void finish(Output &out, Buffer &buffer) {
   out.value8b(XXH64(buffer.data(), end, 0));
   buffer.resize(out.adapter().writtenBytesCount());
 }
-void encode(Buffer &buffer, const Header &header, const SectionWriters &writers) {
-  ZoneScopedN("snapshot serialization");
-  buffer.clear();
-  Output out{buffer};
-  begin(out, header);
-  for (std::size_t i = 0; i < tags.size(); ++i)
-    section(out, tags[i], writers[i]);
-  finish(out, buffer);
-}
-void decode(const View &view, const SectionReaders &readers) {
-  for (std::size_t i = 0; i < tags.size(); ++i) {
-    const auto &bytes = view.sections.at(i).bytes;
-    Input in{bytes.data(), bytes.size()};
-    readers[i](in);
-    check_complete(in);
-  }
+Input section_input(const View &view, Tag tag) {
+  const auto found = std::find_if(view.sections.begin(), view.sections.end(),
+                                  [tag](const SectionView &section) { return section.tag == tag; });
+  if (found == view.sections.end())
+    throw std::runtime_error("missing snapshot section");
+  return Input{found->bytes.data(), found->bytes.size()};
 }
 View parse(std::span<const std::uint8_t> bytes, std::span<const std::string_view> loadable) {
   if (bytes.size() < magic.size() + 4 + 1 + 8 + 32 + 4 + 8)

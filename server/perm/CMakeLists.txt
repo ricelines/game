@@ -1,10 +1,7 @@
-add_library(amber_perm perm.cpp snapshot.cpp)
+add_library(amber_perm STATIC
+  perm.cpp
+  snapshot.cpp
+)
+target_include_directories(amber_perm PUBLIC ${PROJECT_SOURCE_DIR}/server)
+target_compile_features(amber_perm PUBLIC cxx_std_20)
 target_link_libraries(amber_perm PUBLIC amber_store amber_snap)
-
-if(BUILD_TESTING)
-  add_executable(perm_test ../../tests/perm_test.cpp)
-  target_link_libraries(perm_test PRIVATE amber_perm)
-  add_test(NAME perm COMMAND perm_test)
-  add_executable(offer_deadlines_bench ../../tests/offer_deadlines_bench.cpp)
-  target_link_libraries(offer_deadlines_bench PRIVATE amber_perm)
-endif()

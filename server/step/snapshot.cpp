@@ -1,5 +1,5 @@
-#include "snapshot.hpp"
-#include "record/snapshot.hpp"
+#include "snap/snap.hpp"
+#include "step.hpp"
 #include <algorithm>
 
 namespace amber::step {
@@ -30,8 +30,6 @@ template <class S> void serialize(S &s, ThresholdToken &v) {
   s.object(v.consumer);
   s.value4b(v.script);
   s.value4b(v.watch_index);
-  s.value8b(v.process_revision);
-  s.value8b(v.binding_revision);
 }
 template <class S> void serialize(S &s, Timer &v) {
   s.value8b(v.due);

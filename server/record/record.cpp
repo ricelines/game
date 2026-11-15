@@ -72,6 +72,25 @@ void check_zstd(std::size_t result) {
 }
 } // namespace
 
+std::vector<Credit> credits(IdentityRead identity, AttributionRead attribution,
+                            const catalog::Models &models, const catalog::Scripts &scripts,
+                            std::span<const Handle> objects, ScriptId script, double hz) {
+  std::vector<record::Credit> result;
+  auto add = [&](PlayerId author, double time) { result.push_back({author, time, false}); };
+  for (auto object : objects)
+    if (identity.valid(object)) {
+      const auto slot = object.slot();
+      add(attribution.maker[slot], static_cast<double>(attribution.created_step[slot]) / hz);
+      const auto &model = models.rows.at(identity.model[slot]);
+      add(model.author, model.created_s);
+    }
+  if (script) {
+    const auto &row = scripts.rows.at(script);
+    add(row.author, row.created_s);
+  }
+  return result;
+}
+
 Journal::Journal(std::size_t authors_max, std::vector<PlayerId> seed_actors)
     : authors_max_(authors_max), seed_actors_(std::move(seed_actors)) {
   std::sort(seed_actors_.begin(), seed_actors_.end());

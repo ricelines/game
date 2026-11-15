@@ -1,5 +1,3 @@
-#include "bindings/structural/revision.hpp"
-#include "catalog/revision.hpp"
 #include "structural_fixture.hpp"
 
 #include <algorithm>
@@ -11,20 +9,10 @@ using test_runtime::require;
 namespace {
 using Json = nlohmann::json;
 struct Fixture : test_structural::Fixture {
-  catalog::ModelTexts texts;
-  bindings::CatalogPublication publication;
-  bindings::commerce::RebindOffersBinding rebound;
-  bindings::ModelDefinitionEdit edit;
   TermId action;
   explicit Fixture(std::uint32_t capacity = 64)
       : test_structural::Fixture(capacity),
-        publication(test_structural::Fixture::publication(texts)),
-        rebound{offers, trades, permission_flags(f.objects), lifecycle.custody},
-        edit{f.models,    parameters, texts,  f.model_settings,
-             assets,      f.assets,   {0, 0}, bindings::replacement_edit(replacement),
-             publication, rebound},
-        action(bindings::declare_model_edit(f.terms, declarations)) {
-    bindings::register_model_edit(operations, action, edit);
+        action(step::declare_model_edit(f.terms, declarations)) {
     add("return {kind='model',on={['novel.touch']=function(self)end}}");
     allow_build();
     f.models.rows[1].author = 1;
@@ -39,16 +27,15 @@ struct Fixture : test_structural::Fixture {
     f.models.rows[2].canonical_params = "{}";
   }
   std::vector<Handle> make(float x, std::uint32_t params = 0) {
-    const auto out =
-        act("engine.create", {}, {{"model", "m:1"}, {"params", params}, {"position", {x, 0, 0}}});
+    const auto out = create({{"model", "m:1"}, {"params", params}, {"position", {x, 0, 0}}});
     require(out.reply.at("ok"), "initial actual assembly creation");
-    return created(out);
+    return out.created_objects;
   }
   void unrelated_observers() {
     f.models.rows[2].script = script;
     for (auto h : {f.a, f.b, f.c})
       f.objects.model[h.slot()] = 2;
-    install::project_model(f.triggers, f.models, f.scripts, f.terms, 2);
+    react::project_model(f.triggers, f.models, f.scripts, f.terms, 2);
   }
   void proposal(bool invalid = false) {
     f.materials.rows[9] = {{10, Value(500.)}, {11, Value(.5)}};
@@ -90,22 +77,20 @@ struct Fixture : test_structural::Fixture {
     if (invalid)
       assets.rows.at(f.models.rows[3].asset).manifest["bindings"]["motion"]["mode"] = "invalid";
   }
-  bindings::ActionOutcome revise(Caller caller = PlayerId{1}) {
-    return bindings::perform_action(actions, {caller, action, {}, Value{}},
-                                    {{"model", "m:1"}, {"proposal", "m:3"}}, {});
+  step::NativeCompletion revise(Caller caller = PlayerId{1}) {
+    return step::revise_model(
+        f.objects, parts, declared, f.models, parameters, texts, f.model_settings, assets, f.assets,
+        {0, 0}, geometry, *f.projection, world, transforms(f.objects), parents(f.objects),
+        space_flags(f.objects), permission_flags(f.objects), physical, physical_changes,
+        authority(f.objects), attribution(f.objects), ledger, offers, trades, plots, f.scripts,
+        plot_membership(f.objects), {10, 11}, {.6f, 0},
+        call({}, {{"model", "m:1"}, {"proposal", "m:3"}}, caller));
   }
   void offered(Handle root) {
-    bindings::commerce::OfferBinding binding{offers,           permission_flags(f.objects), players,
-                                             grants,           authority(f.objects),        limits,
-                                             lifecycle.custody};
-    auto out = bindings::commerce::offer(
-        &binding, {{PlayerId{f.objects.owner[root.slot()]}, 0, root, Value{}},
-                   {{"price", 5}},
-                   {},
-                   0,
-                   20,
-                   {},
-                   {}});
+    const auto out =
+        step::offer(offers, permission_flags(f.objects), players, grants, authority(f.objects),
+                    limits, world, identity(f.objects), parents(f.objects), parts, declared,
+                    call(root, {{"price", 5}}, PlayerId{f.objects.owner[root.slot()]}));
     require(out.reply.at("ok"), "ordinary placed goods offer");
   }
 };
@@ -180,14 +165,11 @@ void capacity_rejection_preserves_definition_but_cancels_offer() {
           "combined capacity rejection changes neither definition nor instance identities");
   require(!x.offers.rows[1].live && !(x.f.objects.flags[a[0].slot()] & Escrow),
           "the earlier ordinary offer cancellation remains after geometry rejection");
-  auto logs = x.journal.take();
-  bool cancellation = false, chosen = false;
-  for (const auto &row : logs) {
-    cancellation |= row.at("name") == "goods_offers_invalidated";
-    if (row.at("name") == "base.revise_model")
-      chosen = row.at("result") == "denied" && row.at("changed").get<bool>();
-  }
-  require(cancellation && chosen, "S7 retains actual cancellation and denied definition result");
+  const auto cancellation = std::ranges::find_if(
+      out.records, [](const auto &row) { return row.name == "goods_offers_invalidated"; });
+  require(cancellation != out.records.end() && cancellation->changed && out.changed &&
+              out.result == record::Result::Denied,
+          "the native result retains real cancellation records/effects beside a denied edit");
 }
 void default_and_explicit_parameters_update_in_place() {
   Fixture x;
@@ -239,17 +221,19 @@ void two_edits_share_one_rigid_assembly() {
   initial.owner = 1;
   initial.flags = Dynamic;
   const auto parent = create(x.f.objects, initial);
-  bindings::install_physics(
+  step::install_physics(
       x.world, identity(x.f.objects), transforms(x.f.objects), space_flags(x.f.objects), parent,
-      bindings::describe_physics(x.geometry, x.assets.rows.at(x.f.models.rows[2].asset),
-                                 *x.f.projection, {2, 0, 8, 0, parent}, Dynamic, {10, 11}, {.6f, 0},
-                                 0, 20));
+      step::describe_physics(x.geometry, x.assets.rows.at(x.f.models.rows[2].asset),
+                             *x.f.projection, {2, 0, 8, 0, parent}, Dynamic, {10, 11}, {.6f, 0}, 0,
+                             20));
   x.parts.set(parent.slot(), std::vector<lifecycle::NamedPart>{{"first", a[0]}, {"second", b[0]}});
   x.f.objects.parent[a[0].slot()] = parent;
   x.f.objects.parent[b[0].slot()] = parent;
   lifecycle::rebuild_declared_parts(x.parts, identity(x.f.objects), x.declared);
   const std::array<Handle, 2> joined{a[0], b[0]};
-  bindings::install_declared_attachments(x.placement, joined);
+  step::install_declared_attachments(x.world, identity(x.f.objects), transforms(x.f.objects),
+                                     parents(x.f.objects), space_flags(x.f.objects), x.declared,
+                                     x.physical, x.physical_changes, joined);
   auto all = lifecycle::collect(x.parts, identity(x.f.objects), parent);
   require(space::assemble(x.world, identity(x.f.objects), transforms(x.f.objects), parent,
                           std::span(all).subspan(1), space::Motion::Dynamic)
@@ -275,10 +259,22 @@ void removed_parts_use_ordinary_retirement() {
   x.f.models.rows[3].parts.erase("leaf");
   x.assets.rows.at(x.f.models.rows[3].asset).manifest["parts"].erase("leaf");
   const auto result = x.revise();
-  require(result.reply.at("ok") && !identity(x.f.objects).valid(a[1]) &&
-              !x.grants.rows[grant].live && !x.f.properties[1].get(a[1].slot()) &&
+  require(result.reply.at("ok") && identity(x.f.objects).valid(a[1]) &&
+              result.removed_objects == std::vector<Handle>{a[1]},
+          "geometry replacement leaves retired identities live for owner cleanup");
+  step::NativeCompletion cleanup;
+  step::retire_commerce(x.ledger, x.offers, x.trades, x.grants, x.players, x.limits,
+                        identity(x.f.objects), authority(x.f.objects),
+                        permission_flags(x.f.objects), result.removed_objects, 0, cleanup);
+  react::retire_reactions(
+      x.f.models, *x.f.projection, x.f.installed, x.f.triggers, x.f.subscriptions, x.f.properties,
+      x.f.processes, x.f.instance_settings, x.f.states, x.f.random, x.f.shared, x.f.gives_to,
+      x.f.relations, x.f.allocations, x.meters, result.removed_objects, 0, 20, {}, cleanup.effects);
+  lifecycle::release_rows(x.f.objects, x.parts, x.declared, result.removed_objects);
+  require(!identity(x.f.objects).valid(a[1]) && !x.grants.rows[grant].live &&
+              !x.f.properties[1].get(a[1].slot()) &&
               lifecycle::collect(x.parts, identity(x.f.objects), a[0]).size() == 2,
-          "removed child loses its old identity, state and grants through ordinary retirement");
+          "owner cleanup removes state/grants before the old child identity is freed");
 }
 void invalid_geometry_is_checked_before_catalog_mutation() {
   Fixture x;
@@ -312,9 +308,10 @@ void benchmark() {
     samples.push_back(elapsed);
   }
   std::ranges::sort(samples);
-  std::cout << "100-instance definition edit (200 -> 300 native object shapes, lifecycle/metadata, "
-               "no physics/navigation step or VM queue drain), ms: p50="
-            << samples[9] << " p95=" << samples[18] << " max=" << samples.back() << '\n';
+  std::cout
+      << "100-instance definition edit (200 -> 300 native object shapes, direct catalog/geometry, "
+         "no physics/navigation step or VM queue drain), ms: p50="
+      << samples[9] << " p95=" << samples[18] << " max=" << samples.back() << '\n';
 }
 } // namespace
 int main(int argc, char **argv) {

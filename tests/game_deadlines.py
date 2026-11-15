@@ -26,7 +26,7 @@ def identity(row):
 def baked(row):
     return {
         key: row["measured"][key]
-        for key in ("asset", "volume_m3", "capacity_m3", "size_m", "params", "material")
+        for key in ("asset", "volume_m3", "capacity_l", "size_m", "params", "material")
     }
 
 
@@ -71,7 +71,7 @@ async def deadline_records(architect, evidence, offer, grant):
 
 
 async def deadlines(args, evidence, mira, sol, architect):
-    observed = await mira.request("look", full=True, limit=1000)
+    observed = await mira.request("look", limit=1000)
     chairs = [
         row["h"]
         for row in observed.get("things", []) + observed.get("far", [])

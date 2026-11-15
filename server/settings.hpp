@@ -1,14 +1,14 @@
 #pragma once
 
-#include "drive/drive.hpp"
 #include "elaborate/elaborate.hpp"
 #include "net/net.hpp"
-#include "observe/observe.hpp"
+#include "space/space.hpp"
+#include "step/step.hpp"
 
 namespace amber {
 // Launch configuration only. This value owns no live simulation state.
 struct Settings {
-  drive::Settings clock;
+  step::Settings clock;
   react::VmSettings scripts;
   space::Settings space;
   net::Settings network;
@@ -27,7 +27,6 @@ struct Settings {
   elaborate::FixtureLimits fixture_limits;
   std::size_t fixture_workers;
   float default_friction, default_restitution, goal_tolerance_m;
-  std::uint32_t navigation_diagnostic_budget_us;
 };
 Settings read_settings(const std::filesystem::path &);
 } // namespace amber

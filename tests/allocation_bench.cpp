@@ -1,12 +1,21 @@
-#include "bindings/allocation/allocation.hpp"
 #include "runtime_fixture.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 
 using namespace amber;
 using namespace amber::react;
-int main() {
+namespace {
+using Clock = std::chrono::steady_clock;
+void report(const char *name, unsigned subjects, std::vector<double> &samples) {
+  std::sort(samples.begin(), samples.end());
+  std::cout << name << " subjects=" << subjects << " samples=" << samples.size()
+            << " p50_us=" << samples[samples.size() / 2]
+            << " p95_us=" << samples[samples.size() * 95 / 100] << " max_us=" << samples.back()
+            << '\n';
+}
+void run(unsigned subjects) {
   test_runtime::Fixture f;
   f.terms.rows.resize(13);
   f.terms.rows[10].id = 10;
@@ -19,50 +28,54 @@ int main() {
   f.terms.rows[12].source = Source::Setting;
   GivesTo gives;
   MeterRows meters;
-  PriorityLinks links;
-  bindings::AllocationReconciliation tables{f.allocations, meters, links};
   set_contribution(f.shared, gives, f.terms.rows[10], f.a, f.c, 7, f.effects);
   set_contribution(f.shared, gives, f.terms.rows[11], f.a, f.c, 6, f.effects);
   set_contribution(f.shared, gives, f.terms.rows[11], f.b, f.c, 7, f.effects);
   ObjectInit init;
   init.model = 1;
-  for (unsigned i = 0; i < 10000; ++i) {
+  for (unsigned i = 1; i < subjects; ++i) {
     const auto h = create(f.objects, init);
-    f.shared[10].set(h.slot(), Shared{7, {{h, 7}}});
-    f.shared[11].set(h.slot(), Shared{9, {{h, 9}}});
+    set_contribution(f.shared, gives, f.terms.rows[10], h, h, 7, f.effects);
+    set_contribution(f.shared, gives, f.terms.rows[11], h, h, 9, f.effects);
   }
-  rebuild_priorities(links, *f.projection);
-  constexpr unsigned count = 100000;
-  std::size_t changed = 0;
-  auto begin = std::chrono::steady_clock::now();
+  validate_shared_terms(f.terms);
+  reconcile_allocations(*f.projection, f.allocations, meters, f.effects, 0, 20);
+  constexpr unsigned count = 2000;
+  std::vector<double> samples;
+  samples.reserve(count);
   for (unsigned i = 0; i < count; ++i) {
     f.effects = {};
+    const auto begin = Clock::now();
     set_contribution(f.shared, gives, f.terms.rows[10], f.a, f.c, (i & 1) ? 8 : 6, f.effects);
-    bindings::reconcile_allocations(*f.projection, tables, f.effects, i, 20);
-    changed += !f.effects.ordered.empty();
+    reconcile_allocations(*f.projection, f.allocations, meters, f.effects, i, 20);
+    samples.push_back(std::chrono::duration<double, std::micro>(Clock::now() - begin).count());
   }
-  const auto elapsed =
-      std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - begin);
-  test_runtime::require(changed == count && get_share(f.allocations, f.c, 11, f.a) +
-                                                    get_share(f.allocations, f.c, 11, f.b) ==
-                                                8,
-                        "measured reconciliation produces actual conserved allocation changes");
-  std::cout << "indexed contribution reconciliation unrelated_subjects=10000 ns/op="
-            << elapsed.count() / count << '\n';
+  test_runtime::require(
+      get_share(f.allocations, f.c, 11, f.a) + get_share(f.allocations, f.c, 11, f.b) == 8,
+      "dirty reconciliation preserves delivered supply");
+  report("dirty_contribution_and_reconcile", subjects, samples);
   f.instance_settings.columns.resize(13);
-  begin = std::chrono::steady_clock::now();
+  samples.clear();
   for (unsigned i = 0; i < count; ++i) {
     f.effects = {};
+    const auto begin = Clock::now();
     f.instance_settings.columns[12].set(f.b.slot(), Value((i & 1) ? -1.0 : 1.0));
-    bindings::reconcile_priority(*f.projection, tables, {SettingKey::Scope::Instance, f.b.bits, 12},
-                                 f.effects, count + i, 20);
+    reconcile_priority(*f.projection, f.allocations, meters,
+                       {SettingKey::Scope::Instance, f.b.bits, 12}, f.effects, count + i, 20);
+    samples.push_back(std::chrono::duration<double, std::micro>(Clock::now() - begin).count());
   }
-  const auto priority_elapsed =
-      std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - begin);
   test_runtime::require(
       get_share(f.allocations, f.c, 11, f.a) == 6 &&
-          priority_inputs(links, {SettingKey::Scope::Instance, f.b.bits, 12}).size() == 1,
-      "priority benchmark uses the actual indexed pair and final priority");
-  std::cout << "indexed inherited priority reconciliation unrelated_subjects=10000 ns/op="
-            << priority_elapsed.count() / count << '\n';
+          priority_inputs(*f.projection, {SettingKey::Scope::Instance, f.b.bits, 12}).size() == 1,
+      "priority scan selects the actual affected pair");
+  report("rare_inherited_priority_and_reconcile", subjects, samples);
+}
+} // namespace
+int main() {
+  std::cout
+      << "Scope: direct primary rows; all subjects have allocation/meter history, one dirty "
+         "subject with two demanders; no VM, physics, "
+         "transport, snapshot or frame pacing. Samples include mutation and reconciliation.\n";
+  run(100);
+  run(1000);
 }

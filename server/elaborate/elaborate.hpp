@@ -1,6 +1,7 @@
 #pragma once
 
 #include "record/record.hpp"
+#include "snap/snap.hpp"
 
 #include <map>
 #include <span>
@@ -203,3 +204,27 @@ private:
 };
 void complete_capture(CaptureRefs &, const CaptureWrite &);
 } // namespace amber::elaborate
+
+namespace amber::elaborate {
+using ObjectSelection = std::optional<std::span<const Handle>>;
+using GapSelection = std::optional<std::span<const GapKey>>;
+using HashSelection = std::optional<std::span<const Hash>>;
+void write_requests(snap::Output &, const Requests &, ObjectSelection = {});
+void read_requests(snap::Input &, Requests &);
+void write_gaps(snap::Output &, const GapCounts &, GapSelection = {});
+void read_gaps(snap::Input &, GapCounts &);
+void write_last_gaps(snap::Output &, const LastGaps &, ObjectSelection = {});
+void read_last_gaps(snap::Input &, LastGaps &);
+void write_capture_refs(snap::Output &, const CaptureRefs &, HashSelection = {});
+void read_capture_refs(snap::Input &, CaptureRefs &);
+} // namespace amber::elaborate
+
+namespace amber::fixture {
+struct Run {
+  std::filesystem::path executable, catalog, work_directory;
+  elaborate::FixtureJob job;
+};
+// Composition only: every TestRun is reported by a fresh real simulation child.
+elaborate::FixtureResult evaluate(const Run &);
+int command(int argc, char **argv, const std::filesystem::path &executable);
+} // namespace amber::fixture

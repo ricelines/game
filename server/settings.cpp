@@ -82,8 +82,6 @@ Settings read_settings(const std::filesystem::path &path) {
   s.default_friction = f("space", "DEFAULT_FRICTION");
   s.default_restitution = f("space", "DEFAULT_RESTITUTION");
   s.goal_tolerance_m = f("space", "GOAL_TOLERANCE_M");
-  s.space.tile_install_budget_us = size("navigation", "INSTALL_BUDGET_US");
-  s.navigation_diagnostic_budget_us = size("navigation", "DIAGNOSTIC_BUDGET_US");
   s.space.crowd_query_radius_multiplier = f("navigation", "CROWD_QUERY_RADIUS_MULTIPLIER");
   s.space.crowd_optimize_radius_multiplier = f("navigation", "CROWD_OPTIMIZE_RADIUS_MULTIPLIER");
   s.space.crowd_separation_weight = f("navigation", "CROWD_SEPARATION_WEIGHT");

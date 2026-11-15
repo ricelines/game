@@ -334,7 +334,7 @@ def main():
     parser.add_argument(
         "--input", type=Path, help="JSON with emergence and/or wikipedia source manifests"
     )
-    parser.add_argument("--output", type=Path, default=Path("measure-validation"))
+    parser.add_argument("--output", type=Path, default=Path(".cache/measure/validation"))
     parser.add_argument(
         "--history-only", action="store_true", help="Compute Wikipedia histories without views"
     )

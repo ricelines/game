@@ -1,7 +1,63 @@
-#include "snapshot.hpp"
+#include "react.hpp"
+#include "snap/snap.hpp"
 #include <algorithm>
 
 namespace amber::react {
+template <class S> void serialize(S &s, Process &v) {
+  snap::field(s, v.v0);
+  snap::field(s, v.step0);
+  snap::field(s, v.rate);
+  snap::field(s, v.lo);
+  snap::field(s, v.hi);
+}
+template <class S> void serialize(S &s, Contribution &v) {
+  snap::field(s, v.from);
+  snap::field(s, v.amount);
+}
+template <class S> void serialize(S &s, Shared &v) {
+  snap::field(s, v.total);
+  snap::field(s, v.parts);
+}
+template <class S> void serialize(S &s, SubjectTerm &v) {
+  snap::field(s, v.subject);
+  snap::field(s, v.term);
+}
+template <class S> void serialize(S &s, AllocationKey &v) {
+  snap::field(s, v.subject);
+  snap::field(s, v.contributor);
+  snap::field(s, v.term);
+  snap::field(s, v.supplier);
+}
+template <class S> void serialize(S &s, Meter &v) {
+  snap::field(s, v.amount0);
+  snap::field(s, v.step0);
+  snap::field(s, v.rate);
+}
+template <class S> void serialize(S &s, Answer &v) {
+  snap::field(s, v.present);
+  snap::field(s, v.value);
+}
+template <class S> void serialize(S &s, SharedWatchAnswer &v) {
+  snap::field(s, v.aggregate);
+  snap::field(s, v.own_allocation);
+}
+template <class S> void serialize(S &s, RelationAnswer &v) {
+  snap::field(s, v.out);
+  snap::field(s, v.in);
+}
+template <class S> void serialize(S &s, Threshold &v) {
+  snap::field(s, v.predicate);
+  snap::field(s, v.value);
+}
+template <class S> void serialize(S &s, WatchBinding &v) {
+  snap::field(s, v.consumer);
+  snap::field(s, v.index);
+  snap::field(s, v.last);
+  snap::field(s, v.declaration.term);
+  snap::field(s, v.declaration.thresholds);
+  snap::field(s, v.dependencies);
+}
+
 namespace {
 template <class Map, class Pred> void write_map(snap::Output &out, const Map &map, Pred include) {
   std::vector<std::pair<typename Map::key_type, typename Map::mapped_type>> entries;
@@ -124,7 +180,6 @@ void read_shared(snap::Input &in, SharedColumns &shared, GivesTo &gives,
   read_sparse(in, gives, slots);
   read_map(in, allocations.values);
   read_map(in, meters);
-  rebuild_allocation_index(allocations);
 }
 void write_script_states(snap::Output &out, const ScriptStates &states,
                          const Subscriptions &subscriptions, const SnapshotSelection &selected) {
@@ -138,8 +193,6 @@ void write_script_states(snap::Output &out, const ScriptStates &states,
     snap::field(s, key);
     write_map(s, states.at(key), [](const auto &) { return true; });
   });
-  auto revision = subscriptions.next_revision;
-  snap::field(out, revision);
   std::vector<std::pair<FactKey, std::vector<WatchBinding>>> rows;
   for (const auto &[source, bindings] : subscriptions.rows) {
     std::vector<WatchBinding> included;
@@ -161,9 +214,7 @@ void read_script_states(snap::Input &in, ScriptStates &states, Subscriptions &su
     snap::field(s, key);
     read_map(s, states[key]);
   });
-  snap::field(in, subscriptions.next_revision);
   read_map(in, subscriptions.rows);
-  rebuild_subscription_index(subscriptions);
 }
 void write_random(snap::Output &out, const RandomStates &random,
                   const SnapshotSelection &selected) {

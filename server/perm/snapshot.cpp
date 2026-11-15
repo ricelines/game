@@ -1,5 +1,5 @@
-#include "snapshot.hpp"
-#include "snap/codec.hpp"
+#include "perm.hpp"
+#include "snap/snap.hpp"
 #include <algorithm>
 
 namespace amber::perm {
@@ -160,7 +160,6 @@ template <class S> void serialize(S &s, TradeSide &v) {
   s.value4b(v.offer);
   s.value8b(v.money);
   s.boolValue(v.confirmed);
-  s.object(v.prior_custody);
 }
 template <class S> void serialize(S &s, Trade &v) {
   s.value4b(v.id);

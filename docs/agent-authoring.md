@@ -28,7 +28,7 @@ These example terms must exist in the registry. A declaration's `kind` is `model
 
 Handlers receive `(self, sender, args)`. A selected object's action receives the acting body or script object as sender. A body's action receives its selected target as sender. Events carry their actual sender. `self.handle` is the installed object and `self.script` its current script ID; both are readonly. Handles preserve their generation and compare by identity. Keep them as handles rather than converting them into numbers.
 
-A watch is a name or `{term='example.level', along='example.connected_to', thresholds={{predicate='below',value=2}}}`. Predicates are `above`, `at_least`, `below`, `at_most`. An `along` watch follows a relation. Thresholds schedule boundary crossings rather than polling every step.
+A watch is a name or `{term='example.level', thresholds={{predicate='below',value=2}}}`. Predicates are `above`, `at_least`, `below`, `at_most`. Shared quantities may follow the relation declared by their term. Thresholds schedule boundary crossings rather than polling every step.
 
 The validation worker compiles the file, runs its top level once under a 50 ms limit, and derives the declaration. Literal `set` and `rate` calls declare their state terms automatically; dynamic terms need a `sets` list. Contributions need a `contributes` list. Unknown terms, wrong sources/kinds and unknown rights are rejected. `slots` describes requested installation permissions; declaring a slot does not grant it.
 
@@ -40,7 +40,6 @@ A rule also needs `applies_to={material='example.material'}` or `{flag='example.
 |---|---|
 | `self:get(term)` | Own quantity/flag from its intrinsic, measured, state, setting or combined source; nil when absent. |
 | `self:setting(term)` | Own setting with instance → model → plot → world fallback. Zero and false are real overrides. |
-| `self:read(handle, term)` | Quantity/flag on an acquired or persistent handle. Read access gives no mutation authority. |
 | `self:set(term, value, part?)` | Write declared, non-shared state on self or an actual declared part. Setting a quantity stops its old rate. |
 | `self:rate(term, per_second, lo, hi, part?)` | Fold current state, then set its steady rate and bounds. |
 | `self:related(relation, 'out' or 'in')` | Current handles at the relation's other end. |
@@ -56,7 +55,7 @@ Values use SI units. Term kinds are `quantity`, `flag`, `event`, `relation`, `ac
 
 `self.state` persists a flat mapping of integer/string keys to numbers, booleans, strings and handles. Nil deletes an entry. Tables/functions cannot be stored there. Generic iteration and `#self.state` work; use ordinary local tables for scratch work. State changes are immediate and survive errors/cutoffs.
 
-Events accept a scalar, handle, string, vector or flat record of at most 64 named fields. Actions use their registered inputs, including structured native records. Luau vectors and handles are converted at that boundary; returned `created` entries are actual typed handles. Reads may use handles obtained through relations, events, exact queries, action results or persisted state. Knowing a printed name grants nothing.
+Events accept a scalar, handle, string, vector or flat record of at most 64 named fields. Actions use their registered inputs, including structured native records. Luau vectors and handles are converted at that boundary; returned `created` entries are actual typed handles. Quantity reads address this object. Related objects communicate their state through authored events or contributions; physical queries return their documented measurements. Knowing a printed name grants nothing.
 
 ## Ordinary actions and authority
 
@@ -87,7 +86,7 @@ The starting native operations include:
 | `engine.attach` | Moving object plus `{parent, local_pose?}`; Move on subject, Use/reach on parent. |
 | `engine.release` | Attached object plus `{linear?, angular?}`; relinquish a current held item or use its motion authority. |
 | `engine.impulse` | Object plus `{momentum, point}`; real physics under Move/reach. Foreign avatar animation needs its separate Avatar grant. |
-| `engine.transfer` | Source plus `{to, term, amount}`; conserved state quantity, source Move and recipient Use. |
+| `engine.transfer` | Source plus `{to, term, amount, to_max?}`; conserved quantity, source Move and recipient Use. Availability and bounds cap the transfer; returns actual `amount`. |
 | `engine.hold_goods` | Goods root, `{}`; Transfer on it and its parts; stores it for its existing owner. |
 
 Native action poses use `{position={x,y,z}, rotation={x,y,z,w}}`, with both inner values arrays. Luau vectors also work for positions/velocities. `local_pose` is relative to its parent. Other action families cover scoped grants/revocation, money, ownership/trade, installation and elaboration. Their signatures appear in ordinary action listings; a known action needs no extra schema-discovery step.
@@ -107,9 +106,9 @@ Body actions are authored Lua like other behavior. These primitives operate on o
 | `world.near(self, radius)` | Exact nearby handles in `objects`. |
 | `world.raycast(from, to)` | Exact first hit with object, position and fraction when present. |
 
-Queries count against the existing run deadline. An incomplete native query cuts off the handler; it gives no new time budget.
+The VM interrupt limits handler execution. Path and perception queries retain their configured count limits; native queries do not create a separate wall-clock budget.
 
-Readonly helpers are `self:object(handle?)` (model/material/params/owner/parent, position, quaternion array, installed scripts), `self:asset(handle?)` (actual immutable manifest), `self:material(material, term)`, `self:measure_model(model, params?, material?)`, `self:measure_instance(handle?)`. Measurements include disjoint material masses; instance measurements include declared parts. `self:meter(subject, demand_term, contributor, supplier?)`, `self:plot(plot_id?)`, `self:plot_objects(plot_id)` supply settlement facts. These reads grant no rights. Poses are available as `self:object(handle).position` and `.rotation`.
+Readonly helpers are `self:object(handle?)` (model/material/params/owner/parent, position, quaternion array, installed scripts), `self:asset(handle?)` (actual immutable manifest), `self:material(material, term)`, `self:measure_model(model, params?, material?)`, `self:measure_instance(handle?)`. Measurements include disjoint material masses; instance measurements include declared parts and return nil for a retired handle. `self:meter(subject, demand_term, contributor, supplier?)`, `self:plot(plot_id?)`, `self:plot_objects(plot_id)` supply settlement facts. These reads grant no rights. Poses are available as `self:object(handle).position` and `.rotation`.
 
 ## Assets, definition edits and limits
 
@@ -117,4 +116,4 @@ CAD programs export `build(params)` and optional `PARAMS`, `MATERIAL`, `SCRIPT`,
 
 A variant registers baked parameters without changing placed objects. Apply it through an ordinary reconfiguration action. A model author can submit a baked proposal and call `base.revise_model` with `{model,proposal}`; its instances switch while keeping ownership, poses, matching part handles and instance state. This is an author operation, without a stock exchange or player authority forwarded through a rule.
 
-A handler has a 5 ms protection deadline and a 4 MiB script memory limit. Nested actions keep the caller's running deadline. Earlier changes survive an error/cutoff, which is recorded. Only exchanges of valuables are all or nothing. Globals and captured tables are readonly; captured scalar mutation is rejected. There are no files, network, dynamic source loading or outside clocks. Scripts cannot create/resume coroutines; ordinary `act` suspension stays on the current native call stack and is never saved in the world.
+A handler has a 5 ms protection deadline and a 4 MiB script memory limit. Nested actions keep the caller's running deadline. Earlier changes survive an error/cutoff, which is recorded. Only exchanges of valuables are all or nothing. Globals and captured tables are readonly; captured scalar mutation is rejected. There are no files, network, dynamic source loading or outside clocks. Scripts cannot create/resume coroutines; ordinary `act` suspension stays on the active handler call stack and is never saved in the world.

@@ -1,4 +1,4 @@
-#include "catalog/revision.hpp"
+#include "react/react.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -88,8 +88,8 @@ void preserved_defaults_and_variants() {
           "default adopts new defaults and explicit values map to their actual baked variant");
   const auto old_model = f.models.rows[1];
   const auto old_count = f.parameters.rows.size();
-  const auto edited =
-      update_definition(f.models, f.parameters, f.texts, f.settings, f.assets, 1, 4);
+  const auto edited = update_definition(f.models, f.parameters, f.texts, f.assets, 1, 4);
+  inherit_definition_settings(f.settings, edited);
   require(edited.changed && edited.parameters.size() == 2 && edited.models.size() == 4,
           "direct edit deduplicates shared nested child definitions");
   const auto &current = f.models.rows[1];
@@ -117,8 +117,7 @@ void preserved_defaults_and_variants() {
   require(measured.rows.at(1).volume == 2 && measured.parameter_rows.at(1).volume == 4 &&
               measured.rows.contains(retained) && measured.rows.contains(pin),
           "new measured facts cover current root, children and explicit parameter blocks");
-  const auto unchanged =
-      update_definition(f.models, f.parameters, f.texts, f.settings, f.assets, 1, 4);
+  const auto unchanged = update_definition(f.models, f.parameters, f.texts, f.assets, 1, 4);
   require(!unchanged.changed && unchanged.models.empty(),
           "repeating the current definition does not create extra child identities");
 }
@@ -128,7 +127,7 @@ void missing_parameter_rejects_before_writes() {
   f.assets.rows.at(f.parameters.rows[2].asset).canonical_params =
       f.parameters.rows[2].canonical_params;
   const auto old_hash = f.models.rows[1].asset;
-  rejects([&] { update_definition(f.models, f.parameters, f.texts, f.settings, f.assets, 1, 4); },
+  rejects([&] { update_definition(f.models, f.parameters, f.texts, f.assets, 1, 4); },
           "a missing baked parameter set is not guessed");
   require(f.models.rows[1].asset == old_hash && f.models.rows.size() == 9 &&
               f.parameters.rows.size() == 3,
@@ -145,8 +144,7 @@ void dropped_keys_and_new_defaults() {
   }
   f.models.rows[4].canonical_params = R"({"added":5})";
   f.parameters.rows[2].canonical_params = R"({"added":5})";
-  const auto edited =
-      update_definition(f.models, f.parameters, f.texts, f.settings, f.assets, 1, 4);
+  const auto edited = update_definition(f.models, f.parameters, f.texts, f.assets, 1, 4);
   require(edited.changed && f.parameters.rows[1].canonical_params == R"({"added":5})",
           "removed keys are dropped and new keys use actual source defaults");
 }

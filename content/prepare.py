@@ -133,6 +133,19 @@ def validate_symbols(plan: dict) -> None:
     for row in plan["models"]:
         if row.get("script") and row["script"] not in scripts:
             raise ValueError(f"Missing script {row['script']}")
+    for profile in plan["profiles"]:
+        if "body" not in profile:
+            continue
+        if profile["body"] not in objects:
+            raise ValueError(f"Missing starting body {profile['body']}")
+        if "play" not in profile["modes"]:
+            continue
+        for choices in profile.get("body_installs", []):
+            for choice in choices:
+                for field in ("object", "avatar"):
+                    endpoint = choice["scope"].get(field)
+                    if endpoint and endpoint not in objects:
+                        raise ValueError(f"Missing starting slot endpoint {endpoint}")
     for row in plan["relations"]:
         if row["from"] not in objects or row["to"] not in objects:
             raise ValueError(f"Missing relation endpoint: {row}")
