@@ -372,7 +372,11 @@ def validate_journal(path, evidence):
             and sum(row.get("agent") is True for row in rows) == 1,
             "nested script/native attempts must not become extra chosen actions",
         )
-        nested = [row for row in rows if row.get("kind") == "action" and row["id"] != root["id"]]
+        nested = [
+            row
+            for row in rows
+            if row.get("kind") in {"action", "denial"} and row["id"] != root["id"]
+        ]
         switch = [row for row in nested if row.get("name") == "base.switch"]
         require(
             len(nested) == 3
@@ -380,6 +384,13 @@ def validate_journal(path, evidence):
             and switch[0]["result"] == ("applied" if child_ok else "denied")
             and all(row.get("actor") == script and row.get("agent") is False for row in nested),
             "real nested switch, malformed native and denied pay lost their actor/results",
+        )
+        require(
+            all(
+                row["kind"] == ("denial" if row["result"] == "denied" else "action")
+                for row in nested
+            ),
+            "nested attempts must use denial records exactly when refused",
         )
         by_id = {row["id"]: row for row in rows}
         require(
@@ -428,10 +439,13 @@ def validate_journal(path, evidence):
         "fresh nested installation actions failed before the old invocation was retired",
     )
     creates = [
-        row for row in records if row.get("kind") == "action" and row.get("name") == "engine.create"
+        row
+        for row in records
+        if row.get("kind") in {"action", "denial"} and row.get("name") == "engine.create"
     ]
     require(
         len(creates) == 3
+        and [row["kind"] for row in creates] == ["denial", "action", "action"]
         and [row["result"] for row in creates] == ["denied", "applied", "applied"]
         and all(row.get("actor") == script and row.get("agent") is False for row in creates),
         "nested native construction attempts lost their true result, actor or nonchosen source",
