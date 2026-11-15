@@ -1323,7 +1323,7 @@ enum class Reason {
   NotParticipant,
   NotPresent
 };
-enum class LandVerb : std::uint8_t { Build, Enter, RunScripts, Transfer = 5 };
+enum class LandVerb : std::uint8_t { Build, Enter, RunScripts };
 struct Plot {
   PlotId id = 0;
   PlayerId owner = 0;
@@ -1363,12 +1363,6 @@ struct HolderControl {
 struct GrantResult {
   Reason reason = Reason::InvalidScope;
   GrantId grant = 0;
-  explicit operator bool() const { return reason == Reason::Allowed; }
-};
-struct PlotTransferResult {
-  Reason reason = Reason::MissingRight;
-  PlayerId previous_owner = 0;
-  std::vector<GrantId> revoked;
   explicit operator bool() const { return reason == Reason::Allowed; }
 };
 struct GrantDeadlines {

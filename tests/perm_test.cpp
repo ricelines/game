@@ -461,9 +461,6 @@ void land_bans_override_presets_and_scripts_use_their_own_grants() {
   revoke(f.grants, f.players, id);
   require(!check_land(script, LandVerb::Build, plot, f.players, f.grants, 2),
           "revoked land grant remained usable");
-  plot.preset |= bit(Verb::Transfer);
-  require(!check_land(Holder::player(2), LandVerb::Transfer, plot, f.players, f.grants, 2),
-          "public preset accidentally granted land control transfer");
 }
 
 void offers_preflight_before_money_ownership_and_allowances_change() {

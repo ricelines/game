@@ -112,8 +112,6 @@ perm::Rights rights(const Json &row, perm::ScopeKind scope) {
         result |= 2;
       else if (name == "run_scripts")
         result |= 4;
-      else if (name == "transfer")
-        result |= perm::bit(perm::Verb::Transfer);
       else
         throw std::invalid_argument("wrong plot right");
     } else {

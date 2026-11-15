@@ -45,9 +45,6 @@ std::vector<GrantId> revoke_many(Grants &, Players &, std::span<const GrantId>);
 std::vector<GrantId> revoke_object(Grants &, Players &, Handle);
 std::vector<GrantId> revoke_objects(Grants &, Players &, std::span<const Handle>);
 
-PlotTransferResult transfer_plot(Plots &, Grants &, Players &, Holder, PlotId, PlayerId recipient,
-                                 Step);
-
 GrantDeadlines advance_grants(Grants &, Players &, Step now, Step reminder_steps,
                               std::size_t max_entries);
 void rebuild_grant_lookup(Grants &);

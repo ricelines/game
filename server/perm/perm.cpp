@@ -280,15 +280,12 @@ Decision check_land(Holder actor, LandVerb verb, const Plot &plot, const Players
       return {Reason::Allowed};
   }
   const auto required = Rights{1} << static_cast<unsigned>(verb);
-  // Transfer is an explicit grant, not an additional public land-preset bit.
-  if (verb != LandVerb::Transfer) {
-    if (plot.preset & required)
+  if (plot.preset & required)
+    return {Reason::Allowed};
+  if (actor.kind == HolderKind::Player && plot.group && (plot.preset & (required << 8))) {
+    const auto &groups = players.rows[actor.id].groups;
+    if (std::binary_search(groups.begin(), groups.end(), plot.group))
       return {Reason::Allowed};
-    if (actor.kind == HolderKind::Player && plot.group && (plot.preset & (required << 8))) {
-      const auto &groups = players.rows[actor.id].groups;
-      if (std::binary_search(groups.begin(), groups.end(), plot.group))
-        return {Reason::Allowed};
-    }
   }
   return check_scope(actor, Scope::plot(plot.id), required, grants, now);
 }
@@ -339,10 +336,9 @@ GrantResult create_grant(Grants &grants, Players &players, Holder issuer,
           control.controller != request.scope.subject)))))
     return {Reason::InvalidScope};
   const Rights scope_mask = request.scope.kind == ScopeKind::Avatar ? Rights{3}
-                            : request.scope.kind == ScopeKind::Plot
-                                ? Rights{7} | bit(Verb::Transfer)
-                            : monetary(request.scope) ? Rights{1}
-                                                      : all_rights;
+                            : request.scope.kind == ScopeKind::Plot ? Rights{7}
+                            : monetary(request.scope)               ? Rights{1}
+                                                                    : all_rights;
   if (request.verbs & ~scope_mask)
     return {Reason::InvalidScope};
   if ((request.verbs & control.available) != request.verbs)
@@ -435,28 +431,6 @@ std::vector<GrantId> revoke_objects(Grants &grants, Players &players,
       marked[grant.id] = true;
   }
   return remove_marked(grants, players, marked);
-}
-
-PlotTransferResult transfer_plot(Plots &plots, Grants &grants, Players &players, Holder actor,
-                                 PlotId id, PlayerId recipient, Step now) {
-  if (!id || id >= plots.rows.size() || plots.rows[id].id != id)
-    return {Reason::InvalidScope, 0, {}};
-  if (!recipient || recipient >= players.rows.size())
-    return {Reason::UnknownHolder, 0, {}};
-  auto &plot = plots.rows[id];
-  const auto decision = check_land(actor, LandVerb::Transfer, plot, players, grants, now);
-  if (!decision)
-    return {decision.reason, 0, {}};
-  const auto previous = plot.owner;
-  if (previous == recipient)
-    return {Reason::Allowed, previous, {}};
-  std::vector<GrantId> scoped;
-  for (const auto &grant : grants.rows)
-    if (grant.live && grant.scope == Scope::plot(id))
-      scoped.push_back(grant.id);
-  auto revoked = revoke_many(grants, players, scoped);
-  plot.owner = recipient;
-  return {Reason::Allowed, previous, std::move(revoked)};
 }
 
 GrantDeadlines advance_grants(Grants &grants, Players &players, Step now, Step reminder_steps,

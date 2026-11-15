@@ -133,10 +133,10 @@ void explicit_authority_and_online_assembly() {
   f.inspect();
   require(std::get<double>(f.state.at(std::string("count"))) == 1,
           "placed plot query excludes Body and declared children");
-  f.grant(pe::Scope::plot(1), pe::Rights{1} << unsigned(pe::LandVerb::Transfer));
+  f.grant(pe::Scope::plot(1), pe::Rights{7});
   f.collect();
   require(!f.reply.value("ok", false) && !(f.scene.objects.flags[f.root.slot()] & Held),
-          "plot transfer authority never confers goods custody");
+          "plot authority never confers goods custody");
   f.grant(pe::Scope::owned_on_plot(1, 1), pe::bit(pe::Verb::Transfer));
   const auto id =
       f.grant(pe::Scope::object(f.root), pe::bit(pe::Verb::Transfer) | pe::bit(pe::Verb::Destroy));
