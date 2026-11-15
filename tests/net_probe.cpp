@@ -1,4 +1,5 @@
 #include "net/net.hpp"
+#include "step/step.hpp"
 
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
@@ -40,6 +41,7 @@ int main(int argc, char **argv) {
   std::signal(SIGTERM, stop);
   std::signal(SIGINT, stop);
   std::cout << "ready\n" << std::flush;
+  record::Journal journal(8, {});
   std::vector<nt::Input> inputs;
   std::uint32_t step = 0;
   auto next = std::chrono::steady_clock::now();
@@ -85,6 +87,10 @@ int main(int argc, char **argv) {
           }
           server.publish(std::move(publication));
         }
+      } else if (const auto *notice = std::get_if<nt::SendOverflow>(&input)) {
+        step::record_send_overflow(journal, *notice, step);
+        for (const auto &row : journal.take())
+          std::cout << row.dump() << '\n' << std::flush;
       } else if (const auto *fault = std::get_if<nt::Fault>(&input)) {
         std::cerr << "transport fault: " << fault->reason << "\n";
       }

@@ -101,7 +101,12 @@ struct Disconnected {
 struct Fault {
   std::string reason;
 };
-using Input = std::variant<Connected, Control, Disconnected, Fault>;
+struct SendOverflow {
+  SessionId session;
+  std::size_t buffered_bytes;
+  bool closed;
+};
+using Input = std::variant<Connected, Control, Disconnected, Fault, SendOverflow>;
 class Server {
 public:
   explicit Server(ServerOptions);

@@ -180,6 +180,22 @@ async def native(binary: pathlib.Path, web: pathlib.Path, assets: pathlib.Path, 
             raise AssertionError("native transport did not stop/join cleanly") from None
         assert process.returncode == 0, (process.returncode, stdout, stderr)
         assert not stderr, stderr
+        if not limits:
+            records = [json.loads(line) for line in stdout.splitlines()]
+            overflows = [
+                row
+                for row in records
+                if row.get("kind") == "system" and row.get("name") == "overflow"
+            ]
+            closed = next(row for row in overflows if row["action"] == "closed")
+            stale = next(
+                row
+                for row in overflows
+                if row["action"] == "stale" and row["session"] == closed["session"]
+            )
+            assert stale["queue"] == closed["queue"] == "send"
+            assert 0 < stale["buffered_bytes"] <= closed["buffered_bytes"]
+            assert stale["id"] < closed["id"]
 
 
 async def buffering(port: int, cross_soft_limit: bool):

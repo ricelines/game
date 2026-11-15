@@ -415,7 +415,10 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     if (launch.network)
       server.drain(network_inputs);
     for (auto &input : network_inputs)
-      incoming.push_back(std::move(input));
+      if (const auto *notice = std::get_if<net::SendOverflow>(&input))
+        record_send_overflow(journal, *notice, clock.step);
+      else
+        incoming.push_back(std::move(input));
     std::size_t admitted_network = 0;
     while (!incoming.empty() &&
            ((!admitted_network && !frame.foreground) || admits(frame, Monotonic::now()))) {

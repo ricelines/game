@@ -14,6 +14,7 @@ namespace {
 struct SocketData {
   SessionId session = 0;
   bool binary = false;
+  bool stale = false;
 };
 using Socket = uWS::WebSocket<false, true, SocketData>;
 bool below(const std::filesystem::path &root, const std::filesystem::path &file) {
@@ -117,15 +118,25 @@ struct Server::Data {
     if (loop)
       loop->defer(std::move(function));
   }
+  bool check_send(Socket *socket) {
+    const auto buffered = socket->getBufferedAmount();
+    auto &data = *socket->getUserData();
+    const bool stale = buffered > options.replication.send_soft;
+    if (stale && !data.stale)
+      input(SendOverflow{data.session, buffered, false});
+    data.stale = stale;
+    replication.set_writable(data.session, !stale);
+    if (buffered > options.replication.send_hard) {
+      input(SendOverflow{data.session, buffered, true});
+      socket->end(1008, "slow_viewer");
+      return false;
+    }
+    return true;
+  }
   void transmit(Publication publication) {
-    const auto &limits = options.replication;
     for (auto it = sockets.begin(); it != sockets.end();) {
-      auto [session, socket] = *it++;
-      auto buffered = socket->getBufferedAmount();
-      if (buffered > limits.send_hard)
-        socket->end(1008, "slow_viewer");
-      else
-        replication.set_writable(session, buffered <= limits.send_soft);
+      auto *socket = (it++)->second;
+      check_send(socket);
     }
     std::vector<Delivery> deliveries;
     try {
@@ -147,15 +158,8 @@ struct Server::Data {
         if (found == sockets.end())
           continue;
         auto *socket = found->second;
-        auto buffered = socket->getBufferedAmount();
-        if (buffered > limits.send_hard) {
-          socket->end(1008, "slow_viewer");
+        if (!check_send(socket) || socket->getUserData()->stale)
           continue;
-        }
-        if (buffered > limits.send_soft) {
-          replication.set_writable(session, false);
-          continue;
-        }
         auto status = socket->send(bytes, uWS::BINARY);
         if (status == Socket::DROPPED) {
           socket->end(1008, "slow_viewer");
@@ -163,8 +167,7 @@ struct Server::Data {
           // BACKPRESSURE means uWS retained the unsent suffix. Throttle only
           // above SEND_SOFT, not merely because a write needed buffering.
           replication.sent(session, delivery);
-          if (socket->getBufferedAmount() > limits.send_hard)
-            socket->end(1008, "slow_viewer");
+          check_send(socket);
         }
       }
     }
@@ -258,13 +261,12 @@ void Server::send(SessionId session, std::string text) {
     if (found == n->sockets.end())
       return;
     auto *socket = found->second;
-    if (socket->getBufferedAmount() > n->options.replication.send_hard) {
-      socket->end(1008, "slow_viewer");
+    if (!n->check_send(socket))
       return;
-    }
-    if (socket->send(text, uWS::TEXT) == Socket::DROPPED ||
-        socket->getBufferedAmount() > n->options.replication.send_hard)
+    if (socket->send(text, uWS::TEXT) == Socket::DROPPED)
       socket->end(1008, "slow_viewer");
+    else
+      n->check_send(socket);
   });
 }
 void Server::close(SessionId session, std::uint16_t code, std::string reason) {

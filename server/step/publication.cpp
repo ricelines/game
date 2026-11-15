@@ -28,6 +28,17 @@ void publish_value_changes(net::ReplicationIndex &replication, net::SessionViews
   }
   net::invalidate(views, changed);
 }
+void record_send_overflow(record::Journal &journal, const net::SendOverflow &notice, Step now) {
+  record::Event event;
+  event.step = now;
+  event.kind = record::Kind::System;
+  event.name = "overflow";
+  event.detail = {{"queue", "send"},
+                  {"session", notice.session},
+                  {"buffered_bytes", notice.buffered_bytes},
+                  {"action", notice.closed ? "closed" : "stale"}};
+  journal.append(std::move(event));
+}
 void publish_effects(react::DeferredEffects &&effects, const record::Origin &origin, Step now,
                      step::WorkQueues &queues, step::TimerWheel &wheel, record::Journal &journal,
                      std::size_t event_limit) {

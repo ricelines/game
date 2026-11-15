@@ -824,6 +824,7 @@ void reconcile_effects(const react::ValueRead &values, react::AllocationRows &al
                        const catalog::Scripts &scripts, const react::RuleVersions &rules,
                        std::vector<FactKey> &mutated, Step now, double hz,
                        react::DeferredEffects &effects, const record::Origin &origin);
+void record_send_overflow(record::Journal &, const net::SendOverflow &, Step);
 void publish_effects(react::DeferredEffects &&, const record::Origin &, Step, WorkQueues &,
                      TimerWheel &, record::Journal &, std::size_t event_limit);
 record::Origin publish_invocation(record::Journal &, WorkQueues &, TimerWheel &,
