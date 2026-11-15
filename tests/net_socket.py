@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import gzip
 import json
 import pathlib
@@ -20,6 +21,7 @@ import time
 import urllib.error
 import urllib.request
 
+from net_live import Replica
 from websockets.asyncio.client import connect
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -153,7 +155,114 @@ async def sockets(port: int):
         assert ws.close_code == 1008 and ws.close_reason == "slow_viewer"
 
 
-async def run(binary: pathlib.Path):
+@contextlib.asynccontextmanager
+async def native(binary: pathlib.Path, web: pathlib.Path, assets: pathlib.Path, *limits: int):
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    process = subprocess.Popen(
+        [str(binary), str(port), str(web), str(assets), *map(str, limits)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        ready = await asyncio.wait_for(asyncio.to_thread(process.stdout.readline), 10)
+        assert ready == "ready\n", ready
+        yield port
+    finally:
+        process.send_signal(signal.SIGTERM)
+        try:
+            stdout, stderr = await asyncio.wait_for(asyncio.to_thread(process.communicate), 5)
+        except TimeoutError:
+            process.kill()
+            stdout, stderr = process.communicate()
+            raise AssertionError("native transport did not stop/join cleanly") from None
+        assert process.returncode == 0, (process.returncode, stdout, stderr)
+        assert not stderr, stderr
+
+
+async def buffering(port: int, cross_soft_limit: bool):
+    uri = f"ws://127.0.0.1:{port}/ws"
+    # A small receive window plus a paused reader forces the multi-MB frame to
+    # leave an unsent suffix in uWS, rather than relying on a slow CI machine.
+    reader = socket.socket()
+    reader.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+    reader.settimeout(5)
+    reader.connect(("127.0.0.1", port))
+    reader.setblocking(False)
+    replica = Replica()
+    frames = []
+    async with connect(uri, sock=reader, max_size=None, compression=None, ping_interval=None) as ws:
+        await ws.send(json.dumps({"t": "hello", "key": "net-probe-fixture", "binary": True}))
+        assert json.loads(await ws.recv())["t"] == "welcome"
+        # A control barrier puts every initial keyframe before the test batch.
+        await asyncio.sleep(0.15)
+        await ws.send(json.dumps({"t": "ping", "id": "initial"}))
+        while True:
+            message = await asyncio.wait_for(ws.recv(), 10)
+            if isinstance(message, bytes):
+                replica.apply(message)
+            elif json.loads(message).get("id") == "initial":
+                break
+        assert (0, 0) in replica.cells and (32767, 32767) in replica.cells
+        ws.transport.pause_reading()
+        await ws.send(json.dumps({"t": "buffer" if cross_soft_limit else "burst"}))
+        if cross_soft_limit:
+            await ws.send(json.dumps({"t": "view", "x": 4096}))
+        await asyncio.sleep(0.35)
+        await ws.send(json.dumps({"t": "ping", "id": "buffered"}))
+        ws.transport.resume_reading()
+        received_buffer = False
+        while True:
+            message = await asyncio.wait_for(ws.recv(), 15)
+            if isinstance(message, bytes):
+                replica.apply(message)
+                frames.append((message[0], len(message)))
+            elif message.startswith("b"):
+                assert len(message) == 4 * 1024 * 1024
+                received_buffer = True
+            elif json.loads(message).get("id") == "buffered":
+                break
+        if cross_soft_limit:
+            assert received_buffer, "uWS lost the buffered frame"
+            # Recovery can be scheduled after the control barrier as the TCP
+            # buffer drains. It must erase old cells and keyframe all current ones.
+            deadline = time.monotonic() + 10
+            while (
+                (128, 0) not in replica.cells
+                or (0, 0) in replica.cells
+                or sum(kind == 1 for kind, _ in frames) < 26
+            ):
+                assert time.monotonic() < deadline, "soft-limit recovery did not finish"
+                message = await asyncio.wait_for(ws.recv(), 10)
+                assert isinstance(message, bytes)
+                replica.apply(message)
+                frames.append((message[0], len(message)))
+            assert len(replica.cells) == 26
+            assert sum(kind == 3 for kind, _ in frames) == 25
+            assert sum(kind == 1 for kind, _ in frames) == 26, (
+                "crossing SEND_SOFT must recover the stale global stream as well as new cells"
+            )
+        else:
+            assert max(size for _, size in frames) > 3 * 1024 * 1024
+            assert all(kind == 2 for kind, _ in frames), (
+                "buffered-but-accepted writes below SEND_SOFT caused redundant keyframes"
+            )
+            assert sum(kind == 2 for kind, _ in frames) >= 2
+            assert len(replica.cells[(0, 0)]) == 60000
+    print(
+        json.dumps(
+            {
+                "buffered_socket": "soft_recovery" if cross_soft_limit else "accepted",
+                "frames": len(frames),
+                "bytes": sum(size for _, size in frames),
+            }
+        )
+    )
+
+
+async def run(binary: pathlib.Path, backpressure_only: bool = False):
     with tempfile.TemporaryDirectory(prefix="net-http-", dir=ROOT / ".build") as temp:
         base = pathlib.Path(temp)
         web, assets = base / "web", base / "assets"
@@ -167,33 +276,16 @@ async def run(binary: pathlib.Path):
         asset = "ab" * 32
         (assets / asset).mkdir()
         (assets / asset / "lod0.glb").write_bytes(b"GLB transport bytes")
-        # Reserve a free loopback port, then let the native fixture own it.
-        with socket.socket() as reservation:
-            reservation.bind(("127.0.0.1", 0))
-            port = reservation.getsockname()[1]
-        process = subprocess.Popen(
-            [str(binary), str(port), str(web), str(assets)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        try:
-            ready = await asyncio.wait_for(asyncio.to_thread(process.stdout.readline), 10)
-            assert ready == "ready\n", ready
-            await asyncio.to_thread(check_http, port, asset, content)
-            await sockets(port)
-        finally:
-            process.send_signal(signal.SIGTERM)
-            try:
-                stdout, stderr = await asyncio.wait_for(asyncio.to_thread(process.communicate), 5)
-            except TimeoutError:
-                process.kill()
-                stdout, stderr = process.communicate()
-                raise AssertionError("native transport did not stop/join cleanly") from None
-            assert process.returncode == 0, (process.returncode, stdout, stderr)
-            assert not stderr, stderr
+        if not backpressure_only:
+            async with native(binary, web, assets) as port:
+                await asyncio.to_thread(check_http, port, asset, content)
+                await sockets(port)
+        async with native(binary, web, assets, 32 * 1024 * 1024, 64 * 1024 * 1024) as port:
+            await buffering(port, False)
+        async with native(binary, web, assets, 256 * 1024, 16 * 1024 * 1024) as port:
+            await buffering(port, True)
     print("actual WebSocket/HTTP transport checks passed")
 
 
 if __name__ == "__main__":
-    asyncio.run(run(pathlib.Path(sys.argv[1]).resolve()))
+    asyncio.run(run(pathlib.Path(sys.argv[1]).resolve(), "--backpressure-only" in sys.argv[2:]))

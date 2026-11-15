@@ -16,8 +16,8 @@ void stop(int) {
 }
 } // namespace
 int main(int argc, char **argv) {
-  if (argc != 4) {
-    std::cerr << "usage: net_probe PORT CLIENT_ROOT ASSETS_ROOT\n";
+  if (argc != 4 && argc != 6) {
+    std::cerr << "usage: net_probe PORT CLIENT_ROOT ASSETS_ROOT [SEND_SOFT SEND_HARD]\n";
     return 2;
   }
   auto config = toml::parse_file(AMBER_CONFIG_PATH);
@@ -29,7 +29,8 @@ int main(int argc, char **argv) {
                      argv[3],
                      {float(network["CELL_M"].value<double>().value()),
                       int(i(network["ENTER_CELLS"])), int(i(network["LEAVE_CELLS"])),
-                      std::size_t(i(network["SEND_SOFT"])), std::size_t(i(network["SEND_HARD"]))},
+                      argc == 6 ? std::stoull(argv[4]) : std::size_t(i(network["SEND_SOFT"])),
+                      argc == 6 ? std::stoull(argv[5]) : std::size_t(i(network["SEND_HARD"]))},
                      std::uint32_t(i(network["CONTROL_MAX"]))});
   auto error = server.start();
   if (!error.empty()) {
@@ -69,6 +70,20 @@ int main(int argc, char **argv) {
           server.send(control->session, message.dump());
         } else if (message.value("t", "") == "flood") {
           server.send(control->session, std::string(12 * 1024 * 1024, 'x'));
+        } else if (message.value("t", "") == "buffer") {
+          server.send(control->session, std::string(4 * 1024 * 1024, 'b'));
+        } else if (message.value("t", "") == "view") {
+          server.view(control->session, {float(message.at("x").get<double>()), 0, 0});
+        } else if (message.value("t", "") == "burst") {
+          nt::Publication publication{step, {}, {}};
+          for (int n = 1; n <= 60000; ++n) {
+            nt::Entity row{};
+            row.object = Handle::make(n, 1);
+            row.position = {2, 2, 1};
+            row.footprint_m = .1f;
+            publication.upserts.push_back(std::move(row));
+          }
+          server.publish(std::move(publication));
         }
       } else if (const auto *fault = std::get_if<nt::Fault>(&input)) {
         std::cerr << "transport fault: " << fault->reason << "\n";

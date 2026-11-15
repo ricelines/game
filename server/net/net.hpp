@@ -46,9 +46,12 @@ struct Cell {
 inline constexpr Cell global_cell{32767, 32767};
 Cell replication_cell(Vec3 position, float footprint_m, float cell_m);
 std::set<Cell> interest_cells(Cell center, const std::set<Cell> &previous, const Settings &);
+enum class MessageType : std::uint8_t { Keyframe = 1, Delta = 2, Drop = 3 };
 struct Delivery {
   std::vector<SessionId> recipients;
   std::shared_ptr<const Bytes> bytes;
+  Cell cell;
+  MessageType type;
 };
 class Replicator {
 public:
@@ -60,6 +63,8 @@ public:
   void remove_viewer(SessionId);
   void set_writable(SessionId, bool);
   std::vector<Delivery> advance(Publication);
+  // A frame written or buffered by the socket counts as sent; no peer ack is needed.
+  void sent(SessionId, const Delivery &);
 
 private:
   struct Data;

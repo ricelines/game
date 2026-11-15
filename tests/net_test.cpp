@@ -146,10 +146,18 @@ nt::Entity entity(std::uint32_t slot = 17) {
   row.states = {{7, .5f}, {9, 1}};
   return row;
 }
-void deliver(const std::vector<nt::Delivery> &packets, std::map<nt::SessionId, Client> &clients) {
+void sent(nt::Replicator &replication, const std::vector<nt::Delivery> &packets) {
   for (const auto &packet : packets)
     for (auto recipient : packet.recipients)
+      replication.sent(recipient, packet);
+}
+void deliver(nt::Replicator &replication, const std::vector<nt::Delivery> &packets,
+             std::map<nt::SessionId, Client> &clients) {
+  for (const auto &packet : packets)
+    for (auto recipient : packet.recipients) {
       clients[recipient].apply(*packet.bytes);
+      replication.sent(recipient, packet);
+    }
 }
 const nt::Bytes *frame(const std::vector<nt::Delivery> &packets, nt::SessionId session,
                        nt::Cell cell, int type) {
@@ -177,14 +185,14 @@ void golden_and_stream_consistency() {
                       "0102030405060708037b000000c90000000d00000003082080"
                       "0207000000003f09000000803f");
   require(*key == expected, "keyframe differs from labelled little-endian fixture");
-  deliver(packets, clients);
+  deliver(replication, packets, clients);
   row.position = {1.244f, 2.0001f, .126f};
   row.states = {{7, .75f}};
   packets = replication.advance({22, {row}, {}});
   auto expected_delta = hex("0200000000160000000000000001000000090201000107000000403f");
   const auto *change = frame(packets, 1, {0, 0}, 2);
   require(change && *change == expected_delta, "delta differs from position/state fixture");
-  deliver(packets, clients);
+  deliver(replication, packets, clients);
   require(clients[1].cells[{0, 0}].at(0).states.size() == 1, "mask8 did not replace states");
   replication.set_view(2, {});
   row.position.x += .1f;
@@ -198,19 +206,19 @@ void golden_and_stream_consistency() {
           "existing viewer got keyframe");
   require(frame(packets, 2, {0, 0}, 1) && !frame(packets, 2, {0, 0}, 2),
           "joiner got same-step delta");
-  deliver(packets, clients);
+  deliver(replication, packets, clients);
   require(clients[1].cells == clients[2].cells, "join keyframe and delta baselines differ");
   auto replacement = row;
   replacement.object = Handle::make(18, 1);
   packets = replication.advance({26, {replacement}, {row.object}});
-  deliver(packets, clients);
+  deliver(replication, packets, clients);
   require(clients[1].cells[{0, 0}].size() == 1 &&
               clients[1].cells[{0, 0}].at(0).handle == replacement.object.bits,
           "local ID was not reused after removal in same delta");
   replication.set_view(3, {33, 0, 0});
   replacement.position.x = 33.01f;
   packets = replication.advance({28, {replacement}, {}});
-  deliver(packets, clients);
+  deliver(replication, packets, clients);
   require(clients[1].cells[{0, 0}].empty() && clients[3].cells[{1, 0}].at(0).position[0] == 101,
           "migration was not old removal and absolute new addition");
   require(replication.advance({30, {}, {}}).empty(), "clean cells emitted a recurring update");
@@ -218,11 +226,11 @@ void golden_and_stream_consistency() {
   global.footprint_m = 40;
   global.position = {-44.12f, 90.13f, 7};
   packets = replication.advance({32, {global}, {}});
-  deliver(packets, clients);
+  deliver(replication, packets, clients);
   require(clients[1].cells[nt::global_cell].at(0).position[0] == -4412,
           "global stream position was cell-relative");
   replication.set_view(1, {33, 0, 0});
-  deliver(replication.advance({34, {}, {}}), clients);
+  deliver(replication, replication.advance({34, {}, {}}), clients);
   require(clients[1].cells.contains({0, 0}), "hysteresis dropped adjacent old cell");
   replication.set_writable(1, false);
   replication.set_view(1, {129, 0, 0});
@@ -238,9 +246,44 @@ void golden_and_stream_consistency() {
   require(frame(packets, 1, {0, 0}, 3) && frame(packets, 1, {4, 0}, 1) &&
               frame(packets, 1, nt::global_cell, 1),
           "recovery did not drop obsolete cells and keyframe current cells");
-  deliver(packets, clients);
+  deliver(replication, packets, clients);
   require(!clients[1].cells.contains({0, 0}) && clients[1].cells.contains({4, 0}),
           "recovery client membership mismatch");
+}
+void skipped_drop_is_retried_after_partial_batch() {
+  nt::Replicator replication({32, 1, 1, 262144, 4194304});
+  replication.set_view(1, {});
+  std::map<nt::SessionId, Client> clients;
+  deliver(replication, replication.advance({2, {entity()}, {}}), clients);
+  require(clients[1].cells.size() == 10, "fixture did not join the initial cells");
+  replication.set_view(1, {128, 0, 0});
+  auto packets = replication.advance({4, {}, {}});
+  require(packets.front().type == nt::MessageType::Drop, "drops must precede recovery frames");
+  const auto accepted_drop = packets.front().cell;
+  clients[1].apply(*packets.front().bytes);
+  replication.sent(1, packets.front());
+  // The socket accepted the first frame, then crossed SEND_SOFT. The rest of
+  // this batch was never handed to it, including eight more CELL_DROP frames.
+  replication.set_writable(1, false);
+  require(replication.advance({6, {}, {}}).empty(), "throttled viewer received frames");
+  replication.set_view(1, {192, 0, 0});
+  replication.set_writable(1, true);
+  packets = replication.advance({8, {}, {}});
+  require(!frame(packets, 1, accepted_drop, 3), "an accepted drop was retried");
+  require(std::count_if(packets.begin(), packets.end(),
+                        [](const auto &packet) { return packet.type == nt::MessageType::Drop; }) ==
+              8,
+          "soft-limit recovery lost skipped drops or dropped cells never sent");
+  require(frame(packets, 1, nt::global_cell, 1), "stale global stream was not keyframed");
+  deliver(replication, packets, clients);
+  std::set<nt::Cell> actual;
+  for (const auto &[cell, rows] : clients[1].cells) {
+    (void)rows;
+    actual.insert(cell);
+  }
+  require(actual == nt::interest_cells({6, 0}, {}, {32, 1, 1, 262144, 4194304}),
+          "client retained obsolete cells after skipped-drop recovery");
+  require(replication.advance({10, {}, {}}).empty(), "sent recovery frames repeated");
 }
 void quaternion_accuracy() {
   require(nt::pack_rotation({}) == 0x80200803u, "identity quaternion fixture mismatch");
@@ -268,6 +311,7 @@ void capacity_and_shared_encoding() {
   require(packets.size() == 2 && packets[0].recipients.size() == 500 &&
               packets[1].recipients.size() == 500,
           "cell bytes were not shared across500 viewers");
+  sent(replication, packets);
   std::vector<double> timings;
   std::size_t encoded = 0;
   for (int n = 0; n < 100; ++n) {
@@ -279,6 +323,7 @@ void capacity_and_shared_encoding() {
     }
     auto start = std::chrono::steady_clock::now();
     packets = replication.advance(std::move(next));
+    sent(replication, packets);
     timings.push_back(
         std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
             .count());
@@ -304,19 +349,20 @@ void capacity_and_shared_encoding() {
   crowded.set_view(1, {});
   auto valid = crowded.advance({2, {entity()}, {}});
   std::map<nt::SessionId, Client> clients;
-  deliver(valid, clients);
+  deliver(crowded, valid, clients);
   require(clients[1].cells[{0, 0}].size() == 1, "rejected publication partially mutated baseline");
 }
 void empty_world_roaming_does_not_retain_streams() {
 #if defined(__GLIBC__)
   nt::Replicator replication({32, 0, 1, 262144, 4194304});
   replication.set_view(1, {});
-  replication.advance({0, {}, {}});
+  sent(replication, replication.advance({0, {}, {}}));
   const auto before = mallinfo2().uordblks;
   for (int i = 1; i <= 16384; ++i) {
     replication.set_view(1, {float(i % 128) * 128, float(i / 128) * 128, 0});
     auto frames = replication.advance({std::uint32_t(i), {}, {}});
     require(!frames.empty(), "roaming viewer got no new keyframe");
+    sent(replication, frames);
   }
   const auto after = mallinfo2().uordblks;
   const auto growth = after > before ? after - before : 0;
@@ -329,6 +375,7 @@ void empty_world_roaming_does_not_retain_streams() {
 int main() {
   try {
     golden_and_stream_consistency();
+    skipped_drop_is_retried_after_partial_batch();
     quaternion_accuracy();
     capacity_and_shared_encoding();
     empty_world_roaming_does_not_retain_streams();

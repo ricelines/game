@@ -7,7 +7,6 @@
 #include <future>
 #include <map>
 #include <mutex>
-#include <set>
 #include <thread>
 
 namespace amber::net {
@@ -140,13 +139,12 @@ struct Server::Data {
       }
       return;
     }
-    std::set<SessionId> blocked;
     for (const auto &delivery : deliveries) {
       auto bytes = std::string_view(reinterpret_cast<const char *>(delivery.bytes->data()),
                                     delivery.bytes->size());
       for (auto session : delivery.recipients) {
         auto found = sockets.find(session);
-        if (found == sockets.end() || blocked.contains(session))
+        if (found == sockets.end())
           continue;
         auto *socket = found->second;
         auto buffered = socket->getBufferedAmount();
@@ -156,15 +154,17 @@ struct Server::Data {
         }
         if (buffered > limits.send_soft) {
           replication.set_writable(session, false);
-          blocked.insert(session);
           continue;
         }
         auto status = socket->send(bytes, uWS::BINARY);
-        if (status == Socket::DROPPED || socket->getBufferedAmount() > limits.send_hard) {
+        if (status == Socket::DROPPED) {
           socket->end(1008, "slow_viewer");
-        } else if (status == Socket::BACKPRESSURE) {
-          replication.set_writable(session, false);
-          blocked.insert(session);
+        } else {
+          // BACKPRESSURE means uWS retained the unsent suffix. Throttle only
+          // above SEND_SOFT, not merely because a write needed buffering.
+          replication.sent(session, delivery);
+          if (socket->getBufferedAmount() > limits.send_hard)
+            socket->end(1008, "slow_viewer");
         }
       }
     }

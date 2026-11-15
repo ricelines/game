@@ -243,6 +243,15 @@ void Replicator::set_writable(SessionId session, bool writable) {
   if (!writable)
     viewer.stale = true;
 }
+void Replicator::sent(SessionId session, const Delivery &delivery) {
+  auto found = data->viewers.find(session);
+  if (found == data->viewers.end())
+    return;
+  if (delivery.type == MessageType::Drop)
+    found->second.sent.erase(delivery.cell);
+  else if (delivery.type == MessageType::Keyframe)
+    found->second.sent.insert(delivery.cell);
+}
 std::vector<Delivery> Replicator::advance(Publication publication) {
   ZoneScopedN("replication encode and delivery grouping");
   ZoneValue(publication.upserts.size());
@@ -376,24 +385,25 @@ std::vector<Delivery> Replicator::advance(Publication publication) {
       else if (changed.contains(cell))
         deltas[cell].push_back(session);
     }
-    viewer.sent = viewer.cells;
     viewer.stale = false;
   }
   std::vector<Delivery> deliveries;
   for (auto &[cell, recipients] : drops) {
     Wire wire;
     wire.header(3, cell);
-    deliveries.push_back({std::move(recipients), wire.finish()});
+    deliveries.push_back({std::move(recipients), wire.finish(), cell, MessageType::Drop});
   }
   for (auto &[cell, recipients] : deltas)
     deliveries.push_back({std::move(recipients),
-                          delta(cell, publication.step, n.streams.at(cell), changed.at(cell))});
+                          delta(cell, publication.step, n.streams.at(cell), changed.at(cell)), cell,
+                          MessageType::Delta});
   const Stream empty;
   for (auto &[cell, recipients] : keys) {
     auto found = n.streams.find(cell);
     deliveries.push_back(
         {std::move(recipients),
-         keyframe(cell, publication.step, found == n.streams.end() ? empty : found->second)});
+         keyframe(cell, publication.step, found == n.streams.end() ? empty : found->second), cell,
+         MessageType::Keyframe});
   }
   // Empty streams need no retained baseline after removals are serialized.
   for (const auto &[cell, changes] : changed) {
