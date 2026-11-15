@@ -112,7 +112,8 @@ PhysicalDefinition describe_physics(const GeometryAssets &geometries, const cata
     } else if (term.source == react::Source::Setting)
       answer = react::read_setting(values.instance_settings, values.model_settings,
                                    values.plot_settings, values.world_settings, subject.instance,
-                                   subject.model, subject.plot, id);
+                                   subject.settings_model ? subject.settings_model : subject.model,
+                                   subject.plot, id);
     else if (subject.instance && values.identity.valid(subject.instance))
       answer = react::read(values, subject.instance, id, now, hz);
     if (!answer.present || !answer.value.is_numeric() || !std::isfinite(answer.value.numeric()))

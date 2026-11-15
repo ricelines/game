@@ -24,8 +24,8 @@ inline PlayerId player_id(const Json &input, const perm::Players &players) {
     throw std::invalid_argument("unknown player wallet");
   return id;
 }
-inline PlayerId default_wallet(const drive::NativeCall &call, IdentityRead identity,
-                               AuthorityRead authority, const perm::Players &players) {
+inline PlayerId controller(const drive::NativeCall &call, IdentityRead identity,
+                           AuthorityRead authority, const perm::Players &players) {
   const auto holder = actor(call);
   if (holder.kind == perm::HolderKind::Player)
     return player_id("p:" + std::to_string(holder.id), players);
@@ -33,6 +33,13 @@ inline PlayerId default_wallet(const drive::NativeCall &call, IdentityRead ident
     throw std::invalid_argument("script installation is no longer alive");
   const auto owner = authority.owner[holder.installed_on.slot()];
   return player_id("p:" + std::to_string(owner), players);
+}
+inline perm::AccountTarget default_account(const drive::NativeCall &call,
+                                           const authority::AccountRead &read) {
+  const auto holder = actor(call);
+  if (holder.kind == perm::HolderKind::Player)
+    return authority::account("p:" + std::to_string(holder.id), read);
+  return authority::account(to_string(holder.installed_on), read);
 }
 inline Handle present(const DeliveryTargets &delivery, IdentityRead identity, PlayerId player) {
   const auto found = delivery.present_bodies.find(player);
@@ -47,10 +54,62 @@ inline drive::NativeCompletion result(bool changed, Json extra = Json::object())
   out.reply.update(extra);
   return out;
 }
-inline drive::NativeCompletion denied(perm::Reason why) {
+inline drive::NativeCompletion denied(perm::Reason why, std::string need, std::string on,
+                                      PlayerId controller = 0) {
+  std::string fix;
+  switch (why) {
+  case perm::Reason::MissingRight:
+  case perm::Reason::Expired:
+    fix = "ask p:" + std::to_string(controller) + " for " + need + " on " + on;
+    break;
+  case perm::Reason::Allowance:
+    fix = "ask the grant issuer to increase the spending allowance";
+    break;
+  case perm::Reason::InsufficientBalance:
+    fix = "add credits to the paying account or lower the amount";
+    break;
+  case perm::Reason::MailboxFull:
+    fix = "ask the recipient to collect items from their mailbox";
+    break;
+  case perm::Reason::NotPlaced:
+    fix = "place the goods in the world before offering them";
+    break;
+  case perm::Reason::InEscrow:
+    fix = "cancel the goods' active offer or trade first";
+    break;
+  case perm::Reason::NotPresent:
+    fix = "both participants must connect before trading";
+    break;
+  case perm::Reason::NotParticipant:
+  case perm::Reason::WrongBuyer:
+    fix = "ask the participants to change or create an offer for you";
+    break;
+  case perm::Reason::OfferGone:
+  case perm::Reason::StaleGoods:
+    fix = "choose currently available goods or an active offer";
+    break;
+  case perm::Reason::NotGoods:
+    fix = "choose an object that is not a player body";
+    break;
+  case perm::Reason::InheritedLimit:
+  case perm::Reason::NoCopy:
+    fix = "choose goods whose next-owner permissions allow this exchange";
+    break;
+  case perm::Reason::NotController:
+    fix = "use goods from your inventory or ask their owner to place them";
+    break;
+  default:
+    fix = "correct the supplied " + need + " for " + on;
+    break;
+  }
   drive::NativeCompletion out;
   out.result = record::Result::Denied;
-  out.reply = {{"ok", false}, {"denied", {{"why", perm::reason_text(why)}}}};
+  out.reply = {{"ok", false},
+               {"denied",
+                {{"need", std::move(need)},
+                 {"on", std::move(on)},
+                 {"why", perm::reason_text(why)},
+                 {"fix", std::move(fix)}}}};
   return out;
 }
 inline void record(drive::NativeCompletion &out, const drive::NativeCall &call, std::string name,

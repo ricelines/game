@@ -7,10 +7,10 @@ drive::NativeCompletion trade_open(void *local, const drive::NativeCall &call) {
   const auto other = detail::player_id(call.arguments.at("other"), b.players);
   if (!detail::present(b.delivery, b.identity, who) ||
       !detail::present(b.delivery, b.identity, other))
-    return detail::denied(perm::Reason::NotPresent);
+    return detail::denied(perm::Reason::NotPresent, "presence", "p:" + std::to_string(other));
   const auto opened = perm::open_trade(b.trades, b.players, who, other);
   if (!opened)
-    return detail::denied(opened.reason);
+    return detail::denied(opened.reason, "trade", "p:" + std::to_string(other));
   return detail::result(true,
                         {{"trade", "trade:" + std::to_string(opened.trade)},
                          {"players", {"p:" + std::to_string(who), "p:" + std::to_string(other)}}});
@@ -44,7 +44,8 @@ drive::NativeCompletion trade_change(void *local, const drive::NativeCall &call)
       call.arguments.at("money").get<std::int64_t>(), prior, call.step,
       item ? std::span<const perm::Target>{item->parts} : std::span<const perm::Target>{});
   if (!changed)
-    return detail::denied(changed.reason);
+    return detail::denied(changed.reason, "transfer",
+                          item ? to_string(item->root.object) : "trade:" + std::to_string(id), who);
   auto out = detail::result(
       true, {{"trade", "trade:" + std::to_string(id)}, {"confirmations_reset", true}});
   detail::apply(b.custody, changed.custody, out.effects);
@@ -71,7 +72,8 @@ drive::NativeCompletion trade_confirm(void *local, const drive::NativeCall &call
   for (std::size_t side = 0; side < 2; ++side) {
     bodies[side] = detail::present(b.delivery, b.custody.identity, trade.players[side]);
     if (!bodies[side])
-      return detail::denied(perm::Reason::NotPresent);
+      return detail::denied(perm::Reason::NotPresent, "presence",
+                            "p:" + std::to_string(trade.players[side]));
   }
   for (std::size_t side = 0; side < 2; ++side) {
     const auto offer_id = trade.sides[side].offer;
@@ -89,7 +91,7 @@ drive::NativeCompletion trade_confirm(void *local, const drive::NativeCall &call
       perm::confirm_trade(b.trades, b.offers, b.ledger, b.grants, b.players, b.authority, b.flags,
                           b.limits, id, who, targets, bodies, call.step, spans);
   if (!confirmed)
-    return detail::denied(confirmed.reason);
+    return detail::denied(confirmed.reason, "confirm", "trade:" + std::to_string(id), who);
   auto out = detail::result(confirmed.completed || !previously,
                             {{"trade", "trade:" + std::to_string(id)},
                              {"completed", confirmed.completed},
@@ -109,7 +111,7 @@ drive::NativeCompletion trade_cancel(void *local, const drive::NativeCall &call)
       detail::preflight(b.custody, side.prior_custody);
   const auto cancelled = perm::cancel_trade(b.trades, b.offers, b.flags, id, who);
   if (!cancelled)
-    return detail::denied(cancelled.reason);
+    return detail::denied(cancelled.reason, "cancel", "trade:" + std::to_string(id), who);
   auto out = detail::result(true, {{"trade", "trade:" + std::to_string(id)}});
   detail::apply(b.custody, cancelled.custody, out.effects);
   std::vector<Handle> affected;

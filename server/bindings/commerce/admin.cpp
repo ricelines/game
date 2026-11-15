@@ -30,11 +30,19 @@ perm::Holder holder(const Json &row, const perm::Players &players) {
     throw std::invalid_argument("script holder needs a full object handle");
   return perm::Holder::script(authority::identifier(row.at("script"), "s:"), *parsed);
 }
-perm::HolderControl installed_holder(const Json &row, const GrantBinding &binding,
+perm::Holder actor(const drive::NativeCall &call) {
+  if (const auto *player = std::get_if<PlayerId>(&call.request.caller))
+    return perm::Holder::player(*player);
+  const auto &script = std::get<ScriptHolder>(call.request.caller);
+  return perm::Holder::script(script.script, script.object);
+}
+perm::HolderControl installed_holder(perm::Holder selected, const GrantBinding &binding,
                                      const drive::NativeCall &call) {
-  const auto selected = holder(row, binding.players);
-  if (selected.kind == perm::HolderKind::Player)
+  if (selected.kind == perm::HolderKind::Player) {
+    if (!selected.id || selected.id >= binding.players.rows.size())
+      throw std::invalid_argument("unknown current player holder");
     return {selected, selected.id, true};
+  }
   const auto object = selected.installed_on;
   if (!binding.scopes.identity.valid(object) || selected.id >= binding.scripts.rows.size() ||
       binding.scripts.rows[selected.id].id != selected.id)
@@ -55,12 +63,36 @@ drive::NativeCompletion result(bool changed, Json fields = Json::object()) {
   out.reply.update(fields);
   return out;
 }
-drive::NativeCompletion denied(std::string_view reason, Json fields = Json::object()) {
+drive::NativeCompletion denied(std::string_view need, Json on, std::string_view why,
+                               std::string_view fix) {
   drive::NativeCompletion out;
   out.result = record::Result::Denied;
-  out.reply = {{"ok", false}, {"error", "permission_denied"}, {"problem", reason}};
-  out.reply.update(fields);
+  out.reply = {{"ok", false},
+               {"denied", {{"need", need}, {"on", std::move(on)}, {"why", why}, {"fix", fix}}}};
   return out;
+}
+drive::NativeCompletion bad_input(std::string_view problem) {
+  drive::NativeCompletion out;
+  out.result = record::Result::Denied;
+  out.reply = {{"ok", false}, {"error", "bad_input"}, {"problem", problem}};
+  return out;
+}
+std::string_view grant_fix(perm::Reason reason) {
+  switch (reason) {
+  case perm::Reason::InheritedLimit:
+    return "narrow the requested rights to the inherited ceiling";
+  case perm::Reason::ExpiryRequired:
+  case perm::Reason::Expired:
+    return "set a future expires_s within the parent grant's lifetime";
+  case perm::Reason::Duplicate:
+    return "revoke the existing grant for this holder and scope before issuing another";
+  case perm::Reason::UnknownHolder:
+    return "choose a current player or a script installed on the specified object";
+  case perm::Reason::InvalidDelegation:
+    return "delegate once from a root grant, narrowing its scope, rights, cap and expiry";
+  default:
+    return "obtain a root grant for these rights and scope, or have their controller issue it";
+  }
 }
 void invalidate(const AdminInvalidation &sink) {
   if (sink.changed)
@@ -79,7 +111,7 @@ Json scope_json(perm::Scope scope) {
     return {{"owned_on_plot",
              {{"owner", "p:" + std::to_string(scope.owner)}, {"plot", scope.subject}}}};
   case perm::ScopeKind::Account:
-    return {{"account", "p:" + std::to_string(scope.subject)}};
+    return {{"account", perm::account_name(scope.account())}};
   case perm::ScopeKind::Avatar:
     return {{"avatar", to_string(Handle{scope.subject})}};
   case perm::ScopeKind::Plot:
@@ -140,35 +172,31 @@ Json grant_json(const perm::Grants &grants, const perm::Grant &grant, Step step,
                            ? Json((grant.expires_step > step ? grant.expires_step - step : 0) / hz)
                            : Json(nullptr)}};
 }
-GroupId group(const Json &value, PlayerId who, const perm::Players &players,
-              const perm::Groups &groups) {
+GroupId group(const Json &value, const perm::Groups &groups) {
   if (value.is_null())
     return 0;
-  const auto id = authority::identifier(value, "g:");
+  const auto id = authority::identifier(value, "group:");
   if (id >= groups.rows.size() || groups.rows[id].id != id)
     throw std::invalid_argument("unknown group");
-  if (!std::binary_search(players.rows[who].groups.begin(), players.rows[who].groups.end(), id))
-    throw std::invalid_argument("assigned group requires current membership");
   return id;
 }
-void preset_rights(std::uint32_t &preset, const Json &arguments, std::string_view name,
+bool preset_rights(std::uint32_t &preset, const Json &arguments, std::string_view name,
                    unsigned shift, perm::ScopeKind scope, perm::Rights allowed) {
   if (!arguments.contains(name))
-    return;
+    return true;
   const auto rights = authority::rights(arguments.at(name), scope);
   if (rights & ~allowed)
-    throw std::invalid_argument(scope == perm::ScopeKind::Plot
-                                    ? "plot presets allow only build, enter and run_scripts"
-                                    : "preset cannot widen the inherited next-owner ceiling");
+    return false;
   const auto mask = (scope == perm::ScopeKind::Plot ? perm::Rights{7} : perm::all_rights) << shift;
   preset = (preset & ~mask) | (rights << shift);
+  return true;
 }
 Json preset_json(std::uint32_t preset, GroupId group, bool plot) {
   const auto scope = plot ? perm::ScopeKind::Plot : perm::ScopeKind::Object;
   const auto mask = plot ? perm::Rights{7} : perm::all_rights;
   Json row = {{"everyone", rights_json(preset & mask, scope)},
               {"group_rights", rights_json((preset >> 8) & mask, scope)},
-              {"group", group ? Json("g:" + std::to_string(group)) : Json(nullptr)}};
+              {"group", group ? Json("group:" + std::to_string(group)) : Json(nullptr)}};
   if (!plot)
     row["next_owner"] = rights_json((preset >> 16) & mask, scope);
   return row;
@@ -217,51 +245,91 @@ GrantUpdates advance_grants(GrantMaintenance &binding, Step now, Step reminder_s
 drive::NativeCompletion grant(void *local, const drive::NativeCall &call) {
   auto &binding = *static_cast<GrantBinding *>(local);
   try {
-    const auto who = player(call, binding.players);
+    const auto issuer = installed_holder(actor(call), binding, call);
+    if (!issuer.installed)
+      return denied("installation", holder_json(issuer.holder),
+                    "caller script is not currently installed",
+                    "install the script on that object before invoking its actions");
+    const auto who = issuer.controller;
     const auto control = authority::scope(call.arguments.at("scope"), binding.scopes, who);
-    const auto holder = installed_holder(call.arguments.at("holder"), binding, call);
+    const auto recipient =
+        installed_holder(holder(call.arguments.at("holder"), binding.players), binding, call);
     const auto duration =
         authority::duration_steps(call.arguments.value("expires_s", 0.0), call.hz);
     if (duration > std::numeric_limits<Step>::max() - call.step)
       throw std::invalid_argument("grant expiry exceeds world step range");
     const perm::GrantRequest request{
         who,
-        holder.holder,
+        recipient.holder,
         control.scope,
         authority::rights(call.arguments.at("rights"), control.scope.kind),
         call.arguments.value("cap", std::int64_t{}),
         authority::duration_steps(call.arguments.value("period_s", 0.0), call.hz),
         duration ? call.step + duration : 0};
-    const auto created =
-        perm::create_grant(binding.grants, binding.players, request, control, holder, call.step);
-    if (!created)
-      return denied(perm::reason_text(created.reason),
-                    {{"need", call.arguments.at("rights")}, {"scope", call.arguments.at("scope")}});
+    const auto created = perm::create_grant(binding.grants, binding.players, issuer.holder, request,
+                                            control, recipient, call.step);
+    if (!created) {
+      if (created.reason == perm::Reason::BadAmount || created.reason == perm::Reason::InvalidScope)
+        return bad_input(perm::reason_text(created.reason));
+      return denied("grant", call.arguments.at("scope"), perm::reason_text(created.reason),
+                    grant_fix(created.reason));
+    }
     invalidate(binding.invalidation);
     return result(true, {{"grant", "grant:" + std::to_string(created.grant)},
                          {"details", grant_json(binding.grants, binding.grants.rows[created.grant],
                                                 call.step, call.hz)}});
   } catch (const std::exception &error) {
-    return denied(error.what());
+    return bad_input(error.what());
   }
 }
 drive::NativeCompletion revoke(void *local, const drive::NativeCall &call) {
   auto &binding = *static_cast<RevokeBinding *>(local);
   try {
-    const auto who = player(call, binding.players);
+    const auto issuer = actor(call);
+    PlayerId who = 0;
+    if (issuer.kind == perm::HolderKind::Player)
+      who = player(call, binding.players);
+    else {
+      if (!issuer.id || !binding.scopes.identity.valid(issuer.installed_on))
+        throw std::invalid_argument("stale script caller");
+      who = binding.scopes.authority.owner[issuer.installed_on.slot()];
+    }
+    const auto allowed = [&](const perm::Grant &grant) {
+      if (issuer.kind == perm::HolderKind::Player)
+        return grant.issuer == who || architect(binding.scopes.profiles, who);
+      return grant.holder == issuer ||
+             (grant.parent && binding.grants.rows[grant.parent].holder == issuer);
+    };
     std::vector<GrantId> ids;
     if (call.arguments.contains("grant")) {
       const auto id = authority::identifier(call.arguments.at("grant"), "grant:");
       if (id >= binding.grants.rows.size())
         throw std::invalid_argument("unknown grant");
-      if (binding.grants.rows[id].issuer != who && !architect(binding.profiles, who))
-        throw std::invalid_argument("only the issuer or architect may revoke this grant");
+      if (!allowed(binding.grants.rows[id]))
+        return denied("revoke", "grant:" + std::to_string(id),
+                      "caller did not issue or hold this grant",
+                      "have its issuer revoke it, or relinquish a grant held by this caller");
       ids.push_back(id);
     } else {
       const auto selected = holder(call.arguments.at("holder"), binding.players);
-      for (auto id : binding.players.rows[who].grants_given)
-        if (binding.grants.rows[id].holder == selected)
-          ids.push_back(id);
+      if (call.arguments.contains("scope")) {
+        const auto scope = authority::scope(call.arguments.at("scope"), binding.scopes, who).scope;
+        const auto found = binding.grants.by_key.find({selected, scope});
+        if (found != binding.grants.by_key.end()) {
+          if (!allowed(binding.grants.rows[found->second]))
+            return denied("revoke", "grant:" + std::to_string(found->second),
+                          "caller did not issue or hold this grant",
+                          "have its issuer revoke it, or relinquish a grant held by this caller");
+          ids.push_back(found->second);
+        }
+      } else if (issuer.kind == perm::HolderKind::Player) {
+        for (auto id : binding.players.rows[who].grants_given)
+          if (binding.grants.rows[id].holder == selected)
+            ids.push_back(id);
+      } else
+        for (const auto &grant : binding.grants.rows)
+          if (grant.live && grant.holder == selected && allowed(grant))
+            ids.push_back(grant.id);
     }
     const auto removed = perm::revoke_many(binding.grants, binding.players, ids);
     Json revoked = Json::array();
@@ -271,13 +339,13 @@ drive::NativeCompletion revoke(void *local, const drive::NativeCall &call) {
       invalidate(binding.invalidation);
     return result(!removed.empty(), {{"revoked", revoked}});
   } catch (const std::exception &error) {
-    return denied(error.what());
+    return bad_input(error.what());
   }
 }
 drive::NativeCompletion list_grants(void *local, const drive::NativeCall &call) {
   const auto &binding = *static_cast<ListGrantsBinding *>(local);
   try {
-    const auto who = player(call, binding.players);
+    const auto issuer = actor(call);
     auto rows = [&](const auto &ids) {
       Json result = Json::array();
       for (auto id : ids)
@@ -285,14 +353,29 @@ drive::NativeCompletion list_grants(void *local, const drive::NativeCall &call) 
           result.push_back(grant_json(binding.grants, binding.grants.rows[id], call.step, call.hz));
       return result;
     };
-    return result(false, {{"held", rows(binding.players.rows[who].grants_held)},
-                          {"given", rows(binding.players.rows[who].grants_given)}});
+    if (issuer.kind == perm::HolderKind::Player) {
+      const auto who = player(call, binding.players);
+      return result(false, {{"held", rows(binding.players.rows[who].grants_held)},
+                            {"given", rows(binding.players.rows[who].grants_given)}});
+    }
+    std::vector<GrantId> held, given;
+    for (const auto &grant : binding.grants.rows)
+      if (grant.live) {
+        if (grant.holder == issuer)
+          held.push_back(grant.id);
+        if (grant.parent && binding.grants.rows[grant.parent].holder == issuer)
+          given.push_back(grant.id);
+      }
+    return result(false, {{"held", rows(held)}, {"given", rows(given)}});
   } catch (const std::exception &error) {
-    return denied(error.what());
+    return bad_input(error.what());
   }
 }
 drive::NativeCompletion preset(void *local, const drive::NativeCall &call) {
   auto &binding = *static_cast<PresetBinding *>(local);
+  if (!std::holds_alternative<PlayerId>(call.request.caller))
+    return denied("player_caller", "goods presets", "this action requires a current player caller",
+                  "have the player perform this administrative action directly");
   try {
     const auto who = player(call, binding.players);
     const auto object = call.request.target;
@@ -302,20 +385,33 @@ drive::NativeCompletion preset(void *local, const drive::NativeCall &call) {
     if (target.flags & Body)
       throw std::invalid_argument("body is not goods");
     if (target.owner != who)
-      throw std::invalid_argument("only the current owner may change goods presets");
+      return denied("owner", to_string(object), "only the current owner may change goods presets",
+                    "ask p:" + std::to_string(target.owner) + " to change these presets");
     if (target.flags & Escrow)
-      throw std::invalid_argument("goods in escrow cannot change presets");
+      return denied("available_goods", to_string(object), "goods in escrow cannot change presets",
+                    "cancel the offer or finish the trade before changing presets");
     const auto allowed = (perm::all_rights & ~perm::inherited_rights) | target.owner_limit;
     auto preset = target.preset;
-    preset_rights(preset, call.arguments, "everyone", 0, perm::ScopeKind::Object, allowed);
-    preset_rights(preset, call.arguments, "group_rights", 8, perm::ScopeKind::Object, allowed);
-    preset_rights(preset, call.arguments, "next_owner", 16, perm::ScopeKind::Object, allowed);
-    const auto assigned = call.arguments.contains("group") ? group(call.arguments.at("group"), who,
-                                                                   binding.players, binding.groups)
-                                                           : target.group;
+    if (!preset_rights(preset, call.arguments, "everyone", 0, perm::ScopeKind::Object, allowed) ||
+        !preset_rights(preset, call.arguments, "group_rights", 8, perm::ScopeKind::Object,
+                       allowed) ||
+        !preset_rights(preset, call.arguments, "next_owner", 16, perm::ScopeKind::Object, allowed))
+      return denied("inherited_ceiling", to_string(object),
+                    "preset cannot widen the inherited next-owner ceiling",
+                    "remove rights excluded by the inherited ceiling");
+    const auto assigned = call.arguments.contains("group")
+                              ? group(call.arguments.at("group"), binding.groups)
+                              : target.group;
+    if (call.arguments.contains("group") && assigned &&
+        !std::binary_search(binding.players.rows[who].groups.begin(),
+                            binding.players.rows[who].groups.end(), assigned))
+      return denied("group_membership", "group:" + std::to_string(assigned),
+                    "assigning this group requires current membership",
+                    "ask the group controller to add you before assigning this group");
     const auto no_copy = call.arguments.value("no_copy", bool(target.flags & NoCopy));
     if (!no_copy && !(target.owner_limit & perm::bit(perm::Verb::Copy)))
-      throw std::invalid_argument("inherited copy restriction cannot be cleared");
+      return denied("copy", to_string(object), "inherited copy restriction cannot be cleared",
+                    "keep no_copy enabled for these goods");
     const bool changed = preset != target.preset || assigned != target.group ||
                          no_copy != bool(target.flags & NoCopy);
     binding.columns.preset[object.slot()] = preset;
@@ -328,11 +424,14 @@ drive::NativeCompletion preset(void *local, const drive::NativeCall &call) {
     details["no_copy"] = no_copy;
     return result(changed, {{"object", to_string(object)}, {"preset", details}});
   } catch (const std::exception &error) {
-    return denied(error.what());
+    return bad_input(error.what());
   }
 }
 drive::NativeCompletion group_create(void *local, const drive::NativeCall &call) {
   auto &binding = *static_cast<GroupCreateBinding *>(local);
+  if (!std::holds_alternative<PlayerId>(call.request.caller))
+    return denied("player_caller", "group creation", "this action requires a current player caller",
+                  "have the player perform this administrative action directly");
   try {
     const auto who = player(call, binding.players);
     const auto name = call.arguments.at("name").get<std::string>();
@@ -341,24 +440,31 @@ drive::NativeCompletion group_create(void *local, const drive::NativeCall &call)
     auto &groups = binding.players.rows[who].groups;
     groups.insert(std::lower_bound(groups.begin(), groups.end(), id), id);
     invalidate(binding.invalidation);
-    return result(true, {{"group", "g:" + std::to_string(id)},
+    return result(true, {{"group", "group:" + std::to_string(id)},
                          {"controller", "p:" + std::to_string(who)},
                          {"name", name}});
   } catch (const std::exception &error) {
-    return denied(error.what());
+    return bad_input(error.what());
   }
 }
 drive::NativeCompletion group_member(void *local, const drive::NativeCall &call) {
   auto &binding = *static_cast<GroupMemberBinding *>(local);
+  if (!std::holds_alternative<PlayerId>(call.request.caller))
+    return denied("player_caller", "group membership",
+                  "this action requires a current player caller",
+                  "have the player perform this administrative action directly");
   try {
     const auto who = player(call, binding.players);
-    const auto id = authority::identifier(call.arguments.at("group"), "g:");
+    const auto id = authority::identifier(call.arguments.at("group"), "group:");
     const auto member = recipient(call.arguments.at("player"), binding.players);
     const auto present = call.arguments.at("member").get<bool>();
     if (id >= binding.groups.rows.size() || binding.groups.rows[id].id != id)
       throw std::invalid_argument("unknown group");
     if (binding.groups.rows[id].controller != who && (member != who || present))
-      throw std::invalid_argument("only the group controller may change another membership");
+      return denied("group_controller", "group:" + std::to_string(id),
+                    "only the group controller may change another membership",
+                    "ask p:" + std::to_string(binding.groups.rows[id].controller) +
+                        " to change membership; you may leave the group yourself");
     auto &memberships = binding.players.rows[member].groups;
     const auto found = std::lower_bound(memberships.begin(), memberships.end(), id);
     const bool before = found != memberships.end() && *found == id;
@@ -368,15 +474,18 @@ drive::NativeCompletion group_member(void *local, const drive::NativeCall &call)
       memberships.erase(found);
     if (before != present)
       invalidate(binding.invalidation);
-    return result(before != present, {{"group", "g:" + std::to_string(id)},
+    return result(before != present, {{"group", "group:" + std::to_string(id)},
                                       {"player", "p:" + std::to_string(member)},
                                       {"member", present}});
   } catch (const std::exception &error) {
-    return denied(error.what());
+    return bad_input(error.what());
   }
 }
 drive::NativeCompletion plot_permissions(void *local, const drive::NativeCall &call) {
   auto &binding = *static_cast<PlotPermissionsBinding *>(local);
+  if (!std::holds_alternative<PlayerId>(call.request.caller))
+    return denied("player_caller", "plot presets", "this action requires a current player caller",
+                  "have the player perform this administrative action directly");
   try {
     const auto who = player(call, binding.players);
     const auto id = call.arguments.at("plot").get<PlotId>();
@@ -384,13 +493,22 @@ drive::NativeCompletion plot_permissions(void *local, const drive::NativeCall &c
       throw std::invalid_argument("unknown plot");
     auto &plot = binding.plots.rows[id];
     if (plot.owner != who)
-      throw std::invalid_argument("only the current plot owner may change plot permissions");
+      return denied("plot_owner", "plot:" + std::to_string(id),
+                    "only the current plot owner may change plot permissions",
+                    "ask p:" + std::to_string(plot.owner) + " to change plot permissions");
     auto preset = plot.preset;
-    preset_rights(preset, call.arguments, "everyone", 0, perm::ScopeKind::Plot, 7);
-    preset_rights(preset, call.arguments, "group_rights", 8, perm::ScopeKind::Plot, 7);
-    const auto assigned = call.arguments.contains("group") ? group(call.arguments.at("group"), who,
-                                                                   binding.players, binding.groups)
-                                                           : plot.group;
+    if (!preset_rights(preset, call.arguments, "everyone", 0, perm::ScopeKind::Plot, 7) ||
+        !preset_rights(preset, call.arguments, "group_rights", 8, perm::ScopeKind::Plot, 7))
+      return bad_input("plot presets allow only build, enter and run_scripts");
+    const auto assigned = call.arguments.contains("group")
+                              ? group(call.arguments.at("group"), binding.groups)
+                              : plot.group;
+    if (call.arguments.contains("group") && assigned &&
+        !std::binary_search(binding.players.rows[who].groups.begin(),
+                            binding.players.rows[who].groups.end(), assigned))
+      return denied("group_membership", "group:" + std::to_string(assigned),
+                    "assigning this group requires current membership",
+                    "ask the group controller to add you before assigning this group");
     auto banned = plot.banned;
     if (call.arguments.contains("banned")) {
       banned.clear();
@@ -411,7 +529,7 @@ drive::NativeCompletion plot_permissions(void *local, const drive::NativeCall &c
       details["banned"].push_back("p:" + std::to_string(player));
     return result(changed, {{"plot", id}, {"permissions", details}});
   } catch (const std::exception &error) {
-    return denied(error.what());
+    return bad_input(error.what());
   }
 }
 } // namespace amber::bindings::commerce

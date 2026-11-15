@@ -112,9 +112,8 @@ Parsed parse(std::string_view text) {
   return out;
 }
 std::string validate_look(const Json &row) {
-  return first({fields(row, {}, {"limit", "events_limit", "full"}), number(row, "limit", 1),
-                number(row, "events_limit", 1),
-                row.contains("full") && !row["full"].is_boolean() ? "full must be a boolean" : ""});
+  return first({fields(row, {}, {"limit", "events_limit"}), number(row, "limit", 1),
+                number(row, "events_limit", 1)});
 }
 std::string validate_inspect(const Json &row) {
   return first({fields(row, {"target"}, {"events_limit"}), string(row, "target"),
@@ -158,10 +157,9 @@ std::string validate_register_script(const Json &row) {
   return first({fields(row, {"source"}), string(row, "source")});
 }
 std::string validate_register_variant(const Json &row) {
-  return first(
-      {fields(row, {"model", "expected_source_hash", "asset", "canonical_params", "manifest"}),
-       string(row, "model"), string(row, "expected_source_hash"), string(row, "asset"),
-       string(row, "canonical_params"), object(row, "manifest")});
+  return first({fields(row, {"model", "asset", "canonical_params", "manifest"}),
+                string(row, "model"), string(row, "asset"), string(row, "canonical_params"),
+                object(row, "manifest")});
 }
 std::string validate_authoring_failed(const Json &row) {
   const auto error =

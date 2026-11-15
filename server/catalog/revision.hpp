@@ -3,33 +3,25 @@
 #include "catalog.hpp"
 
 namespace amber::catalog {
-struct RevisionAlias {
-  Model model;
-  ModelId inherit_from = 0;
+struct RevisedParameter {
+  std::uint32_t before = 0, after = 0;
 };
-struct RevisionVariant {
-  std::uint32_t before_params = 0, proposal_params = 0, after_params = 0;
-  Hash asset;
-  std::string canonical_params;
-  std::map<std::string, ModelId> parts;
-};
-struct ModelRevisionPlan {
-  ModelId model = 0, proposal = 0;
-  Hash before_source, before_asset;
-  std::size_t model_count = 0, parameter_count = 0;
-  Model after;
-  std::vector<RevisionAlias> aliases;
-  std::vector<RevisionVariant> variants;
+struct ModelUpdate {
+  ModelId model = 0;
   bool changed = false;
+  std::vector<ModelId> models;
+  std::vector<RevisedParameter> parameters;
 };
-// referenced_params includes current instance blocks; the default (zero) is
-// always included. New IDs are predictions valid until the single writer yields.
-ModelRevisionPlan plan_revision(const Models &, const ParameterBlocks &, const Assets &,
-                                ModelId model, ModelId proposal,
-                                std::span<const std::uint32_t> referenced_params);
-const RevisionVariant &revision_variant(const ModelRevisionPlan &, std::uint32_t before_params);
-void commit_revision(Models &, ParameterBlocks &, ModelTexts &, react::ModelSettings &,
-                     const ModelRevisionPlan &);
-void project_revision_measurements(react::AssetMeasurements &, const ModelRevisionPlan &,
-                                   const Assets &, MeasurementBindings);
+// Resolve every registered parameter set against the proposal's baked sets.
+// The default adopts the new defaults; explicit values survive on retained keys.
+std::vector<RevisedParameter> definition_parameters(const Models &, const ParameterBlocks &,
+                                                    const Assets &, ModelId model,
+                                                    ModelId proposal);
+// A rare definition edit on the single writer. Parameter block identities stay
+// usable and receive the new geometry; no old definition can be reconfigured in.
+ModelUpdate update_definition(Models &, ParameterBlocks &, ModelTexts &, react::ModelSettings &,
+                              const Assets &, ModelId model, ModelId proposal);
+void project_definition_measurements(react::AssetMeasurements &, const Models &,
+                                     const ParameterBlocks &, const Assets &, const ModelUpdate &,
+                                     MeasurementBindings);
 } // namespace amber::catalog

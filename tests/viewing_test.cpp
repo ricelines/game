@@ -230,13 +230,13 @@ int main(int argc, char **argv) {
     observe::Hearing hearing;
     const std::vector<observe::Listener> listeners{{11, body, {0, 0, 1.55f}},
                                                    {12, body, {100, 100, 0}}};
-    bindings::SoundBinding sound{hearing, identity(scene.objects), transforms(scene.objects),
-                                 listeners};
+    bindings::SoundBinding sound{hearing,   identity(scene.objects), transforms(scene.objects),
+                                 listeners, instance_text,           model_text};
     react::StateBinding state_binding{properties, processes, terms};
     react::register_binding(vm, "sound", bindings::sound_binding, &sound);
     react::register_binding(vm, "set", react::set_binding, &state_binding);
     auto prepared = catalog::prepare_script(
-        R"(return {kind='model',actions={['test.t3']={right='use',right_on='self',mechanics={'sound'}}},on={
+        R"(return {kind='model',actions={['test.t3']={right='use'}},on={
       ['test.t3']=function(self) self:sound('audible',12,nil,{kind='speech'}) end,
       ['test.t4']=function(self)
         self:set('test.t1',73)
@@ -292,7 +292,6 @@ int main(int argc, char **argv) {
                          now,
                          20,
                          120,
-                         1000,
                          {},
                          {}};
     control::Invocation call;
@@ -319,7 +318,8 @@ int main(int argc, char **argv) {
                 offered_action["inputs"][0]["quantity"]["unit"] == "kg",
             "rich action discovery lost callable name, canonical signature or units");
     auto &declared_action = scripts.rows[1].declaration.actions[0];
-    declared_action.right_on = "selected";
+    const auto body_model = scene.objects.model[body.slot()];
+    models.rows[body_model].script = 0;
     action_call.request.fields = {{"target", to_string(visible)}};
     auto available = vi::actions_handler(&offered, action_call).fields;
     require(available["total"] == 0 && available["actions"].empty() && available["more"] == false,
@@ -330,9 +330,10 @@ int main(int argc, char **argv) {
     action_call.request.fields.erase("name");
     const auto scope = perm::Scope::object(visible);
     const auto use = perm::bit(perm::Verb::Use);
-    const auto use_grant = perm::create_grant(
-        grants, players, {3, perm::Holder::player(2), scope, use, 0, 0, 10},
-        {scope, 3, perm::all_rights, 0, false}, {perm::Holder::player(2), 2, false}, now);
+    const auto use_grant = perm::create_grant(grants, players, perm::Holder::player(3),
+                                              {3, perm::Holder::player(2), scope, use, 0, 0, 10},
+                                              {scope, 3, perm::all_rights, 0, false},
+                                              {perm::Holder::player(2), 2, false}, now);
     require(bool(use_grant), "source discovery fixture needs a real explicit Use grant");
     now = 9;
     available = vi::actions_handler(&offered, action_call).fields;
@@ -348,18 +349,16 @@ int main(int argc, char **argv) {
     require(vi::actions_handler(&offered, action_call).fields["total"] == 1,
             "public object preset did not make the actual action available");
     scene.objects.preset[visible.slot()] = 0;
-    declared_action.right_on = "self";
+    models.rows[body_model].script = 1;
     require(
         vi::actions_handler(&offered, action_call).fields["total"] == 1,
         "body-first action filtering checked the foreign selection instead of its self endpoint");
-    declared_action.right_on = "selected";
     declared_action.reach = true;
     scene.objects.preset[far.slot()] = use;
     action_call.request.fields = {{"target", to_string(far)}};
     require(vi::actions_handler(&offered, action_call).fields["total"] == 1,
             "requested action discovery added a reach filter absent from the source contract");
     scene.objects.preset[far.slot()] = 0;
-    declared_action.right_on = "self";
     declared_action.reach = false;
     now = 0;
     action_call.request.fields = Json::object();
@@ -401,40 +400,33 @@ int main(int argc, char **argv) {
             "held object included by real custody relationship");
     require(find(first["far"], far), "salient distant geometry included");
     const auto second = vi::look_handler(&look, call).fields;
-    require(find(second["things"], visible)->size() == 3,
-            "unchanged rows become h/distance/bearing only");
+    require(find(second["things"], visible)->contains("measured"),
+            "native observations must remain full for gateway compaction");
     require(views.rows.at(11).last_observation.size() >= 3,
             "capture retains handles from short and far rows");
     require(first.contains("body_actions") && !first["body_actions"].empty() &&
-                first.contains("player_actions") && !second.contains("body_actions") &&
-                !second.contains("player_actions"),
-            "native session compaction does not omit unchanged action lists");
+                first.contains("player_actions") &&
+                second["body_actions"] == first["body_actions"] &&
+                second["player_actions"] == first["player_actions"],
+            "native projection lost action lists needed by a fresh gateway session");
     const auto *prepared_rows = views.rows.at(11).pending.things.data();
     const auto acquired = views.rows.at(11).acquired;
     const auto positions = scene.objects.position;
     const auto flags = scene.objects.flags;
     const auto model_ids = scene.objects.model;
-    call.request.fields["full"] = true;
     const auto full_again = vi::look_handler(&look, call).fields;
     require(find(full_again["things"], visible) && *find(full_again["things"], visible) == *seen &&
                 full_again["body_actions"] == first["body_actions"] &&
                 full_again["player_actions"] == first["player_actions"] &&
                 full_again["far"] == first["far"],
-            "full look did not restore descriptions, measured values and actions after reset");
+            "successive native looks must supply full descriptions and actions");
     require(views.rows.at(11).pending.ready &&
                 views.rows.at(11).pending.things.data() == prepared_rows &&
                 views.rows.at(11).acquired == acquired && !active.dirty.contains(11) &&
                 scene.objects.position == positions && scene.objects.flags == flags &&
                 scene.objects.model == model_ids,
-            "full look invalidated current perception or mutated world state");
-    call.request.fields["full"] = false;
-    const auto compact_again = vi::look_handler(&look, call).fields;
-    require(find(compact_again["things"], visible)->size() == 3 &&
-                !compact_again.contains("body_actions") &&
-                !compact_again.contains("player_actions"),
-            "full look disabled subsequent ordinary compaction");
+            "unchanged look rescanned perception or mutated world state");
     call.request.fields["limit"] = 1;
-    call.request.fields["full"] = true;
     const auto limited = vi::look_handler(&look, call).fields;
     require(limited["things"].size() == 1 && limited["far"] == first["far"] &&
                 views.rows.at(11).pending.things.data() == prepared_rows &&
@@ -448,7 +440,6 @@ int main(int argc, char **argv) {
                                              find(limited["far"], h);
                                     }),
             "limited observation capture includes handles not returned to the player");
-    call.request.fields.erase("full");
     call.request.fields.erase("limit");
     model_settings.rows[1][7] = Value(17.0);
     vi::invalidate(views, std::span(&visible, 1));
@@ -632,7 +623,8 @@ int main(int argc, char **argv) {
             "pure speech was counted as a stored world-value change");
     call.request.fields = Json::object();
     const auto heard = vi::look_handler(&look, call).fields;
-    require(heard["events"].size() == 1 && heard["events"][0]["data"] == "audible",
+    require(heard["heard"].size() == 1 && heard["heard"][0]["text"] == "audible" &&
+                heard["heard"][0]["from"] == to_string(body),
             "native response retains real nearby hearing");
     require(!hearing.queues.contains(12) || hearing.queues.at(12).empty(),
             "distant listener receives no sound");

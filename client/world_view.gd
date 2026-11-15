@@ -312,7 +312,8 @@ func _create(handle: String) -> bool:
 			var material_id = int(
 				metadata.get(handle, {}).get("material", _model(handle).get("material", 0))
 			)
-			var key = row.asset + ":" + str(lod) + ":" + str(material_id) + ":" + str(index)
+			var geometry = assets.cache[row.asset].manifest.geometry_hash
+			var key = geometry + ":" + str(lod) + ":" + str(material_id) + ":" + str(index)
 			if not groups.has(key):
 				var multi = MultiMesh.new()
 				multi.transform_format = MultiMesh.TRANSFORM_3D

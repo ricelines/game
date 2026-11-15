@@ -113,7 +113,7 @@ void catalog_roundtrip_and_capture() {
   models.rows.push_back(outside);
   ParameterBlocks params;
   params.rows.push_back({1, 1, std::string(64, 'c'), "{\"height\":2.0}", {{"variant_leaf", 2}}});
-  rebuild_parameter_index(params);
+
   Scripts scripts;
   Script script;
   script.id = 1;
@@ -165,8 +165,8 @@ void catalog_roundtrip_and_capture() {
       loaded_models.rows.size() == 4 && loaded_models.rows[3].id == 0 &&
           loaded_models.rows[1].canonical_params == first.canonical_params,
       "capture retains ID allocator/default parameter identity while omitting unrelated models");
-  require(loaded_params.by_model_asset.at({1, std::string(64, 'c')}) == 1,
-          "parameter block derived index restored");
+  require(loaded_params.rows[1].model == 1 && loaded_params.rows[1].asset == std::string(64, 'c'),
+          "parameter block primary identity and asset restored");
   require(loaded_scripts.rows[1].declaration.approved &&
               loaded_scripts.rows[1].declaration.sets == std::vector<TermId>{3},
           "script metadata/pins restored");

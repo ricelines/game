@@ -11,9 +11,11 @@ int main() {
   perm::Players players;
   players.rows.resize(3);
   perm::Ledger ledger;
-  ledger.balance = {0, 100, 100};
+  ledger.balance = {{perm::Account::player(1), 100}, {perm::Account::player(2), 100}};
   perm::Grants grants;
-  cm::PaymentBinding binding{ledger, grants, players, identity(objects), authority(objects)};
+  perm::Groups groups;
+  cm::PaymentBinding binding{ledger, grants, players, identity(objects), authority(objects),
+                             groups};
   drive::NativeOperations operations;
   drive::register_native(operations, 1, {cm::validate_pay, cm::pay, &binding});
   constexpr int count = 100000;
@@ -31,7 +33,8 @@ int main() {
       throw std::runtime_error("benchmark did not complete a real transfer and diagnostic draft");
   }
   const auto elapsed = std::chrono::steady_clock::now() - start;
-  if (ledger.balance[1] != 100 || ledger.balance[2] != 100)
+  if (ledger.balance[perm::Account::player(1)] != 100 ||
+      ledger.balance[perm::Account::player(2)] != 100)
     throw std::runtime_error("benchmark lost currency");
   std::cout << "native validated payment + completed diagnostic: "
             << std::chrono::duration<double, std::nano>(elapsed).count() / count << " ns/op\n";

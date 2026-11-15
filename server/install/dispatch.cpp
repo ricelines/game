@@ -11,12 +11,8 @@ const catalog::Script &script(const catalog::Scripts &scripts, ScriptId id) {
   return scripts.rows[id];
 }
 react::HandlerRef handler(const catalog::Script &source, const react::Terms &terms, TermId term) {
-  return {source.id,
-          terms.rows.at(term).name,
-          source.author,
-          source.declaration.version,
-          source.declaration.active,
-          false};
+  return {source.id, terms.rows.at(term).name, source.author, source.declaration.version,
+          source.declaration.active};
 }
 RuleKey key(const react::RuleVersion &rule) {
   return {rule.trigger, rule.selector, rule.flag_selector};
@@ -124,7 +120,7 @@ RuleChange add_rule(react::RuleVersions &versions, const catalog::Scripts &scrip
         break;
       }
     react::RuleVersion row{
-        {id, terms.rows.at(trigger).name, source.author, version, declaration.active, true},
+        {id, terms.rows.at(trigger).name, source.author, version, declaration.active},
         trigger,
         selector->second,
         kind == react::Kind::Flag};

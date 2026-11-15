@@ -210,7 +210,7 @@ async def run(args, evidence, artifacts, summary):
         ):
             after = await mira.request("look", limit=1)
             require(
-                after["self"]["body"] == before["self"]["body"]
+                after["self"]["h"] == before["self"]["h"]
                 and after["self"]["holding"] == door
                 and after["self"]["intent"] == before["self"]["intent"],
                 "actual body/held assembly/navigation intent did not survive automatic restore",
@@ -263,7 +263,7 @@ async def run(args, evidence, artifacts, summary):
             await asyncio.sleep(0.6)
             continued = await mira.request("look", limit=1)
             require(
-                math.dist(after["self"]["pos"], continued["self"]["pos"]) > 0.001,
+                math.dist(after["self"]["at"], continued["self"]["at"]) > 0.001,
                 "persisted navigation did not continue through actual post-restart physics",
             )
             summary["after"] = {

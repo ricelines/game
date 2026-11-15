@@ -15,10 +15,6 @@ template <class S> void serialize(S &s, WatchWork &v) {
   s.object(v.source);
   s.object(v.origin);
 }
-template <class S> void serialize(S &s, ActionWork &v) {
-  s.object(v.request);
-  s.object(v.origin);
-}
 template <class S> void serialize(S &s, InputWork &v) {
   s.value8b(v.id);
 }
@@ -89,8 +85,6 @@ void write_queues(snap::Output &out, const WorkQueues &q, const Intents &intents
               return selected.contains(work.receiver);
             else if constexpr (std::is_same_v<T, WatchWork>)
               return selected.contains(work.source.subject);
-            else if constexpr (std::is_same_v<T, ActionWork>)
-              return selected.contains(work.request.target);
             else
               return std::find(selected_inputs.begin(), selected_inputs.end(), work.id) !=
                      selected_inputs.end();

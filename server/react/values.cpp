@@ -332,16 +332,13 @@ double metered(const Meter &meter, Step now, double hz) {
   return meter.amount0 +
          meter.rate * (static_cast<double>(now) - static_cast<double>(meter.step0)) / hz;
 }
-std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, Combine combine,
-                                    const PriorityValues &priority, Handle subject,
-                                    TermId supply_term, TermId demand_term,
-                                    AllocationRows &allocations, MeterRows &meters, Step now,
-                                    double hz) {
-  std::vector<AllocationKey> changed;
-  struct Demand {
-    Handle from;
-    double wanted, allocated = 0;
-  };
+namespace {
+struct Demand {
+  Handle from;
+  double wanted, allocated = 0;
+};
+std::vector<Demand> divide(const Shared &supply, const Shared &demand, Combine combine,
+                           const PriorityValues &priority) {
   std::vector<Demand> rows;
   for (auto &part : demand.parts)
     if (part.amount > 0)
@@ -379,6 +376,31 @@ std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, 
       active = std::move(next);
     }
   }
+  return rows;
+}
+void erase_allocation(AllocationRows &rows, const AllocationKey &key) {
+  rows.values.erase(key);
+  auto &subject = rows.by_subject_term.at({key.subject, key.term});
+  std::erase(subject, key);
+  if (subject.empty())
+    rows.by_subject_term.erase({key.subject, key.term});
+  for (auto object : {key.subject, key.contributor}) {
+    auto found = rows.by_object.find(object.bits);
+    if (found == rows.by_object.end())
+      continue;
+    std::erase(found->second, key);
+    if (found->second.empty())
+      rows.by_object.erase(found);
+  }
+}
+} // namespace
+std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, Combine combine,
+                                    const PriorityValues &priority, Handle subject,
+                                    TermId supply_term, TermId demand_term,
+                                    AllocationRows &allocations, MeterRows &meters, Step now,
+                                    double hz) {
+  std::vector<AllocationKey> changed;
+  auto rows = divide(supply, demand, combine, priority);
   std::unordered_map<AllocationKey, double, AllocationKeyHash> next;
   double served = 0;
   for (auto &row : rows) {
@@ -393,29 +415,35 @@ std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, 
         offered > 0 ? served * std::max(0.0, part.amount) / offered : 0;
   auto update = [&](AllocationKey key, double rate) {
     auto found = allocations.values.find(key);
-    if (found == allocations.values.end()) {
+    if (found != allocations.values.end() && found->second == rate)
+      return;
+    if (found == allocations.values.end() && rate == 0)
+      return;
+    auto [meter, fresh] = meters.try_emplace(key, Meter{0, now, rate});
+    if (!fresh) {
+      meter->second.amount0 = metered(meter->second, now, hz);
+      meter->second.step0 = now;
+      meter->second.rate = rate;
+    }
+    if (rate == 0) {
+      erase_allocation(allocations, key);
+    } else if (found == allocations.values.end()) {
       allocations.values.emplace(key, rate);
       allocations.by_subject_term[{key.subject, key.term}].push_back(key);
       allocations.by_object[key.subject.bits].push_back(key);
       if (key.subject != key.contributor)
         allocations.by_object[key.contributor.bits].push_back(key);
-      meters[key] = {0, now, rate};
-      if (rate != 0)
-        changed.push_back(key);
-    } else if (found->second != rate) {
-      auto &meter = meters.at(key);
-      meter.amount0 = metered(meter, now, hz);
-      meter.step0 = now;
-      meter.rate = rate;
+    } else {
       found->second = rate;
-      changed.push_back(key);
     }
+    changed.push_back(key);
   };
   auto zero_missing = [&](TermId term, bool supplier) {
     auto found = allocations.by_subject_term.find({subject, term});
     if (found == allocations.by_subject_term.end())
       return;
-    for (auto key : found->second)
+    const auto keys = found->second;
+    for (auto key : keys)
       if (key.supplier == supplier && !next.contains(key))
         update(key, 0);
   };
@@ -428,6 +456,27 @@ std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, 
 double get_share(const AllocationRows &rows, Handle subject, TermId term, Handle contributor) {
   auto it = rows.values.find({subject, contributor, term, false});
   return it == rows.values.end() ? 0 : it->second;
+}
+double live_share(const ValueRead &values, Handle subject, TermId demand_term, Handle contributor,
+                  Step now, double hz) {
+  if (!values.identity.valid(subject))
+    return 0;
+  const auto &term = values.terms.rows.at(demand_term);
+  const auto *supply = column(values.shared, term.paired, subject);
+  const auto *demand = column(values.shared, demand_term, subject);
+  if (!supply || !demand)
+    return 0;
+  PriorityValues priorities;
+  if (term.combine == Combine::SharePriority && term.priority)
+    for (const auto &part : demand->parts) {
+      const auto answer = read(values, part.from, term.priority, now, hz);
+      if (answer.present && answer.value.is_numeric())
+        priorities.values.emplace(part.from.bits, answer.value.numeric());
+    }
+  for (const auto &row : divide(*supply, *demand, term.combine, priorities))
+    if (row.from == contributor)
+      return row.allocated;
+  return 0;
 }
 void rebuild_allocation_index(AllocationRows &rows) {
   rows.by_subject_term.clear();
@@ -442,25 +491,15 @@ void rebuild_allocation_index(AllocationRows &rows) {
 }
 void retire_allocations(AllocationRows &rows, MeterRows &meters, Handle object) {
   const auto found = rows.by_object.find(object.bits);
-  if (found == rows.by_object.end())
-    return;
-  const auto keys = found->second;
-  for (const auto &key : keys) {
-    rows.values.erase(key);
-    meters.erase(key);
-    const FactKey source{key.subject, key.term};
-    auto &subject = rows.by_subject_term.at(source);
-    std::erase(subject, key);
-    if (subject.empty())
-      rows.by_subject_term.erase(source);
-    for (auto h : {key.subject, key.contributor}) {
-      auto index = rows.by_object.find(h.bits);
-      if (index == rows.by_object.end())
-        continue;
-      std::erase(index->second, key);
-      if (index->second.empty())
-        rows.by_object.erase(index);
-    }
+  if (found != rows.by_object.end()) {
+    const auto keys = found->second;
+    for (const auto &key : keys)
+      erase_allocation(rows, key);
   }
+  // Earned integrals outlive withdrawal, but never either endpoint's lifetime.
+  std::erase_if(meters, [&](const auto &row) {
+    return row.first.subject == object || row.first.contributor == object;
+  });
 }
+
 } // namespace amber::react

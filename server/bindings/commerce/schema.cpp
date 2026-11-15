@@ -150,16 +150,17 @@ Declarations declare_commerce(react::Terms &terms, command::NativeActions &nativ
     return command::declare_native(native, terms, std::move(name), std::move(description),
                                    std::move(right), false, std::move(input));
   };
-  ids.pay = add("engine.pay",
-                "Transfer whole currency units between existing player wallets. Scripts need an "
-                "explicit capped Spend grant on the payer wallet.",
-                "",
-                schema({{"to", str}, {"amount", money}, {"from", str}}, {"to", "amount"},
-                       {{"to", "p:PLAYER_ID"}, {"amount", 1}}));
+  ids.pay =
+      add("engine.pay",
+          "Transfer whole currency units between player, object or group accounts. Scripts need an "
+          "explicit capped Spend grant on the payer account.",
+          "",
+          schema({{"to", str}, {"amount", money}, {"from", str}}, {"to", "amount"},
+                 {{"to", "p:PLAYER_ID"}, {"amount", 1}}));
   ids.balance =
       add("engine.balance",
-          "Read a player wallet. Omitted account selects the player caller, or the installed "
-          "script object's current owner; selection grants no spending authority.",
+          "Read an account balance. Omitted account selects the player caller, or the installed "
+          "script object itself; selection grants no spending authority.",
           "", schema({{"account", str}}, Json::array(), Json::object()));
   ids.inventory =
       add("engine.inventory", "List your inventory and mailbox roots with full object identities.",

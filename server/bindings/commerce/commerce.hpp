@@ -29,6 +29,8 @@ struct Custody {
   const Relation &declared_parts;
   std::array<TermId, 4> relation_terms;
   SceneProjection &scene;
+  PlotWrite membership;
+  const perm::Plots &plots;
 };
 struct PaymentBinding {
   perm::Ledger &ledger;
@@ -36,12 +38,14 @@ struct PaymentBinding {
   const perm::Players &players;
   IdentityRead identity;
   AuthorityRead authority;
+  const perm::Groups &groups;
 };
 struct BalanceBinding {
   const perm::Ledger &ledger;
   const perm::Players &players;
   IdentityRead identity;
   AuthorityRead authority;
+  const perm::Groups &groups;
 };
 struct InventoryBinding {
   const perm::Players &players;
@@ -94,6 +98,7 @@ struct AcceptBinding {
   Custody &custody;
   const DeliveryTargets &delivery;
   std::size_t mailbox_max;
+  const perm::Groups &groups;
 };
 struct TradeOpenBinding {
   perm::Trades &trades;
@@ -159,13 +164,9 @@ struct RebindOffersBinding {
   PermissionFlags flags;
   Custody &custody;
 };
-// Forecast ordinary visible custody without mutation. Native preparation checks
-// retained parents and includes future grasps in geometry/aggregate capacity.
-bool preflight_rebound_offers(const void *, std::span<const Handle> affected,
-                              std::span<const Handle> removed,
-                              std::vector<space::VisibleCustody> &forecast, std::string &error);
-// Commit once after all native/resource/lifetime preflights, before extraction.
-void rebind_offers(void *, std::span<const Handle> affected, const InvocationInput &,
+// Cancel affected offers/trades and return their goods through ordinary custody.
+// This is an immediate effect, including when a later definition edit is rejected.
+void rebind_offers(RebindOffersBinding &, std::span<const Handle> affected, const InvocationInput &,
                    react::DeferredEffects &);
 struct MailboxDelivery {
   perm::Players &players;

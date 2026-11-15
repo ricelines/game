@@ -142,7 +142,6 @@ class Authoring:
                     "model": reply["model"],
                     "hash": result["hash"],
                     "measured": reply.get("measured", result["measured"]),
-                    "timings": result.get("timings", {}),
                     "sandbox": result.get("sandbox", {}),
                 }
             )
@@ -165,7 +164,6 @@ class Authoring:
                     result,
                     job,
                     model=identity,
-                    expected_source_hash=definition["source_hash"],
                 )
             job.update(
                 {
@@ -173,7 +171,6 @@ class Authoring:
                     "status": "done",
                     "hash": result["hash"],
                     "measured": reply.get("measured", result["measured"]),
-                    "timings": result.get("timings", {}),
                     "sandbox": result.get("sandbox", {}),
                 }
             )
@@ -190,9 +187,17 @@ class Authoring:
         async def work(job):
             # Use the bake subsystem's literal PARAMS resolver: block0 adopts the new
             # defaults; explicit current blocks preserve values and gain new defaults.
+            _defaults, schema = resolve(source, {})
             supplied = [
                 {},
-                *(json.loads(row["canonical_params"]) for row in definition["variants"]),
+                *(
+                    {
+                        key: value
+                        for key, value in json.loads(row["canonical_params"]).items()
+                        if key in schema
+                    }
+                    for row in definition["variants"]
+                ),
             ]
             parameters = list(
                 dict.fromkeys(canonical_params(resolve(source, row)[0]) for row in supplied)
@@ -225,10 +230,9 @@ class Authoring:
             job.update(
                 {
                     "status": "done",
-                    "effect": "revision_staged",
+                    "effect": "proposal_ready",
                     "model": identity,
-                    "revision_model": proposal,
-                    "expected_source_hash": definition["source_hash"],
+                    "proposal": proposal,
                     "hash": results[0]["hash"],
                     "variants": initial["variants"],
                     "progress": {"completed": len(results), "total": len(results)},

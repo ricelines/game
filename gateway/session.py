@@ -26,6 +26,8 @@ class Session:
         self.events = deque()
         self.mutations = asyncio.Lock()
         self.closed_reason = ""
+        self.known = {}
+        self.action_lists = {}
         self._welcomed = asyncio.get_running_loop().create_future()
 
     async def open(self):
@@ -94,6 +96,28 @@ class Session:
         result["events_omitted"] = result.get("events_omitted", 0) + max(0, count - limit)
         return result
 
+    def forget_observation(self):
+        self.known.clear()
+        self.action_lists.clear()
+
+    def compact_observation(self, result):
+        for field in ("things", "far"):
+            for index, row in enumerate(result.get(field, [])):
+                handle = row["h"]
+                description = {
+                    key: value for key, value in row.items() if key not in ("dist_m", "bearing")
+                }
+                if self.known.get(handle) == description:
+                    result[field][index] = {key: row[key] for key in ("h", "dist_m", "bearing")}
+                self.known[handle] = description
+        for field in ("body_actions", "player_actions"):
+            actions = result[field]
+            if self.action_lists.get(field) == actions:
+                del result[field]
+            else:
+                self.action_lists[field] = actions
+        return result
+
     async def tool(self, name, arguments):
         validate(name, arguments)
         arguments = dict(arguments)
@@ -104,6 +128,8 @@ class Session:
                 result = await self.request(name, events_limit=event_limit, **arguments)
         else:
             result = await self.request(name, events_limit=event_limit, **arguments)
+        if name == "look" and "things" in result:
+            self.compact_observation(result)
         return self.attach_events(result, event_limit)
 
     async def close(self):

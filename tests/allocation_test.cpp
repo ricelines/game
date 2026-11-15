@@ -2,6 +2,7 @@
 #include "bindings/turns/turns.hpp"
 #include "react/snapshot.hpp"
 #include "runtime_fixture.hpp"
+#include "space_fixture.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -22,34 +23,48 @@ struct Fixture {
   bindings::AllocationReconciliation allocation{f.allocations, meters, priorities};
   RelationBinding relations{f.relation_view, f.terms};
   ContributionBinding contributions{f.shared, gives, f.terms, f.relation_view};
-  ShareBinding shares{f.allocations, f.terms};
+  ShareBinding shares{*f.projection};
   Handle subject = f.c, third, supplier, substitute;
   ScriptId consumer = 0, producer = 0, bare = 0;
   Relation declared;
   lifecycle::Parts parts;
   lifecycle::Instances lifetime{f.objects, parts, declared};
   bindings::Execution execution{f.vm, f.states, f.random, identity(f.objects), declared, 17};
-  drive::StructuralOperations structural;
   drive::Clock clock;
   step::WorkQueues queues;
   step::TimerWheel timers;
   record::Journal journal{8, {}};
   std::vector<FactKey> mutated;
   std::vector<bindings::GapDraft> gaps;
-  bindings::HandlerTurns handlers{execution,
-                                  structural,
-                                  f.triggers,
-                                  *f.projection,
-                                  {f.subscriptions, f.links, f.scripts, f.rules},
-                                  journal,
-                                  queues,
-                                  timers,
-                                  mutated,
-                                  clock,
-                                  20,
-                                  1000,
-                                  allocation};
-  bindings::WatchTurns watches{handlers, gaps};
+  bindings::HandlerTurns handlers{
+      execution, f.triggers, *f.projection, {f.subscriptions, f.links, f.scripts, f.rules},
+      journal,   queues,     timers,        mutated,
+      clock,     20,         1000,          allocation};
+  command::NativeActions declarations;
+  drive::NativeOperations native;
+  control::Profiles profiles;
+  perm::Players players;
+  perm::Grants grants;
+  perm::OwnerLimits limits;
+  step::Intents intents;
+  space::Space physical{testspace::settings()};
+  bindings::ActionTurns actions{handlers,
+                                declarations,
+                                native,
+                                f.models,
+                                f.scripts,
+                                f.installed,
+                                f.rules,
+                                profiles,
+                                authority(f.objects),
+                                transforms(f.objects),
+                                limits,
+                                players,
+                                grants,
+                                physical,
+                                intents,
+                                gaps,
+                                1.5f};
   Fixture(Combine combine = Combine::ShareEqual) {
     f.terms.rows.resize(13);
     for (TermId id : {10u, 11u, 12u}) {
@@ -116,8 +131,8 @@ struct Fixture {
   void drain() {
     drive::Frame frame;
     frame.handler_deadline = drive::Monotonic::now() + std::chrono::seconds(1);
-    drive::drain_foreground(queues, frame, {&handlers, bindings::consume_event},
-                            {&watches, bindings::consume_watch}, {}, {});
+    drive::drain_foreground(queues, frame, {&actions, bindings::consume_event},
+                            {&actions, bindings::consume_watch}, {});
   }
   void publish() {
     bindings::reconcile_allocations(*f.projection, allocation, f.effects, clock.step, 20);
@@ -169,6 +184,8 @@ void redistribution_is_consumer_specific() {
           "same-total supplier replacement does not wake unchanged demanders");
   near(metered(x.meters.at({x.subject, x.supplier, 10, true}), 40, 20), 7,
        "withdrawn supplier meter retains delivered integral and stops");
+  require(!x.f.allocations.values.contains({x.subject, x.supplier, 10, true}),
+          "withdrawn supply retained a redundant zero allocation");
   near(metered(x.meters.at({x.subject, x.substitute, 10, true}), 40, 20), 7,
        "replacement supplier starts at actual replacement time");
   x.clock.step = 40;
@@ -183,6 +200,8 @@ void redistribution_is_consumer_specific() {
   x.publish();
   near(metered(x.meters.at({x.subject, x.f.a, 11, false}), 80, 20), 3,
        "withdrawn live demander retains its integral at zero rate");
+  require(!x.f.allocations.values.contains({x.subject, x.f.a, 11, false}),
+          "withdrawn demand retained a redundant zero allocation");
   x.clock.step = 80;
   x.contribute(x.f.a, 11, 1);
   x.contribute(x.f.b, 11, 11);
@@ -368,8 +387,23 @@ void installation_modes_keep_saved_answers_and_flat_state() {
   near(std::get<double>(x.f.states.at({x.f.a, next}).at(std::string("count"))), 1,
        "replacement default receives its current watched answer once");
 }
+void share_reads_current_contributions_in_same_handler() {
+  Fixture x;
+  x.baseline();
+  const auto script = x.f.add(R"(return {kind='instance',contributes={'novel.wanted'},on={
+    ['novel.cue']=function(self)
+      local subject=self:related('novel.link','out')[1]
+      self:contribute(subject,'novel.wanted',1)
+      self.state.immediate=self:get_share(subject,'novel.wanted')
+    end}})");
+  x.install_script(x.f.a, script);
+  bindings::consume_event(&x.actions, {step::EventWork{x.f.a, {}, 6, Value{}, {}}, {}});
+  near(std::get<double>(x.f.states.at({x.f.a, script}).at(std::string("immediate"))), 1,
+       "get_share uses current contribution rows before the handler's reconciliation phase");
+}
 } // namespace
 int main() {
+  share_reads_current_contributions_in_same_handler();
   redistribution_is_consumer_specific();
   actual_handler_reconciles_before_causal_watch();
   thresholds_and_relation_rebinding_preserve_answer_semantics();

@@ -112,14 +112,25 @@ void append_heard(Json &result, observe::Hearing &hearing, net::SessionId sessio
   const auto heard = observe::take_heard(hearing, session, limit, omitted);
   if (!result.contains("events"))
     result["events"] = Json::array();
-  for (const auto &event : heard)
-    result["events"].push_back({{"kind", "sound"},
-                                {"source", to_string(event.sound.source)},
-                                {"at", detail::vector(event.sound.at)},
-                                {"dist_m", event.distance_m},
-                                {"speaker", event.sound.speaker},
-                                {"data", observe::event_payload_json(event.sound.payload)},
-                                {"root", event.sound.origin.root}});
+  if (!result.contains("heard"))
+    result["heard"] = Json::array();
+  for (const auto &event : heard) {
+    if (event.sound.speech)
+      result["heard"].push_back(
+          {{"from", event.sound.speaker ? "p:" + std::to_string(event.sound.speaker)
+                                        : to_string(event.sound.source)},
+           {"name", event.sound.name},
+           {"text", observe::event_payload_json(event.sound.payload)},
+           {"dist_m", event.distance_m}});
+    else
+      result["events"].push_back({{"kind", "sound"},
+                                  {"source", to_string(event.sound.source)},
+                                  {"at", detail::vector(event.sound.at)},
+                                  {"dist_m", event.distance_m},
+                                  {"speaker", event.sound.speaker},
+                                  {"data", observe::event_payload_json(event.sound.payload)},
+                                  {"root", event.sound.origin.root}});
+  }
   result["events_omitted"] = result.value("events_omitted", std::size_t{}) + omitted;
 }
 void refresh_view(LookBinding &binding, net::SessionId session, const control::Principal &principal,
@@ -144,7 +155,7 @@ void refresh_view(LookBinding &binding, net::SessionId session, const control::P
   const auto scan = observe::scan(
       binding.space, identity, binding.transforms, binding.declared_parts, observer, held,
       binding.settings, binding.lights, binding.zones, catalog.values, binding.motion, binding.now,
-      binding.hz, binding.world_ambient_lux, limit, detail::deadline(binding.query_ms));
+      binding.hz, binding.world_ambient_lux, limit, space::Deadline::max());
   auto &row = binding.sessions.rows[session];
   row.player = principal.player;
   row.body = principal.body;
@@ -169,7 +180,15 @@ void refresh_view(LookBinding &binding, net::SessionId session, const control::P
       goal = to_string(std::get<Handle>(intent->second.goal));
     next.self.intent = {{"id", intent->second.id}, {"kind", "move_to"}, {"goal", goal}};
   }
-  for (const auto zone : scan.zones) {
+  auto ordered_zones = scan.zones;
+  std::sort(ordered_zones.begin(), ordered_zones.end(), [&](Handle left, Handle right) {
+    const auto *a = binding.zones.rows.get(left.slot());
+    const auto *b = binding.zones.rows.get(right.slot());
+    const auto pa = a && a->zone == left ? a->priority : 0;
+    const auto pb = b && b->zone == right ? b->priority : 0;
+    return pa != pb ? pa > pb : left < right;
+  });
+  for (const auto zone : ordered_zones) {
     auto description = detail::describe(catalog, zone, binding.now, binding.hz);
     next.self.zones.emplace_back(zone, description.says.name);
   }
@@ -202,11 +221,8 @@ control::Reply look_handler(void *local, const control::Invocation &call) {
                             .first(std::min(limit, pending.things.size()));
     const auto event_limit =
         call.request.fields.value("events_limit", binding.settings.events_per_response);
-    if (call.request.fields.value("full", false))
-      observe::forget(row.sent);
-    auto result =
-        observe::observation(row.sent, pending.step, binding.hz, pending.self, things, pending.far,
-                             {}, pending.body_actions, pending.player_actions);
+    auto result = observe::observation(pending.step, binding.hz, pending.self, things, pending.far,
+                                       pending.body_actions, pending.player_actions);
     result["complete"] = pending.complete;
     row.last_observation.clear();
     row.last_observation.push_back(call.principal.body);

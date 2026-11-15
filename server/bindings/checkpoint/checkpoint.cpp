@@ -317,7 +317,7 @@ std::uint64_t read_queues(snap::Input &in, step::WorkQueues &queues, step::Inten
 }
 void write_reqs(snap::Output &out, const elaborate::Requests &requests,
                 const elaborate::GapCounts &gaps, const elaborate::LastGaps &last,
-                const elaborate::CaptureRefs &captures, const elaborate::PendingFixtures &pending,
+                const elaborate::CaptureRefs &captures,
                 std::optional<std::span<const Handle>> selected) {
   std::set<elaborate::GapKey> gap_ids;
   std::set<elaborate::Hash> hashes;
@@ -347,15 +347,12 @@ void write_reqs(snap::Output &out, const elaborate::Requests &requests,
   elaborate::write_last_gaps(out, last, selected);
   elaborate::write_capture_refs(out, captures,
                                 selected ? elaborate::HashSelection(capture_ids) : std::nullopt);
-  elaborate::write_pending_fixtures(out, pending, !selected);
 }
 void read_reqs(snap::Input &in, elaborate::Requests &requests, elaborate::GapCounts &gaps,
-               elaborate::LastGaps &last, elaborate::CaptureRefs &captures,
-               elaborate::PendingFixtures &pending) {
+               elaborate::LastGaps &last, elaborate::CaptureRefs &captures) {
   elaborate::read_requests(in, requests);
   elaborate::read_gaps(in, gaps);
   elaborate::read_last_gaps(in, last);
   elaborate::read_capture_refs(in, captures);
-  elaborate::read_pending_fixtures(in, pending);
 }
 } // namespace amber::bindings::checkpoint

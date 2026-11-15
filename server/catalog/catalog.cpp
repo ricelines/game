@@ -365,8 +365,9 @@ std::uint32_t add_variant(ParameterBlocks &blocks, Models &models, ModelTexts &t
   if (!model || source.id != model || source.source_hash != asset.source_hash ||
       source.part_name != asset.part_name || canonical != asset.canonical_params)
     throw std::runtime_error("variant does not belong to model source");
-  if (auto found = blocks.by_model_asset.find({model, hash}); found != blocks.by_model_asset.end())
-    return found->second;
+  for (const auto &block : blocks.rows)
+    if (block.id && block.model == model && block.asset == hash)
+      return block.id;
   // Preflight all child references/defaults before allocating any model identity.
   for (const auto &[name, part] : asset.manifest.at("parts").items()) {
     const auto &child = assets.rows.at(part.at("asset").get<std::string>());
@@ -389,7 +390,6 @@ std::uint32_t add_variant(ParameterBlocks &blocks, Models &models, ModelTexts &t
   }
   const auto id = static_cast<std::uint32_t>(blocks.rows.size());
   blocks.rows.push_back({id, model, std::move(hash), std::move(canonical), std::move(children)});
-  blocks.by_model_asset[{model, blocks.rows.back().asset}] = id;
   return id;
 }
 const std::map<std::string, ModelId> &part_models(const Models &models,
@@ -423,10 +423,5 @@ void project_measurements(react::AssetMeasurements &measurements, ModelId model,
   else
     measurements.rows[model] = std::move(row);
 }
-void rebuild_parameter_index(ParameterBlocks &blocks) {
-  blocks.by_model_asset.clear();
-  for (const auto &block : blocks.rows)
-    if (block.id)
-      blocks.by_model_asset[{block.model, block.asset}] = block.id;
-}
+
 } // namespace amber::catalog

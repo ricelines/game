@@ -8,9 +8,6 @@
 namespace amber::control {
 class Sessions;
 }
-namespace amber::drive {
-struct Clock;
-}
 namespace amber::bindings {
 struct IlluminanceReads;
 namespace viewing {
@@ -55,11 +52,9 @@ private:
   react::PriorityLinks &priorities_;
   MetadataChanges &changes_;
   MaterialAppearanceRoles appearance_;
-  std::vector<ModelId> model_ids_;
-  std::vector<TermId> term_ids_, material_ids_, inspection_terms_, added_terms_, changed_materials_;
+  std::vector<TermId> material_ids_, inspection_terms_, added_terms_, changed_materials_;
   nlohmann::json catalog_;
 };
-struct MaterialRefresh;
 struct RegistryPersistence {
   const react::Terms &terms;
   const react::Materials &materials;
@@ -68,18 +63,13 @@ struct RegistryPersistence {
   const catalog::MechanicalBindings &mechanical;
   catalog::RegistryDocument &document;
   std::filesystem::path directory;
-  MaterialRefresh &physics;
-  const drive::Clock &clock;
-  double hz;
   CatalogPublication &publication;
 };
-catalog::Hash commit_registry(void *, std::span<const TermId>, std::span<const TermId>);
+catalog::Hash commit_registry(RegistryPersistence &, std::span<const TermId>,
+                              std::span<const TermId>);
 void publish_rule_registry(void *, ScriptId, bool approved, bool active, Step, double,
                            const record::Origin &, react::DeferredEffects &);
 
-struct ContextBinding {
-  AuthorityRead authority;
-};
 struct ObjectBinding {
   IdentityRead identity;
   TransformRead transforms;
@@ -129,7 +119,6 @@ struct PlotReadBinding {
   const perm::Plots &plots;
   AuthorityRead authority;
 };
-int context_binding(lua_State *);
 int object_binding(lua_State *);
 int asset_binding(lua_State *);
 int material_binding(lua_State *);

@@ -49,49 +49,11 @@ template <class S> void path(S &s, std::filesystem::path &value) {
   if constexpr (std::is_same_v<S, snap::Input>)
     value = std::move(text);
 }
-template <class S> void json(S &s, nlohmann::json &value) {
-  std::string text;
-  if constexpr (std::is_same_v<S, snap::Output>)
-    text = value.dump();
-  snap::field(s, text);
-  if constexpr (std::is_same_v<S, snap::Input>)
-    value = nlohmann::json::parse(text);
-}
 template <class S> void capture(S &s, CaptureRef &value) {
   snap::field(s, value.hash);
   path(s, value.path);
   snap::field(s, value.status);
   snap::field(s, value.error);
-}
-template <class S> void fixture(S &s, FixtureJob &value) {
-  snap::field(s, value.id);
-  snap::field(s, value.request);
-  snap::field(s, value.actor);
-  snap::field(s, value.capture);
-  path(s, value.capture_path);
-  snap::field(s, value.candidate.artifact);
-  snap::field(s, value.candidate.registry);
-  snap::field(s, value.candidate.script);
-  snap::field(s, value.candidate.runtime);
-  json(s, value.candidate.tests);
-  std::vector<std::pair<std::string, Handle>> subjects;
-  if constexpr (std::is_same_v<S, snap::Output>)
-    for (const auto &entry : value.candidate.subjects)
-      subjects.push_back(entry);
-  s.container(subjects, snap::max_collection(), [](S &stream, auto &entry) {
-    snap::field(stream, entry.first);
-    snap::field(stream, entry.second);
-  });
-  if constexpr (std::is_same_v<S, snap::Input>) {
-    value.candidate.subjects.clear();
-    for (auto &entry : subjects)
-      value.candidate.subjects.emplace(std::move(entry.first), entry.second);
-  }
-  snap::field(s, value.order.session);
-  snap::field(s, value.order.sequence);
-  snap::field(s, value.limits.timeout_ms);
-  snap::field(s, value.limits.diagnostic_bytes);
-  snap::field(s, value.limits.result_bytes);
 }
 } // namespace
 void write_requests(snap::Output &out, const Requests &table, ObjectSelection selection) {
@@ -170,27 +132,6 @@ void read_capture_refs(snap::Input &in, CaptureRefs &table) {
   for (auto &row : rows) {
     auto hash = row.hash;
     table.rows.emplace(std::move(hash), std::move(row));
-  }
-}
-void write_pending_fixtures(snap::Output &out, const PendingFixtures &table, bool include) {
-  auto next = table.next_id;
-  snap::field(out, next);
-  std::vector<FixtureJob> rows;
-  if (include)
-    for (const auto &[id, row] : table.rows) {
-      (void)id;
-      rows.push_back(row);
-    }
-  out.container(rows, snap::max_collection(), fixture<snap::Output>);
-}
-void read_pending_fixtures(snap::Input &in, PendingFixtures &table) {
-  snap::field(in, table.next_id);
-  table.rows.clear();
-  std::vector<FixtureJob> rows;
-  in.container(rows, snap::max_collection(), fixture<snap::Input>);
-  for (auto &row : rows) {
-    const auto id = row.id;
-    table.rows.emplace(id, std::move(row));
   }
 }
 } // namespace amber::elaborate

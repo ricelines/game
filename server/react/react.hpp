@@ -144,7 +144,6 @@ struct HandlerRef {
   PlayerId author = 0;
   std::uint32_t version = 0;
   bool enabled = true;
-  bool world_rule = false;
 };
 struct Trigger {
   std::unordered_map<TermId, HandlerRef> by_material;
@@ -252,6 +251,8 @@ std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, 
                                     TermId demand_term, AllocationRows &, MeterRows &, Step now,
                                     double hz);
 double get_share(const AllocationRows &, Handle subject, TermId demand_term, Handle contributor);
+double live_share(const ValueRead &, Handle subject, TermId demand_term, Handle contributor,
+                  Step now, double hz);
 void rebuild_allocation_index(AllocationRows &);
 void retire_allocations(AllocationRows &, MeterRows &, Handle);
 
@@ -263,56 +264,16 @@ struct StateKeyHash {
 using ScriptState = std::unordered_map<StateKey, StateAtom, StateKeyHash>;
 using ScriptStates = std::unordered_map<ScriptKey, ScriptState, ScriptKeyHash>;
 using RandomStates = std::unordered_map<std::uint64_t, std::uint64_t>;
-struct TermExchange {
-  TermId term = 0;
-  Value before, after;
-};
-struct ScalarExchange {
-  StateKey key;
-  std::optional<StateAtom> before;
-  StateAtom after;
-};
-struct ResourceExchange {
-  ScriptKey holder;
-  std::vector<TermExchange> terms;
-  std::vector<ScalarExchange> state;
-};
-struct StructuralRequest {
-  enum class Kind { Create, Destroy, ReplaceBinding, ReviseModel } kind = Kind::Create;
-  struct Binding {
-    ModelId model = 0;
-    TermId material = 0;
-    std::uint32_t params = 0;
-  };
-  Binding binding;
-  Vec3 position;
-  Quat rotation;
-  PlotId plot = 0;
-  Handle target;
-  EventPayload context;
-  std::optional<ResourceExchange> exchange;
-  struct ModelRevision {
-    ModelId model = 0, proposal = 0;
-    std::string expected_source_hash;
-  };
-  std::optional<ModelRevision> revision;
-};
 struct Diagnostic {
   std::string name, message;
 };
 struct ContributionChange {
   FactKey source;
 };
-struct CausalReceipt {
-  void *owner;
-  std::uint64_t receipt;
-  void (*finalize)(void *, std::uint64_t, const record::Origin &);
-};
-using Effect = std::variant<step::EventWork, step::WatchWork, step::Timer, step::ActionWork,
-                            Diagnostic, record::Event, ContributionChange, CausalReceipt>;
+using Effect = std::variant<step::EventWork, step::WatchWork, step::Timer, Diagnostic,
+                            record::Event, ContributionChange>;
 struct DeferredEffects {
   std::vector<Effect> ordered;
-  std::vector<StructuralRequest> structural;
   bool changed = false;
   std::vector<Handle> consulted_handles{};
   std::vector<step::BackgroundItem> background{};
@@ -330,8 +291,6 @@ bool set_relation(Relation &, TermId, Handle from, Handle to, bool present, Defe
 bool apply_derived_fact(RuntimeMeasurements &, const DerivedFactInput &, DeferredEffects &);
 void retire_object(Properties &, Processes &, ScriptStates &, RandomStates &, Handle,
                    std::span<const ScriptId> installed_scripts);
-// Structural commands must first be applied by composition and reflected in changed.
-// This publishes causal work/diagnostics after structural commands have been taken/applied.
 void publish_effects(DeferredEffects &&, const record::Origin &, Step now, step::WorkQueues &,
                      step::TimerWheel &, record::Journal &, std::size_t event_limit);
 
@@ -342,9 +301,7 @@ struct WatchDeclaration {
 struct ActionDeclaration {
   TermId action = 0;
   std::string right, function;
-  std::string right_on = "selected";
   bool reach = false;
-  std::vector<std::string> mechanics{};
 };
 struct ScriptDeclaration {
   enum class Kind { Model, Instance, Rule } kind = Kind::Model;
@@ -375,11 +332,6 @@ struct CompiledScript {
 ScriptValidation validate_script(std::string_view, const Terms &, const ScriptDeclaration &,
                                  const RightsDeclaration &);
 CompiledScript compile_script(std::string_view);
-struct BodyEndpoints {
-  Handle body, selected, held;
-  PlayerId actor = 0;
-  std::vector<std::string> mechanics{};
-};
 struct Invocation {
   ScriptKey self;
   Step step = 0;
@@ -387,25 +339,27 @@ struct Invocation {
   TermId trigger = 0;
   Handle sender;
   EventPayload payload;
-  std::vector<Handle> acquired, parts;
-  // Immediate action identity is descriptive. Bindings that mutate under player
-  // authority use the separately bounded direct_body envelope, never this field.
+  std::vector<Handle> acquired, event_targets, parts;
+  // Descriptive action identity; it never confers permission on the script.
   std::optional<Caller> action_caller;
   Handle action_body, action_target;
-  std::optional<BodyEndpoints> direct_body;
   record::Origin origin;
   ScriptState *state = nullptr;
   std::uint64_t *random = nullptr;
   DeferredEffects *effects = nullptr;
   std::chrono::steady_clock::time_point deadline;
-  bool world_rule = false, approved = false, active = false;
   const ScriptDeclaration *declaration = nullptr;
 };
 void consult_object(const Invocation &, Handle);
 struct RunOutcome {
-  enum class Status { Ok, Error, Cutoff, Missing } status = Status::Missing;
+  enum class Status { Ok, Error, Cutoff, Missing, Action } status = Status::Missing;
   std::string error;
   std::size_t memory_bytes = 0;
+  struct Action {
+    ActionRequest request;
+    nlohmann::json arguments;
+  };
+  std::optional<Action> action{};
 };
 struct VmSettings {
   std::size_t script_kb;
@@ -431,6 +385,7 @@ private:
   friend void register_binding(Vm &, std::string_view, int (*)(lua_State *), void *);
   friend RunOutcome load_script(Vm &, const CompiledScript &, const ScriptDeclaration &);
   friend RunOutcome run_handler(Vm &, const HandlerRef &, Invocation &);
+  friend RunOutcome resume_handler(Vm &, Invocation &, const nlohmann::json &);
   friend bool set_activation(Vm &, ScriptId, bool, bool);
   friend std::size_t state_capacity(const Vm &, ScriptId);
   friend ScriptAnalysis analyze_script(std::string_view, const Terms &, const RightsDeclaration &,
@@ -442,11 +397,12 @@ ScriptAnalysis analyze_script(std::string_view, const Terms &, const RightsDecla
                               VmSettings);
 RunOutcome load_script(Vm &, const CompiledScript &, const ScriptDeclaration &);
 RunOutcome run_handler(Vm &, const HandlerRef &, Invocation &);
+// An act call suspends only the currently running handler. The step executes
+// its checked action and immediately resumes this same call with the result.
+RunOutcome resume_handler(Vm &, Invocation &, const nlohmann::json &);
 bool set_activation(Vm &, ScriptId, bool approved, bool active);
 Invocation &invocation(lua_State *);
 void *binding_data(lua_State *);
-bool may_construct(const Invocation &);
-bool queue_structural(Invocation &, StructuralRequest);
 void push_handle(lua_State *, Handle);
 Handle check_handle(lua_State *, int index);
 EventPayload check_event_payload(lua_State *, int index);
@@ -477,8 +433,7 @@ struct ContributionBinding {
   const RelationsRead &relations;
 };
 struct ShareBinding {
-  const AllocationRows &allocations;
-  const Terms &terms;
+  const ValueRead &values;
 };
 int get_binding(lua_State *);
 int read_binding(lua_State *);

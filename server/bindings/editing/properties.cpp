@@ -100,7 +100,9 @@ drive::NativeCompletion patch_state(void *local, const drive::NativeCall &call) 
     const auto player = detail::player(call);
     if (!detail::role(binding.profiles, player, "architect") &&
         !detail::role(binding.profiles, player, "elaborator"))
-      throw std::invalid_argument("state repair requires architect or elaborator role");
+      throw detail::PolicyDenied("architect_or_elaborator", to_string(call.request.target),
+                                 "state repair requires architect or elaborator role",
+                                 "have an architect or elaborator perform this repair");
     detail::edit(binding.access, call);
     std::vector<std::pair<TermId, Value>> changes;
     for (const auto &[name, value] : call.arguments.at("values").items()) {
@@ -134,7 +136,9 @@ drive::NativeCompletion relate(void *local, const drive::NativeCall &call) {
       throw std::invalid_argument("term is not a relation");
     if (std::find(binding.mechanical_relations.begin(), binding.mechanical_relations.end(), term) !=
         binding.mechanical_relations.end())
-      throw std::invalid_argument("mechanical relation is owned by Space");
+      throw detail::PolicyDenied("physical_action", binding.values.terms.rows[term].name,
+                                 "mechanical relation is owned by Space",
+                                 "perform the checked physical action that changes this relation");
     const auto other = detail::handle(call.arguments.at("other"), binding.access.identity);
     const auto present = call.arguments.at("present").get<bool>();
     if (!present && !binding.relations.contains(term))

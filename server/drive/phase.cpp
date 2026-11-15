@@ -9,7 +9,7 @@
 namespace amber::drive {
 namespace {
 void consume(step::ForegroundItem item, EventConsumer event, WatchConsumer watch,
-             ActionConsumer action, InputConsumer input) {
+             InputConsumer input) {
   std::visit(
       [&](auto &work) {
         using T = std::decay_t<decltype(work)>;
@@ -17,17 +17,15 @@ void consume(step::ForegroundItem item, EventConsumer event, WatchConsumer watch
           event.run(event.context, {std::move(work), std::move(item.threshold)});
         else if constexpr (std::is_same_v<T, step::WatchWork>)
           watch.run(watch.context, std::move(work));
-        else if constexpr (std::is_same_v<T, step::ActionWork>)
-          action.run(action.context, std::move(work));
         else
           input.run(input.context, std::move(work));
       },
       item.work);
 }
 void drain_causal(step::WorkQueues &queues, Frame &frame, EventConsumer event, WatchConsumer watch,
-                  ActionConsumer action, InputConsumer input) {
+                  InputConsumer input) {
   while (!queues.causal.empty() && admits(frame, Monotonic::now())) {
-    consume(std::move(*step::pop_foreground(queues)), event, watch, action, input);
+    consume(std::move(*step::pop_foreground(queues)), event, watch, input);
     ++frame.foreground;
   }
 }
@@ -84,19 +82,18 @@ Monotonic::time_point finish_frame(Clock &clock, PhaseCosts &costs, const Frame 
   return clock.next_start;
 }
 void drain_foreground(step::WorkQueues &queues, Frame &frame, EventConsumer event,
-                      WatchConsumer watch, ActionConsumer action, InputConsumer input) {
+                      WatchConsumer watch, InputConsumer input) {
   ZoneScopedN("foreground work");
-  while (admits(frame, Monotonic::now())) {
+  while (frame.foreground == 0 || admits(frame, Monotonic::now())) {
     auto item = step::pop_foreground(queues);
     if (!item)
       return;
-    consume(std::move(*item), event, watch, action, input);
+    consume(std::move(*item), event, watch, input);
     ++frame.foreground;
   }
 }
 void drain_background(step::WorkQueues &queues, Frame &frame, BackgroundConsumer background,
-                      EventConsumer event, WatchConsumer watch, ActionConsumer action,
-                      InputConsumer input) {
+                      EventConsumer event, WatchConsumer watch, InputConsumer input) {
   ZoneScopedN("background work");
   while (frame.background == 0 || admits(frame, Monotonic::now())) {
     auto item = step::pop_background(queues);
@@ -104,7 +101,7 @@ void drain_background(step::WorkQueues &queues, Frame &frame, BackgroundConsumer
       return;
     background.run(background.context, std::move(*item));
     ++frame.background;
-    drain_causal(queues, frame, event, watch, action, input);
+    drain_causal(queues, frame, event, watch, input);
   }
 }
 } // namespace amber::drive

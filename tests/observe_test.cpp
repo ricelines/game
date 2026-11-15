@@ -84,7 +84,7 @@ void observation_geometry_and_live_light() {
                     samples);
   require(samples.empty() && lights.candidates.empty(), "removed light leaves no retained cells");
 }
-void zones_subscriptions_hearing_and_cache() {
+void zones_subscriptions_hearing_and_observation() {
   Scene scene;
   Values values;
   auto receiver = scene.box({.2f, .2f, .2f}, {0, 0, 1}, sp::Motion::Static, 0, false);
@@ -147,7 +147,6 @@ void zones_subscriptions_hearing_and_cache() {
   auto heard = ob::take_heard(hearing, 1, 40, omitted);
   require(omitted == 5 && heard.size() == 40 && hearing.queues.empty(),
           "hearing newest count and distance-only delivery");
-  ob::SessionCache cache;
   ob::PreparedThing thing{{receiver, 1, 0, 2, false, false, true, {}, ob::Seen::Salience::Near},
                           {receiver,
                            "arbitrary.model",
@@ -156,23 +155,23 @@ void zones_subscriptions_hearing_and_cache() {
                            {"custom.action"}}};
   ob::SelfDescription self{receiver, {}, {0, 0, 0}, 0, nullptr, {}};
   std::vector<std::string> actions{"body.custom"};
-  auto render = [&] {
-    return ob::observation(cache, 0, 20, self, std::span(&thing, 1), {}, heard, actions, {});
-  };
+  auto render = [&] { return ob::observation(0, 20, self, std::span(&thing, 1), {}, actions, {}); };
   auto first = render();
   require(first["things"][0].contains("measured") && first["things"][0]["says"]["name"] == "claim",
           "measured truth and maker text separate");
   auto second = render();
-  require(second["things"][0].size() == 3 && !second.contains("body_actions"),
-          "unchanged observation is compact");
+  require(second == first && second.contains("body_actions"),
+          "native observation remains full for gateway-owned session compaction");
+  require(first["self"]["h"] == to_string(receiver) && first["self"]["at"].size() == 3 &&
+              first["self"]["zone"] == "" && first.contains("heard") &&
+              !first["things"][0].contains("lux"),
+          "S5 fields and boolean light projection");
   thing.description.measured["size"] = 5;
   auto changed = render();
   require(changed["things"][0].contains("measured"), "live value invalidates descriptive cache");
   thing.seen.reachable = false;
   auto far = render();
   require(!far["things"][0].contains("actions"), "out-of-reach action discovery hidden");
-  ob::forget(cache);
-  require(render().contains("body_actions"), "reconnect resets per-session cache");
 }
 void benchmark_inert_density() {
   for (std::uint32_t count : {0u, 10000u, 100000u}) {
@@ -226,7 +225,7 @@ int main(int argc, char **argv) {
       return 0;
     }
     observation_geometry_and_live_light();
-    zones_subscriptions_hearing_and_cache();
+    zones_subscriptions_hearing_and_observation();
     std::cout << "observation tests passed\n";
     return 0;
   } catch (const std::exception &e) {

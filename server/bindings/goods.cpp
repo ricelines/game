@@ -7,18 +7,6 @@
 #include <lualib.h>
 
 namespace amber::bindings {
-namespace {
-int denied(lua_State *L, std::string_view reason, Handle object) {
-  lua_createtable(L, 0, 3);
-  lua_pushstring(L, "denied");
-  lua_setfield(L, -2, "effect");
-  lua_pushlstring(L, reason.data(), reason.size());
-  lua_setfield(L, -2, "reason");
-  react::push_handle(L, object);
-  lua_setfield(L, -2, "object");
-  return 1;
-}
-} // namespace
 int plot_objects_binding(lua_State *L) {
   const auto &b = *static_cast<const PlotObjectsBinding *>(react::binding_data(L));
   auto &i = react::invocation(L);
@@ -40,81 +28,98 @@ int plot_objects_binding(lua_State *L) {
   }
   return 1;
 }
-int hold_goods_binding(lua_State *L) {
-  auto &b = *static_cast<HoldGoodsBinding *>(react::binding_data(L));
-  auto &i = react::invocation(L);
-  auto h = react::check_handle(L, 2);
-  if (!b.identity.valid(h))
-    return denied(L, perm::reason_text(perm::Reason::StaleGoods), h);
-  if (h != i.self.object && std::ranges::find(i.acquired, h) == i.acquired.end() &&
-      std::ranges::find(i.parts, h) == i.parts.end())
-    luaL_error(L, "hold_goods needs a live acquired object");
+namespace {
+std::string hold_inputs(const nlohmann::json &input) {
+  return input.is_object() && input.empty() ? "" : "hold_goods takes no inputs";
+}
+drive::NativeCompletion hold_goods(void *context, const drive::NativeCall &call) {
+  auto &b = *static_cast<HoldGoodsBinding *>(context);
+  const auto h = call.request.target;
+  const auto recipient = b.authority.owner[h.slot()];
+  const auto deny = [&](std::string_view reason) {
+    drive::NativeCompletion out;
+    out.result = record::Result::Denied;
+    out.reply = {{"ok", false},
+                 {"denied",
+                  {{"need", "transfer"},
+                   {"on", to_string(h)},
+                   {"why", reason},
+                   {"fix", "ask p:" + std::to_string(recipient) +
+                               " for Transfer on the item and its declared parts"}}}};
+    return out;
+  };
   if (const auto *parents = b.declared_parts.in.get(h.slot()); parents && !parents->empty())
-    return denied(L, perm::reason_text(perm::Reason::InvalidScope), h);
-  const auto recipient = player_arg(L, 3);
+    return deny(perm::reason_text(perm::Reason::InvalidScope));
   std::vector<Handle> descendants;
   if (const auto *children = b.declared_parts.out.get(h.slot()))
     descendants = *children;
   for (std::size_t index = 0; index < descendants.size(); ++index) {
-    auto child = descendants[index];
+    const auto child = descendants[index];
     if (!b.identity.valid(child))
-      return denied(L, perm::reason_text(perm::Reason::StaleGoods), child);
+      return deny(perm::reason_text(perm::Reason::StaleGoods));
     if (const auto *children = b.declared_parts.out.get(child.slot()))
       descendants.insert(descendants.end(), children->begin(), children->end());
   }
   std::vector<perm::Target> parts;
-  parts.reserve(descendants.size());
   for (auto child : descendants)
     parts.push_back(perm::target(b.identity, b.authority, b.limits, child));
-  auto delivered = b.delivery.present_bodies.find(recipient);
-  bool present =
+  const auto delivered = b.delivery.present_bodies.find(recipient);
+  const bool present =
       delivered != b.delivery.present_bodies.end() && b.identity.valid(delivered->second);
-  Handle custodian = present ? delivered->second : Handle{};
-  auto plan = perm::prepare_store_goods(b.players, b.grants,
-                                        perm::Holder::script(i.self.script, i.self.object),
-                                        perm::target(b.identity, b.authority, b.limits, h), parts,
-                                        recipient, custodian, present, b.mailbox_max, i.step);
-  if (!plan)
-    return denied(L, perm::reason_text(plan.reason), h);
+  const auto custodian = present ? delivered->second : Handle{};
+  const auto holder =
+      std::holds_alternative<PlayerId>(call.request.caller)
+          ? perm::Holder::player(std::get<PlayerId>(call.request.caller))
+          : perm::Holder::script(std::get<ScriptHolder>(call.request.caller).script,
+                                 std::get<ScriptHolder>(call.request.caller).object);
+  if (!recipient || recipient >= b.players.rows.size())
+    return deny(perm::reason_text(perm::Reason::UnknownHolder));
   const auto &player = b.players.rows[recipient];
   const auto &stored = present ? player.inventory : player.mailbox;
-  const bool changed = !(b.flags.get(h.slot()) & Held) ||
-                       b.parents.parent[h.slot()] != plan.custodian ||
+  const bool changed = !(b.flags.get(h.slot()) & Held) || b.parents.parent[h.slot()] != custodian ||
                        std::ranges::find(stored, h) == stored.end();
   if (changed) {
-    auto result = space::custody(b.space, b.identity, h, plan.custodian, b.parents, b.flags,
-                                 b.relations, b.relation_changes, descendants);
-    if (result.status != space::Status::Ok)
-      return denied(L, space::status_text(result.status), h);
-    perm::commit_store_goods(b.players, plan);
+    const auto ready =
+        space::can_custody(b.space, b.identity, h, custodian, b.parents, descendants);
+    if (ready.status != space::Status::Ok)
+      return deny(space::status_text(ready.status));
+  }
+  const auto stored_goods = perm::store_goods(
+      b.players, b.grants, holder, perm::target(b.identity, b.authority, b.limits, h), parts,
+      recipient, custodian, present, b.mailbox_max, call.step);
+  if (!stored_goods)
+    return deny(perm::reason_text(stored_goods.reason));
+  if (changed) {
+    // The readonly custody check passed; only player lists changed since then.
+    [[maybe_unused]] const auto result =
+        space::custody(b.space, b.identity, h, custodian, b.parents, b.flags, b.relations,
+                       b.relation_changes, descendants);
+    assert(result.status == space::Status::Ok);
     auto closure = descendants;
     closure.push_back(h);
+    perm::update_plots(b.identity, b.transforms, b.plot_write, b.plots, closure, false);
     scene_visible(b.scene, closure, false);
   }
-  record::Event event;
-  event.step = i.step;
-  event.kind = record::Kind::System;
-  event.actor = record::Actor::script(i.self.script);
-  event.name = "hold_goods";
-  event.result = changed ? record::Result::Applied : record::Result::NoEffect;
-  event.changed = changed;
-  event.things = {h};
-  if (i.declaration)
-    event.script_author = i.declaration->author;
-  event.detail = {{"recipient", "p:" + std::to_string(recipient)},
-                  {"location", present ? "inventory" : "mailbox"}};
-  i.effects->ordered.push_back(std::move(event));
-  i.effects->changed |= changed;
-  lua_createtable(L, 0, 4);
-  lua_pushstring(L, "held");
-  lua_setfield(L, -2, "effect");
-  react::push_handle(L, h);
-  lua_setfield(L, -2, "object");
-  auto account = "p:" + std::to_string(recipient);
-  lua_pushlstring(L, account.data(), account.size());
-  lua_setfield(L, -2, "recipient");
-  lua_pushstring(L, present ? "inventory" : "mailbox");
-  lua_setfield(L, -2, "location");
-  return 1;
+  drive::NativeCompletion out;
+  out.changed = changed;
+  out.result = changed ? record::Result::Applied : record::Result::NoEffect;
+  out.reply = {{"ok", true},
+               {"effect", changed ? "applied" : "none"},
+               {"object", to_string(h)},
+               {"recipient", "p:" + std::to_string(recipient)},
+               {"location", present ? "inventory" : "mailbox"}};
+  return out;
+}
+} // namespace
+void register_hold_goods_action(react::Terms &terms, command::NativeActions &declarations,
+                                drive::NativeOperations &operations, HoldGoodsBinding &binding) {
+  const auto id = command::declare_native(
+      declarations, terms, "engine.hold_goods",
+      "Store the selected item for its existing owner, using Transfer permission.", "transfer",
+      false,
+      {{"type", "object"},
+       {"properties", nlohmann::json::object()},
+       {"additionalProperties", false}});
+  drive::register_native(operations, id, {hold_inputs, hold_goods, &binding});
 }
 } // namespace amber::bindings

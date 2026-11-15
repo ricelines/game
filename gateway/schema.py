@@ -23,9 +23,8 @@ def _tool(name, description, properties=None, required=()):
 TOOLS = [
     _tool(
         "look",
-        "Observe what your body can currently perceive. Unchanged things may be abbreviated. "
-        "Use full=true when starting a fresh context to resend current descriptions and actions.",
-        {"limit": {"type": "integer", "minimum": 1}, "full": {"type": "boolean"}},
+        "Observe what your body can currently perceive. Unchanged things may be abbreviated.",
+        {"limit": {"type": "integer", "minimum": 1}},
     ),
     _tool(
         "inspect",
@@ -39,8 +38,8 @@ TOOLS = [
     _tool(
         "actions",
         (
-            "Discover available actions, their inputs, rights and examples. Discover before "
-            "guessing an action signature."
+            "Optional help: list available actions or read one action's description, inputs, "
+            "right and example. Listed one-line signatures can be called directly with do."
         ),
         {
             "target": {"type": "string"},

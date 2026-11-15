@@ -134,7 +134,15 @@ void initialize_objects(ObjectLifecycle &lifecycle, std::span<const Handle> all,
 }
 bool can_retire_objects(const ObjectLifecycle &lifecycle, std::span<const Handle> objects,
                         std::string &error) {
-  return objects.empty() || commerce::can_retire_goods(lifecycle.owners_.commerce, objects, error);
+  if (objects.empty())
+    return true;
+  const auto &b = lifecycle.owners_;
+  const auto money = perm::can_refund_object_accounts(b.ledger, b.authority, objects);
+  if (money != perm::Reason::Allowed) {
+    error = perm::reason_text(money);
+    return false;
+  }
+  return commerce::can_retire_goods(b.commerce, objects, error);
 }
 void retire_objects(ObjectLifecycle &lifecycle, std::span<const Handle> objects,
                     const InvocationInput &input, react::DeferredEffects &effects) {
@@ -143,6 +151,20 @@ void retire_objects(ObjectLifecycle &lifecycle, std::span<const Handle> objects,
   auto &b = lifecycle.owners_;
   auto &scene = b.scene.owners_;
   commerce::retire_goods(b.commerce, objects, effects);
+  for (const auto &refund : perm::refund_object_accounts(b.ledger, b.authority, objects)) {
+    record::Event event;
+    event.step = input.step;
+    event.kind = record::Kind::System;
+    event.name = "account_refund";
+    event.changed = true;
+    event.result = record::Result::Applied;
+    event.things = {refund.object};
+    event.detail = {{"from", perm::account_name(perm::Account::object(refund.object))},
+                    {"to", perm::account_name(perm::Account::player(refund.owner))},
+                    {"amount", refund.amount},
+                    {"agent", false}};
+    effects.ordered.emplace_back(std::move(event));
+  }
   retire_reactions(b.reaction_retirement, objects, input, effects);
   perm::revoke_objects(b.grants, b.players, objects);
   for (auto h : objects) {

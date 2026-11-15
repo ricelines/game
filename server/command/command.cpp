@@ -58,12 +58,11 @@ Resolution selected(Declaration declaration, Route route, Handle receiver, Handl
   Resolution result;
   result.route = route;
   result.receiver = receiver;
-  result.permission_target = declaration.action->right_on == "self" ? receiver : target;
+  result.permission_target = receiver;
   result.right = declaration.action->right;
   result.reach = declaration.action->reach;
-  result.mechanics = declaration.action->mechanics;
   result.declaration_script = declaration.script;
-  if (!result.permission_target && (!result.right.empty() || result.reach))
+  if (!result.permission_target || (result.reach && !target))
     result.failure = Failure::MissingTarget;
   return result;
 }
@@ -125,7 +124,6 @@ Resolution resolve(const NativeActions &native, const react::Terms &terms,
       result.failure = Failure::MissingTarget;
     return result;
   }
-  // An installed script never obtains a player's direct-body invocation envelope.
   if (std::holds_alternative<PlayerId>(request.caller) && identity.valid(body)) {
     if (const auto found = declared(models, scripts, installed, identity, body, request.action);
         found.action)
@@ -145,6 +143,7 @@ Resolution resolve(const NativeActions &native, const react::Terms &terms,
   }
   result.permission_target = result.receiver;
   result.right = "use";
+  result.reach = true;
   return result;
 }
 bool collides(const NativeActions &native, const react::ScriptDeclaration &script) {

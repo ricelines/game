@@ -21,7 +21,6 @@ struct SelectorWatches {
 };
 struct HandlerTurns {
   bindings::Execution &execution;
-  const drive::StructuralOperations &structural;
   const react::Triggers &triggers;
   const react::ValueRead &values;
   SelectorWatches selectors;
@@ -36,14 +35,8 @@ struct HandlerTurns {
   MassReconciliation *mass = nullptr;
 };
 void reconcile_effects(HandlerTurns &, react::DeferredEffects &, const record::Origin &);
-bindings::CompletedInvocation run_invocation(HandlerTurns &, const drive::PlannedInvocation &,
-                                             std::vector<Handle> *created = nullptr);
 void consume_event(void *, drive::EventTurn);
 void consume_background(void *, step::BackgroundItem);
-struct WatchTurns {
-  HandlerTurns &handlers;
-  std::vector<GapDraft> &gaps;
-};
 void consume_watch(void *, step::WatchWork);
 struct ActionTurns {
   HandlerTurns &handlers;
@@ -60,7 +53,6 @@ struct ActionTurns {
   const perm::Players &players;
   const perm::Grants &grants;
   const space::Space &space;
-  const Relation &grasped;
   const step::Intents &intents;
   std::vector<GapDraft> &gaps;
   float reach_m;
@@ -71,6 +63,8 @@ struct ActionOutcome {
   bool deferred = false;
 };
 ActionOutcome perform_action(ActionTurns &, ActionRequest, nlohmann::json native_arguments,
-                             const record::Origin &, std::optional<drive::InputOrder> order = {});
-void consume_action(void *, step::ActionWork);
+                             const record::Origin &, std::optional<drive::InputOrder> order = {},
+                             std::chrono::steady_clock::time_point deadline = {});
+bindings::CompletedInvocation run_invocation(ActionTurns &, const drive::PlannedInvocation &,
+                                             std::vector<Handle> *created = nullptr);
 } // namespace amber::bindings

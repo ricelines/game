@@ -1,79 +1,54 @@
 #include "construction.hpp"
-#include "bindings/arguments/arguments.hpp"
 
-#include <algorithm>
-#include <lua.h>
-#include <lualib.h>
+#include <charconv>
 
 namespace amber::bindings {
 namespace {
-react::StructuralRequest::Binding binding(lua_State *L, const ConstructionBinding &b,
-                                          int model_index, int params_index, int material_index) {
-  const auto model = model_arg(L, model_index);
-  const auto params = lua_isnoneornil(L, params_index) ? 0 : unsigned_arg(L, params_index, true);
-  try {
-    (void)catalog::resolve_asset(b.models, b.parameters, model, params);
-  } catch (const std::exception &error) {
-    luaL_error(L, "%s", error.what());
-  }
-  const auto material = lua_isnoneornil(L, material_index) ? b.models.rows[model].material
-                                                           : term_arg(L, material_index, b.terms);
-  if (b.terms.rows[material].kind != react::Kind::Material)
-    luaL_error(L, "binding material is not a material");
-  return {model, material, params};
-}
-Handle target(lua_State *L, int index) {
-  const auto object = react::check_handle(L, index);
-  const auto &inv = react::invocation(L);
-  if (object != inv.self.object &&
-      std::find(inv.acquired.begin(), inv.acquired.end(), object) == inv.acquired.end() &&
-      std::find(inv.parts.begin(), inv.parts.end(), object) == inv.parts.end())
-    luaL_error(L, "structural target was not acquired");
-  return object;
-}
-int queued(lua_State *L, react::StructuralRequest request) {
-  if (!react::queue_structural(react::invocation(L), std::move(request)))
-    luaL_error(L, "structural creation/replacement requires approved active world-rule dispatch");
-  lua_createtable(L, 0, 1);
-  lua_pushboolean(L, true);
-  lua_setfield(L, -2, "queued");
-  return 1;
-}
-void world_rule(lua_State *L) {
-  if (!react::may_construct(react::invocation(L)))
-    luaL_error(L, "creation/replacement requires approved active world-rule dispatch");
+using Json = nlohmann::json;
+std::string inputs(const Json &value) {
+  return value.is_object() ? "" : "expected an input record";
 }
 } // namespace
-int create_binding(lua_State *L) {
-  const auto &b = *static_cast<ConstructionBinding *>(react::binding_data(L));
-  world_rule(L);
-  react::StructuralRequest request;
-  request.kind = react::StructuralRequest::Kind::Create;
-  request.binding = binding(L, b, 2, 3, 4);
-  request.position = vector_arg(L, 5);
-  request.rotation = rotation_arg(L, 6);
-  request.exchange = capture_exchange(L, 7, b.properties, b.processes, b.terms, b.exchange_max);
-  return queued(L, std::move(request));
+ConstructionActions declare_construction_actions(react::Terms &terms,
+                                                 command::NativeActions &declarations) {
+  ConstructionActions ids;
+  const Json vector = {
+      {"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 3}, {"maxItems", 3}};
+  const Json quaternion = {
+      {"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 4}, {"maxItems", 4}};
+  const Json str = {{"type", "string"}};
+  const Json material = {{"anyOf", Json::array({str, {{"type", "integer"}, {"minimum", 1}}})}};
+  const Json params = {{"type", "integer"}, {"minimum", 0}};
+  const auto add = [&](std::string name, std::string description, std::string right, bool reach,
+                       Json properties, Json required, TermId &result) {
+    result = command::declare_native(declarations, terms, std::move(name), std::move(description),
+                                     std::move(right), reach,
+                                     {{"type", "object"},
+                                      {"properties", std::move(properties)},
+                                      {"required", std::move(required)},
+                                      {"additionalProperties", false}});
+  };
+  add("engine.create", "Place a model with the caller's Build permission on its destination plot.",
+      "", false,
+      {{"model", str},
+       {"params", params},
+       {"material", material},
+       {"position", vector},
+       {"rotation", quaternion}},
+      {"model", "position"}, ids.create);
+  add("engine.destroy",
+      "Remove the selected object and its declared parts using Destroy permission.", "destroy",
+      false, Json::object(), Json::array(), ids.destroy);
+  add("engine.reconfigure", "Change the selected model binding using Edit permission.", "edit",
+      true, {{"model", str}, {"params", params}, {"material", material}}, {"model"},
+      ids.reconfigure);
+  return ids;
 }
-int remove_binding(lua_State *L) {
-  const auto &b = *static_cast<RemovalBinding *>(react::binding_data(L));
-  const auto object = target(L, 2);
-  if (!b.identity.valid(object))
-    luaL_error(L, "structural target is no longer alive");
-  react::StructuralRequest request;
-  request.kind = react::StructuralRequest::Kind::Destroy;
-  request.target = object;
-  request.exchange = capture_exchange(L, 3, b.properties, b.processes, b.terms, b.exchange_max);
-  return queued(L, std::move(request));
-}
-int replace_binding(lua_State *L) {
-  const auto &b = *static_cast<ConstructionBinding *>(react::binding_data(L));
-  world_rule(L);
-  react::StructuralRequest request;
-  request.kind = react::StructuralRequest::Kind::ReplaceBinding;
-  request.target = target(L, 2);
-  request.binding = binding(L, b, 3, 4, 5);
-  request.exchange = capture_exchange(L, 6, b.properties, b.processes, b.terms, b.exchange_max);
-  return queued(L, std::move(request));
+void register_construction_actions(drive::NativeOperations &operations, ConstructionActions ids,
+                                   CreateOperation &creation, RemoveOperation &removal,
+                                   ReplaceOperation &replacement) {
+  drive::register_native(operations, ids.create, {inputs, create_instance, &creation});
+  drive::register_native(operations, ids.destroy, {inputs, remove_instance, &removal});
+  drive::register_native(operations, ids.reconfigure, {inputs, replace_instance, &replacement});
 }
 } // namespace amber::bindings

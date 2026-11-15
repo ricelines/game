@@ -141,8 +141,8 @@ def require(value, message):
 
 
 class Journey:
-    def __init__(self, client, output, keys):
-        self.client, self.output, self.keys = client, output, keys
+    def __init__(self, client, output, keys, sessions):
+        self.client, self.output, self.keys, self.sessions = client, output, keys, sessions
         self.report = {
             "kind": "manual actual native/gateway/bake integration",
             "requests": [],
@@ -176,6 +176,11 @@ class Journey:
             return result
 
     async def tool(self, actor, name, **arguments):
+        if name == "look":
+            # This manual geometry regression needs full rows to compare assets;
+            # session compaction is exercised separately by gateway tests.
+            session = await self.sessions.get(self.keys[actor], "live-authoring-" + actor)
+            session.forget_observation()
         return await self.request(actor, "/tools/" + name, arguments)
 
     async def act(self, actor, action, *, target=None, **arguments):
@@ -198,7 +203,7 @@ class Journey:
             if observed["self"]["intent"] is None:
                 goods = await self.tool(actor, "inspect", target=target)
                 require(
-                    math.dist(observed["self"]["pos"], goods["position"]) < 1.6,
+                    math.dist(observed["self"]["at"], goods["position"]) < 1.6,
                     "normal approach stopped outside edit reach",
                 )
                 return
@@ -207,7 +212,7 @@ class Journey:
 
     async def open_entrance(self):
         # This authored seed fixture requires walking through its ordinary door.
-        observed = await self.tool("author", "look", full=True, limit=500)
+        observed = await self.tool("author", "look", limit=500)
         doors = [
             row["h"]
             for row in observed["things"]
@@ -270,7 +275,7 @@ async def run(options):
     sessions = Sessions(options.world)
     authoring = Authoring(pool)
     async with TestClient(TestServer(create_app(sessions, authoring))) as client:
-        test = Journey(client, options.output, keys)
+        test = Journey(client, options.output, keys, sessions)
         watcher = await Watcher(options.world, options.watch_key).open()
         try:
             broken = (
@@ -349,7 +354,7 @@ async def run(options):
 
             async def ordinary_inputs():
                 observed, changed = await asyncio.gather(
-                    test.tool("author", "look", full=True),
+                    test.tool("author", "look"),
                     test.act("other", "base.make_material", material="base.wood", kg=0.001),
                 )
                 require(
@@ -482,7 +487,7 @@ async def run(options):
                 proposed["progress"] == {"completed": 2, "total": 2},
                 "definition edit did not bake exactly the two distinct current parameter sets",
             )
-            staged = await test.tool("author", "inspect", target=proposed["revision_model"])
+            staged = await test.tool("author", "inspect", target=proposed["proposal"])
             require(
                 staged["source_hash"] == hashlib.sha256(revision.encode()).hexdigest()
                 and json.loads(staged["canonical_params"]) == {"width": 0.14}
@@ -498,7 +503,7 @@ async def run(options):
             registrations = [
                 event
                 for event in staged_events["events"]
-                if event.get("model") == proposed["revision_model"]
+                if event.get("model") == proposed["proposal"]
                 and event.get("name") in {"register_model", "register_variant"}
             ]
             require(len(registrations) == 1, "one edit staged multiple native registration choices")
@@ -524,14 +529,11 @@ async def run(options):
             }
             revision_args = {
                 "model": model,
-                "revision_model": proposed["revision_model"],
-                "expected_source_hash": proposed["expected_source_hash"],
+                "proposal": proposed["proposal"],
             }
             denied = await test.act("other", "base.revise_model", **revision_args)
             require(
-                denied.get("effect") == "none"
-                and "only the model author can revise its definition"
-                in denied.get("script_errors", []),
+                denied.get("ok") is False and denied.get("denied", {}).get("need") == "edit",
                 "another player revised a foreign model definition",
             )
             still = [await test.tool("author", "inspect", target=h) for h in [first, second]]
@@ -588,10 +590,10 @@ async def run(options):
                 )
             streamed_after = await watcher.expect(after)
             committed_step = (await test.tool("author", "look", limit=1))["step"]
-            stale = await test.act("author", "base.revise_model", **revision_args)
+            repeated = await test.act("author", "base.revise_model", **revision_args)
             require(
-                stale.get("effect") == "none" and stale.get("script_errors"),
-                "stale source hash was accepted after model revision",
+                repeated.get("ok") is True and repeated.get("reason") == "no_effect",
+                "repeating the current definition should have no effect",
             )
             definition = await test.tool("author", "inspect", target=model)
             require(
@@ -656,7 +658,7 @@ async def run(options):
                 "ordinary_reconfigure": True,
                 "ordinary_revision": True,
                 "foreign_author_denied": True,
-                "stale_revision_denied": True,
+                "repeated_definition_no_effect": True,
                 "invalid_required_set_no_commit": True,
                 "actual_cli_current_definition": cli_reply["source_hash"],
                 "before": before,

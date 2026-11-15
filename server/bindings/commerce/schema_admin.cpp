@@ -34,6 +34,27 @@ void holder(const Json &value) {
   if (!parse_handle(value.at("on").get<std::string>()))
     throw std::invalid_argument("script holder needs a full object handle");
 }
+void scope(const Json &scope) {
+  fields(scope, {}, {"object", "owned_on_plot", "account", "avatar", "plot", "issuance"});
+  if (scope.size() != 1)
+    throw std::invalid_argument("choose one scope");
+  if (scope.contains("owned_on_plot")) {
+    fields(scope.at("owned_on_plot"), {"owner", "plot"});
+    authority::identifier(scope.at("owned_on_plot").at("owner"), "p:");
+    if (!scope.at("owned_on_plot").at("plot").is_number_unsigned() &&
+        !scope.at("owned_on_plot").at("plot").is_number_integer())
+      throw std::invalid_argument("plot must be a positive ID");
+    if (scope.at("owned_on_plot").at("plot").get<std::int64_t>() <= 0)
+      throw std::invalid_argument("plot must be a positive ID");
+  } else if (scope.contains("plot")) {
+    if (!scope.at("plot").is_number_integer() || scope.at("plot").get<std::int64_t>() <= 0)
+      throw std::invalid_argument("plot must be a positive ID");
+  } else if (scope.contains("issuance")) {
+    if (scope.at("issuance") != true)
+      throw std::invalid_argument("issuance must be true");
+  } else
+    string(scope.begin().value());
+}
 void strings(const Json &value) {
   if (!value.is_array())
     throw std::invalid_argument("rights must be an array");
@@ -45,7 +66,7 @@ void preset_fields(const Json &row, bool plot) {
     if (row.contains(key))
       strings(row.at(key));
   if (row.contains("group") && !row.at("group").is_null())
-    authority::identifier(row.at("group"), "g:");
+    authority::identifier(row.at("group"), "group:");
   if (!plot && row.contains("no_copy") && !row.at("no_copy").is_boolean())
     throw std::invalid_argument("no_copy must be boolean");
 }
@@ -69,26 +90,7 @@ std::string validate_grant(const Json &row) {
   return validate([&] {
     fields(row, {"holder", "scope", "rights"}, {"cap", "period_s", "expires_s"});
     holder(row.at("holder"));
-    const auto &scope = row.at("scope");
-    fields(scope, {}, {"object", "owned_on_plot", "account", "avatar", "plot", "issuance"});
-    if (scope.size() != 1)
-      throw std::invalid_argument("choose one scope");
-    if (scope.contains("owned_on_plot")) {
-      fields(scope.at("owned_on_plot"), {"owner", "plot"});
-      authority::identifier(scope.at("owned_on_plot").at("owner"), "p:");
-      if (!scope.at("owned_on_plot").at("plot").is_number_unsigned() &&
-          !scope.at("owned_on_plot").at("plot").is_number_integer())
-        throw std::invalid_argument("plot must be a positive ID");
-      if (scope.at("owned_on_plot").at("plot").get<std::int64_t>() <= 0)
-        throw std::invalid_argument("plot must be a positive ID");
-    } else if (scope.contains("plot")) {
-      if (!scope.at("plot").is_number_integer() || scope.at("plot").get<std::int64_t>() <= 0)
-        throw std::invalid_argument("plot must be a positive ID");
-    } else if (scope.contains("issuance")) {
-      if (scope.at("issuance") != true)
-        throw std::invalid_argument("issuance must be true");
-    } else
-      string(scope.begin().value());
+    scope(row.at("scope"));
     strings(row.at("rights"));
     if (row.at("rights").empty())
       throw std::invalid_argument("grant needs at least one right");
@@ -104,13 +106,18 @@ std::string validate_grant(const Json &row) {
 }
 std::string validate_revoke(const Json &row) {
   return validate([&] {
-    fields(row, {}, {"grant", "holder"});
-    if (row.size() != 1)
-      throw std::invalid_argument("choose one grant or holder");
-    if (row.contains("grant"))
+    fields(row, {}, {"grant", "holder", "scope"});
+    if (row.contains("grant")) {
+      if (row.size() != 1)
+        throw std::invalid_argument("choose one grant or holder with optional scope");
       authority::identifier(row.at("grant"), "grant:");
-    else
+    } else {
+      if (!row.contains("holder"))
+        throw std::invalid_argument("revoke needs a grant or holder");
       holder(row.at("holder"));
+      if (row.contains("scope"))
+        scope(row.at("scope"));
+    }
   });
 }
 std::string validate_list_grants(const Json &row) {
@@ -134,7 +141,7 @@ std::string validate_group_create(const Json &row) {
 std::string validate_group_member(const Json &row) {
   return validate([&] {
     fields(row, {"group", "player", "member"});
-    authority::identifier(row.at("group"), "g:");
+    authority::identifier(row.at("group"), "group:");
     authority::identifier(row.at("player"), "p:");
     if (!row.at("member").is_boolean())
       throw std::invalid_argument("member must be boolean");
@@ -159,7 +166,10 @@ AdminDeclarations declare_admin(react::Terms &terms, command::NativeActions &nat
   const Json boolean = {{"type", "boolean"}};
   const Json rights = {{"type", "array"}, {"items", str}, {"uniqueItems", true}};
   const Json group = {{"type", {"string", "null"}},
-                      {"description", "g:N; null clears the assigned group"}};
+                      {"description", "group:N; null clears the assigned group"}};
+  const Json scope = {{"type", "object"},
+                      {"description", "Exactly one of object, owned_on_plot:{owner,plot}, "
+                                      "account:p:N, avatar, plot or issuance:true"}};
   const Json holder = {
       {"oneOf",
        Json::array({str, schema({{"script", str}, {"on", str}}, {"script", "on"},
@@ -169,31 +179,32 @@ AdminDeclarations declare_admin(react::Terms &terms, command::NativeActions &nat
     return command::declare_native(native, terms, name, description, "", false, std::move(inputs));
   };
   AdminDeclarations ids;
-  ids.grant = add(
-      "engine.grant",
-      "Grant current rights to a player or installed script. Spending and script holders require "
-      "future expiry; spending also requires a period. Delegation shares its parent's allowance.",
-      schema({{"holder", holder},
-              {"scope",
-               {{"type", "object"},
-                {"description", "Exactly one of object, owned_on_plot:{owner,plot}, "
-                                "account:p:N, avatar, plot or issuance:true"}}},
-              {"rights", rights},
-              {"cap", {{"type", "integer"}, {"minimum", 0}}},
-              {"period_s", {{"type", "number"}, {"minimum", 0}}},
-              {"expires_s", {{"type", "number"}, {"minimum", 0}}}},
-             {"holder", "scope", "rights"},
-             {{"holder", "p:PLAYER_ID"},
-              {"scope", {{"object", "o:SLOT.GENERATION"}}},
-              {"rights", {"use"}},
-              {"expires_s", 3600}}));
-  ids.revoke = add(
-      "engine.revoke",
-      "Revoke one issued grant (architects may revoke any) or all grants you issued to a holder. "
-      "Delegated children are revoked too.",
-      schema({{"grant", str}, {"holder", holder}}, Json::array(), {{"grant", "grant:GRANT_ID"}}));
+  ids.grant =
+      add("engine.grant",
+          "Grant current rights to a player or installed script. Spending and script-held or "
+          "script-issued grants require future expiry; spending also requires a period. "
+          "Delegation shares its parent's allowance.",
+          schema({{"holder", holder},
+                  {"scope", scope},
+                  {"rights", rights},
+                  {"cap", {{"type", "integer"}, {"minimum", 0}}},
+                  {"period_s", {{"type", "number"}, {"minimum", 0}}},
+                  {"expires_s", {{"type", "number"}, {"minimum", 0}}}},
+                 {"holder", "scope", "rights"},
+                 {{"holder", "p:PLAYER_ID"},
+                  {"scope", {{"object", "o:SLOT.GENERATION"}}},
+                  {"rights", {"use"}},
+                  {"expires_s", 3600}}));
+  ids.revoke =
+      add("engine.revoke",
+          "Revoke one issued grant or issued grants to a holder, optionally on one exact scope. "
+          "Scripts may revoke their issued children or relinquish their own held grants. "
+          "Architects may revoke any grant. Delegated children are revoked too.",
+          schema({{"grant", str}, {"holder", holder}, {"scope", scope}}, Json::array(),
+                 {{"grant", "grant:GRANT_ID"}}));
   ids.list_grants = add("engine.list_grants",
-                        "Read your indexed held and given grants, remaining caps and expiry.",
+                        "Read your held and given grants, remaining caps and expiry; scripts see "
+                        "their exact held grants and issued children.",
                         schema(Json::object(), Json::array(), Json::object()));
   ids.preset = add(
       "engine.preset",
@@ -212,7 +223,7 @@ AdminDeclarations declare_admin(react::Terms &terms, command::NativeActions &nat
       "engine.group_member",
       "As group controller, add/remove a player; any member may leave themself.",
       schema({{"group", str}, {"player", str}, {"member", boolean}}, {"group", "player", "member"},
-             {{"group", "g:GROUP_ID"}, {"player", "p:PLAYER_ID"}, {"member", true}}));
+             {{"group", "group:GROUP_ID"}, {"player", "p:PLAYER_ID"}, {"member", true}}));
   ids.plot_permissions =
       add("engine.plot_permissions",
           "As current plot owner, patch build/enter/run_scripts rights, assigned group and player "

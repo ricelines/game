@@ -18,16 +18,6 @@ struct StructuralRights {
   const space::Space &space;
   float reach_m;
 };
-struct ResourceCommit {
-  IdentityRead identity;
-  react::Properties &properties;
-  react::Processes &processes;
-  react::ScriptStates &states;
-  const react::Terms &terms;
-  const react::Vm &vm;
-};
-std::string check_resources(const ResourceCommit &, const drive::StructuralCall &);
-void commit_resources(ResourceCommit &, const drive::StructuralCall &, react::DeferredEffects &);
 struct ConstructionCatalog {
   const catalog::Models &models;
   const catalog::ParameterBlocks &parameters;
@@ -59,14 +49,13 @@ struct CreateOperation {
   GeometryInstallation &geometry;
   AssemblyPlacement &placement;
   const StructuralRights &rights;
-  ResourceCommit &resources;
   ObjectLifecycle &lifecycle;
+  PlotWrite membership;
   CreditResolver credits{};
 };
 struct RemoveOperation {
   lifecycle::Instances &instances;
   const StructuralRights &rights;
-  ResourceCommit &resources;
   ObjectLifecycle &lifecycle;
   CreditResolver credits{};
 };
@@ -80,8 +69,8 @@ struct ReplaceOperation {
   space::PhysicalRelations &physical;
   std::vector<space::RelationChange> &changes;
   const StructuralRights &rights;
-  ResourceCommit &resources;
   ObjectLifecycle &lifecycle;
+  PlotWrite membership;
   CreditResolver credits{};
 };
 // Mechanical/lifecycle view shared by ordinary authorized edits and definition
@@ -97,12 +86,13 @@ struct ReplacementEdit {
   ParentWrite parents;
   space::PhysicalRelations &physical;
   std::vector<space::RelationChange> &changes;
-  ResourceCommit &resources;
   ObjectLifecycle &lifecycle;
+  PlotWrite membership;
+  const perm::Plots &land;
   CreditResolver credits{};
 };
 ReplacementEdit replacement_edit(ReplaceOperation &);
-drive::StructuralCompletion create_instance(void *, const drive::StructuralCall &);
-drive::StructuralCompletion remove_instance(void *, const drive::StructuralCall &);
-drive::StructuralCompletion replace_instance(void *, const drive::StructuralCall &);
+drive::NativeCompletion create_instance(void *, const drive::NativeCall &);
+drive::NativeCompletion remove_instance(void *, const drive::NativeCall &);
+drive::NativeCompletion replace_instance(void *, const drive::NativeCall &);
 } // namespace amber::bindings

@@ -58,9 +58,13 @@ void update_rule(RuleActivation &b, ScriptId id, RuleMode mode, Step now, double
       b.scripts.rows[script].declaration.active = false;
       react::set_activation(b.vm, script, b.scripts.rows[script].declaration.approved, false);
     }
-    const auto found = b.links.by_script.find(script);
-    const auto consumers =
-        found == b.links.by_script.end() ? std::vector<ScriptKey>{} : found->second;
+    std::vector<ScriptKey> consumers;
+    for (const auto &[key, link] : b.links.rows) {
+      (void)link;
+      if (key.consumer.script == script &&
+          std::find(consumers.begin(), consumers.end(), key.consumer) == consumers.end())
+        consumers.push_back(key.consumer);
+    }
     for (auto consumer : consumers) {
       const auto allowed =
           install::rule_watch_terms(b.rules, b.values, consumer.object, script, now, hz);

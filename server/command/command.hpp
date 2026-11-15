@@ -23,7 +23,6 @@ struct Resolution {
   Handle receiver, permission_target;
   std::string right;
   bool reach = false;
-  std::vector<std::string> mechanics;
   ScriptId declaration_script = 0;
   explicit operator bool() const { return failure == Failure::None; }
 };

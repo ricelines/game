@@ -1,83 +1,306 @@
 {
-  "source": "https://github.com/EmergenceAI/Emergence-World/blob/main/tools/README.md",
-  "uncatalogued_default_change_tools": [
-    "_blog",
-    "act",
-    "activate_lighthouse",
-    "add_to_archive",
-    "add_to_board_post",
-    "add_to_board_post_or_something_not_available",
-    "add_to_todo",
-    "add_to_todo_note",
-    "agent_directory",
-    "announce",
-    "announce_to_agents",
-    "announce_to_all",
-    "announce_to_audience",
-    "announce_to_nearby",
-    "announce_to_room",
-    "anonymous_bet",
-    "arson_building",
-    "beacon",
-    "bear",
-    "behavioral_observatory",
-    "behavioral_tracking_tool",
-    "boost",
-    "browse_shops",
-    "calculate_spatial_capital_velocity",
-    "cancel_personal_event",
-    "check_agent_popularity",
+  "adapter_revision": 2,
+  "definitions_version": 1,
+  "repository_commit": "a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b",
+  "catalog": {
+    "url": "https://github.com/EmergenceAI/Emergence-World/blob/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/tools/README.md",
+    "sha256": "7168505d4bf36f6e91e79fb5315bbd2d94aa212831d8c0cabc14a084953ec6fa"
+  },
+  "policy": "Classify the tool operation, not its name prefix. Informational reads/computations are look; routine diary/activity logging, UI and query caches do not turn them into world changes. A tool with meaningful write modes remains change for all calls because S11 uses one class per type. Unknown types retain the specified change default. No tool_response text is parsed into applied/denied results.",
+  "corrections": {
+    "calculate_spatial_capital_velocity": {
+      "from": "change",
+      "to": "look",
+      "reason": "Registered function calculates diagnostics from supplied distance, energy and credit numbers.",
+      "evidence": {
+        "kind": "published_tool_definition",
+        "world": "s2-gemini",
+        "row_0based": 14609,
+        "file": "s2-gemini.zip",
+        "file_sha256": "eb98a4a92d6b1252faf58d337e5f9b307387994b538b96c959b6042c7ded3766"
+      }
+    },
+    "check_agent_popularity": {
+      "from": "change",
+      "to": "look",
+      "reason": "Returns existing character popularity rankings.",
+      "evidence": {
+        "kind": "published_tool_response",
+        "world": "s1-agentworld-claude-db",
+        "row_0based": 1189,
+        "file": "s1-agentworld-claude-db.json",
+        "file_sha256": "05e427e724d18d565724426e1c9b8682af1e04ddd25cfed4fce46416df3b4042"
+      }
+    },
+    "check_human_task_status": {
+      "from": "change",
+      "to": "look",
+      "reason": "Returns a task status or its received human response; creation uses a different tool.",
+      "evidence": {
+        "kind": "published_tool_response",
+        "world": "s1-agentworld-claude-db",
+        "row_0based": 8845,
+        "file": "s1-agentworld-claude-db.json",
+        "file_sha256": "05e427e724d18d565724426e1c9b8682af1e04ddd25cfed4fce46416df3b4042"
+      }
+    },
+    "check_landmark_popularity": {
+      "from": "change",
+      "to": "look",
+      "reason": "Returns existing landmark popularity rankings.",
+      "evidence": {
+        "kind": "published_tool_response",
+        "world": "s1-agentworld-claude-db",
+        "row_0based": 1190,
+        "file": "s1-agentworld-claude-db.json",
+        "file_sha256": "05e427e724d18d565724426e1c9b8682af1e04ddd25cfed4fce46416df3b4042"
+      }
+    },
+    "check_prediction_accuracy": {
+      "from": "change",
+      "to": "look",
+      "reason": "Returns evaluated prediction counts and accuracy summaries.",
+      "evidence": {
+        "kind": "published_tool_response",
+        "world": "s2-qwen",
+        "row_0based": 5792,
+        "file": "s2-qwen.zip",
+        "file_sha256": "f2b78f0a0210ab647a9effd5baf9e6976c6f71e241087a8441d5dab3f9010001"
+      }
+    },
+    "check_verification_status": {
+      "from": "change",
+      "to": "look",
+      "reason": "Registered description and outputs show existing verifications, claims and discrepancies.",
+      "evidence": {
+        "kind": "published_tool_definition",
+        "world": "s2-qwen",
+        "row_0based": 4385,
+        "file": "s2-qwen.zip",
+        "file_sha256": "f2b78f0a0210ab647a9effd5baf9e6976c6f71e241087a8441d5dab3f9010001"
+      }
+    },
+    "cross_city_telemetry_scan": {
+      "from": "change",
+      "to": "look",
+      "reason": "Registered function scans for telemetry coordinates and returns observations.",
+      "evidence": {
+        "kind": "published_tool_definition",
+        "world": "s2-gemini",
+        "row_0based": 21258,
+        "file": "s2-gemini.zip",
+        "file_sha256": "eb98a4a92d6b1252faf58d337e5f9b307387994b538b96c959b6042c7ded3766"
+      }
+    },
+    "find_tool_for_task": {
+      "from": "change",
+      "to": "look",
+      "reason": "Returns matching available capabilities and their locations.",
+      "evidence": {
+        "kind": "published_tool_response",
+        "world": "s2-claude",
+        "row_0based": 20065,
+        "file": "s2-claude.zip",
+        "file_sha256": "0f9f42343c876e001374ca929e71510852972c605a301f83f17376667f182069"
+      }
+    },
+    "get_agent_trustworthiness_score": {
+      "from": "change",
+      "to": "look",
+      "reason": "Published function reads an existing average rating and rating count; it does not rate an agent.",
+      "evidence": {
+        "kind": "published_tool_definition",
+        "world": "s2-claude",
+        "row_0based": 27456,
+        "file": "s2-claude.zip",
+        "file_sha256": "0f9f42343c876e001374ca929e71510852972c605a301f83f17376667f182069"
+      }
+    },
+    "legibility_dashboard": {
+      "from": "change",
+      "to": "look",
+      "reason": "Registered function presents existing ledger, prediction and usage summaries.",
+      "evidence": {
+        "kind": "published_tool_definition",
+        "world": "s2-qwen",
+        "row_0based": 18224,
+        "file": "s2-qwen.zip",
+        "file_sha256": "f2b78f0a0210ab647a9effd5baf9e6976c6f71e241087a8441d5dab3f9010001"
+      }
+    },
+    "list_active_predictions": {
+      "from": "change",
+      "to": "look",
+      "reason": "Lists registered predictions and their deadlines; registration is a separate tool.",
+      "evidence": {
+        "kind": "published_tool_response",
+        "world": "s2-qwen",
+        "row_0based": 5791,
+        "file": "s2-qwen.zip",
+        "file_sha256": "f2b78f0a0210ab647a9effd5baf9e6976c6f71e241087a8441d5dab3f9010001"
+      }
+    },
+    "list_shared_logs": {
+      "from": "change",
+      "to": "look",
+      "reason": "Lists existing shared logs, sizes, authors and update times.",
+      "evidence": {
+        "kind": "published_tool_response",
+        "world": "s2-qwen",
+        "row_0based": 2828,
+        "file": "s2-qwen.zip",
+        "file_sha256": "f2b78f0a0210ab647a9effd5baf9e6976c6f71e241087a8441d5dab3f9010001"
+      }
+    },
+    "memory_breach_scan": {
+      "from": "change",
+      "to": "look",
+      "reason": "Registered function searches another agent's existing diary and memories during the breach window.",
+      "evidence": {
+        "kind": "published_tool_definition",
+        "world": "s2-gemini",
+        "row_0based": 120282,
+        "file": "s2-gemini.zip",
+        "file_sha256": "eb98a4a92d6b1252faf58d337e5f9b307387994b538b96c959b6042c7ded3766"
+      }
+    },
+    "overall_tool_usage_analytics": {
+      "from": "change",
+      "to": "look",
+      "reason": "Published function queries tool-usage statistics; query exports and generic logging do not make this a world operation.",
+      "evidence": {
+        "kind": "published_tool_definition",
+        "world": "s2-deepseek",
+        "row_0based": 51811,
+        "file": "s2-deepseek.zip",
+        "file_sha256": "ab4733fc740f7134ab9768a71f84cce7870a1ddb4ef8a139178d02aba64c73c3"
+      }
+    },
+    "query_dynamic_routing_analytics": {
+      "from": "change",
+      "to": "look",
+      "reason": "Registered function queries existing routing optimization state and stress parameters.",
+      "evidence": {
+        "kind": "published_tool_definition",
+        "world": "s2-gemini",
+        "row_0based": 19872,
+        "file": "s2-gemini.zip",
+        "file_sha256": "eb98a4a92d6b1252faf58d337e5f9b307387994b538b96c959b6042c7ded3766"
+      }
+    },
+    "query_intel_ledger": {
+      "from": "change",
+      "to": "look",
+      "reason": "Registered function queries existing claim-versus-delivery observations.",
+      "evidence": {
+        "kind": "published_tool_definition",
+        "world": "s2-qwen",
+        "row_0based": 3601,
+        "file": "s2-qwen.zip",
+        "file_sha256": "f2b78f0a0210ab647a9effd5baf9e6976c6f71e241087a8441d5dab3f9010001"
+      }
+    },
+    "query_landmark_tools": {
+      "from": "change",
+      "to": "look",
+      "reason": "Registered function looks up the tools available at landmarks without travel.",
+      "evidence": {
+        "kind": "published_tool_definition",
+        "world": "s2-qwen",
+        "row_0based": 10316,
+        "file": "s2-qwen.zip",
+        "file_sha256": "f2b78f0a0210ab647a9effd5baf9e6976c6f71e241087a8441d5dab3f9010001"
+      }
+    },
+    "read_advertisement": {
+      "from": "change",
+      "to": "look",
+      "reason": "Reads the current advertisement and expiry; publication uses a different tool.",
+      "evidence": {
+        "kind": "published_tool_response",
+        "world": "s2-claude",
+        "row_0based": 6734,
+        "file": "s2-claude.zip",
+        "file_sha256": "0f9f42343c876e001374ca929e71510852972c605a301f83f17376667f182069"
+      }
+    },
+    "read_landmark_info": {
+      "from": "change",
+      "to": "look",
+      "reason": "Published function loads existing landmark Markdown; its diary/activity logging is observation bookkeeping.",
+      "evidence": {
+        "kind": "published_tool_definition",
+        "world": "s2-mixed",
+        "row_0based": 2296,
+        "file": "s2-mixed.zip",
+        "file_sha256": "f338b5060a56dbe3062917bf10e8d35ec5e1e42ae3e8e935820c7851572dd1af"
+      }
+    },
+    "read_shared_log": {
+      "from": "change",
+      "to": "look",
+      "reason": "Reads existing shared-log entries and verifies their stored hash chain.",
+      "evidence": {
+        "kind": "published_tool_response",
+        "world": "s2-qwen",
+        "row_0based": 2829,
+        "file": "s2-qwen.zip",
+        "file_sha256": "f2b78f0a0210ab647a9effd5baf9e6976c6f71e241087a8441d5dab3f9010001"
+      }
+    },
+    "search_my_diary": {
+      "from": "change",
+      "to": "look",
+      "reason": "Searches existing diary entries and memories.",
+      "evidence": {
+        "kind": "published_tool_response",
+        "world": "s2-claude",
+        "row_0based": 2288,
+        "file": "s2-claude.zip",
+        "file_sha256": "0f9f42343c876e001374ca929e71510852972c605a301f83f17376667f182069"
+      }
+    },
+    "search_tool": {
+      "from": "change",
+      "to": "look",
+      "reason": "Returns tool-registry search results for the requested name.",
+      "evidence": {
+        "kind": "published_tool_response",
+        "world": "s2-claude",
+        "row_0based": 6,
+        "file": "s2-claude.zip",
+        "file_sha256": "0f9f42343c876e001374ca929e71510852972c605a301f83f17376667f182069"
+      }
+    },
+    "visitor_log": {
+      "from": "change",
+      "to": "look",
+      "reason": "Published function SELECTs existing building visitor statistics; it does not register a visit.",
+      "evidence": {
+        "kind": "published_tool_definition",
+        "world": "s2-gemini",
+        "row_0based": 1507,
+        "file": "s2-gemini.zip",
+        "file_sha256": "eb98a4a92d6b1252faf58d337e5f9b307387994b538b96c959b6042c7ded3766"
+      }
+    }
+  },
+  "retained_mixed_tools": {
+    "agent_directory": "Registered signature supports register as well as search/list; successful registration is in the export.",
+    "behavioral_observatory": "Registered signature includes honesty_register, credit_flow and other record-creation modes.",
+    "phenotypic_telemetry_tracker": "Registered signature includes record_event as well as query.",
+    "recusal_auto_cross_check": "Registered description explicitly stores checks in its public precedent registry."
+  },
+  "unresolved_read_shaped_tools": [
     "check_balance",
     "check_bank",
-    "check_human_task_status",
-    "check_landmark_popularity",
     "check_messages",
     "check_needs",
-    "check_prediction_accuracy",
     "check_proposals",
     "check_seed_inventory",
     "check_status",
     "check_time",
-    "check_verification_status",
-    "commitment_ledger",
-    "contagion_coefficient_tracker",
-    "contagion_tracker_extended",
-    "create_community_event",
-    "create_human_task",
-    "credit_escrow",
-    "cross_city_telemetry_scan",
-    "cross_grid_asset_bridge",
-    "decentralized_escrow_oracle",
-    "deep_research",
-    "default_diary",
-    "default_diary_entry",
-    "delay",
-    "deposit_compute_credits",
-    "deposit_credits",
-    "deposit_credits_in_bank",
-    "diary_entry",
-    "dispute_resolution",
-    "dispute_resolution_vote",
-    "earthquakethink_aloud",
-    "eat_at_restaurant",
-    "economic_resilience_act",
-    "edit_from_billboard",
-    "executePythonCode",
-    "execute_code",
-    "execute_python_code",
-    "execute_routine",
-    "external_keypair_minter",
-    "ferris_wheel_ride",
-    "fetch_blog",
-    "find_tool_for_task",
-    "fist_bump",
-    "fist_bump_agent",
-    "flirt_with_agent",
-    "founders_inquiry",
-    "fresh_mart",
-    "fresh_mart_purchase",
     "get_agent_status",
-    "get_agent_trustworthiness_score",
     "get_credit_score",
     "get_current_location",
     "get_current_state",
@@ -89,66 +312,11 @@
     "get_state",
     "get_time",
     "get_wallet_balance",
-    "go",
-    "gov_vote",
-    "harvest_seed",
-    "hug",
-    "ig",
-    "imitation_game",
-    "intimidate_agent",
-    "jarduerset_mood_and_terminate",
-    "legibility_dashboard",
-    "light_beacon",
-    "list_active_predictions",
     "list_grant_pitches",
-    "list_shared_logs",
     "list_todos",
     "list_tool_registry",
     "list_tools",
     "list_townhall_proposals",
-    "living_circuit_dashboard",
-    "load_skill",
-    "look_around",
-    "lux_v107_audit",
-    "manage_spatial_grid_obstacles",
-    "marketplace_list",
-    "matplotlib_note",
-    "memory_breach_scan",
-    "mock",
-    "mood",
-    "morning_calibration",
-    "navigate_agentpark",
-    "ntfy_check",
-    "observe_environment",
-    "open_coworking_desk",
-    "overall_tool_usage_analytics",
-    "participation_insurance",
-    "participation_insurance_claim",
-    "peer_to_peer_lending_oracle",
-    "per_self_care",
-    "phase_transition_scanner",
-    "phenotypic_telemetry_tracker",
-    "plan_tool_calls",
-    "plant_seed",
-    "play_game",
-    "post_advertisement",
-    "post_egress",
-    "post_on_billboard",
-    "prediction_registry",
-    "preservation_manifest",
-    "public_action_row",
-    "public_visual_inspection_row",
-    "publish_blog",
-    "publish_spatial_claim",
-    "publish_to_blog",
-    "punch_agent",
-    "query_dynamic_routing_analytics",
-    "query_intel_ledger",
-    "query_landmark_tools",
-    "rate_agent_for_trustworthiness",
-    "rate_human_response",
-    "rate_trustworthiness",
-    "read_advertisement",
     "read_aloud",
     "read_archive",
     "read_archive_entry",
@@ -158,7 +326,6 @@
     "read_calendar",
     "read_diary",
     "read_file",
-    "read_landmark_info",
     "read_manifesto",
     "read_my_state",
     "read_proposal",
@@ -166,86 +333,17 @@
     "read_proposal_info",
     "read_proposals",
     "read_self_state",
-    "read_shared_log",
     "read_social_feed",
     "read_todo",
     "read_world_info",
-    "recharge",
-    "recharge_at_station",
-    "record_intel_observation",
-    "recusal_auto_cross_check",
-    "register_behavioral_prediction",
-    "remove_todo",
-    "repay",
-    "repay_loan",
-    "rest",
-    "ride",
-    "ride_ferris_wheel",
-    "ride_sky_wheel",
-    "risk_market",
-    "risk_market_v4",
-    "run_home",
-    "run_intel_ledger_query",
-    "run_tests",
-    "search",
-    "searchArchive",
     "search_blog",
     "search_diary_breach",
-    "search_memorial",
-    "search_my_diary",
-    "search_tool",
-    "send_command_placeholder",
-    "set_care",
-    "share_data",
-    "silent_negotiation",
-    "skip",
-    "sky_wheel_ride",
-    "skywheel_lens",
-    "sleep",
-    "spatial_insurance_oracle",
-    "submit_constitutional_proposal",
-    "submit_legacy_testimony",
-    "submit_proposal",
-    "submit_proposal_vote",
-    "submit_tool_proposal",
-    "submit_townhall_vote",
-    "submit_victory_arch_grant_pitch",
-    "submit_victory_arch_pitch",
-    "sunset_reflection",
-    "take_loan_from_bank",
-    "tend_seed",
-    "test_my_tool",
-    "think",
-    "throw_voice",
-    "todo_list",
-    "todo_write",
-    "update_community_event",
-    "update_relationship",
-    "update_todo",
-    "update_todo_placeholder",
-    "update_todos",
-    "update_townhall_proposal",
-    "verify_landmark_position",
-    "verify_landmark_position_remote",
-    "view_fountain",
-    "view_proposal",
-    "visitor_log",
-    "vote",
-    "vote_for_grant_pitch",
-    "vote_on_law",
-    "wager_registry",
-    "wait_for_event",
-    "wait_for_response",
-    "wave_at",
-    "whisper",
-    "withdraw_credits",
-    "withdraw_from_bank",
-    "withdraw_money",
-    "write_billboard",
-    "write_blog_post",
-    "write_new_blog",
-    "write_to_gcs",
-    "write_to_shared_log"
+    "search_memorial"
   ],
+  "unresolved_policy": "These names lack a defining successful response or callable definition in the reviewed records/catalog. Missing responses and dispatch failures do not establish lookup semantics. Prefixes do not override the frozen unknown default.",
+  "other_unresolved_examples": {
+    "phase_transition_scanner": "Diagnostic outputs exist, but reviewed data has no defining source/signature establishing persistence semantics. Retain change rather than infer from its name.",
+    "lux_v107_audit": "An audit-success message alone does not establish which world effects ran."
+  },
   "malformed_tool_names": "Preserved unchanged as types with the frozen default change; diagnostics report hashes, not full prose."
 }

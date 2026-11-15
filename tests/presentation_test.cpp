@@ -48,7 +48,10 @@ struct Fixture {
     terms.rows[3].kind = re::Kind::Material;
     terms.rows[4].source = re::Source::Intrinsic;
     terms.rows[5].dimensions = {2, 1, -3, 0, 0, 0, 0, 0};
+    terms.rows[6].source = re::Source::Intrinsic;
+    terms.rows[6].dimensions = {-3, 1, 0, 0, 0, 0, 0, 0};
     materials.rows[3][4] = Value(.25);
+    materials.rows[3][6] = Value(7850.);
     ca::Asset a;
     a.hash = first;
     a.minimum = {0, 0, 0};
@@ -86,7 +89,7 @@ struct Fixture {
     return {terms,     identity(objects), objects.plot, objects.params,
             materials, measurements,      properties,   processes,
             instance,  model_settings,    plots,        world,
-            shared,    relations,         runtime,      0};
+            shared,    relations,         runtime,      6};
   }
   bi::ReplicationIndex index() { return bi::ReplicationIndex({32, 2, 3, 65536, 1048576}); }
   void add(bi::ReplicationIndex &index, Handle h) {
@@ -110,6 +113,15 @@ void descriptions_and_roles() {
                           f.instance_texts, f.values(), inspected, actions, 0, 20);
   require(description.measured["size_m"][2] == 5 && description.measured["params"]["height"] == 5,
           "effective parameter asset supplies actual geometry measurements");
+  require(description.measured["mass_kg"] == 3925 && description.measured["capacity_l"] == 100 &&
+              description.measured["material"] == "invented.q3" &&
+              !description.measured.contains("capacity_m3"),
+          "S5 mass, capacity units and material name come from the actual variant");
+  f.materials.rows[3][6] = Value(1000.);
+  require(bi::describe_object(h, identity(f.objects), f.models, f.parameters, f.assets, f.texts,
+                              f.instance_texts, f.values(), inspected, actions, 0, 20)
+                  .measured["mass_kg"] == 500,
+          "material edits must change measured mass without rebaking");
   require(description.measured["values"]["invented.q1"] == 7 && description.says.name.empty() &&
               description.says.description == "instance fiction",
           "measured truth and intentional empty claims remain separate");

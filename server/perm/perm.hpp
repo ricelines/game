@@ -3,7 +3,9 @@
 #include "store/store.hpp"
 
 #include <array>
+#include <compare>
 #include <map>
+#include <set>
 #include <span>
 #include <unordered_map>
 
@@ -27,16 +29,36 @@ struct Holder {
   bool operator==(const Holder &) const = default;
 };
 
+enum class AccountKind : std::uint8_t { Player, Object, Group };
+struct Account {
+  AccountKind kind = AccountKind::Player;
+  std::uint64_t subject = 0;
+  static Account player(PlayerId id) { return {AccountKind::Player, id}; }
+  static Account object(Handle object) { return {AccountKind::Object, object.bits}; }
+  static Account group(GroupId id) { return {AccountKind::Group, id}; }
+  auto operator<=>(const Account &) const = default;
+};
+std::string account_name(Account);
+struct AccountTarget {
+  Account account;
+  PlayerId controller = 0;
+  static AccountTarget player(PlayerId id) { return {Account::player(id), id}; }
+};
+
 enum class ScopeKind : std::uint8_t { Object, OwnedOnPlot, Account, Avatar, Plot, Issuance };
 struct Scope {
   ScopeKind kind = ScopeKind::Object;
   std::uint64_t subject = 0;
   PlayerId owner = 0;
+  AccountKind account_kind = AccountKind::Player;
   static Scope object(Handle handle) { return {ScopeKind::Object, handle.bits, 0}; }
   static Scope owned_on_plot(PlayerId owner, PlotId plot) {
     return {ScopeKind::OwnedOnPlot, plot, owner};
   }
-  static Scope account(PlayerId player) { return {ScopeKind::Account, player, 0}; }
+  static Scope account(Account account) {
+    return {ScopeKind::Account, account.subject, 0, account.kind};
+  }
+  Account account() const { return {account_kind, subject}; }
   static Scope avatar(Handle body) { return {ScopeKind::Avatar, body.bits, 0}; }
   static Scope plot(PlotId id) { return {ScopeKind::Plot, id, 0}; }
   static Scope issuance() { return {ScopeKind::Issuance, 0, 0}; }
@@ -82,12 +104,11 @@ struct Grant {
 struct Grants {
   std::vector<Grant> rows{Grant{}};
   std::unordered_map<GrantKey, GrantId, GrantKeyHash> by_key;
-  // Derived deadline indexes. Revocation leaves stale entries for the due-time
-  // consumer to discard; ordinary permission checks never touch these queues.
-  std::multimap<Step, GrantId> expiring, reminders;
+  // Each live deadline has one ordered (step,id) entry, erased on removal.
+  std::set<std::pair<Step, GrantId>> expiring, reminders;
 };
 struct Ledger {
-  std::vector<std::int64_t> balance{0};
+  std::map<Account, std::int64_t> balance;
 };
 using OwnerLimits = SparseColumn<Rights>;
 
@@ -142,6 +163,9 @@ struct Plot {
 struct Plots {
   std::vector<Plot> rows{Plot{}};
 };
+// Refresh only changed scene objects. Hidden inventory and mailboxes have no plot.
+std::vector<Handle> update_plots(IdentityRead, TransformRead, PlotWrite, const Plots &,
+                                 std::span<const Handle>, bool in_world);
 struct Decision {
   Reason reason = Reason::MissingRight;
   GrantId grant = 0;
@@ -153,8 +177,8 @@ Decision check_land(Holder, LandVerb, const Plot &, const Players &, const Grant
 Target target(IdentityRead, AuthorityRead, const OwnerLimits &, Handle);
 Decision check(Holder, Verb, const Target &, const Players &, const Grants &, Step);
 Decision check_scope(Holder, Scope, Rights required, const Grants &, Step);
-Decision check_account(Holder, PlayerId wallet, std::int64_t amount, const Grants &, Step);
-std::int64_t balance(const Ledger &, PlayerId);
+Decision check_account(Holder, AccountTarget, std::int64_t amount, const Grants &, Step);
+std::int64_t balance(const Ledger &, Account);
 std::int64_t allowance(const Grants &, GrantId, Step);
 
 struct GrantRequest {
@@ -183,8 +207,8 @@ struct GrantResult {
   explicit operator bool() const { return reason == Reason::Allowed; }
 };
 
-GrantResult create_grant(Grants &, Players &, const GrantRequest &, const ScopeControl &,
-                         const HolderControl &, Step);
+GrantResult create_grant(Grants &, Players &, Holder issuer, const GrantRequest &,
+                         const ScopeControl &, const HolderControl &, Step);
 // Input bindings authorize issuer/architect before invoking mutation helpers.
 std::vector<GrantId> revoke(Grants &, Players &, GrantId);
 std::vector<GrantId> revoke_many(Grants &, Players &, std::span<const GrantId>);
@@ -210,9 +234,16 @@ struct TransferResult {
   std::int64_t amount = 0;
   explicit operator bool() const { return reason == Reason::Allowed; }
 };
-TransferResult pay(Ledger &, Grants &, Holder, PlayerId payer, PlayerId recipient,
+TransferResult pay(Ledger &, Grants &, Holder, AccountTarget payer, Account recipient,
                    std::int64_t amount, Step);
-TransferResult issue(Ledger &, Grants &, Holder, PlayerId recipient, std::int64_t amount, Step);
+TransferResult issue(Ledger &, Grants &, Holder, Account recipient, std::int64_t amount, Step);
+struct AccountRefund {
+  Handle object;
+  PlayerId owner = 0;
+  std::int64_t amount = 0;
+};
+Reason can_refund_object_accounts(const Ledger &, AuthorityRead, std::span<const Handle>);
+std::vector<AccountRefund> refund_object_accounts(Ledger &, AuthorityRead, std::span<const Handle>);
 
 // Changes only authority/permission-owned columns; custody is mirrored separately.
 std::vector<GrantId> transfer_owner(AuthorityWrite, OwnerLimits &, PermissionFlags, Grants &,
@@ -231,7 +262,7 @@ struct Offer {
 };
 struct Offers {
   std::vector<Offer> rows{Offer{}};
-  std::multimap<Step, OfferId> expiring;
+  std::set<std::pair<Step, OfferId>> expiring;
 };
 struct CustodyChange {
   Handle goods, parent;
@@ -257,7 +288,7 @@ std::vector<OfferId> advance_offers(Offers &, IdentityRead, PermissionFlags, Ste
 struct Buyer {
   Holder actor;
   PlayerId beneficiary = 0;
-  PlayerId payer = 0;
+  AccountTarget payer;
   Handle custodian;
   bool present = false;
 };
@@ -273,18 +304,9 @@ SwapResult accept(Offers &, Ledger &, Grants &, Players &, AuthorityWrite, Permi
 SwapResult give(Players &, Grants &, AuthorityWrite, PermissionFlags, OwnerLimits &, Holder sender,
                 const Target &, PlayerId recipient, Handle recipient_body, bool present,
                 std::size_t mailbox_max, Step, std::span<const Target> parts = {});
-struct StoreGoodsPlan {
-  Reason reason = Reason::InvalidScope;
-  Handle goods, custodian;
-  PlayerId recipient = 0;
-  bool present = false;
-  explicit operator bool() const { return reason == Reason::Allowed; }
-};
-StoreGoodsPlan prepare_store_goods(const Players &, const Grants &, Holder, const Target &,
-                                   std::span<const Target> parts, PlayerId recipient,
-                                   Handle recipient_body, bool present, std::size_t mailbox_max,
-                                   Step);
-void commit_store_goods(Players &, const StoreGoodsPlan &);
+SwapResult store_goods(Players &, const Grants &, Holder, const Target &,
+                       std::span<const Target> parts, PlayerId recipient, Handle recipient_body,
+                       bool present, std::size_t mailbox_max, Step);
 std::vector<CustodyChange> deliver_mailbox(Players &, PlayerId, Handle body);
 
 using TradeId = std::uint32_t;

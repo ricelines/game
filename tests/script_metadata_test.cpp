@@ -1,5 +1,3 @@
-#include "bindings/authority/authority.hpp"
-#include "bindings/construction/construction.hpp"
 #include "bindings/metadata/metadata.hpp"
 
 #include <iostream>
@@ -32,7 +30,6 @@ struct Fixture {
   react::ScriptState state;
   react::DeferredEffects effects;
   ScriptId next = 100;
-  bindings::ContextBinding context{authority(objects)};
   bindings::ObjectBinding object{identity(objects), transforms(objects), authority(objects),
                                  parents(objects),  objects.params,      models,
                                  instances};
@@ -51,9 +48,6 @@ struct Fixture {
                                                     1};
   bindings::MeterReadBinding meter{meters, terms, identity(objects)};
   bindings::PlotReadBinding plot{plots, authority(objects)};
-  bindings::ConstructionBinding construction{models, parameters, terms, properties, processes, 64};
-  bindings::RemovalBinding removal{identity(objects), terms, properties, processes, 64};
-  bindings::PlotTransferBinding plot_transfer{plots, grants, players};
   Fixture() {
     terms.rows.resize(6);
     for (TermId i = 1; i < terms.rows.size(); ++i) {
@@ -113,7 +107,6 @@ struct Fixture {
     meters[{root, part, 2, false}] = {2, 0, 3};
     players.rows.resize(4);
     plots.rows.push_back({1, 2, 0, 7, {-5, -4, 30, 40}, {}});
-    react::register_binding(vm, "context", bindings::context_binding, &context);
     react::register_binding(vm, "object", bindings::object_binding, &object);
     react::register_binding(vm, "asset", bindings::asset_binding, &asset);
     react::register_binding(vm, "material", bindings::material_binding, &material);
@@ -122,20 +115,13 @@ struct Fixture {
                             &measure_instance);
     react::register_binding(vm, "meter", bindings::meter_binding, &meter);
     react::register_binding(vm, "plot", bindings::plot_binding, &plot);
-    react::register_binding(vm, "create", bindings::create_binding, &construction);
-    react::register_binding(vm, "replace", bindings::replace_binding, &construction);
-    react::register_binding(vm, "remove", bindings::remove_binding, &removal);
-    react::register_binding(vm, "transfer_plot", bindings::transfer_plot_binding, &plot_transfer);
   }
-  react::RunOutcome run(std::string_view body, bool world_rule = false,
-                        std::optional<Caller> caller = {}, bool direct = false) {
+  react::RunOutcome run(std::string_view body) {
     const auto source = "return {on={run=function(self,from,args) " + std::string(body) + " end}}";
     react::ScriptDeclaration declaration;
     declaration.id = next++;
     declaration.author = 2;
-    declaration.kind = world_rule ? react::ScriptDeclaration::Kind::Rule
-                                  : react::ScriptDeclaration::Kind::Instance;
-    declaration.approved = world_rule;
+    declaration.kind = react::ScriptDeclaration::Kind::Instance;
     declaration.sets = {2};
     const auto loaded = react::load_script(vm, react::compile_script(source), declaration);
     require(loaded.status == react::RunOutcome::Status::Ok, loaded.error.c_str());
@@ -147,16 +133,10 @@ struct Fixture {
     invocation.step = 20;
     invocation.state = &state;
     invocation.effects = &effects;
-    invocation.action_caller = caller;
-    invocation.action_body = root;
-    invocation.action_target = part;
-    if (direct)
-      invocation.direct_body = react::BodyEndpoints{root, part, unrelated, 2, {}};
-    return react::run_handler(vm, {declaration.id, "run", 2, 1, true, world_rule}, invocation);
+    return react::run_handler(vm, {declaration.id, "run", 2}, invocation);
   }
-  void ok(std::string_view body, bool rule = false, std::optional<Caller> caller = {},
-          bool direct = false) {
-    const auto result = run(body, rule, caller, direct);
+  void ok(std::string_view body) {
+    const auto result = run(body);
     require(result.status == react::RunOutcome::Status::Ok, result.error.c_str());
   }
 };
@@ -188,15 +168,12 @@ void effective_metadata_and_mass() {
   require(f.run("self:measure_model(1,0.5)").status == react::RunOutcome::Status::Error,
           "fractional parameter block cannot silently select another variant");
 }
-void immediate_context_is_descriptive() {
+void installed_script_identity_is_readonly() {
   Fixture f;
-  f.ok(R"(local c=self:context();assert(c.actor=='p:2' and c.body==self.handle
-    and c.selected==from and c.held~=nil and c.owner=='p:2'))",
-       false, PlayerId{2}, true);
-  f.ok(R"(local c=self:context();assert(c.actor==nil and c.body==nil and c.held==nil
-    and c.caller_script==71 and c.caller_object==from and c.selected==from))",
-       false, ScriptHolder{71, f.part});
-  f.ok(R"(local c=self:context();assert(c.actor==nil and c.selected==nil and c.held==nil))");
+  f.ok(R"(assert(self.script==100 and self:object().owner=='p:2')
+    assert(self.context==nil and from~=self.handle)
+    assert(not pcall(function()self.script=1 end))
+    assert(self.script==100))");
 }
 void single_solid_measurement_has_no_assembly_metadata() {
   Fixture f;
@@ -215,53 +192,14 @@ void retained_handles_reacquire_reads() {
   require(f.run("self:object(self.state.saved)").status == react::RunOutcome::Status::Error,
           "a stored string is not promoted into a typed object reference");
 }
-void structural_requests_and_permission_boundary() {
-  Fixture f;
-  const auto create = R"(local q=self:create('m:1',1,'custom.4',vector.create(2,3,4),
-    {0,0,0,2},{terms={['custom.2']=7},state={[3]=4}});assert(q.queued))";
-  require(f.run(create).status == react::RunOutcome::Status::Error && f.effects.structural.empty(),
-          "ordinary scripts cannot gain create authority through binding presence");
-  f.ok(create, true, PlayerId{2});
-  require(f.effects.structural.size() == 1 && !f.effects.changed,
-          "creation request does not claim commit before native preflight");
-  const auto &request = f.effects.structural.front();
-  require(request.binding.model == 1 && request.binding.params == 1 &&
-              request.binding.material == 4 && request.rotation.w == 1 &&
-              request.exchange->holder.object == f.root &&
-              request.exchange->terms[0].before == Value(10.0) &&
-              request.exchange->terms[0].after == Value(7.0) &&
-              f.properties[2].get(f.root.slot())->number == 10 &&
-              std::get<double>(f.state.at(std::int64_t{3})) == 5,
-          "deferred exchange captures answers without mutating resources");
-  f.ok("self:remove(from)");
-  require(f.effects.structural.front().target == f.part,
-          "ordinary scripts can request removal, commit still checks ordinary Destroy");
-  require(f.run("self:create(1,0.5,4,vector.create(0,0,0))", true).status ==
-                  react::RunOutcome::Status::Error &&
-              f.effects.structural.empty(),
-          "invalid geometry binding is rejected before queueing");
-  f.ok("assert(not self:transfer_plot(1,'p:3').ok)", false, PlayerId{2}, true);
-  require(f.plots.rows[1].owner == 2, "immediate body caller does not lend plot authority");
-  const auto holder = perm::Holder::script(f.next, f.root);
-  const auto grant = perm::create_grant(
-      f.grants, f.players,
-      {2, holder, perm::Scope::plot(1), perm::bit(perm::Verb::Transfer), 0, 0, 100},
-      {perm::Scope::plot(1), 2, perm::bit(perm::Verb::Transfer), 1, false}, {holder, 2, true}, 0);
-  require(bool(grant), "owner fills ordinary installed script plot slot");
-  f.ok("assert(self:transfer_plot(1,'p:3').ok)");
-  require(f.plots.rows[1].owner == 3 && !f.grants.rows[grant.grant].live && f.effects.changed,
-          "authorized transfer commits ownership and revokes old plot grants together");
-}
 } // namespace
 int main() {
   try {
     effective_metadata_and_mass();
     single_solid_measurement_has_no_assembly_metadata();
-    immediate_context_is_descriptive();
+    installed_script_identity_is_readonly();
     retained_handles_reacquire_reads();
-    structural_requests_and_permission_boundary();
-    std::cout
-        << "Actual Luau metadata, variant mass, construction requests and plot transfer passed.\n";
+    std::cout << "Actual readonly Luau metadata and variant mass checks passed.\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return 1;

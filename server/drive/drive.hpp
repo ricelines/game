@@ -47,13 +47,11 @@ template <class T> struct Consumer {
 };
 using EventConsumer = Consumer<EventTurn>;
 using WatchConsumer = Consumer<step::WatchWork>;
-using ActionConsumer = Consumer<step::ActionWork>;
 using InputConsumer = Consumer<step::InputWork>;
 using BackgroundConsumer = Consumer<step::BackgroundItem>;
-void drain_foreground(step::WorkQueues &, Frame &, EventConsumer, WatchConsumer, ActionConsumer,
-                      InputConsumer);
+void drain_foreground(step::WorkQueues &, Frame &, EventConsumer, WatchConsumer, InputConsumer);
 void drain_background(step::WorkQueues &, Frame &, BackgroundConsumer, EventConsumer, WatchConsumer,
-                      ActionConsumer, InputConsumer);
+                      InputConsumer);
 
 struct Input {
   std::uint64_t id = 0;
@@ -97,6 +95,7 @@ struct Gate {
   bool allowed = false;
   std::string reason;
 };
+std::string_view required_right(std::string_view right, Caller, const perm::Target &);
 Gate check_right(std::string_view right, Caller, const perm::Target &, const perm::Players &,
                  const perm::Grants &, Step);
 struct Bounds {
@@ -114,8 +113,8 @@ std::vector<PlannedInvocation> plan_event(const react::Triggers &, const react::
                                           const step::EventWork &, Step, double hz);
 std::vector<PlannedInvocation> plan_action(const react::Triggers &, const react::ValueRead &,
                                            const command::Resolution &, const ActionRequest &,
-                                           Handle authenticated_body, Handle held,
-                                           const record::Origin &, Step, double hz);
+                                           Handle authenticated_body, const record::Origin &, Step,
+                                           double hz);
 struct WatchPlan {
   bool modeled = false;
   std::optional<FactKey> shared_gap;
@@ -130,31 +129,6 @@ WatchPlan plan_background(react::Subscriptions &, install::WatchLinks &, const r
                           const catalog::Scripts &, const react::RuleVersions &,
                           const step::BackgroundItem &, Step, double hz);
 
-struct StructuralCall {
-  const react::StructuralRequest &request;
-  const react::HandlerRef &handler;
-  const bindings::InvocationInput &invocation;
-};
-struct StructuralCompletion {
-  bool changed = false;
-  std::vector<Handle> created;
-  std::vector<record::Event> records;
-  std::vector<react::Effect> effects;
-  std::string error;
-};
-struct StructuralOperation {
-  StructuralCompletion (*run)(void *, const StructuralCall &) = nullptr;
-  void *context = nullptr;
-};
-struct StructuralOperations {
-  std::map<react::StructuralRequest::Kind, StructuralOperation> rows;
-};
-struct ExecutionResult {
-  bindings::CompletedInvocation invocation;
-  std::vector<Handle> created;
-};
-ExecutionResult execute(bindings::Execution &, const PlannedInvocation &,
-                        const StructuralOperations &);
 struct InputOrder {
   std::uint64_t input = 0, session = 0, sequence = 0, request = 0;
 };
@@ -185,7 +159,4 @@ struct NativeOperations {
 };
 void register_native(NativeOperations &, TermId, NativeOperation);
 NativeCompletion invoke_native(const NativeOperations &, NativeCall);
-record::Origin publish_native(record::Journal &, step::WorkQueues &, step::TimerWheel &,
-                              record::Event action, NativeCompletion, const record::Origin &,
-                              std::span<const record::Credit>, Step, std::size_t event_limit);
 } // namespace amber::drive

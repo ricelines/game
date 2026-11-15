@@ -76,7 +76,7 @@ int main() {
   shared.resize(2);
   shared[1].set(a.slot(), Shared{1, {}});
   RuleVersions rules;
-  rules.history.push_back({{1, "new.quantity", 1, 3, true, true}, 1, 2, false});
+  rules.history.push_back({{1, "new.quantity", 1, 3, true}, 1, 2, false});
   step::BackgroundItem item{a, 1, 1, {}, 3};
   std::size_t valid = 0;
   start = std::chrono::steady_clock::now();

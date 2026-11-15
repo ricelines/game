@@ -64,11 +64,18 @@ class Journal {
 public:
   Journal(std::size_t authors_max, std::vector<PlayerId> seed_actors);
   Origin append(Event event, const Origin &inherited = {}, std::span<const Credit> credits = {});
+  // Nested actions need their cause's id before the handler returns. The row
+  // stays in the normal step buffer and receives its outcome before take().
+  Origin finish(Origin, Result result, bool changed,
+                nlohmann::json detail = nlohmann::json::object(),
+                std::span<const Credit> credits = {});
   std::vector<nlohmann::json> take();
   std::uint64_t next_id() const { return next_id_; }
   void restore_next_id(std::uint64_t next_id);
+  void include_credits(Origin &, std::span<const Credit>) const;
 
 private:
+  void include_author(Origin &, PlayerId) const;
   std::uint64_t next_id_ = 1;
   std::size_t authors_max_;
   std::vector<PlayerId> seed_actors_;

@@ -45,8 +45,6 @@ struct WatchLink {
 struct WatchLinks {
   std::unordered_map<WatchKey, WatchLink, WatchKeyHash> rows;
   std::unordered_map<FactKey, std::vector<WatchKey>, FactKeyHash> by_dependency;
-  std::unordered_map<ScriptKey, std::vector<WatchKey>, ScriptKeyHash> by_consumer;
-  std::unordered_map<ScriptId, std::vector<ScriptKey>> by_script;
 };
 enum class SyncMode { Initial, Change, Restore };
 struct WatchChanges {

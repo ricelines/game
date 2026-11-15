@@ -14,7 +14,7 @@ struct Settings {
   net::Settings network;
   observe::Settings perception;
   catalog::RuntimePins pins;
-  std::size_t event_queue_max, authors_max, exchange_max, pose_batch_max, mailbox_max;
+  std::size_t event_queue_max, authors_max, part_batch_max, mailbox_max;
   std::size_t record_queue_batches, snapshot_keep;
   int record_zstd, snapshot_zstd;
   std::uint32_t control_max, repl_every, repl_delay_ms;

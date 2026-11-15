@@ -27,6 +27,7 @@ struct Fixture {
   react::ScriptStates states;
   react::RandomStates random;
   Relation parts;
+  record::Journal journal{8, {}};
   react::Vm vm{{4096, 50, 5, 64}};
   react::ValueRead values;
   react::ReadBinding read;
@@ -69,7 +70,6 @@ struct Fixture {
       on={['unforeseen.1']=function(self,from,args)
         assert(self:get('unforeseen.3')==1)
         self:set('unforeseen.3',11)
-        self:act('unforeseen.1',self.handle,{amount=2})
       end,
       ['unforeseen.4']=function(self)
         self.state.last=self:random()
@@ -90,29 +90,27 @@ struct Fixture {
     const auto loaded = react::load_script(vm, analyzed.compiled, analyzed.declaration);
     require(loaded.status == react::RunOutcome::Status::Ok, loaded.error.c_str());
   }
-  bindings::CompletedInvocation run(ScriptId script, TermId term = 1, Handle receiver = {}) {
+  bindings::CompletedInvocation run(ScriptId script, TermId term = 1, Handle receiver = {},
+                                    const record::Origin &origin = {}) {
     bindings::InvocationInput input;
     input.receiver = receiver ? receiver : object;
     input.sender = other;
     input.trigger = term;
     input.step = 12;
+    input.origin = origin;
     input.action_caller = PlayerId{7};
-    return bindings::execute(
-        execution, {script, terms.rows[term].name, script + 10, 1, true, false}, std::move(input));
+    react::Invocation invocation;
+    bindings::CompletedInvocation completed;
+    bindings::start_invocation(execution, journal,
+                               {script, terms.rows[term].name, script + 10, 1, true},
+                               std::move(input), invocation, completed);
+    bindings::finish_invocation(execution, journal, invocation, completed);
+    return completed;
   }
 };
 void live_effects_and_causal_finalization() {
   Fixture f;
-  auto first = f.run(1);
-  auto second = f.run(2);
-  auto failed = f.run(3);
-  require(first.outcome.status == react::RunOutcome::Status::Ok &&
-              second.outcome.status == react::RunOutcome::Status::Ok &&
-              failed.outcome.status == react::RunOutcome::Status::Error &&
-              react::read_state(f.properties, f.processes, f.object, 3, 12, 20).value.numeric() ==
-                  111,
-          "later handlers see prior writes and error preserves completed state");
-  record::Journal journal(8, {});
+  auto &journal = f.journal;
   step::WorkQueues queues;
   step::TimerWheel timers;
   record::Event action;
@@ -120,14 +118,20 @@ void live_effects_and_causal_finalization() {
   action.kind = record::Kind::Action;
   action.actor = record::Actor::player(7);
   action.name = "unforeseen.1";
-  std::vector<bindings::CompletedInvocation> calls;
-  calls.push_back(std::move(first));
-  calls.push_back(std::move(second));
-  calls.push_back(std::move(failed));
-  const auto completed = bindings::publish_action(journal, queues, timers, std::move(action),
-                                                  std::move(calls), {}, {}, 1000);
-  require(completed.handlers == 3 && completed.changed && completed.errors.size() == 1,
-          "final action outcome includes actual partial effects");
+  const auto origin = journal.append(std::move(action));
+  auto first = f.run(1, 1, {}, origin);
+  auto second = f.run(2, 1, {}, origin);
+  auto failed = f.run(3, 1, {}, origin);
+  require(first.outcome.status == react::RunOutcome::Status::Ok &&
+              second.outcome.status == react::RunOutcome::Status::Ok &&
+              failed.outcome.status == react::RunOutcome::Status::Error &&
+              react::read_state(f.properties, f.processes, f.object, 3, 12, 20).value.numeric() ==
+                  111,
+          "later handlers see prior writes and error preserves completed state");
+  journal.finish(origin, record::Result::Applied, true, {});
+  bindings::publish_invocation(journal, queues, timers, std::move(first), origin, 1000);
+  bindings::publish_invocation(journal, queues, timers, std::move(second), origin, 1000);
+  bindings::publish_invocation(journal, queues, timers, std::move(failed), origin, 1000);
   const auto logs = journal.take();
   require(logs.size() == 5 && logs[0]["kind"] == "action" && logs[0]["changed"] == true &&
               logs[1]["kind"] == "handler" && logs[1]["cause"] == logs[0]["id"] &&
@@ -140,14 +144,12 @@ void live_effects_and_causal_finalization() {
   auto event = step::pop_foreground(queues);
   require(event && std::get<step::EventWork>(event->work).origin.cause == logs[1]["id"],
           "emitted event uses completed first-handler origin");
-  auto script_action = step::pop_foreground(queues);
-  require(script_action && std::holds_alternative<step::ActionWork>(script_action->work),
-          "self.act is queued after VM returns");
-  const auto &request = std::get<step::ActionWork>(script_action->work).request;
-  require(std::get<ScriptHolder>(request.caller) == ScriptHolder{2, f.object},
-          "script-generated action keeps installed holder rather than immediate player");
+  auto failed_event = step::pop_foreground(queues);
+  require(failed_event && std::holds_alternative<step::EventWork>(failed_event->work) &&
+              queues.causal.empty(),
+          "partial-error emissions are retained without a deferred action lane");
 }
-void persistence_activation_and_structural_boundary() {
+void persistence_and_activation() {
   Fixture f;
   const auto first = f.run(2, 4);
   require(first.outcome.status == react::RunOutcome::Status::Ok, "first RNG handler");
@@ -164,25 +166,12 @@ void persistence_activation_and_structural_boundary() {
   require(disabled.outcome.status == react::RunOutcome::Status::Missing &&
               std::get<double>(f.states.at({f.object, 2}).at(std::string("count"))) == 2,
           "inactive cached script cannot execute even with an old handler reference");
-  auto pending = f.run(1);
-  pending.effects.structural.emplace_back();
-  record::Journal journal(8, {});
-  step::WorkQueues queues;
-  step::TimerWheel timers;
-  bool rejected = false;
-  try {
-    bindings::publish_invocation(journal, queues, timers, std::move(pending), {}, 1000);
-  } catch (const std::logic_error &) {
-    rejected = true;
-  }
-  require(rejected && journal.next_id() == 1,
-          "unapplied structural output cannot be recorded as completed");
 }
 } // namespace
 int main() {
   try {
     live_effects_and_causal_finalization();
-    persistence_activation_and_structural_boundary();
+    persistence_and_activation();
     std::cout << "Actual VM execution, live effects and causal finalization tests passed.\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

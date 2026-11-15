@@ -10,7 +10,7 @@ local function update(self)
     self.state.upstream, self.state.downstream = upstream, downstream
     local demand = 0
     if self:get('base.on') and downstream then
-        demand = math.min(self:get('base.power_demand', downstream) or 0, self:setting('base.rated_power'))
+        demand = math.min(self:read(downstream, 'base.power_demand') or 0, self:setting('base.rated_power'))
     end
     if upstream then self:contribute(upstream, 'base.power_demand', demand) end
     local delivered = upstream and self:get_share(upstream, 'base.power_demand') or 0

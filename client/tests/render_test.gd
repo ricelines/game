@@ -50,6 +50,10 @@ func run() -> void:
 		lods[lod] = components
 	var meshes = lods[2]
 	cache.cache[hash] = {"status": "ready", "manifest": manifest, "meshes": lods}
+	var other_hash = hash.sha256_text()
+	var other_manifest = manifest.duplicate(true)
+	other_manifest.hash = other_hash
+	cache.cache[other_hash] = {"status": "ready", "manifest": other_manifest, "meshes": lods}
 	check(not meshes.is_empty(), "real baked triangles present")
 	var stream = Stream.new()
 	var view = View.new()
@@ -76,7 +80,7 @@ func run() -> void:
 	for index in 1000:
 		var handle = "o:%d.1" % (index + 1)
 		stream.entities[handle] = {
-			"asset": hash,
+			"asset": hash if index % 2 == 0 else other_hash,
 			"states": {2: 0.5, 3: 1.0},
 			"position": Vector3(index % 40, index / 40, 0),
 			"rotation": Quaternion.IDENTITY,
@@ -88,7 +92,10 @@ func run() -> void:
 	var began = Time.get_ticks_usec()
 	view._process(0.016)
 	check(view.draws.size() == 1000, "all ordinary objects rendered")
-	check(view.groups.size() == meshes.size(), "immutable meshes batch across instances")
+	check(
+		view.groups.size() == meshes.size(),
+		"identical measured geometry batches across distinct authored asset identities"
+	)
 	check(
 		view._visual("o:1.1", meshes[0].name).tint.is_equal_approx(Color(0.5, 0.25, 0, 1)),
 		"arbitrary term controls authored color"

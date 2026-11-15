@@ -1,9 +1,137 @@
+#include "perm/perm.hpp"
 #include "space_fixture.hpp"
 namespace {
 using namespace testspace;
 bool edge(const sp::Edges &edges, Handle from, Handle to) {
   auto *list = edges.out.get(from.slot());
   return list && std::find(list->begin(), list->end(), to) != list->end();
+}
+void sensor_contacts_use_body_overlap() {
+  Scene scene;
+  const auto moving = scene.box({.6f, .6f, .6f}, {2, 0, 0}, sp::Motion::Kinematic, 0, false, false);
+  ObjectInit init;
+  init.model = 1;
+  const auto zone = create(scene.objects, init);
+  const auto geometry = sp::sensor_box_geometry(scene.space, {2, 4, 4});
+  require(sp::add_volume(scene.space, identity(scene.objects), transforms(scene.objects),
+                         {zone, geometry, {{0, 0, 1}, {}}, sp::VolumeKind::Zone})
+                  .status == sp::Status::Ok,
+          "solid zone sensor add");
+  const auto container = create(scene.objects, init);
+  require(sp::add_volume(scene.space, identity(scene.objects), transforms(scene.objects),
+                         {container, geometry, {{0, 0, 1}, {}}, sp::VolumeKind::Container})
+                  .status == sp::Status::Ok,
+          "container sensor add");
+  scene.tick();
+  require(!edge(scene.relations.in_zone, moving, zone), "outside body starts in zone");
+  auto relocate = [&](float x) {
+    require(sp::set_pose(scene.space, identity(scene.objects), transforms(scene.objects), moving,
+                         {{x, 0, 0}, {}})
+                    .status == sp::Status::Ok,
+            "move nonsolid kinematic sensor subject");
+    scene.tick();
+  };
+  // The centre is outside. This must come from shape overlap, not the former
+  // centre-in-volume polling path. Nonsolid motion does not wake neighbours.
+  relocate(1.2f);
+  require(edge(scene.relations.in_zone, moving, zone),
+          "rigid sensor ignored body overlap outside its centre");
+  require(!edge(scene.relations.contains, container, moving),
+          "container adopted zone overlap instead of its separate centre rule");
+  require(scene.result.contacts.empty() && !edge(scene.relations.supports, zone, moving),
+          "zone sensor leaked a physical collision/support event");
+  scene.tick();
+  require(scene.result.relations.empty() && edge(scene.relations.in_zone, moving, zone),
+          "persisted sensor contact repeated or lost membership");
+  relocate(2);
+  require(!edge(scene.relations.in_zone, moving, zone), "rigid sensor exit was missed");
+  relocate(0);
+  require(edge(scene.relations.contains, container, moving), "inside centre lacks containment");
+  scene.tick();
+  require(scene.result.moved.empty() && scene.result.relations.empty(),
+          "stationary container contact produced spurious movement or relation changes");
+  std::vector<sp::RelationChange> changes;
+  require(sp::custody(scene.space, identity(scene.objects), moving, {}, parents(scene.objects),
+                      space_flags(scene.objects), scene.relations, changes)
+                  .status == sp::Status::Ok,
+          "collect zone member into hidden custody");
+  scene.tick();
+  require(!edge(scene.relations.in_zone, moving, zone),
+          "hidden inventory retained or recreated sensor membership");
+
+  // A static shape has no ordinary active-body contact update, so an explicit
+  // relocation uses the one-shot reconciliation path instead.
+  const auto fixed = scene.box({.6f, .6f, .6f}, {2, 0, 0});
+  scene.tick();
+  require(sp::set_pose(scene.space, identity(scene.objects), transforms(scene.objects), fixed,
+                       {{1.2f, 0, 0}, {}})
+                  .status == sp::Status::Ok,
+          "relocate static sensor subject");
+  scene.tick();
+  require(edge(scene.relations.in_zone, fixed, zone), "static relocation lost zone overlap");
+  scene.objects.position[zone.slot()] = {10, 0, 0};
+  scene.tick();
+  require(!edge(scene.relations.in_zone, fixed, zone), "moved sensor retained static member");
+  scene.objects.position[zone.slot()] = {};
+  scene.tick();
+  require(edge(scene.relations.in_zone, fixed, zone), "moved sensor failed to regain member");
+  sp::remove(scene.space, identity(scene.objects), zone, parents(scene.objects),
+             space_flags(scene.objects), scene.relations, changes);
+  destroy(scene.objects, zone);
+  init.position = {10, 0, 0};
+  const auto replacement = create(scene.objects, init);
+  require(replacement.slot() == zone.slot() && replacement != zone,
+          "sensor generation fixture did not reuse its slot");
+  require(sp::add_volume(scene.space, identity(scene.objects), transforms(scene.objects),
+                         {replacement, geometry, {{0, 0, 1}, {}}, sp::VolumeKind::Zone})
+                  .status == sp::Status::Ok,
+          "replacement sensor add");
+  scene.tick();
+  require(!edge(scene.relations.in_zone, fixed, zone) &&
+              !edge(scene.relations.in_zone, fixed, replacement),
+          "retired sensor contact leaked to a reused owner slot");
+}
+void plot_membership_follows_real_motion_and_hidden_custody() {
+  Scene scene;
+  const auto holder = scene.character({-1, 0, 0});
+  const auto item = scene.box({.2f, .2f, .2f}, {-1, 0, 1}, sp::Motion::Kinematic, 0, false, false);
+  perm::Plots plots;
+  plots.rows.push_back({1, 1, 0, 0, {-5, -5, 0, 5}, {}});
+  plots.rows.push_back({2, 2, 0, 0, {0, -5, 5, 5}, {}});
+  const std::array selected{item};
+  auto refresh = [&](bool visible) {
+    return perm::update_plots(identity(scene.objects), transforms(scene.objects),
+                              plot_membership(scene.objects), plots, selected, visible);
+  };
+  require(refresh(true) == std::vector<Handle>{item} && scene.objects.plot[item.slot()] == 1,
+          "placed goods plot not initialized");
+  std::vector<sp::RelationChange> changes;
+  require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
+                     parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
+                     scene.relations.supports, scene.relations.attached_to,
+                     {item, holder, {{0, 0, 1}, {}}, true}, changes)
+                  .status == sp::Status::Ok,
+          "grasp plot test goods");
+  require(sp::set_pose(scene.space, identity(scene.objects), transforms(scene.objects), holder,
+                       {{1, 0, 0}, {}})
+                  .status == sp::Status::Ok,
+          "move visible custodian across plot boundary");
+  scene.tick();
+  require(refresh(true) == std::vector<Handle>{item} && scene.objects.plot[item.slot()] == 2 &&
+              scene.objects.parent[item.slot()] == holder,
+          "visible held goods did not follow its actual world plot");
+  require(sp::custody(scene.space, identity(scene.objects), item, holder, parents(scene.objects),
+                      space_flags(scene.objects), scene.relations, changes)
+                  .status == sp::Status::Ok,
+          "hide plot test goods in inventory");
+  require(refresh(false) == std::vector<Handle>{item} && scene.objects.plot[item.slot()] == 0,
+          "hidden inventory retained its custodian's plot");
+  require(sp::custody(scene.space, identity(scene.objects), item, {}, parents(scene.objects),
+                      space_flags(scene.objects), scene.relations, changes)
+                  .status == sp::Status::Ok,
+          "move inventory goods to mailbox custody");
+  require(refresh(false).empty() && scene.objects.plot[item.slot()] == 0,
+          "mailbox goods gained a plot without being revealed");
 }
 void gravity_visibility_zones_and_snapshot() {
   Scene scene;
@@ -266,7 +394,7 @@ void predicted_sensor_crossings_and_containment() {
   scene.wait_navigation();
   sp::MoveRequest request{walker, 1, sp::PointGoal{{4, 0, 0}, .1f}, {}};
   int entered = 0, left = 0;
-  bool contained = false;
+  bool contained = false, overlap_before_center = false;
   for (int i = 0; i < 150; ++i) {
     scene.tick({&request, 1});
     for (const auto &change : scene.result.relations)
@@ -276,13 +404,16 @@ void predicted_sensor_crossings_and_containment() {
         else
           ++left;
       }
+    if (edge(scene.relations.in_zone, walker, zone) &&
+        scene.objects.position[walker.slot()].x < -1.01f)
+      overlap_before_center = true;
     if (edge(scene.relations.contains, container, walker)) {
       contained = true;
       require(scene.objects.parent[walker.slot()] == container,
               "containment did not set immediate parent");
     }
   }
-  require(entered == 1 && left == 1 && contained,
+  require(entered == 1 && left == 1 && contained && overlap_before_center,
           "scheduled zone entry/exit was missed or repeated");
   require(!scene.objects.parent[walker.slot()], "zone exit retained container parent");
 }
@@ -356,6 +487,26 @@ void benchmarks() {
   std::vector<sp::MotionRow> rows;
   benchmark("motion_capture", 1000,
             [&] { sp::capture_motion(scene.space, identity(scene.objects), rows); });
+}
+void sensor_benchmark() {
+  Scene scene;
+  for (int i = 0; i < 100; ++i)
+    scene.box({.2f, .2f, .2f}, {float(i % 10) - 5, float(i / 10) - 5, 0}, sp::Motion::Static, 0,
+              false);
+  const auto shape = sp::sensor_box_geometry(scene.space, {20, 20, 4});
+  for (int i = 0; i < 20; ++i) {
+    ObjectInit init;
+    init.model = 1;
+    const auto zone = create(scene.objects, init);
+    require(sp::add_volume(scene.space, identity(scene.objects), transforms(scene.objects),
+                           {zone, shape, {{0, 0, 1}, {}}, sp::VolumeKind::Zone})
+                    .status == sp::Status::Ok,
+            "benchmark zone add");
+  }
+  scene.tick();
+  benchmark("sensor_step_100_objects_20_overlapping_zones", 200, [&] { scene.tick(); });
+  require(scene.result.relations.empty() && scene.result.moved.empty(),
+          "steady zone contacts published fake changes");
 }
 void requested_speed_respects_authored_profile() {
   Scene scene;
@@ -1042,6 +1193,8 @@ int main(int argc, char **argv) {
       density_benchmarks();
       return 0;
     }
+    sensor_contacts_use_body_overlap();
+    plot_membership_follows_real_motion_and_hidden_custody();
     gravity_visibility_zones_and_snapshot();
     attachments_and_sweep();
     real_stair_navigation();
@@ -1057,6 +1210,7 @@ int main(int argc, char **argv) {
     nested_nonsolid_assembly();
     assembly_geometry_rebuild();
     benchmarks();
+    sensor_benchmark();
     std::cout << "space tests passed\n";
   } catch (const std::exception &error) {
     std::cerr << "space test: " << error.what() << "\n";

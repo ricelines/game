@@ -24,7 +24,6 @@ void restore_motion_causes(MechanicalCauses &causes, space::Space &space, Identi
     auto token = causes.restore(row.summary);
     auto result = space::restore_motion_cause(space, identity, row.object, token);
     if (result.status != space::Status::Ok) {
-      causes.abandon(token);
       throw std::runtime_error("restoring physical cause: " +
                                std::string(space::status_text(result.status)));
     }

@@ -73,6 +73,7 @@ public:
     perm::OwnerLimits &limits;
     AuthorityRead authority;
     TermId start;
+    perm::Ledger &ledger;
   };
   explicit ObjectLifecycle(Owners owners) : owners_(owners) {}
 

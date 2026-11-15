@@ -70,19 +70,34 @@ void Space::Native::CharacterListener::add(const JPH::CharacterVirtual *characte
                                            const JPH::CharacterContact &hit, bool started) {
   // Jolt calls this from actual contact resolution/support; some paths set
   // mHadCollision immediately after the callback rather than before it.
-  if (hit.mIsSensorB)
-    return;
   const Handle first{character->GetUserData()}, second{hit.mUserData};
   if (!first || !second || first == second)
     return;
+  const Key key{first.bits, hit.mBodyB.GetIndexAndSequenceNumber(), hit.mCharacterIDB.GetValue(),
+                hit.mSubShapeIDB.GetValue()};
+  if (hit.mIsSensorB) {
+    auto found = pairs.find(key);
+    if (found == pairs.end()) {
+      const auto volume = std::ranges::find(state.volumes, hit.mBodyB, &Volume::body);
+      if (volume == state.volumes.end())
+        return;
+      CachedContact contact{{first, second, {}, {}, true, {}}, volume->spec.kind};
+      pairs.emplace(key, contact);
+      sensor_contact_changed(state, contact, true);
+    } else if (found->second.sensor == VolumeKind::Container) {
+      const auto subject_body = state.bodies.find(first.bits);
+      if (subject_body != state.bodies.end())
+        subject_body->second.membership.containers_dirty = true;
+    }
+    return;
+  }
   Contact contact{first,
                   second,
                   av(hit.mPosition),
                   av(-hit.mContactNormal),
                   started,
                   native_causes(state, first, second)};
-  pairs[{first.bits, hit.mBodyB.GetIndexAndSequenceNumber(), hit.mCharacterIDB.GetValue(),
-         hit.mSubShapeIDB.GetValue()}] = contact;
+  pairs[key] = {contact, {}};
   if (started)
     state.contacts.push_back(contact);
 }
@@ -96,10 +111,15 @@ void Space::Native::CharacterListener::remove(const JPH::CharacterVirtual *chara
   if (found == pairs.end())
     return;
   auto contact = found->second;
+  pairs.erase(found);
+  if (contact.sensor) {
+    if (!has_sensor_contact(state, contact))
+      sensor_contact_changed(state, contact, false);
+    return;
+  }
   contact.started = false;
   contact.causes = native_causes(state, contact.first, contact.second);
   state.contacts.push_back(contact);
-  pairs.erase(found);
 }
 void Space::Native::CharacterListener::OnContactAdded(const JPH::CharacterVirtual *c,
                                                       const JPH::CharacterContact &hit,

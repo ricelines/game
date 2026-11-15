@@ -1,5 +1,6 @@
 #include "scene_fixture.hpp"
 #include "space_fixture.hpp"
+#include <limits>
 
 using namespace amber;
 namespace bi = amber::bindings;
@@ -24,11 +25,13 @@ struct Fixture {
   perm::OwnerLimits limits;
   perm::Offers offers;
   perm::Trades trades;
+  perm::Plots plots;
+  perm::Ledger ledger;
   testscene::Projection projection{f.objects, f.models,        parameters, assets, *f.projection,
                                    f.runtime, f.subscriptions, declared,   {2, 3}};
   testscene::Lifecycle lifecycle{f,        space,   instances,  parts,   declared,
                                  physical, changes, projection, players, grants,
-                                 limits,   offers,  trades};
+                                 limits,   offers,  trades,     plots,   ledger};
   lifecycle::Created assembly;
   std::string root_hash = ca::sha256("projection root"),
               child_hash = ca::sha256("projection child"),
@@ -314,6 +317,42 @@ void changed_values_and_scene_sampling() {
               f.projection.running_zones.sources.empty() && terminal.changed,
           "terminal light and ambient sampling emits measured change before periodic work ends");
 }
+void funded_retirement_preflights_the_complete_owner_refund() {
+  Fixture f;
+  const auto root = f.assembly.root, child = f.assembly.objects[1];
+  const auto owner = f.f.objects.owner[root.slot()];
+  const auto wallet = perm::Account::player(owner);
+  f.ledger.balance[wallet] = std::numeric_limits<std::int64_t>::max() - 10;
+  f.ledger.balance[perm::Account::object(root)] = 7;
+  f.ledger.balance[perm::Account::object(child)] = 7;
+  const auto before = f.ledger.balance;
+  const auto closure = f.instances.closure(std::span(&root, 1));
+  std::string error;
+  require(!bi::can_retire_objects(f.lifecycle.lifecycle, closure, error) &&
+              f.ledger.balance == before && identity(f.f.objects).valid(root) &&
+              identity(f.f.objects).valid(child) &&
+              space::bounds(f.space, identity(f.f.objects), root).has_value(),
+          "aggregate account overflow changed money, identity or real geometry before refusal");
+  f.ledger.balance[wallet] = 1;
+  require(bi::can_retire_objects(f.lifecycle.lifecycle, closure, error), error.c_str());
+  re::DeferredEffects effects;
+  bi::retire_objects(f.lifecycle.lifecycle, closure, {}, effects);
+  require(perm::balance(f.ledger, wallet) == 15 &&
+              !f.ledger.balance.contains(perm::Account::object(root)) &&
+              !f.ledger.balance.contains(perm::Account::object(child)) &&
+              !identity(f.f.objects).valid(root) && !identity(f.f.objects).valid(child) &&
+              !space::bounds(f.space, identity(f.f.objects), root).has_value(),
+          "actual funded assembly retirement lost funds or left spatial/identity rows alive");
+  std::size_t receipts = 0;
+  for (const auto &effect : effects.ordered)
+    if (const auto *event = std::get_if<record::Event>(&effect);
+        event && event->name == "account_refund") {
+      require(event->detail.at("agent") == false && event->detail.at("amount") == 7,
+              "refund diagnostic became a player choice or lost the actual amount");
+      ++receipts;
+    }
+  require(receipts == 2, "funded part retirement omitted completed account refund records");
+}
 } // namespace
 int main() {
   try {
@@ -321,6 +360,7 @@ int main() {
     ancestor_retirement_and_custody();
     hidden_rebind_and_initialization();
     changed_values_and_scene_sampling();
+    funded_retirement_preflights_the_complete_owner_refund();
     std::cout << "projection lifecycle checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

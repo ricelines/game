@@ -1,91 +1,59 @@
 #include "finance.hpp"
-
-#include <charconv>
-#include <lua.h>
-#include <lualib.h>
+#include "bindings/authority/descriptors.hpp"
 
 namespace amber::bindings {
 namespace {
-PlayerId wallet(lua_State *L, int index, const perm::Players &players) {
-  std::size_t size = 0;
-  const char *text = luaL_checklstring(L, index, &size);
-  PlayerId id = 0;
-  if (size < 3 || text[0] != 'p' || text[1] != ':')
-    luaL_error(L, "wallet must name a player as p:N");
-  const auto parsed = std::from_chars(text + 2, text + size, id);
-  if (parsed.ec != std::errc{} || parsed.ptr != text + size || !id || id >= players.rows.size())
-    luaL_error(L, "wallet player does not exist");
-  return id;
+std::string issuance_inputs(const nlohmann::json &input) {
+  if (!input.is_object() || input.size() != 2 || !input.contains("to") ||
+      !input.at("to").is_string() || !input.contains("amount") ||
+      !input.at("amount").is_number_integer())
+    return "expected destination account and whole amount";
+  if ((input.at("amount").is_number_unsigned() &&
+       input.at("amount").get<std::uint64_t>() > INT64_MAX) ||
+      input.at("amount").get<std::int64_t>() < 0)
+    return "amount must be nonnegative whole currency units";
+  return {};
 }
-std::int64_t amount(lua_State *L, int index) {
-  const double value = luaL_checknumber(L, index);
-  if (!std::isfinite(value) || value < 0 || value >= 0x1p63 || std::trunc(value) != value)
-    luaL_error(L, "amount must be nonnegative whole currency units");
-  return static_cast<std::int64_t>(value);
-}
-int result(lua_State *L, const perm::TransferResult &transfer) {
-  if (transfer && transfer.amount > 0)
-    react::invocation(L).effects->changed = true;
-  lua_createtable(L, 0, 3);
-  lua_pushboolean(L, bool(transfer));
-  lua_setfield(L, -2, "ok");
-  lua_pushnumber(L, static_cast<double>(transfer.amount));
-  lua_setfield(L, -2, "amount");
-  const auto why = perm::reason_text(transfer.reason);
-  lua_pushlstring(L, why.data(), why.size());
-  lua_setfield(L, -2, "reason");
-  return 1;
-}
-void completed(lua_State *L, const char *operation, PlayerId to, std::optional<PlayerId> from,
-               const perm::TransferResult &transfer) {
-  if (!transfer || transfer.amount == 0)
-    return;
-  const auto &inv = react::invocation(L);
-  record::Event event;
-  event.kind = record::Kind::System;
-  event.actor = record::Actor::script(inv.self.script);
-  event.name = operation;
-  event.changed = true;
-  event.result = record::Result::Applied;
-  event.things = {inv.self.object};
-  if (inv.declaration)
-    event.script_author = inv.declaration->author;
-  event.detail = {{"to", "p:" + std::to_string(to)}, {"amount", transfer.amount}};
-  if (from)
-    event.detail["from"] = "p:" + std::to_string(*from);
-  inv.effects->ordered.push_back(std::move(event));
+drive::NativeCompletion issue(void *context, const drive::NativeCall &call) {
+  auto &b = *static_cast<IssuanceBinding *>(context);
+  const auto to =
+      authority::account(call.arguments.at("to"), {b.identity, b.authority, b.players, b.groups})
+          .account;
+  const auto holder =
+      std::holds_alternative<PlayerId>(call.request.caller)
+          ? perm::Holder::player(std::get<PlayerId>(call.request.caller))
+          : perm::Holder::script(std::get<ScriptHolder>(call.request.caller).script,
+                                 std::get<ScriptHolder>(call.request.caller).object);
+  const auto transfer = perm::issue(b.ledger, b.grants, holder, to,
+                                    call.arguments.at("amount").get<std::int64_t>(), call.step);
+  drive::NativeCompletion out;
+  out.changed = bool(transfer) && transfer.amount > 0;
+  out.result = !transfer     ? record::Result::Denied
+               : out.changed ? record::Result::Applied
+                             : record::Result::NoEffect;
+  out.reply = {{"ok", bool(transfer)},
+               {"effect", out.changed ? "applied" : "none"},
+               {"amount", transfer.amount},
+               {"reason", perm::reason_text(transfer.reason)}};
+  if (!transfer)
+    out.reply["denied"] = {
+        {"need", "issuance"},
+        {"on", perm::account_name(to)},
+        {"why", perm::reason_text(transfer.reason)},
+        {"fix", "ask the architect for an unexpired issuance grant with enough budget"}};
+  return out;
 }
 } // namespace
-int balance_binding(lua_State *L) {
-  const auto &b = *static_cast<BalanceBinding *>(react::binding_data(L));
-  const auto self = react::invocation(L).self.object;
-  if (!b.identity.valid(self))
-    luaL_error(L, "script object is no longer alive");
-  const auto key = lua_isnoneornil(L, 2) ? b.authority.owner[self.slot()] : wallet(L, 2, b.players);
-  lua_pushnumber(L, static_cast<double>(perm::balance(b.ledger, key)));
-  return 1;
-}
-int payment_binding(lua_State *L) {
-  auto &b = *static_cast<PaymentBinding *>(react::binding_data(L));
-  const auto from = wallet(L, 2, b.players);
-  const auto to = wallet(L, 3, b.players);
-  const auto whole = amount(L, 4);
-  const auto &inv = react::invocation(L);
-  const auto transfer =
-      perm::pay(b.ledger, b.grants, perm::Holder::script(inv.self.script, inv.self.object), from,
-                to, whole, inv.step);
-  completed(L, "payment", to, from, transfer);
-  return result(L, transfer);
-}
-int issuance_binding(lua_State *L) {
-  auto &b = *static_cast<IssuanceBinding *>(react::binding_data(L));
-  const auto to = wallet(L, 2, b.players);
-  const auto whole = amount(L, 3);
-  const auto &inv = react::invocation(L);
-  const auto transfer =
-      perm::issue(b.ledger, b.grants, perm::Holder::script(inv.self.script, inv.self.object), to,
-                  whole, inv.step);
-  completed(L, "issuance", to, {}, transfer);
-  return result(L, transfer);
+void register_issuance_action(react::Terms &terms, command::NativeActions &native,
+                              drive::NativeOperations &operations, IssuanceBinding &binding) {
+  const auto id = command::declare_native(
+      native, terms, "engine.issue", "Issue currency using an explicit issuance grant.", "", false,
+      {{"type", "object"},
+       {"properties",
+        {{"to", {{"type", "string"}}},
+         {"amount", {{"type", "integer"}, {"minimum", 0}, {"maximum", INT64_MAX}}}}},
+       {"required", {"to", "amount"}},
+       {"additionalProperties", false}});
+  drive::register_native(operations, id, {issuance_inputs, issue, &binding});
 }
 } // namespace amber::bindings

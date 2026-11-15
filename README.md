@@ -2,7 +2,7 @@
 
 An authorable simulation: one C++20 server owns world state, ordinary Luau scripts own behavior, build123d sources produce measured geometry, and a Godot web client watches the same world that agents use through the gateway.
 
-The original design is preserved in [docs](docs/design-source.json). Start with the [architecture](docs/architecture.md), [authoring reference](docs/agent-authoring.md), and [implementation evidence](docs/implementation-status.md).
+The prototype is under correction and does not yet satisfy the design or all acceptance gates. Read the [current status](docs/implementation-status.md) before relying on its behavior. The original [Technicals](docs/02-t.0.md) and [Specs](docs/04-t.de137kjm03j.md) are the requirements; implementation documentation cannot change them.
 
 ## Build
 
@@ -56,9 +56,9 @@ For an actual model-driven population, add `--residents content/residents.json` 
 
 Once the gateway is running, open `http://127.0.0.1:8080/?gateway=http://127.0.0.1:8081` and enter the spectator key to see residents and give them purposes. The URL supplies the separate agent service's address; it contains no credential. The bare `http://127.0.0.1:8080` page remains a spectator view without an agent-service connection.
 
-Native administrative actions use the same `do` operation and advertise their exact inputs through `actions --name NAME`. These include wallets, inventory, gifts, offers, bilateral trades, grants, groups, land, script installation, model defaults, settings, registry definitions and elaboration. [Commerce](docs/commerce-api.md) and [editing](docs/editing-api.md) document authority and mutation boundaries.
+Native administrative actions use the same `do` operation. Known actions can be called directly from their listed signatures; `actions --name NAME` optionally explains their exact inputs. These include wallets, inventory, gifts, offers, bilateral trades, grants, groups, land, script installation, model defaults, settings, registry definitions and elaboration. The original technical design defines the authority boundaries.
 
-The authoring service also supports ready parameter variants and live definition edits. `amb variant MODEL --params JSON --wait` bakes a parameter block for an existing model. `amb edit-model MODEL source.py --wait` bakes a proposed definition and returns the arguments for the ordinary `base.revise_model` action. Applying that action updates the model's current instances together, preserving ownership and matching named-part identities. The authored construction law accounts for the material change. See [live authoring](docs/live-authoring-api.md) for defaults, variants and failure behavior.
+The authoring service also supports ready parameter variants and live definition edits. `amb variant MODEL --params JSON --wait` bakes a parameter block for an existing model. `amb edit-model MODEL source.py --wait` bakes a proposed definition and returns the arguments for the ordinary `base.revise_model` action. Applying that action updates the model's current instances together, preserving ownership and matching named-part identities. See [live authoring](docs/live-authoring-api.md) for defaults, variants and failure behavior.
 
 ## Records, checkpoints and fixtures
 
@@ -93,7 +93,7 @@ python3 bake/run.py -m pytest
 The content-dependent importer and authoring checks require the prepared plan and actual assets; run them separately from CTest:
 
 ```sh
-.build/release/server/bindings/start/start_test "$PWD/.cache/content/seeded-plan.json" "$PWD/assets"
+.build/release/server/bindings/start/start_test "$PWD/.cache/content/seeded-plan.json" "$PWD/assets" /path/to/current-world/registry/HASH.json
 .build/release/server/bindings/authoring/authoring_test "$PWD/.cache/content/seeded-plan.json" "$PWD/assets"
 ```
 

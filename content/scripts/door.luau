@@ -12,9 +12,9 @@ local function tick(self)
     if math.abs(delta) < 0.00001 then self.state.moving = false return end
     local axis = binding.axis
     local translation = rotate(vector.create(axis[1], axis[2], axis[3]), self:object().rotation) * delta * binding.travel
-    local before = self:position(leaf)
+    local before = self:object(leaf).position
     local result = self:sweep(leaf, translation)
-    local achieved = vector.magnitude(self:position(leaf) - before)
+    local achieved = vector.magnitude(self:object(leaf).position - before)
     self:set('base.open_fraction', math.clamp(current + math.sign(delta) * achieved / binding.travel, 0, 1))
     if result.effect == 'obstructed' or achieved < 0.00001 then
         self.state.moving = false

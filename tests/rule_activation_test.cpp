@@ -80,8 +80,10 @@ void activation_and_late_first_contribution() {
     require(runs(r, f.b, id) == 1 && runs(r, f.a, id) == 0 &&
                 react::read(f.values(), f.b, 2, 0, 20).value.numeric() == 6,
             "first contribution discovers material consumer through explicit or fallback along");
-    require(f.links.by_script.at(id) == std::vector<ScriptKey>{{f.b, id}},
-            "watch membership is indexed by actual consumer and immutable script");
+    require(std::count_if(
+                f.links.rows.begin(), f.links.rows.end(),
+                [&](const auto &row) { return row.first.consumer == ScriptKey{f.b, id}; }) == 1,
+            "watch primary rows retain the actual consumer and immutable script");
     effects = {};
     react::set_contribution(f.shared, gives, f.terms.rows[4], f.c, f.a, 3, effects);
     r.change(effects);
@@ -160,7 +162,9 @@ void catchup_replacement_and_timer_retirement() {
   const auto newer = f.add(rule(true));
   effects = {};
   r.enable(newer, effects);
-  require(!f.links.by_script.contains(id) && !f.subscriptions.by_consumer.contains({f.b, id}) &&
+  require(std::none_of(f.links.rows.begin(), f.links.rows.end(),
+                       [&](const auto &row) { return row.first.consumer.script == id; }) &&
+              !f.subscriptions.by_consumer.contains({f.b, id}) &&
               !install::catch_up_valid(item, f.rules, f.values(), 0, 20),
           "superseded rule loses exact watches and pending obsolete background version");
   require(runs(r, f.b, id) == 1, "replacement preserves old flat state and never replays history");
@@ -211,7 +215,10 @@ void partial_replacement_keeps_live_cache_and_prior_state() {
   effects = {};
   r.enable(newer, effects);
   require(
-      f.scripts.rows[old].declaration.active && f.links.by_consumer.at({f.a, old}).size() == 1,
+      f.scripts.rows[old].declaration.active &&
+          std::count_if(
+              f.links.rows.begin(), f.links.rows.end(),
+              [&](const auto &row) { return row.first.consumer == ScriptKey{f.a, old}; }) == 1,
       "partial replacement retires only replaced watch, preserving cached live sibling trigger");
   effects = {};
   react::set_state(f.properties, f.processes, f.terms.rows[1], f.a, Value(3.0), 0, 20, effects);

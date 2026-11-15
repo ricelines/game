@@ -14,7 +14,4 @@ void write_last_gaps(snap::Output &, const LastGaps &, ObjectSelection = {});
 void read_last_gaps(snap::Input &, LastGaps &);
 void write_capture_refs(snap::Output &, const CaptureRefs &, HashSelection = {});
 void read_capture_refs(snap::Input &, CaptureRefs &);
-// Fixtures restore no pending live jobs; full snapshots retain their copied descriptors.
-void write_pending_fixtures(snap::Output &, const PendingFixtures &, bool include = true);
-void read_pending_fixtures(snap::Input &, PendingFixtures &);
 } // namespace amber::elaborate

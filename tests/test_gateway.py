@@ -4,6 +4,7 @@ import asyncio
 import json
 import subprocess
 import sys
+from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
@@ -75,10 +76,9 @@ def test_current_mcp_revision_and_header_body_validation():
     assert failure.value.code == -32602
 
 
-def test_real_websocket_preserves_native_full_and_short_rows_and_full_request():
+def test_real_websocket_gateway_compacts_full_native_observations():
     async def run():
         async def handler(socket):
-            sent = False
             async for raw in socket:
                 message = json.loads(raw)
                 if message["t"] == "hello":
@@ -88,12 +88,18 @@ def test_real_websocket_preserves_native_full_and_short_rows_and_full_request():
                     )
                     await socket.send(json.dumps({"t": "event", "kind": "changed", "sequence": 1}))
                 elif message["t"] == "look":
-                    row = {"h": "o:2.1", "dist_m": 1, "bearing": 5}
-                    if not sent or message.get("full"):
-                        row["measured"] = {"volume": 1}
-                    sent = True
+                    row = {"h": "o:2.1", "dist_m": 1, "bearing": 5, "measured": {"volume": 1}}
                     await socket.send(
-                        json.dumps({"t": "obs", "id": message["id"], "step": 1, "things": [row]})
+                        json.dumps(
+                            {
+                                "t": "obs",
+                                "id": message["id"],
+                                "step": 1,
+                                "things": [row],
+                                "body_actions": [],
+                                "player_actions": [],
+                            }
+                        )
                     )
                 else:
                     await socket.send(
@@ -119,15 +125,64 @@ def test_real_websocket_preserves_native_full_and_short_rows_and_full_request():
             assert len(first["events"]) + len(result["events"]) == 1
             second = await session.tool("look", {})
             assert second["things"] == [{"h": "o:2.1", "dist_m": 1, "bearing": 5}]
-            full = await session.tool("look", {"full": True})
-            assert full["things"][0]["measured"] == {"volume": 1}
-            with pytest.raises(ValueError, match="full must be a boolean"):
-                await session.tool("look", {"full": 1})
+            session.forget_observation()
+            fresh = await session.tool("look", {})
+            assert fresh["things"][0]["measured"] == {"volume": 1}
+            assert fresh["body_actions"] == []
+            assert "body_actions" not in second
+            with pytest.raises(ValueError, match="Unknown argument: full"):
+                await session.tool("look", {"full": True})
             session.events.extend({"sequence": n} for n in range(50))
             newest = await session.tool("inspect", {"target": "self", "events_limit": 45})
             assert newest["events_omitted"] == 5
             assert newest["events"][0]["sequence"] == 5
             await session.close()
+
+    asyncio.run(run())
+
+
+def test_gateway_cache_tracks_descriptions_across_motion_visibility_and_reconnect():
+    async def run():
+        session = Session("ws://unused", "fixture", "fixture")
+        observation = {
+            "things": [
+                {
+                    "h": "o:2.1",
+                    "dist_m": 1,
+                    "bearing": 5,
+                    "lit": True,
+                    "measured": {"mass_kg": 2},
+                    "says": {"name": "Cup"},
+                }
+            ],
+            "far": [],
+            "body_actions": ["move_to(point: vector)"],
+            "player_actions": [],
+        }
+        first = session.compact_observation(deepcopy(observation))
+        assert first["things"][0]["says"]["name"] == "Cup"
+        observation["things"][0].update(dist_m=3, bearing=90)
+        moved = session.compact_observation(deepcopy(observation))
+        assert moved["things"] == [{"h": "o:2.1", "dist_m": 3, "bearing": 90}]
+        assert "body_actions" not in moved and "player_actions" not in moved
+        away = deepcopy(observation)
+        away["things"] = []
+        session.compact_observation(away)
+        assert len(session.compact_observation(deepcopy(observation))["things"][0]) == 3
+        observation["things"][0]["lit"] = False
+        assert "measured" in session.compact_observation(deepcopy(observation))["things"][0]
+        observation["things"][0]["says"]["name"] = "Renamed cup"
+        assert session.compact_observation(deepcopy(observation))["things"][0]["says"] == {
+            "name": "Renamed cup"
+        }
+        observation["body_actions"].append("sit(target: handle)")
+        changed = session.compact_observation(deepcopy(observation))
+        assert len(changed["body_actions"]) == 2 and "player_actions" not in changed
+        session.forget_observation()
+        fresh = session.compact_observation(deepcopy(observation))
+        assert fresh["things"][0]["says"]["name"] == "Renamed cup"
+        assert "body_actions" in fresh and "player_actions" in fresh
+        session._welcomed.cancel()
 
     asyncio.run(run())
 
@@ -255,6 +310,9 @@ def test_actual_model_adapter_never_executes_a_fallback_on_api_failure():
             self.welcome = {"body": "o:1.1"}
             self.calls = []
 
+        def forget_observation(self):
+            pass
+
         async def tool(self, name, arguments):
             self.calls.append(name)
             return {"things": [], "events": []}
@@ -315,6 +373,9 @@ def test_resident_report_checkpoints_responses_and_retains_reset_context():
         welcome = {"body": "o:1.1"}
         calls = []
 
+        def forget_observation(self):
+            pass
+
         async def tool(self, name, arguments):
             self.calls.append((name, arguments))
             return {"things": [], "fixture_padding": "x" * 250001}
@@ -336,7 +397,7 @@ def test_resident_report_checkpoints_responses_and_retains_reset_context():
         await service.turn(row)
         assert len(reports) == 3
         assert reports[0]["responses"] == []
-        assert reports[0]["agents"][0]["observations"][0]["full_requested"] is True
+        assert reports[0]["agents"][0]["observations"][0]["fresh_context"] is True
         assert reports[1]["responses"][0]["response"] == "labelled-response"
         assert reports[1]["agents"][0]["transcript"]
         final = reports[-1]["agents"][0]
@@ -345,7 +406,7 @@ def test_resident_report_checkpoints_responses_and_retains_reset_context():
         assert "fixture_padding" in final["archived_transcripts"][0][-1]["content"]
         assert row.key not in json.dumps(reports)
         await service.turn(row)
-        assert session.calls == [("look", {"full": True}), ("look", {"full": True})]
+        assert session.calls == [("look", {}), ("look", {})]
 
     session = Tools()
     asyncio.run(run())
@@ -370,6 +431,9 @@ def test_resumed_transcript_gets_full_observation_and_concurrent_budget_is_exact
         async def get(self, *_arguments):
             return self
 
+        def forget_observation(self):
+            pass
+
         async def tool(self, name, arguments):
             self.looks.append((name, arguments))
             return {"things": [], "body_actions": ["novel.call()"], "player_actions": []}
@@ -390,9 +454,9 @@ def test_resumed_transcript_gets_full_observation_and_concurrent_budget_is_exact
         await asyncio.gather(*(residents.turn(row) for row in rows))
         assert api.calls == residents.api_attempts == len(residents.measurements) == 4
         assert residents.budget_reached and residents.stopping
-        assert sessions.looks == [("look", {"full": True})] * 6
+        assert sessions.looks == [("look", {})] * 6
         assert all(row.transcript[0] == retained for row in rows)
-        assert all(row.observations[0]["full_requested"] for row in rows)
+        assert all(row.observations[0]["fresh_context"] for row in rows)
         assert "private-fixture" not in json.dumps(residents.report())
 
     asyncio.run(run())

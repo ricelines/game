@@ -7,10 +7,12 @@ signal failed(hash: String, reason: String)
 
 var root_url = ""
 var cache: Dictionary = {}
+var geometry_meshes: Dictionary = {}
 var downloaded_bytes = 0
 var import_ms = 0.0
 var _queue: Array = []
 var _active = 0
+var _geometry_waiters: Dictionary = {}
 
 
 func ensure(hash: String, lod = 2) -> void:
@@ -40,7 +42,17 @@ func _request_lod(hash: String, lod: int) -> void:
 		if status.status != "failed" or Time.get_ticks_msec() - status.retry_ms < 10000:
 			return
 	row.lod_status[lod] = {"status": "loading"}
-	_queue.append({"hash": hash, "stage": "glb", "lod": lod})
+	var geometry = str(row.manifest.geometry_hash) + ":" + str(lod)
+	if geometry_meshes.has(geometry):
+		row.meshes[lod] = geometry_meshes[geometry]
+		row.lod_status[lod] = {"status": "ready"}
+		row.status = "ready"
+		loaded.emit(hash)
+		return
+	if not _geometry_waiters.has(geometry):
+		_geometry_waiters[geometry] = []
+		_queue.append({"hash": hash, "stage": "glb", "lod": lod, "geometry": geometry})
+	_geometry_waiters[geometry].append(hash)
 
 
 func available_lod(hash: String, wanted: int) -> int:
@@ -69,13 +81,18 @@ func _pump() -> void:
 
 
 func _fail(item: Dictionary, reason: String) -> void:
-	var row = cache[item.hash]
+	var hashes = [item.hash]
 	if item.stage == "glb":
-		row.lod_status[item.lod] = {"status": "failed", "retry_ms": Time.get_ticks_msec()}
-	row.status = "failed" if row.meshes.is_empty() else "ready"
-	row.retry_ms = Time.get_ticks_msec()
-	row.error = reason
-	failed.emit(item.hash, reason)
+		hashes = _geometry_waiters[item.geometry]
+		_geometry_waiters.erase(item.geometry)
+	for hash in hashes:
+		var row = cache[hash]
+		if item.stage == "glb":
+			row.lod_status[item.lod] = {"status": "failed", "retry_ms": Time.get_ticks_msec()}
+		row.status = "failed" if row.meshes.is_empty() else "ready"
+		row.retry_ms = Time.get_ticks_msec()
+		row.error = reason
+		failed.emit(hash, reason)
 
 
 func _completed(
@@ -93,7 +110,7 @@ func _completed(
 		_fail(item, "HTTP %d / %s" % [code, error_string(result)])
 	elif item.stage == "manifest":
 		var manifest = JSON.parse_string(body.get_string_from_utf8())
-		if manifest is Dictionary:
+		if manifest is Dictionary and str(manifest.get("geometry_hash", "")).length() == 64:
 			cache[item.hash].manifest = manifest
 			manifest_loaded.emit(item.hash)
 			for lod in cache[item.hash].wanted:
@@ -110,11 +127,15 @@ func _completed(
 			var meshes: Array = []
 			_collect(scene, Transform3D.IDENTITY, meshes)
 			scene.free()
-			cache[item.hash].meshes[item.lod] = meshes
-			cache[item.hash].lod_status[item.lod] = {"status": "ready"}
-			cache[item.hash].status = "ready"
+			geometry_meshes[item.geometry] = meshes
 			import_ms += (Time.get_ticks_usec() - began) * 0.001
-			loaded.emit(item.hash)
+			var hashes = _geometry_waiters[item.geometry]
+			_geometry_waiters.erase(item.geometry)
+			for hash in hashes:
+				cache[hash].meshes[item.lod] = meshes
+				cache[hash].lod_status[item.lod] = {"status": "ready"}
+				cache[hash].status = "ready"
+				loaded.emit(hash)
 		else:
 			_fail(item, "GLB import: " + error_string(error))
 	_pump()

@@ -216,6 +216,36 @@ void subscription_rebind_and_relations() {
   retire_subscriptions(subscriptions, f.a);
   require(subscriptions.rows.empty(), "source retirement clears self subscription");
 }
+void allocation_rows_track_current_nonzero_shares_only() {
+  Fixture f;
+  AllocationRows allocations;
+  MeterRows meters;
+  const Shared supply{2, {{f.a, 2}}};
+  const Shared empty;
+  PriorityValues priority;
+  for (unsigned i = 0; i < 256; ++i) {
+    ObjectInit init;
+    init.model = 1;
+    const auto consumer = create(f.objects, init);
+    const Shared demand{1, {{consumer, 1}}};
+    allocate(supply, demand, Combine::ShareEqual, priority, f.b, 1, 2, allocations, meters, i * 2,
+             20);
+    require(allocations.values.size() == 2 && allocations.by_subject_term.size() == 2 &&
+                allocations.by_object.size() <= 3,
+            "current allocation rows/indexes grew with withdrawn contributors");
+  }
+  allocate(empty, empty, Combine::ShareEqual, priority, f.b, 1, 2, allocations, meters, 512, 20);
+  require(allocations.values.empty() && allocations.by_subject_term.empty() &&
+              allocations.by_object.empty() && !meters.empty(),
+          "zero shares retained current-state rows or discarded earned integrals");
+  retire_allocations(allocations, meters, f.b);
+  require(meters.empty(), "retiring a fully withdrawn subject retained historical meters");
+  const Shared demand{1, {{f.c, 1}}};
+  allocate(empty, demand, Combine::ShareEqual, priority, f.b, 1, 2, allocations, meters, 513, 20);
+  require(allocations.values.empty() && meters.empty(),
+          "never-served zero demand allocated redundant rows and meters");
+}
+
 void contribution_and_metering() {
   Fixture f;
   DeferredEffects effects;
@@ -278,7 +308,6 @@ void dispatch_and_causality() {
   auto origin = journal.append(handler, parent);
   DeferredEffects effects;
   effects.ordered.push_back(step::EventWork{f.a, f.b, 1, Value(1.0), {}});
-  effects.ordered.push_back(step::ActionWork{{ScriptHolder{9, f.a}, 2, f.b, Value{}}, {}});
   effects.ordered.push_back(step::Timer{3, {f.a, f.a, 3, Value{}, {}}, {}});
   step::WorkQueues q;
   step::TimerWheel wheel;
@@ -286,9 +315,6 @@ void dispatch_and_causality() {
   auto event = std::get<step::EventWork>(step::pop_foreground(q)->work);
   require(event.origin.cause == origin.cause && event.origin.root == parent.root,
           "child stamps completed handler origin");
-  auto script_action = std::get<step::ActionWork>(step::pop_foreground(q)->work);
-  require(std::get<ScriptHolder>(script_action.request.caller).object == f.a,
-          "script action retains installed holder");
   require(step::timers(wheel)[0].event.origin == origin, "timer keeps complete origin");
 }
 RunOutcome execute(Vm &vm, ScriptState &state, DeferredEffects &effects, Handle object, ScriptId id,
@@ -301,22 +327,6 @@ RunOutcome execute(Vm &vm, ScriptState &state, DeferredEffects &effects, Handle 
   inv.effects = &effects;
   inv.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
   return run_handler(vm, {id, std::move(function)}, inv);
-}
-void structural_publication_order() {
-  DeferredEffects effects;
-  effects.structural.push_back(StructuralRequest{});
-  effects.ordered.push_back(step::EventWork{});
-  step::WorkQueues queues;
-  step::TimerWheel timers;
-  record::Journal journal(8, {});
-  bool denied = false;
-  try {
-    publish_effects(std::move(effects), {}, 0, queues, timers, journal, 100);
-  } catch (const std::logic_error &) {
-    denied = true;
-  }
-  require(denied && queues.causal.empty() && journal.take().empty(),
-          "unapplied structure cannot publish descendants or records first");
 }
 void luau_state_and_limits() {
   const auto object = Handle::make(7, 9000001);
@@ -415,18 +425,9 @@ void luau_state_and_limits() {
   require(iter_result.status == RunOutcome::Status::Error && iter_result.memory_bytes <= 256 * 1024,
           "retained iterator snapshots count against script budget");
 }
-int construction_probe(lua_State *L) {
-  auto &inv = invocation(L);
-  StructuralRequest request;
-  if (!queue_structural(inv, request))
-    inv.effects->ordered.emplace_back(std::in_place_type<Diagnostic>,
-                                      Diagnostic{"denied", "construction authority absent"});
-  return 0;
-}
 void live_activation_and_dispatch_authority() {
   Vm vm({4096, 50, 5, 64});
-  register_binding(vm, "build", construction_probe, nullptr);
-  auto compiled = compile_script("return {on={run=function(self) self:build() end}}");
+  auto compiled = compile_script("return {on={run=function(self) self.state.ran=true end}}");
   ScriptDeclaration declaration;
   declaration.id = 11;
   declaration.kind = ScriptDeclaration::Kind::Rule;
@@ -442,30 +443,19 @@ void live_activation_and_dispatch_authority() {
   inv.state = &state;
   inv.random = &rng;
   inv.effects = &effects;
-  HandlerRef handler{11, "run", 1, 1, true, true};
-  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Missing &&
-              effects.structural.empty(),
-          "unapproved inactive rule cannot instantiate");
+  HandlerRef handler{11, "run", 1, 1, true};
+  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Missing && state.empty(),
+          "inactive rule does not run");
   set_activation(vm, 11, true, true);
-  effects.ordered.clear();
   inv.deadline = {};
   require(run_handler(vm, handler, inv).status == RunOutcome::Status::Ok &&
-              effects.structural.size() == 1,
-          "authorized activation updates cached metadata");
-  effects.structural.clear();
-  effects.ordered.clear();
-  handler.world_rule = false;
-  inv.deadline = {};
-  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Ok &&
-              effects.structural.empty(),
-          "ordinary model dispatch of approved rule has no world-rule authority");
-  handler.world_rule = true;
+              std::get<bool>(state.at(std::string("ran"))),
+          "activation updates the cached closure declaration");
+  state.clear();
   set_activation(vm, 11, true, false);
-  effects.ordered.clear();
   inv.deadline = {};
-  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Missing &&
-              effects.structural.empty(),
-          "deactivation takes effect without closure reload");
+  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Missing && state.empty(),
+          "deactivation takes effect without reloading the closure");
 }
 void luau_bound_values_and_events() {
   Fixture f;
@@ -483,7 +473,9 @@ void luau_bound_values_and_events() {
   auto compiled = compile_script(R"(return {on={run=function(self)
     self:set('x.1',3); self:rate('x.1',-1,0,3)
     self:emit(self.handle,'x.2',{target=self.handle,amount=2})
-    self:after(0,'x.2',true); self:act('x.3',self.handle,{amount=1})
+    self:after(0,'x.2',true)
+    local result=self:act('x.3',self.handle,{amount=1})
+    assert(result.ok and result.effect=='applied' and result.created[1]==self.handle)
     self.state.observed=self:get('x.1')
     self.state.explicit=self:read(self.handle,'x.1')
     self:after(0.1,'x.2')
@@ -495,22 +487,33 @@ void luau_bound_values_and_events() {
   require(load_script(vm, compiled, d).status == RunOutcome::Status::Ok, "load bindings script");
   ScriptState state;
   DeferredEffects effects;
-  auto result = execute(vm, state, effects, f.a, 1);
+  std::uint64_t rng = 7;
+  Invocation bound_invocation;
+  bound_invocation.self = {f.a, 1};
+  bound_invocation.state = &state;
+  bound_invocation.random = &rng;
+  bound_invocation.effects = &effects;
+  bound_invocation.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  auto result = run_handler(vm, {1, "run"}, bound_invocation);
+  require(result.status == RunOutcome::Status::Action && result.action &&
+              std::get<ScriptHolder>(result.action->request.caller) == ScriptHolder{1, f.a} &&
+              result.action->arguments == nlohmann::json{{"amount", 1}},
+          "act suspends at its call site as the installed script holder");
+  require(!state.contains(StateKey{std::string("observed")}),
+          "Lua statements after act wait for the actual action result");
+  result = resume_handler(vm, bound_invocation,
+                          {{"ok", true}, {"effect", "applied"}, {"created", {to_string(f.a)}}});
   if (result.status != RunOutcome::Status::Ok)
     throw std::runtime_error(result.error);
   near(std::get<double>(state.at(StateKey{std::string("observed")})), 3,
        "bindings read immediate changes");
   near(std::get<double>(state.at(StateKey{std::string("explicit")})), 3,
        "explicit handle read uses same source resolver");
-  require(effects.ordered.size() == 7,
-          "writes, event, timer, action and omitted payloads preserved");
-  auto &action = std::get<step::ActionWork>(effects.ordered[4]);
-  require(std::get<ScriptHolder>(action.request.caller) == ScriptHolder{1, f.a},
-          "self act cannot borrow player");
+  require(effects.ordered.size() == 6, "writes, events and timers survive action suspension");
   auto &timer = std::get<step::Timer>(effects.ordered[3]);
   require(timer.due == 1, "after zero next step");
-  const auto &empty_timer = std::get<step::Timer>(effects.ordered[5]);
-  const auto &empty_event = std::get<step::EventWork>(effects.ordered[6]);
+  const auto &empty_timer = std::get<step::Timer>(effects.ordered[4]);
+  const auto &empty_event = std::get<step::EventWork>(effects.ordered[5]);
   require(empty_timer.due == 2 && !std::get<Value>(empty_timer.event.payload).present() &&
               !std::get<Value>(empty_event.payload).present(),
           "omitted optional timer and event payloads are ordinary absent scalars");
@@ -556,36 +559,82 @@ void luau_bound_values_and_events() {
 
   auto armed = threshold_timers(Subscriptions{}, f.processes, {f.a, 1}, 0, 20, {});
   require(armed.empty(), "unsubscribed process schedules nothing");
-  ScriptDeclaration law;
-  law.kind = ScriptDeclaration::Kind::Rule;
-  law.approved = true;
-  law.active = true;
-  Invocation invocation;
-  invocation.declaration = &law;
-  invocation.world_rule = true;
-  invocation.approved = true;
-  invocation.active = true;
-  invocation.effects = &effects;
-  StructuralRequest request;
-  request.binding = {1, 10, 0};
-  require(queue_structural(invocation, request),
-          "active approved rule can queue geometry creation");
-  law.kind = ScriptDeclaration::Kind::Instance;
-  require(!queue_structural(invocation, request),
-          "installed script cannot bypass authored construction law");
-  request.kind = StructuralRequest::Kind::ReplaceBinding;
-  require(!queue_structural(invocation, request), "mass-changing binding edit uses same law gate");
+}
+void synchronous_actions_and_nested_deadlines() {
+  Fixture f;
+  f.terms.rows[3].kind = Kind::Action;
+  Vm vm({4096, 50, 5, 64});
+  bind_events(vm, f.terms);
+  ScriptDeclaration declaration;
+  declaration.id = 1;
+  auto compiled = compile_script(R"(return {on={run=function(self, sender, target)
+    self.state.before=(self.state.before or 0)+1
+    local result=self:act('x.3',target,{object=self.handle,point=vector.create(1,2,3),amount=34,fraction=0.5})
+    if result.ok then self.state.after=result.created[1]
+    else self.state.denied=result.denied.need end
+  end}})");
+  require(load_script(vm, compiled, declaration).status == RunOutcome::Status::Ok,
+          "load nested action script");
+  ScriptState outer_state, inner_state;
+  DeferredEffects outer_effects, inner_effects;
+  std::uint64_t rng = 1;
+  Invocation outer, inner;
+  outer.self = {f.a, 1};
+  outer.payload = Value(f.b);
+  outer.state = &outer_state;
+  outer.effects = &outer_effects;
+  outer.random = &rng;
+  outer.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  inner.self = {f.b, 1};
+  inner.payload = Value{};
+  inner.state = &inner_state;
+  inner.effects = &inner_effects;
+  inner.random = &rng;
+  inner.deadline = outer.deadline;
+  const HandlerRef handler{1, "run"};
+  auto outcome = run_handler(vm, handler, outer);
+  require(outcome.status == RunOutcome::Status::Action && outcome.action &&
+              outcome.action->arguments["object"] == to_string(f.a) &&
+              outcome.action->arguments["amount"].is_number_integer() &&
+              outcome.action->arguments["amount"] == 34 &&
+              outcome.action->arguments["fraction"].is_number_float() &&
+              outcome.action->arguments["point"] == nlohmann::json::array({1, 2, 3}),
+          "act preserves typed handles and vector arguments");
+  const auto nested = run_handler(vm, handler, inner);
+  require(nested.status == RunOutcome::Status::Action && !nested.action->request.target,
+          "nested targetless ordinary actions accept nil while the caller waits");
+  require(resume_handler(vm, inner, {{"ok", false}, {"denied", {{"need", "use"}}}}).status ==
+                  RunOutcome::Status::Ok &&
+              std::get<std::string>(inner_state.at(std::string("denied"))) == "use",
+          "callee resumes with the actual canonical denial");
+  require(resume_handler(vm, outer, {{"ok", true}, {"created", {to_string(f.c)}}}).status ==
+                  RunOutcome::Status::Ok &&
+              std::get<Handle>(outer_state.at(std::string("after"))) == f.c,
+          "outer call retains its own Lua stack and receives real created handles");
+  outer.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  require(run_handler(vm, handler, outer).status == RunOutcome::Status::Action,
+          "start another ordinary action");
+  outer.deadline = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+  require(resume_handler(vm, outer, {{"ok", true}}).status == RunOutcome::Status::Cutoff &&
+              std::get<double>(outer_state.at(std::string("before"))) == 2,
+          "nested work does not reset the caller deadline or roll back prior writes");
+  outer.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  require(run_handler(vm, handler, outer).status == RunOutcome::Status::Action &&
+              resume_handler(vm, outer, {{"ok", false}, {"denied", {{"need", "take"}}}}).status ==
+                  RunOutcome::Status::Ok,
+          "cutoff unwinds the active VM call without poisoning later runs");
 }
 } // namespace
 int main() {
   source_resolution();
   process_thresholds_and_transfer();
   subscription_rebind_and_relations();
+  allocation_rows_track_current_nonzero_shares_only();
   contribution_and_metering();
   dispatch_and_causality();
-  structural_publication_order();
   luau_state_and_limits();
   live_activation_and_dispatch_authority();
   luau_bound_values_and_events();
+  synchronous_actions_and_nested_deadlines();
   std::cout << "reaction and real Luau checks passed\n";
 }

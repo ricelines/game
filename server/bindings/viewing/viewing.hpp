@@ -37,7 +37,6 @@ struct SessionView {
   PlayerId player = 0;
   Handle body;
   Vec3 eye;
-  observe::SessionCache sent;
   PendingView pending;
   std::unordered_set<std::uint64_t> acquired;
   std::vector<Handle> last_observation;
@@ -67,7 +66,7 @@ struct LookBinding {
   const step::Intents &intents;
   observe::Settings settings;
   const Step &now;
-  double hz, world_ambient_lux, query_ms;
+  double hz, world_ambient_lux;
   ViewInterestSink interest;
   ObservationSink observations;
 };

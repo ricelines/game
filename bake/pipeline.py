@@ -7,13 +7,16 @@ import hashlib
 import json
 import math
 import re
+import shutil
 from dataclasses import asdict
 from pathlib import Path
 
 import build123d as bd
+import numpy as np
 from OCP.BRep import BRep_Tool
-from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SOLID, TopAbs_VERTEX
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_REVERSED, TopAbs_SOLID, TopAbs_VERTEX
 from OCP.TopExp import TopExp_Explorer
+from OCP.TopLoc import TopLoc_Location
 
 from amb import shapes
 from bake.gltf import write_glb
@@ -38,7 +41,7 @@ def _polygon(wire):
     return points
 
 
-def _measure(shape: bd.Shape, config: dict) -> dict:
+def _measure(shape: bd.Shape, config: dict, *, validated=False) -> dict:
     box = shape.bounding_box()
     low, high = list(box.min), list(box.max)
     size = [high[i] - low[i] for i in range(3)]
@@ -47,7 +50,7 @@ def _measure(shape: bd.Shape, config: dict) -> dict:
     solids = shape.solids()
     if (
         not solids
-        or not shape.is_valid
+        or (not validated and not shape.is_valid)
         or any(
             TopExp_Explorer(shape.wrapped, kind, TopAbs_SOLID).More()
             for kind in (TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX)
@@ -114,39 +117,95 @@ def load_native(path: Path):
     return library
 
 
-def _geometry(shape, output, metadata, config, library, exact_capacity=None):
+def _mesh(shape, tolerance):
+    # Read OCCT's triangulation directly. build123d's tessellate returns a
+    # Vector wrapper for every point, which this pipeline immediately unwraps.
+    shape.mesh(tolerance)
+    points, indices = [], []
+    for face in shape.faces():
+        location = TopLoc_Location()
+        mesh = BRep_Tool.Triangulation_s(face.wrapped, location)
+        transform = location.Transformation()
+        offset = len(points)
+        for index in range(1, mesh.NbNodes() + 1):
+            point = mesh.Node(index).Transformed(transform)
+            points.append([point.X(), point.Y(), point.Z()])
+        reversed_face = face.wrapped.Orientation() == TopAbs_REVERSED
+        for triangle in mesh.Triangles():
+            a, b, c = (triangle.Value(index) + offset - 1 for index in (1, 2, 3))
+            indices.extend((a, c, b) if reversed_face else (a, b, c))
+    return points, indices
+
+
+def _geometry_hash(output):
+    digest = hashlib.sha256()
+    for index in range(3):
+        data = (output / f"lod{index}.glb").read_bytes()
+        digest.update(len(data).to_bytes(8, "little"))
+        digest.update(data)
+    return digest.hexdigest()
+
+
+def _geometry(
+    shape, output, metadata, config, library, compiled, exact_capacity=None, *, validated=False
+):
     output.mkdir(parents=True, exist_ok=True)
-    measured = _measure(shape, config)
+    measured = _measure(shape, config, validated=validated)
     tolerance = max(
         config["LINEAR_TOLERANCE_M"], max(measured["size"]) * config["RELATIVE_TOLERANCE"]
     )
-    vertices, triangles = shape.tessellate(tolerance)
-    if len(triangles) > config["TRIS_MAX"]:
+    points, indices = _mesh(shape, tolerance)
+    if len(indices) // 3 > config["TRIS_MAX"]:
         raise BakeError("tessellation", "Model exceeds configured triangle limit")
-    points = [list(vertex) for vertex in vertices]
-    indices = [index for triangle in triangles for index in triangle]
-    native, lods = _native(
-        library,
-        {
-            "vertices": points,
-            "indices": indices,
-            "capacity_grid": 0 if exact_capacity is not None else config["CAPACITY_GRID"],
-            "lod_ratios": config["LOD_RATIOS"],
-            "lod_relative_error": config["LOD_RELATIVE_ERROR"],
-        },
-        output,
-        config,
+    capacity_grid = 0 if exact_capacity is not None else config["CAPACITY_GRID"]
+    # Native collision and GLB both consume this exact float32 mesh. The cache
+    # lives only in this measurement job; author metadata and CAD facts never
+    # select a hit. Repeated assembly instances retain their own identities.
+    key = (
+        np.asarray(points, dtype="<f4").tobytes(),
+        np.asarray(indices, dtype="<u4").tobytes(),
+        capacity_grid,
     )
-    measured["capacity"] = exact_capacity if exact_capacity is not None else native["capacity"]
+    prior = compiled.get(key)
+    if prior is None:
+        native, lods = _native(
+            library,
+            {
+                "vertices": points,
+                "indices": indices,
+                "capacity_grid": capacity_grid,
+                "lod_ratios": config["LOD_RATIOS"],
+                "lod_relative_error": config["LOD_RELATIVE_ERROR"],
+            },
+            output,
+            config,
+        )
+        geometry_lods = [indices, lods["lod1"], lods["lod2"]]
+        measured["lods"] = [
+            {
+                "file": f"lod{i}.glb",
+                "triangles": write_glb(output / f"lod{i}.glb", points, values, flat=i > 0),
+            }
+            for i, values in enumerate(geometry_lods)
+        ]
+        capacity = native["capacity"]
+        geometry_hash = _geometry_hash(output)
+        compiled[key] = (output, capacity, measured["lods"], geometry_hash)
+    else:
+        original, capacity, lods, geometry_hash = prior
+        for filename in (
+            "collision.bin",
+            "convex.bin",
+            "mesh.bin",
+            "lod0.glb",
+            "lod1.glb",
+            "lod2.glb",
+        ):
+            shutil.copyfile(original / filename, output / filename)
+        measured["lods"] = [dict(row) for row in lods]
+    measured["geometry_hash"] = geometry_hash
+    measured["capacity"] = exact_capacity if exact_capacity is not None else capacity
     measured["capacity_method"] = "standard_exact" if exact_capacity is not None else "voxel_flood"
-    geometry_lods = [indices, lods["lod1"], lods["lod2"]]
-    measured["lods"] = [
-        {
-            "file": f"lod{i}.glb",
-            "triangles": write_glb(output / f"lod{i}.glb", points, values, flat=i > 0),
-        }
-        for i, values in enumerate(geometry_lods)
-    ]
     measured["collision"] = {
         "static": "collision.bin",
         "dynamic": "convex.bin",
@@ -258,6 +317,7 @@ def measure(
     solids = list(shape.solids())
     selected = set()
     children = {}
+    compiled = {}
     for name, part in parts.items():
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", name):
             raise BakeError("metadata", "Part names must be path-safe identifiers")
@@ -274,7 +334,11 @@ def measure(
         if len(origin) != 3 or not all(math.isfinite(value) for value in origin):
             raise BakeError("metadata", "Part origin must contain three finite coordinates")
         child_hash = hashlib.sha256(f"{identity}\0part\0{name}".encode()).hexdigest()
-        local = solids[index].translate(tuple(-value for value in origin))
+        # Measurements need the moved TopoDS solid, not build123d's deep copy
+        # of the Python assembly/provenance graph retained by each selected part.
+        local = bd.Shape.cast(
+            solids[index].wrapped.Moved(bd.Location(tuple(-value for value in origin)).wrapped)
+        )
         child_meta = {
             **metadata,
             "hash": child_hash,
@@ -289,7 +353,11 @@ def measure(
             "replicated": part.get("replicated", []),
             "bindings": part.get("bindings", {}),
         }
-        child = _geometry(local, output / "parts" / name, child_meta, config, library)
+        # The complete imported assembly was already validated. Selecting a
+        # solid and moving its location does not change its topology.
+        child = _geometry(
+            local, output / "parts" / name, child_meta, config, library, compiled, validated=True
+        )
         children[name] = child
         (output / "parts" / name / "manifest.json").write_text(
             json.dumps(child, indent=2, allow_nan=False)
@@ -304,7 +372,14 @@ def measure(
     if remaining:
         root = shape if not selected else bd.Compound(remaining)
         manifest = _geometry(
-            root, output, metadata, config, library, exact_capacity if not selected else None
+            root,
+            output,
+            metadata,
+            config,
+            library,
+            compiled,
+            exact_capacity if not selected else None,
+            validated=True,
         )
     else:
         output.mkdir(parents=True, exist_ok=True)
@@ -322,6 +397,7 @@ def measure(
                 for i in range(3)
             ],
         }
+        manifest["geometry_hash"] = _geometry_hash(output)
     if selected:
         manifest["assembly"] = full_measurements
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2, allow_nan=False))

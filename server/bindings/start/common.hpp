@@ -38,30 +38,7 @@ inline Value scalar(const Json &value, const Symbols &symbols) {
   throw std::invalid_argument("initial property needs a scalar or typed object reference");
 }
 inline perm::Rights rights(const Json &values, perm::ScopeKind scope = perm::ScopeKind::Object) {
-  perm::Rights result = 0;
-  for (const auto &value : values) {
-    const auto name = value.get<std::string>();
-    if (scope == perm::ScopeKind::Account || scope == perm::ScopeKind::Issuance) {
-      if ((scope == perm::ScopeKind::Account && name != "spend") ||
-          (scope == perm::ScopeKind::Issuance && name != "issue"))
-        throw std::invalid_argument("wrong account grant right");
-      result |= 1;
-    } else if (scope == perm::ScopeKind::Plot && name == "build")
-      result |= 1;
-    else if (scope == perm::ScopeKind::Plot && name == "enter")
-      result |= 2;
-    else if (scope == perm::ScopeKind::Plot && name == "run_scripts")
-      result |= 4;
-    else {
-      constexpr std::array<const char *, 7> names{"use",  "take",     "move",   "edit",
-                                                  "copy", "transfer", "destroy"};
-      const auto it = std::find(names.begin(), names.end(), name);
-      if (it == names.end())
-        throw std::invalid_argument("unknown initial permission right");
-      result |= perm::Rights{1} << (it - names.begin());
-    }
-  }
-  return result;
+  return authority::rights(values, scope);
 }
 inline PlayerId account(const Json &value) {
   return authority::identifier(value, "p:");

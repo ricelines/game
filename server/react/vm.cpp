@@ -18,12 +18,26 @@
 namespace amber::react {
 namespace {
 constexpr int handle_tag = 1, state_tag = 2, iterator_tag = 3;
+struct Binding {
+  lua_CFunction function;
+  void *data;
+};
 struct RunContext {
   Invocation *invocation = nullptr;
   std::size_t state_bytes = 0, state_limit = 0;
   const std::size_t *heap_bytes = nullptr;
   std::size_t event_fields_max = 0;
+  lua_State *thread = nullptr;
+  int thread_ref = 0;
+  std::optional<RunOutcome::Action> action{};
+  const nlohmann::json *result = nullptr;
+  const std::map<std::string, Binding> *bindings = nullptr;
+  const HandlerRef *handler = nullptr;
+  int module_ref = 0;
+  bool missing = false;
 };
+nlohmann::json metadata_json(lua_State *, int, std::size_t &, int = 0, bool host_values = false);
+void push_result(lua_State *, const nlohmann::json &);
 struct StateProxy {
   ScriptState *state;
 };
@@ -426,8 +440,9 @@ int emit_method(lua_State *L) {
   const auto event = term_arg(L, 3, *terms);
   if (terms->rows[event].kind != Kind::Event)
     luaL_error(L, "emit needs an event term");
-  if (!acquired(inv, target))
-    luaL_error(L, "event target was not acquired");
+  if (target != inv.self.object && std::ranges::find(inv.parts, target) == inv.parts.end() &&
+      std::ranges::find(inv.event_targets, target) == inv.event_targets.end())
+    luaL_error(L, "event target must be self, a declared part, related, or from this event");
   inv.effects->ordered.push_back(
       step::EventWork{target, inv.self.object, event, check_payload(L, 4), {}});
   return 0;
@@ -458,11 +473,73 @@ int act_method(lua_State *L) {
   const auto action = term_arg(L, 2, *terms);
   if (terms->rows[action].kind != Kind::Action)
     luaL_error(L, "act needs an action term");
-  inv.effects->ordered.push_back(step::ActionWork{{ScriptHolder{inv.self.script, inv.self.object},
-                                                   action, check_handle(L, 3), check_payload(L, 4)},
-                                                  {}});
-  lua_pushboolean(L, 1);
+  std::size_t nodes = 0;
+  nlohmann::json arguments;
+  try {
+    arguments =
+        lua_isnoneornil(L, 4) ? nlohmann::json::object() : metadata_json(L, 4, nodes, 0, true);
+  } catch (const std::runtime_error &error) {
+    luaL_error(L, "%s", error.what());
+  }
+  if (arguments.is_array() && arguments.empty())
+    arguments = nlohmann::json::object();
+  if (!arguments.is_object())
+    luaL_error(L, "action args must be an input record");
+  context(L).action = RunOutcome::Action{{ScriptHolder{inv.self.script, inv.self.object},
+                                          action,
+                                          lua_isnoneornil(L, 3) ? Handle{} : check_handle(L, 3),
+                                          {}},
+                                         std::move(arguments)};
+  return lua_yield(L, 0);
+}
+int act_result(lua_State *L, int) {
+  if (!context(L).invocation->state)
+    luaL_error(L, "script state was retired during its action");
+  push_result(L, *context(L).result);
   return 1;
+}
+int handler_done(lua_State *, int) {
+  return 0;
+}
+int handler_entry(lua_State *L) {
+  auto &run = context(L);
+  auto &inv = *run.invocation;
+  lua_getref(L, run.module_ref);
+  lua_getfield(L, -1, "on");
+  if (lua_istable(L, -1)) {
+    lua_getfield(L, -1, run.handler->function.c_str());
+    lua_remove(L, -2);
+    lua_remove(L, -2);
+  } else {
+    lua_pop(L, 1);
+    lua_getfield(L, -1, run.handler->function.c_str());
+    lua_remove(L, -2);
+  }
+  if (!lua_isfunction(L, -1)) {
+    run.missing = true;
+    return 0;
+  }
+  lua_createtable(L, 0, static_cast<int>(run.bindings->size() + 2));
+  push_handle(L, inv.self.object);
+  lua_setfield(L, -2, "handle");
+  lua_pushunsigned(L, inv.self.script);
+  lua_setfield(L, -2, "script");
+  auto *proxy = static_cast<StateProxy *>(
+      lua_newuserdatataggedwithmetatable(L, sizeof(StateProxy), state_tag));
+  *proxy = {inv.state};
+  lua_setfield(L, -2, "state");
+  for (const auto &[name, binding] : *run.bindings) {
+    if (name == "world.near" || name == "world.raycast")
+      continue;
+    lua_pushlightuserdata(L, binding.data);
+    lua_pushcclosurek(L, binding.function, name.c_str(), 1,
+                      binding.function == act_method ? act_result : nullptr);
+    lua_setfield(L, -2, name.c_str());
+  }
+  lua_setreadonly(L, -1, 1);
+  push_handle(L, inv.sender);
+  push_payload(L, inv.payload);
+  return lua_callyieldable(L, 3, 0);
 }
 struct WriteCheck : Luau::AstVisitor {
   std::vector<std::string> &errors;
@@ -558,15 +635,13 @@ struct Vm::Impl {
     int thread_ref, module_ref;
     ScriptDeclaration declaration;
   };
-  struct Binding {
-    lua_CFunction function;
-    void *data;
-  };
   Allocator allocator;
   VmSettings settings;
   lua_State *main = nullptr;
   std::unordered_map<ScriptId, Script> scripts;
   std::map<std::string, Binding> bindings;
+  std::vector<std::unique_ptr<RunContext>> calls;
+  RunOutcome advance(Invocation &);
   explicit Impl(VmSettings supplied) : settings(supplied) {
     allocator.limit = settings.script_kb * 1024;
     main = lua_newstate(allocate_lua, &allocator);
@@ -710,14 +785,6 @@ ScriptValidation validate_script(std::string_view source, const Terms &terms,
       result.errors.push_back("invalid action kind");
     if (std::find(rights.names.begin(), rights.names.end(), action.right) == rights.names.end())
       result.errors.push_back("unknown action right");
-    if (action.right_on != "self" && action.right_on != "selected")
-      result.errors.push_back("action right_on must be self or selected");
-    static const std::array<std::string_view, 9> mechanical{
-        "navigation", "attachment", "grasp",    "release",       "impulse",
-        "sweep",      "sound",      "transfer", "avatar_control"};
-    for (const auto &mechanic : action.mechanics)
-      if (std::find(mechanical.begin(), mechanical.end(), mechanic) == mechanical.end())
-        result.errors.push_back("unknown action mechanic");
   }
   if (declaration.kind == ScriptDeclaration::Kind::Rule &&
       (declaration.selector.empty() || declaration.tests == 0))
@@ -736,6 +803,17 @@ RunOutcome load_script(Vm &vm, const CompiledScript &compiled,
   const auto thread_ref = lua_ref(impl.main, -1);
   lua_pop(impl.main, 1);
   luaL_sandboxthread(L);
+  lua_newtable(L);
+  for (const auto name : {"near", "raycast"}) {
+    const auto found = impl.bindings.find(std::string("world.") + name);
+    if (found != impl.bindings.end()) {
+      lua_pushlightuserdata(L, found->second.data);
+      lua_pushcclosure(L, found->second.function, name, 1);
+      lua_setfield(L, -2, name);
+    }
+  }
+  lua_setreadonly(L, -1, true);
+  lua_setglobal(L, "world");
   Invocation startup;
   startup.deadline = std::chrono::steady_clock::now() +
                      std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -772,89 +850,25 @@ RunOutcome load_script(Vm &vm, const CompiledScript &compiled,
     lua_unref(impl.main, thread_ref);
   return result;
 }
-RunOutcome run_handler(Vm &vm, const HandlerRef &handler, Invocation &inv) {
-  ZoneScopedN("Luau handler");
-  ZoneValue(handler.script);
-  auto &impl = *vm.impl_;
-  auto found = impl.scripts.find(handler.script);
-  if (found == impl.scripts.end() || !handler.enabled)
-    return {};
-  auto &script = found->second;
-  if (!script.declaration.active ||
-      (script.declaration.kind == ScriptDeclaration::Kind::Rule && !script.declaration.approved))
-    return {};
-  auto *L = script.thread;
-  if (!inv.state || !inv.effects)
-    return {RunOutcome::Status::Error, "state and effects rows must be bound", 0};
-  inv.self.script = handler.script;
-  // These trust facts come only from the loaded, registry-approved declaration.
-  inv.world_rule = handler.world_rule && script.declaration.kind == ScriptDeclaration::Kind::Rule;
-  inv.declaration = &script.declaration;
-  inv.approved = script.declaration.approved;
-  inv.active = script.declaration.active && handler.enabled;
-  if (inv.deadline == std::chrono::steady_clock::time_point{})
-    inv.deadline = std::chrono::steady_clock::now() +
-                   std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                       std::chrono::duration<double, std::milli>(impl.settings.handler_ms));
-  impl.allocator.current = handler.script;
-  RunContext run{&inv, state_size(*inv.state), impl.allocator.limit,
-                 &impl.allocator.used[handler.script], impl.settings.event_fields_max};
-  impl.allocator.state_bytes = &run.state_bytes;
-  lua_setthreaddata(L, &run);
-  lua_settop(L, 0);
-  struct Call {
-    Vm::Impl *impl;
-    Vm::Impl::Script *script;
-    const HandlerRef *handler;
-    Invocation *inv;
-    bool missing = false;
-  };
-  Call call{&impl, &script, &handler, &inv};
-  const int status = lua_cpcall(
-      L,
-      [](lua_State *L) -> int {
-        auto &call = *static_cast<Call *>(lua_tolightuserdata(L, 1));
-        auto &impl = *call.impl;
-        auto &script = *call.script;
-        const auto &handler = *call.handler;
-        auto &inv = *call.inv;
-        lua_settop(L, 0);
-        lua_getref(L, script.module_ref);
-        lua_getfield(L, -1, "on");
-        if (lua_istable(L, -1)) {
-          lua_getfield(L, -1, handler.function.c_str());
-          lua_remove(L, -2);
-          lua_remove(L, -2);
-        } else {
-          lua_pop(L, 1);
-          lua_getfield(L, -1, handler.function.c_str());
-          lua_remove(L, -2);
-        }
-        if (!lua_isfunction(L, -1)) {
-          call.missing = true;
-          return 0;
-        }
-        lua_createtable(L, 0, static_cast<int>(impl.bindings.size() + 2));
-        push_handle(L, inv.self.object);
-        lua_setfield(L, -2, "handle");
-        auto *proxy = static_cast<StateProxy *>(
-            lua_newuserdatataggedwithmetatable(L, sizeof(StateProxy), state_tag));
-        *proxy = {inv.state};
-        lua_setfield(L, -2, "state");
-        for (const auto &[name, binding] : impl.bindings) {
-          lua_pushlightuserdata(L, binding.data);
-          lua_pushcclosure(L, binding.function, name.c_str(), 1);
-          lua_setfield(L, -2, name.c_str());
-        }
-        lua_setreadonly(L, -1, 1);
-        push_handle(L, inv.sender);
-        push_payload(L, inv.payload);
-        lua_call(L, 3, 0);
-        return 0;
-      },
-      &call);
+RunOutcome Vm::Impl::advance(Invocation &inv) {
+  auto &run = *calls.back();
+  assert(run.invocation == &inv);
+  auto *L = run.thread;
+  const auto script = inv.self.script;
+  allocator.current = script;
+  allocator.state_bytes = &run.state_bytes;
+  const int status = lua_resume(L, nullptr, 0);
   RunOutcome result;
-  result.status = call.missing ? RunOutcome::Status::Missing : RunOutcome::Status::Ok;
+  result.memory_bytes = allocator.used[script] + run.state_bytes;
+  allocator.state_bytes = nullptr;
+  allocator.current = 0;
+  if (status == LUA_YIELD && run.action) {
+    result.status = RunOutcome::Status::Action;
+    result.action = std::move(run.action);
+    run.action.reset();
+    return result;
+  }
+  result.status = run.missing ? RunOutcome::Status::Missing : RunOutcome::Status::Ok;
   if (status) {
     result.error = lua_tostring(L, -1) ? lua_tostring(L, -1) : "script failure";
     result.status = std::chrono::steady_clock::now() >= inv.deadline ? RunOutcome::Status::Cutoff
@@ -862,15 +876,65 @@ RunOutcome run_handler(Vm &vm, const HandlerRef &handler, Invocation &inv) {
     inv.effects->ordered.push_back(
         Diagnostic{result.status == RunOutcome::Status::Cutoff ? "cutoff" : "error", result.error});
   }
-  result.memory_bytes = impl.allocator.used[handler.script] + run.state_bytes;
-  impl.allocator.state_bytes = nullptr;
-  lua_settop(L, 0);
   lua_setthreaddata(L, nullptr);
-  impl.allocator.current = 0;
+  lua_resetthread(L);
+  lua_unref(main, run.thread_ref);
+  calls.pop_back();
   return result;
 }
+RunOutcome run_handler(Vm &vm, const HandlerRef &handler, Invocation &inv) {
+  ZoneScopedN("Luau handler");
+  ZoneValue(handler.script);
+  auto &impl = *vm.impl_;
+  const auto found = impl.scripts.find(handler.script);
+  if (found == impl.scripts.end() || !handler.enabled)
+    return {};
+  auto &script = found->second;
+  if (!script.declaration.active ||
+      (script.declaration.kind == ScriptDeclaration::Kind::Rule && !script.declaration.approved))
+    return {};
+  if (!inv.state || !inv.effects)
+    return {RunOutcome::Status::Error, "state and effects rows must be bound", 0};
+  // Each synchronous act crosses a native frame. Preserve Luau's native-call
+  // depth bound even though the callee uses a separate resumable thread.
+  if (impl.calls.size() >= LUAI_MAXCCALLS)
+    return {RunOutcome::Status::Error, "native action call stack overflow", 0};
+  inv.self.script = handler.script;
+  inv.declaration = &script.declaration;
+  if (inv.deadline == std::chrono::steady_clock::time_point{})
+    inv.deadline = std::chrono::steady_clock::now() +
+                   std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                       std::chrono::duration<double, std::milli>(impl.settings.handler_ms));
+  auto run = std::make_unique<RunContext>();
+  run->invocation = &inv;
+  run->state_bytes = state_size(*inv.state);
+  run->state_limit = impl.allocator.limit;
+  run->heap_bytes = &impl.allocator.used[handler.script];
+  run->event_fields_max = impl.settings.event_fields_max;
+  run->module_ref = script.module_ref;
+  run->handler = &handler;
+  run->bindings = &impl.bindings;
+  run->thread = lua_newthread(impl.main);
+  run->thread_ref = lua_ref(impl.main, -1);
+  lua_pop(impl.main, 1);
+  lua_setthreaddata(run->thread, run.get());
+  lua_pushcclosurek(run->thread, handler_entry, "handler", 0, handler_done);
+  impl.calls.push_back(std::move(run));
+  return impl.advance(inv);
+}
+RunOutcome resume_handler(Vm &vm, Invocation &inv, const nlohmann::json &result) {
+  auto &impl = *vm.impl_;
+  auto &run = *impl.calls.back();
+  assert(run.invocation == &inv);
+  run.result = &result;
+  return impl.advance(inv);
+}
+
 namespace {
-nlohmann::json metadata_json(lua_State *L, int index, std::size_t &nodes, int depth = 0) {
+nlohmann::json metadata_json(lua_State *L, int index, std::size_t &nodes, int depth,
+                             bool host_values) {
+  if (host_values && std::chrono::steady_clock::now() >= invocation(L).deadline)
+    luaL_error(L, "handler deadline exceeded");
   if (++nodes > 100000)
     throw std::runtime_error("declaration node limit exceeded");
   if (depth > 16)
@@ -885,6 +949,8 @@ nlohmann::json metadata_json(lua_State *L, int index, std::size_t &nodes, int de
     double value = lua_tonumber(L, index);
     if (!std::isfinite(value))
       throw std::runtime_error("declaration number must be finite");
+    if (host_values && value >= -0x1p63 && value < 0x1p63 && std::trunc(value) == value)
+      return static_cast<std::int64_t>(value);
     return value;
   }
   case LUA_TSTRING: {
@@ -892,6 +958,16 @@ nlohmann::json metadata_json(lua_State *L, int index, std::size_t &nodes, int de
     const char *text = lua_tolstring(L, index, &size);
     return std::string(text, size);
   }
+  case LUA_TVECTOR:
+    if (host_values) {
+      const float *v = lua_tovector(L, index);
+      return nlohmann::json::array({v[0], v[1], v[2]});
+    }
+    throw std::runtime_error("declaration data must not contain vectors");
+  case LUA_TUSERDATA:
+    if (host_values && lua_userdatatag(L, index) == handle_tag)
+      return to_string(check_handle(L, index));
+    throw std::runtime_error("declaration data must not contain host values");
   case LUA_TTABLE: {
     bool array = true;
     std::size_t count = 0;
@@ -909,7 +985,7 @@ nlohmann::json metadata_json(lua_State *L, int index, std::size_t &nodes, int de
       auto result = nlohmann::json::array();
       for (std::size_t i = 1; i <= count; ++i) {
         lua_rawgeti(L, index, static_cast<int>(i));
-        result.push_back(metadata_json(L, -1, nodes, depth + 1));
+        result.push_back(metadata_json(L, -1, nodes, depth + 1, host_values));
         lua_pop(L, 1);
       }
       return result;
@@ -920,13 +996,46 @@ nlohmann::json metadata_json(lua_State *L, int index, std::size_t &nodes, int de
       if (lua_type(L, -2) != LUA_TSTRING)
         throw std::runtime_error("declaration maps require string keys");
       std::string key = lua_tostring(L, -2);
-      result[key] = metadata_json(L, -1, nodes, depth + 1);
+      result[key] = metadata_json(L, -1, nodes, depth + 1, host_values);
       lua_pop(L, 1);
     }
     return result;
   }
   default:
     throw std::runtime_error("declaration data must not contain functions or host values");
+  }
+}
+void push_result(lua_State *L, const nlohmann::json &value) {
+  if (std::chrono::steady_clock::now() >= invocation(L).deadline)
+    luaL_error(L, "handler deadline exceeded");
+  if (value.is_null())
+    lua_pushnil(L);
+  else if (value.is_boolean())
+    lua_pushboolean(L, value.get<bool>());
+  else if (value.is_number())
+    lua_pushnumber(L, value.get<double>());
+  else if (value.is_string()) {
+    const auto &text = value.get_ref<const std::string &>();
+    if (const auto handle = parse_handle(text)) {
+      auto &inv = invocation(L);
+      if (!acquired(inv, *handle))
+        inv.acquired.push_back(*handle);
+      push_handle(L, *handle);
+    } else
+      lua_pushlstring(L, text.data(), text.size());
+  } else if (value.is_array()) {
+    lua_createtable(L, static_cast<int>(value.size()), 0);
+    int index = 1;
+    for (const auto &entry : value) {
+      push_result(L, entry);
+      lua_rawseti(L, -2, index++);
+    }
+  } else {
+    lua_createtable(L, 0, static_cast<int>(value.size()));
+    for (const auto &[name, entry] : value.items()) {
+      push_result(L, entry);
+      lua_setfield(L, -2, name.c_str());
+    }
   }
 }
 TermId named_term(const Terms &terms, const std::string &name) {
@@ -1082,9 +1191,7 @@ ScriptAnalysis analyze_script(std::string_view source, const Terms &terms,
     if (data.contains("actions"))
       for (const auto &[name, value] : data["actions"].items())
         d.actions.push_back({named_term(terms, name), value.at("right").get<std::string>(), name,
-                             value.value("right_on", std::string("selected")),
-                             value.value("reach", false),
-                             value.value("mechanics", std::vector<std::string>{})});
+                             value.value("reach", false)});
     d.tests = data.contains("tests") ? data["tests"].size() : 0;
     lua_getfield(L, -1, "on");
     if (!lua_istable(L, -1))
@@ -1112,9 +1219,6 @@ ScriptAnalysis analyze_script(std::string_view source, const Terms &terms,
     for (const auto &watch : d.watches)
       if (!handlers.contains(watch.term))
         throw std::runtime_error("watch has no handler");
-    for (const auto &action : d.actions)
-      if (!handlers.contains(action.action))
-        throw std::runtime_error("action has no handler");
     Luau::Allocator allocator;
     Luau::AstNameTable table(allocator);
     auto parsed = Luau::Parser::parse(source.data(), source.size(), table, allocator);
@@ -1138,17 +1242,6 @@ bool set_activation(Vm &vm, ScriptId script, bool approved, bool active) {
   found->second.declaration.active = active;
   return true;
 }
-bool may_construct(const Invocation &inv) {
-  return inv.declaration && inv.declaration->kind == ScriptDeclaration::Kind::Rule &&
-         inv.declaration->approved && inv.declaration->active && inv.world_rule && inv.approved &&
-         inv.active;
-}
-bool queue_structural(Invocation &inv, StructuralRequest request) {
-  if (request.kind != StructuralRequest::Kind::Destroy && !may_construct(inv))
-    return false;
-  inv.effects->structural.push_back(std::move(request));
-  return true;
-}
 void consult_object(const Invocation &inv, Handle object) {
   auto &handles = inv.effects->consulted_handles;
   if (object && std::find(handles.begin(), handles.end(), object) == handles.end())
@@ -1161,12 +1254,9 @@ int get_binding(lua_State *L) {
   if (binding.values.terms.rows[id].kind != Kind::Quantity &&
       binding.values.terms.rows[id].kind != Kind::Flag)
     luaL_error(L, "get needs a quantity or flag");
-  Handle target = inv.self.object;
-  if (!lua_isnoneornil(L, 3)) {
-    target = check_handle(L, 3);
-    if (!acquired(inv, target))
-      luaL_error(L, "read target was not acquired");
-  }
+  if (!lua_isnoneornil(L, 3))
+    luaL_error(L, "use read(handle,term) to read another object");
+  const auto target = inv.self.object;
   consult_object(inv, target);
   auto value = read(binding.values, target, id, inv.step, inv.hz);
   if (value.present)
@@ -1266,6 +1356,8 @@ int related_binding(lua_State *L) {
       lua_rawseti(L, -2, i++);
       if (!acquired(inv, handle))
         inv.acquired.push_back(handle);
+      if (std::ranges::find(inv.event_targets, handle) == inv.event_targets.end())
+        inv.event_targets.push_back(handle);
     }
   }
   return 1;
@@ -1308,8 +1400,11 @@ int share_binding(lua_State *L) {
   auto &binding = *static_cast<ShareBinding *>(binding_data(L));
   auto &inv = invocation(L);
   const auto subject = check_handle(L, 2);
-  const auto id = term_arg(L, 3, binding.terms);
-  lua_pushnumber(L, get_share(binding.allocations, subject, id, inv.self.object));
+  const auto id = term_arg(L, 3, binding.values.terms);
+  const auto &term = binding.values.terms.rows[id];
+  if (term.combine != Combine::ShareEqual && term.combine != Combine::SharePriority)
+    luaL_error(L, "get_share needs a shared-demand term");
+  lua_pushnumber(L, live_share(binding.values, subject, id, inv.self.object, inv.step, inv.hz));
   return 1;
 }
 } // namespace amber::react

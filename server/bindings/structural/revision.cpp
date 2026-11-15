@@ -1,248 +1,213 @@
 #include "revision.hpp"
+#include "bindings/authority/descriptors.hpp"
+#include "bindings/commerce/commerce.hpp"
 #include "bindings/metadata/metadata.hpp"
 #include "bindings/scene.hpp"
 #include "catalog/revision.hpp"
 #include "private.hpp"
 
 #include <algorithm>
-#include <cmath>
-#include <stdexcept>
-#include <unordered_set>
 
 namespace amber::bindings {
 namespace {
-std::vector<Handle> revision_roots(const ModelRevisionRead &read, ModelId model) {
-  std::vector<Handle> result;
-  for (std::uint32_t slot = 0; slot < read.identity.model.size(); ++slot) {
-    auto object = read.identity.at(slot);
-    if (object && read.identity.model[slot] == model)
-      result.push_back(object);
-  }
-  return result;
+using Json = nlohmann::json;
+using structural_detail::PreparedReplacement;
+std::string arguments(const Json &value) {
+  if (!value.is_object() || value.size() != 2 || !value.contains("model") ||
+      !value.contains("proposal") || !value.at("model").is_string() ||
+      !value.at("proposal").is_string())
+    return "expected {model:'m:N',proposal:'m:N'}";
+  return {};
 }
-catalog::ModelRevisionPlan revision_plan(const ModelRevisionRead &read, ModelId model,
-                                         ModelId proposal, std::span<const Handle> roots) {
-  std::vector<std::uint32_t> params;
-  for (auto object : roots)
-    params.push_back(read.params[object.slot()]);
-  return catalog::plan_revision(read.models, read.parameters, read.assets, model, proposal, params);
+struct AssemblyChanges {
+  Handle root;
+  std::vector<PreparedReplacement *> replacements;
+};
+std::vector<AssemblyChanges> grouped(std::vector<PreparedReplacement> &replacements) {
+  std::vector<AssemblyChanges> groups;
+  for (auto &replacement : replacements) {
+    const auto found =
+        std::ranges::find(groups, replacement.mechanical_root, &AssemblyChanges::root);
+    if (found == groups.end())
+      groups.push_back({replacement.mechanical_root, {&replacement}});
+    else
+      found->replacements.push_back(&replacement);
+  }
+  return groups;
 }
-void add_mass(std::map<TermId, double> &totals, const ModelRevisionRead &read,
-              const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-              lifecycle::Binding binding) {
-  const auto effective = catalog::resolve_asset(models, parameters, binding.model, binding.params);
-  const auto volume = read.assets.rows.at(effective.hash).volume;
-  const auto &term = read.terms.rows.at(read.density);
-  if (term.kind != react::Kind::Quantity || term.source != react::Source::Intrinsic)
-    throw std::invalid_argument("model revision density must be an intrinsic quantity");
-  const auto density = react::read_intrinsic(read.materials, binding.material, term);
-  if (!density.present || !density.value.is_numeric() || density.value.numeric() <= 0 ||
-      !std::isfinite(density.value.numeric()) || volume < 0 || !std::isfinite(volume))
-    throw std::invalid_argument("model revision requires finite nonnegative disjoint mass");
-  const auto mass = volume * density.value.numeric();
-  auto &sum = totals[binding.material];
-  if (!std::isfinite(mass) || !std::isfinite(sum + mass))
-    throw std::invalid_argument("model revision mass overflow");
-  sum += mass;
-}
-lifecycle::Replacement binding_plan(const ModelRevisionRead &read, const catalog::Models &models,
-                                    const catalog::ParameterBlocks &parameters,
-                                    const catalog::ModelRevisionPlan &revision, Handle root) {
-  const auto next = catalog::revision_variant(revision, read.params[root.slot()]).after_params;
-  auto assembly = lifecycle::expand(models, parameters, read.assets, revision.model, next);
-  return lifecycle::plan_bindings(read.models, read.parts, read.identity, read.params, root,
-                                  assembly, read.identity.material[root.slot()]);
-}
-} // namespace
-RevisionMasses measure_model_change(const ModelRevisionRead &read, ModelId model,
-                                    ModelId proposal) {
-  const auto roots = revision_roots(read, model);
-  const auto revision = revision_plan(read, model, proposal, roots);
-  auto models = read.models;
-  auto parameters = read.parameters;
-  catalog::ModelTexts texts;
-  react::ModelSettings settings;
-  catalog::commit_revision(models, parameters, texts, settings, revision);
-  RevisionMasses result;
-  result.count = roots.size();
-  for (auto root : roots) {
-    const auto plan = binding_plan(read, models, parameters, revision, root);
-    const auto before = lifecycle::collect(read.parts, read.identity, root);
-    const auto removed = lifecycle::collect(read.parts, read.identity, plan.removed);
-    std::unordered_set<std::uint64_t> absent;
-    for (auto h : removed)
-      absent.insert(h.bits);
-    for (auto h : before) {
-      const lifecycle::Binding current{read.identity.model[h.slot()],
-                                       read.identity.material[h.slot()], read.params[h.slot()]};
-      add_mass(result.before, read, read.models, read.parameters, current);
-      if (absent.contains(h.bits))
-        continue;
-      const auto next = std::ranges::find(plan.retained, h, &lifecycle::Rebinding::object);
-      add_mass(result.after, read, models, parameters,
-               next == plan.retained.end() ? current : next->after);
-    }
-    for (const auto &part : plan.added)
-      add_mass(result.after, read, models, parameters, {part.model, part.material, 0});
-  }
-  return result;
-}
-
-drive::StructuralCompletion revise_model(void *context, const drive::StructuralCall &call) {
-  using namespace structural_detail;
-  auto &operation = *static_cast<ModelRevisionOperation *>(context);
-  auto &replacement = operation.replacement;
-  const auto &read = operation.read;
-  drive::StructuralCompletion out;
-  if (!call.handler.world_rule || !read.identity.valid(call.invocation.receiver) ||
-      !call.request.revision || !call.invocation.action_caller ||
-      !std::holds_alternative<PlayerId>(*call.invocation.action_caller)) {
-    out.error = "definition editing requires an immediate model author and approved world rule";
-    return out;
-  }
-  const auto request = *call.request.revision;
-  if (!request.model || request.model >= read.models.rows.size() ||
-      read.models.rows[request.model].id != request.model) {
-    out.error = "unknown model in definition edit";
-    return out;
-  }
-  const auto author = std::get<PlayerId>(*call.invocation.action_caller);
-  const auto &original = read.models.rows[request.model];
-  if (original.author != author) {
-    out.error = "only the model author can revise its definition";
-    return out;
-  }
-  if (original.source_hash != request.expected_source_hash) {
-    out.error = "model source changed; rebake the proposed definition";
-    return out;
-  }
-  const auto roots = revision_roots(read, request.model);
-  const auto revision = revision_plan(read, request.model, request.proposal, roots);
-  if (!revision.changed)
-    return out;
-  out.error = check_resources(replacement.resources, call);
-  if (!out.error.empty())
-    return out;
-  auto models = operation.models;
-  auto parameters = operation.parameters;
-  auto texts = operation.texts;
-  auto settings = operation.settings;
-  auto measurements = operation.measurements;
-  catalog::commit_revision(models, parameters, texts, settings, revision);
-  catalog::project_revision_measurements(measurements, revision, read.assets,
-                                         operation.measurement_roles);
-  const auto &values = replacement.geometry.values;
-  const react::ValueRead prospective{
-      values.terms,      values.identity,      values.plots,
-      values.params,     values.materials,     measurements,
-      values.properties, values.processes,     values.instance_settings,
-      settings,          values.plot_settings, values.world_settings,
-      values.shared,     values.relations,     values.runtime,
-      values.density};
-  const ConstructionCatalog catalog{models, parameters, read.assets};
-  std::vector<PreparedReplacement> prepared;
+// Assemblies share native capacity even though their object edits are independent.
+// Validate their complete new geometry together, before changing any definition.
+void check_geometry(const ReplacementEdit &edit, const std::vector<AssemblyChanges> &groups) {
+  std::vector<space::BodySpec> all;
   std::vector<Handle> retiring, removed;
-  std::unordered_set<std::uint64_t> native_roots;
-  for (auto root : roots) {
-    const auto after = catalog::revision_variant(revision, read.params[root.slot()]).after_params;
-    auto assembly = lifecycle::expand(models, parameters, read.assets, request.model, after);
-    auto plan =
-        lifecycle::plan_replace(read.models, read.parts, read.identity, replacement.transforms,
-                                read.params, root, assembly, read.identity.material[root.slot()]);
-    auto ready = prepare_replacement(replacement, call, std::move(plan), catalog, prospective);
-    if (!native_roots.insert(ready.mechanical_root.bits).second)
-      throw std::invalid_argument("definition edit has overlapping physical assemblies");
-    retiring.insert(retiring.end(), ready.before.begin(), ready.before.end());
-    removed.insert(removed.end(), ready.removed.begin(), ready.removed.end());
-    prepared.push_back(std::move(ready));
+  std::size_t all_sensors = 0;
+  for (const auto &group : groups) {
+    const auto &first = *group.replacements.front();
+    auto definitions = first.retained;
+    std::vector<space::BodySpec> bodies;
+    std::size_t sensors = 0;
+    for (auto *replacement : group.replacements) {
+      removed.insert(removed.end(), replacement->removed.begin(), replacement->removed.end());
+      for (auto h : replacement->removed)
+        definitions.erase(h.bits);
+      for (const auto &row : replacement->plan.retained)
+        definitions[row.object.bits] = replacement->retained.at(row.object.bits);
+      for (const auto &added : replacement->added) {
+        if (added.body.geometry)
+          bodies.push_back(added.body);
+        sensors += added.volumes->size();
+      }
+    }
+    for (const auto &[handle, definition] : definitions) {
+      (void)handle;
+      if (definition.body.geometry)
+        bodies.push_back(definition.body);
+      sensors += definition.volumes->size();
+    }
+    const auto checked = space::can_rebuild_assembly(edit.geometry.space, bodies, sensors,
+                                                     first.before, first.promote);
+    if (checked.status != space::Status::Ok &&
+        (first.in_scene || checked.status != space::Status::Capacity))
+      throw std::invalid_argument("model edit physics: " +
+                                  std::string(space::status_text(checked.status)));
+    if (!first.in_scene)
+      continue;
+    const bool physical_root = std::ranges::any_of(
+        bodies, [&](const auto &body) { return body.object == first.mechanical_root; });
+    const bool aggregate = first.promote && bodies.size() > (physical_root ? 1u : 0u);
+    for (auto body : bodies) {
+      if (aggregate)
+        body.motion = space::Motion::Kinematic;
+      else if (const auto old = space::body_motion(edit.geometry.space, edit.identity, body.object))
+        body.motion = old->motion;
+      all.push_back(body);
+    }
+    all_sensors += sensors + (aggregate ? 1 : 0);
+    retiring.insert(retiring.end(), first.before.begin(), first.before.end());
   }
-  std::vector<space::VisibleCustody> forecast;
-  const auto &prerequisite = operation.prerequisite;
-  if (bool(prerequisite.preflight) != bool(prerequisite.commit))
-    throw std::logic_error("definition prerequisite requires a preflight/commit pair");
-  if (prerequisite.preflight &&
-      !prerequisite.preflight(prerequisite.local, retiring, removed, forecast, out.error))
-    return out;
-  for (const auto &change : forecast)
-    if (change.parent && std::ranges::find(removed, change.parent) != removed.end()) {
-      out.error = "definition would retire a restored custody parent";
-      return out;
-    }
-  std::size_t required = 0, characters = 0;
-  for (auto &ready : prepared) {
-    std::optional<space::Motion> root_motion;
-    const auto future =
-        std::ranges::find(forecast, ready.mechanical_root, &space::VisibleCustody::goods);
-    if (future != forecast.end() && future->parent) {
-      const auto current =
-          space::body_motion(replacement.geometry.space, read.identity, ready.mechanical_root);
-      if (!current || current->motion != space::Motion::Character)
-        root_motion = space::Motion::Kinematic;
-      ready.promote |= future->grasp && std::ranges::any_of(ready.bodies, [&](const auto &body) {
-                         return body.object != ready.mechanical_root;
-                       });
-    }
-    ready.capacity =
-        space::can_rebuild_assembly(replacement.geometry.space, ready.bodies, ready.sensors,
-                                    ready.before, ready.promote, root_motion);
-    if (ready.capacity.status != space::Status::Ok &&
-        ready.capacity.status != space::Status::Capacity) {
-      out.error = "definition physics: " + std::string(space::status_text(ready.capacity.status));
-      return out;
-    }
-    if (ready.in_scene) {
-      required += ready.capacity.required_native;
-      for (const auto &body : ready.bodies)
-        characters += body.motion == space::Motion::Character;
-    }
-  }
-  // One credit calculation counts actual aggregates/query bodies/sensors uniquely.
-  // Independent per-assembly capacity checks cannot establish the batch invariant.
-  const auto availability = space::can_add(replacement.geometry.space, {}, 0, retiring);
-  auto character_slots = space::capacity(replacement.geometry.space).characters_available;
-  for (auto object : retiring)
-    if (const auto mode = space::body_motion(replacement.geometry.space, read.identity, object);
-        mode && mode->motion == space::Motion::Character)
-      ++character_slots;
-  if (required > availability.available_native || characters > character_slots) {
-    out.error = "definition physics: capacity";
+  std::string retirement_error;
+  if (!can_retire_objects(edit.lifecycle, removed, retirement_error))
+    throw std::invalid_argument(retirement_error);
+  const auto checked = space::can_add(edit.geometry.space, all, all_sensors, retiring);
+  if (checked.status != space::Status::Ok)
+    throw std::invalid_argument("model edit physics: " +
+                                std::string(space::status_text(checked.status)));
+}
+drive::NativeCompletion edit_definition(void *local, const drive::NativeCall &call) {
+  using namespace structural_detail;
+  auto &edit = *static_cast<ModelDefinitionEdit *>(local);
+  drive::NativeCompletion out;
+  const auto target = authority::identifier(call.arguments.at("model"), "m:");
+  const auto proposal = authority::identifier(call.arguments.at("proposal"), "m:");
+  const auto author = std::get_if<PlayerId>(&call.request.caller);
+  if (!target || target >= edit.models.rows.size() || edit.models.rows[target].id != target)
+    throw std::invalid_argument("unknown model");
+  if (!author || edit.models.rows[target].author != *author) {
+    out.result = record::Result::Denied;
+    out.reply = {{"ok", false},
+                 {"denied",
+                  {{"need", "edit"},
+                   {"on", call.arguments.at("model")},
+                   {"why", "only the model author can edit its definition"},
+                   {"fix", "ask the model author to edit this definition"}}}};
     return out;
   }
-  if (!can_retire_objects(replacement.lifecycle, removed, out.error))
+  const auto &replacement = edit.replacement;
+  const auto identity = replacement.identity;
+  const auto &params = replacement.geometry.values.params;
+  const auto mappings =
+      catalog::definition_parameters(edit.models, edit.parameters, edit.assets, target, proposal);
+  bool changed = false;
+  for (const auto &[before, after] : mappings)
+    changed |= catalog::resolve_asset(edit.models, edit.parameters, target, before).hash !=
+               catalog::resolve_asset(edit.models, edit.parameters, proposal, after).hash;
+  out.reply = {{"ok", true}, {"effect", "none"}, {"reason", "no_effect"}};
+  if (!changed)
     return out;
-  react::DeferredEffects prerequisite_effects;
-  if (prerequisite.commit)
-    prerequisite.commit(prerequisite.local, retiring, call.invocation, prerequisite_effects);
-  completed_effects(out, std::move(prerequisite_effects));
-  std::vector<space::AssemblyEdit> edits;
-  for (const auto &ready : prepared)
-    edits.push_back(space::extract_assembly(replacement.geometry.space, read.identity,
-                                            ready.mechanical_root,
-                                            std::span(ready.before).subspan(1)));
-  catalog::commit_revision(operation.models, operation.parameters, operation.texts,
-                           operation.settings, revision);
-  catalog::project_revision_measurements(operation.measurements, revision, read.assets,
-                                         operation.measurement_roles);
-  std::vector<ModelId> changed_models{request.model};
-  for (const auto &alias : revision.aliases)
-    changed_models.push_back(alias.model.id);
-  operation.publication.definitions_changed(changed_models);
-  react::DeferredEffects effects;
-  commit_resources(replacement.resources, call, effects);
-  completed_effects(out, std::move(effects));
-  for (std::size_t i = 0; i < prepared.size(); ++i)
-    commit_replacement(replacement, call, prepared[i], edits[i], author, out);
+  const auto before_source = edit.models.rows[target].source_hash;
+  const auto before_asset = edit.models.rows[target].asset;
+  std::vector<Handle> roots;
+  for (std::uint32_t slot = 0; slot < identity.model.size(); ++slot)
+    if (const auto object = identity.at(slot); object && identity.model[slot] == target)
+      roots.push_back(object);
+  // Cancellation is an ordinary effect. If the following geometry edit is
+  // rejected, the cancellation and its records remain visible to the caller.
+  commerce::rebind_offers(edit.offers, roots, native_input(call), out.effects);
+  out.changed = out.effects.changed;
+  const ConstructionCatalog geometry_catalog{edit.models, edit.parameters, edit.assets};
+  std::vector<PreparedReplacement> replacements;
+  try {
+    for (const auto root : roots) {
+      const auto mapped =
+          std::ranges::find(mappings, params[root.slot()], &catalog::RevisedParameter::before);
+      auto assembly =
+          lifecycle::expand(edit.models, edit.parameters, edit.assets, proposal, mapped->after);
+      auto plan =
+          lifecycle::plan_replace(edit.models, replacement.parts, identity, replacement.transforms,
+                                  params, root, assembly, identity.material[root.slot()]);
+      replacements.push_back(prepare_replacement(
+          replacement, call, std::move(plan), geometry_catalog, replacement.geometry.values, true));
+    }
+    check_geometry(replacement, grouped(replacements));
+  } catch (const std::exception &error) {
+    out.result = record::Result::Denied;
+    out.reply = {{"ok", false}, {"error", "bad_input"}, {"problem", error.what()}};
+    return out;
+  }
+  const auto updated = catalog::update_definition(edit.models, edit.parameters, edit.texts,
+                                                  edit.settings, edit.assets, target, proposal);
+  catalog::project_definition_measurements(edit.measurements, edit.models, edit.parameters,
+                                           edit.assets, updated, edit.measurement_roles);
+  // Geometry is already checked. Only the installed model/child identities
+  // differ from the proposal descriptors; retained defaults are the same.
+  for (auto &prepared : replacements) {
+    const auto root = prepared.plan.root;
+    const auto assembly =
+        lifecycle::expand(edit.models, edit.parameters, edit.assets, target, params[root.slot()]);
+    prepared.plan =
+        lifecycle::plan_replace(edit.models, replacement.parts, identity, replacement.transforms,
+                                params, root, assembly, identity.material[root.slot()]);
+  }
+  auto groups = grouped(replacements);
+  std::vector<space::AssemblyEdit> extracted;
+  for (const auto &group : groups) {
+    const auto &first = *group.replacements.front();
+    extracted.push_back(space::extract_assembly(replacement.geometry.space, identity, group.root,
+                                                std::span(first.before).subspan(1)));
+  }
+  for (std::size_t i = 0; i < groups.size(); ++i)
+    commit_replacements(edit.replacement, call, groups[i].replacements, extracted[i], *author, out);
   out.changed = true;
+  out.result = record::Result::Applied;
+  out.reply.erase("reason");
+  out.reply["effect"] = "applied";
+  edit.publication.definitions_changed(updated.models);
   auto event = structural_record(call, record::Kind::System, "model_definition", roots);
-  event.detail = {{"model", "m:" + std::to_string(request.model)},
-                  {"proposal", "m:" + std::to_string(request.proposal)},
-                  {"before_source", revision.before_source},
-                  {"after_source", revision.after.source_hash},
-                  {"before_asset", revision.before_asset},
-                  {"after_asset", revision.after.asset}};
-  const auto &proposal = read.models.rows.at(request.proposal);
-  event.credits.push_back({proposal.author, proposal.created_s, false});
+  event.detail = {{"model", "m:" + std::to_string(target)},
+                  {"proposal", "m:" + std::to_string(proposal)},
+                  {"before_source", before_source},
+                  {"after_source", edit.models.rows[target].source_hash},
+                  {"before_asset", before_asset},
+                  {"after_asset", edit.models.rows[target].asset}};
+  const auto &source = edit.models.rows.at(proposal);
+  event.credits.push_back({source.author, source.created_s, false});
   out.records.insert(out.records.begin(), std::move(event));
   return out;
+}
+} // namespace
+TermId declare_model_edit(react::Terms &terms, command::NativeActions &declarations) {
+  return command::declare_native(
+      declarations, terms, "base.revise_model",
+      "Replace a model definition with a baked proposal, updating its live instances. Only its "
+      "author may do this.",
+      "", false,
+      {{"type", "object"},
+       {"required", {"model", "proposal"}},
+       {"properties", {{"model", {{"type", "string"}}}, {"proposal", {{"type", "string"}}}}},
+       {"additionalProperties", false}});
+}
+void register_model_edit(drive::NativeOperations &operations, TermId action,
+                         ModelDefinitionEdit &edit) {
+  drive::register_native(operations, action, {arguments, edit_definition, &edit});
 }
 } // namespace amber::bindings

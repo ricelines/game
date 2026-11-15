@@ -16,6 +16,7 @@ struct Fixture {
   lifecycle::Instances instances{f.objects, parts, declared};
   std::vector<space::RelationChange> physical_changes;
   space::PhysicalRelations physical;
+  perm::Groups groups;
   perm::Players players;
   perm::Grants grants;
   perm::Ledger ledger;
@@ -58,7 +59,7 @@ struct Fixture {
         projections(f.objects, f.models, parameters, assets, *f.projection, f.runtime,
                     f.subscriptions, declared, {30, 31}),
         lifecycle(f, world, instances, parts, declared, physical, physical_changes, projections,
-                  players, grants, limits, offers, trades),
+                  players, grants, limits, offers, trades, plots, ledger),
         custody{world,
                 identity(f.objects),
                 transforms(f.objects),
@@ -68,16 +69,28 @@ struct Fixture {
                 parts,
                 declared,
                 {0, 0, 3, 0},
-                projections.scene},
-        payment{ledger, grants, players, identity(f.objects), authority(f.objects)},
-        balance{ledger, players, identity(f.objects), authority(f.objects)}, inventory{players},
+                projections.scene,
+                plot_membership(f.objects),
+                plots},
+        payment{ledger, grants, players, identity(f.objects), authority(f.objects), groups},
+        balance{ledger, players, identity(f.objects), authority(f.objects), groups},
+        inventory{players},
         giver{players,  grants, authority(f.objects), permission_flags(f.objects), limits, custody,
               delivery, 1},
         seller{offers, permission_flags(f.objects), players, grants, authority(f.objects), limits,
                custody},
         offer_reads{offers, players, identity(f.objects), authority(f.objects)},
-        buyer{offers, ledger,  grants,   players, authority(f.objects), permission_flags(f.objects),
-              limits, custody, delivery, 1},
+        buyer{offers,
+              ledger,
+              grants,
+              players,
+              authority(f.objects),
+              permission_flags(f.objects),
+              limits,
+              custody,
+              delivery,
+              1,
+              groups},
         opener{trades, players, identity(f.objects), delivery},
         changer{trades, offers, permission_flags(f.objects), players, grants, authority(f.objects),
                 limits, custody},
@@ -109,7 +122,7 @@ struct Fixture {
                   {.6f, 0},
                   allocation} {
     players.rows.resize(4);
-    ledger.balance = {0, 100, 100, 0};
+    ledger.balance = {{perm::Account::player(1), 100}, {perm::Account::player(2), 100}};
     plots.rows.resize(3);
     plots.rows[1] = {1, 1, 0, 0, {-20, -20, 0, 20}, {}};
     plots.rows[2] = {2, 2, 0, 0, {0, -20, 20, 20}, {}};
@@ -255,35 +268,44 @@ struct Fixture {
 void wallet_native_authority_is_explicit() {
   Fixture f;
   const Caller script = ScriptHolder{77, f.f.a};
-  require(!f.call(f.ids.pay, script, {{"to", "p:2"}, {"amount", 10}}).reply.at("ok"),
-          "native script inherited owner Spend");
-  const auto grant = perm::create_grant(
-      f.grants, f.players,
-      {1, perm::Holder::script(77, f.f.a), perm::Scope::account(1), 1, 20, 100, 500},
-      {perm::Scope::account(1), 1, 1, 0, false}, {perm::Holder::script(77, f.f.a), 1, true}, 1);
+  require(
+      !f.call(f.ids.pay, script, {{"from", "p:1"}, {"to", "p:2"}, {"amount", 10}}).reply.at("ok"),
+      "native script inherited owner Spend");
+  const auto grant =
+      perm::create_grant(f.grants, f.players, perm::Holder::player(1),
+                         {1, perm::Holder::script(77, f.f.a),
+                          perm::Scope::account(perm::Account::player(1)), 1, 20, 100, 500},
+                         {perm::Scope::account(perm::Account::player(1)), 1, 1, 0, false},
+                         {perm::Holder::script(77, f.f.a), 1, true}, 1);
   require(bool(grant), "native wallet fixture grant");
-  require(f.call(f.ids.pay, script, {{"to", "p:2"}, {"amount", 15}}).changed &&
-              f.ledger.balance[1] == 85 && f.ledger.balance[2] == 115,
+  require(f.call(f.ids.pay, script, {{"from", "p:1"}, {"to", "p:2"}, {"amount", 15}}).changed &&
+              f.ledger.balance[perm::Account::player(1)] == 85 &&
+              f.ledger.balance[perm::Account::player(2)] == 115,
           "native payment did not use player wallets");
-  require(!f.call(f.ids.pay, script, {{"to", "p:2"}, {"amount", 6}}).changed &&
-              f.grants.rows[grant.grant].spent == 15 && f.ledger.balance[1] == 85,
+  require(!f.call(f.ids.pay, script, {{"from", "p:1"}, {"to", "p:2"}, {"amount", 6}}).changed &&
+              f.grants.rows[grant.grant].spent == 15 &&
+              f.ledger.balance[perm::Account::player(1)] == 85,
           "failed native payment consumed allowance or money");
-  require(!f.call(f.ids.pay, ScriptHolder{77, f.f.b}, {{"to", "p:2"}, {"amount", 1}}).changed,
-          "Spend leaked across installations");
-  require(!f.call(f.ids.pay, PlayerId{1}, {{"to", "g:1"}, {"amount", 1}}).reply.at("ok"),
+  require(
+      !f.call(f.ids.pay, ScriptHolder{77, f.f.b}, {{"from", "p:1"}, {"to", "p:2"}, {"amount", 1}})
+           .changed,
+      "Spend leaked across installations");
+  require(!f.call(f.ids.pay, PlayerId{1}, {{"to", "group:1"}, {"amount", 1}}).reply.at("ok"),
           "non-player wallet accepted");
-  require(f.call(f.ids.balance, script).reply.at("balance") == 85,
-          "script default wallet read selects current owner only");
+  require(f.call(f.ids.balance, script).reply.at("balance") == 0,
+          "script default balance is its distinct installed-object account");
 }
 void actual_assembly_sale_and_inventory_reveal_preserve_identity() {
   Fixture f(4);
   const auto item = f.item(1, {-4, 0, 0});
   const auto child = item.objects[1];
   const auto original_maker = f.f.objects.maker[item.root.slot()];
-  const auto granted = perm::create_grant(
-      f.grants, f.players,
-      {1, perm::Holder::script(77, child), perm::Scope::account(1), 1, 20, 100, 500},
-      {perm::Scope::account(1), 1, 1, 0, false}, {perm::Holder::script(77, child), 1, true}, 1);
+  const auto granted =
+      perm::create_grant(f.grants, f.players, perm::Holder::player(1),
+                         {1, perm::Holder::script(77, child),
+                          perm::Scope::account(perm::Account::player(1)), 1, 20, 100, 500},
+                         {perm::Scope::account(perm::Account::player(1)), 1, 1, 0, false},
+                         {perm::Holder::script(77, child), 1, true}, 1);
   require(bool(granted), "installed part grant fixture");
   require(!f.call(f.ids.offer, PlayerId{1}, {{"price", 40}}, child).reply.at("ok"),
           "internal part sold separately");
@@ -292,20 +314,22 @@ void actual_assembly_sale_and_inventory_reveal_preserve_identity() {
               (f.f.objects.flags[child.slot()] & Escrow),
           "escrow hid actual goods or omitted part");
   const auto offer = offered.reply.at("offer");
-  f.ledger.balance[2] = 39;
+  f.ledger.balance[perm::Account::player(2)] = 39;
   require(!f.call(f.ids.accept, PlayerId{2}, {{"offer", offer}}).changed && f.visible(item.root) &&
-              f.f.objects.owner[item.root.slot()] == 1 && f.ledger.balance[1] == 100,
+              f.f.objects.owner[item.root.slot()] == 1 &&
+              f.ledger.balance[perm::Account::player(1)] == 100,
           "poor acceptance changed valuables or scene");
-  f.ledger.balance[2] = 100;
+  f.ledger.balance[perm::Account::player(2)] = 100;
   f.delivery.present_bodies.erase(2);
   f.players.rows[2].mailbox.push_back(f.f.a);
   require(!f.call(f.ids.accept, PlayerId{2}, {{"offer", offer}}).changed && f.visible(child) &&
-              f.ledger.balance[2] == 100,
+              f.ledger.balance[perm::Account::player(2)] == 100,
           "mailbox overflow consumed offered goods or payment");
   f.delivery.present_bodies[2] = f.bodies[1];
   f.players.rows[2].mailbox.clear();
   const auto accepted = f.call(f.ids.accept, PlayerId{2}, {{"offer", offer}});
-  require(accepted.changed && f.ledger.balance[1] == 140 && f.ledger.balance[2] == 60 &&
+  require(accepted.changed && f.ledger.balance[perm::Account::player(1)] == 140 &&
+              f.ledger.balance[perm::Account::player(2)] == 60 &&
               f.f.objects.owner[child.slot()] == 2 && !f.grants.rows[granted.grant].live &&
               !f.visible(item.root) && !f.visible(child) &&
               f.players.rows[2].inventory == std::vector<Handle>{item.root},
@@ -413,15 +437,17 @@ void trade_changes_cancel_restore_and_complete_one_swap() {
   f.call(f.ids.trade_change, PlayerId{2},
          {{"trade", next}, {"money", 6}, {"goods", to_string(b.root)}});
   f.call(f.ids.trade_confirm, PlayerId{1}, {{"trade", next}});
-  f.ledger.balance[2] = 5;
+  f.ledger.balance[perm::Account::player(2)] = 5;
   require(!f.call(f.ids.trade_confirm, PlayerId{2}, {{"trade", next}}).changed &&
               f.f.objects.owner[a.root.slot()] == 1 && f.visible(a.root),
           "failed second confirmation changed valuable side");
-  f.ledger.balance[2] = 100;
+  f.ledger.balance[perm::Account::player(2)] = 100;
   const auto completed = f.call(f.ids.trade_confirm, PlayerId{2}, {{"trade", next}});
-  require(completed.changed && completed.reply.at("completed") && f.ledger.balance[1] == 96 &&
-              f.ledger.balance[2] == 104 && f.f.objects.owner[a.root.slot()] == 2 &&
-              f.f.objects.owner[b.root.slot()] == 1 && !f.visible(a.root) && !f.visible(b.root),
+  require(completed.changed && completed.reply.at("completed") &&
+              f.ledger.balance[perm::Account::player(1)] == 96 &&
+              f.ledger.balance[perm::Account::player(2)] == 104 &&
+              f.f.objects.owner[a.root.slot()] == 2 && f.f.objects.owner[b.root.slot()] == 1 &&
+              !f.visible(a.root) && !f.visible(b.root),
           "native trade did not atomically exchange player money and real custody");
 }
 void gifts_bounce_and_keep_unrelated_seated_bodies_alive() {
@@ -547,15 +573,15 @@ void script_inventory_placement_uses_its_own_grants() {
           "script borrowed the inventory owner's Move/Build authority");
   const auto holder = perm::Holder::script(script.script, script.object);
   const auto move = perm::create_grant(
-      f.grants, f.players,
+      f.grants, f.players, perm::Holder::player(1),
       {1, holder, perm::Scope::object(item.root), perm::bit(perm::Verb::Move), 0, 0, 500},
       {perm::Scope::object(item.root), 1, perm::all_rights, 1, false}, {holder, 1, true}, 1);
   require(bool(move) && !f.call(f.ids.place_existing, script, args, item.root).changed &&
               !f.visible(item.root),
           "script Move grant borrowed owner's land Build");
-  const auto build =
-      perm::create_grant(f.grants, f.players, {1, holder, perm::Scope::plot(1), 1, 0, 0, 500},
-                         {perm::Scope::plot(1), 1, 7, 1, false}, {holder, 1, true}, 1);
+  const auto build = perm::create_grant(
+      f.grants, f.players, perm::Holder::player(1), {1, holder, perm::Scope::plot(1), 1, 0, 0, 500},
+      {perm::Scope::plot(1), 1, 7, 1, false}, {holder, 1, true}, 1);
   require(bool(build) && f.call(f.ids.place_existing, script, args, item.root).changed &&
               f.visible(item.root) && f.f.objects.owner[item.root.slot()] == 1 &&
               f.players.rows[1].inventory.empty(),
@@ -610,7 +636,7 @@ void rebind_invalidates_only_affected_sales_with_actual_new_parts() {
   bindings::InvocationInput invocation;
   invocation.step = 30;
   react::DeferredEffects effects;
-  cm::rebind_offers(&binding, rebound, invocation, effects);
+  cm::rebind_offers(binding, rebound, invocation, effects);
   require(!f.offers.rows[1].live && f.offers.rows[2].live &&
               (f.f.objects.flags[untouched.root.slot()] & Escrow) &&
               !(f.f.objects.flags[item.root.slot()] & Escrow) &&
@@ -632,7 +658,7 @@ void rebind_invalidates_only_affected_sales_with_actual_new_parts() {
               records[0]["things"].size() == 3,
           "changed sale lacks causal reason or actual new part closure");
   effects = {};
-  cm::rebind_offers(&binding, rebound, invocation, effects);
+  cm::rebind_offers(binding, rebound, invocation, effects);
   require(!effects.changed && effects.ordered.empty(), "rebind cancellation was replayed");
 }
 void rebind_trade_restores_visible_grasp_and_hidden_inventory_at_full_capacity() {
@@ -664,16 +690,7 @@ void rebind_trade_restores_visible_grasp_and_hidden_inventory_at_full_capacity()
   const std::array<Handle, 2> rebound{held.root, stored.root};
   cm::RebindOffersBinding binding{f.offers, f.trades, permission_flags(f.f.objects), f.custody};
   react::DeferredEffects effects;
-  std::vector<space::VisibleCustody> forecast;
-  std::string error;
-  const std::array<Handle, 2> affected{held.root, stored.root};
-  require(cm::preflight_rebound_offers(&binding, affected, {}, forecast, error) &&
-              forecast.size() == 1 && forecast[0].goods == held.root &&
-              forecast[0].parent == f.bodies[0] && forecast[0].grasp && f.trades.rows[1].live &&
-              f.trades.rows[1].sides[0].confirmed && !f.f.objects.parent[held.root.slot()] &&
-              !f.f.objects.parent[stored.root.slot()] && effects.ordered.empty(),
-          "custody forecast changed the quote or omitted its future physical grasp");
-  cm::rebind_offers(&binding, rebound, {}, effects);
+  cm::rebind_offers(binding, rebound, {}, effects);
   require(
       !f.trades.rows[1].live && !f.trades.rows[1].sides[0].confirmed &&
           !f.trades.rows[1].sides[1].confirmed && !f.offers.rows[1].live &&

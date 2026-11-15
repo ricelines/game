@@ -25,27 +25,50 @@ void reconcile_effects(HandlerTurns &turns, react::DeferredEffects &effects,
     if (const auto *watch = std::get_if<step::WatchWork>(&effect))
       turns.mutated.push_back(watch->source);
 }
-bindings::CompletedInvocation run_invocation(HandlerTurns &turns,
+bindings::CompletedInvocation run_invocation(ActionTurns &actions,
                                              const drive::PlannedInvocation &plan,
                                              std::vector<Handle> *created) {
-  auto result = drive::execute(turns.execution, plan, turns.structural);
-  if (created)
-    created->insert(created->end(), result.created.begin(), result.created.end());
-  auto &completed = result.invocation;
-  for (auto object : result.created)
-    if (std::find(completed.things.begin(), completed.things.end(), object) ==
-        completed.things.end())
-      completed.things.push_back(object);
-  const auto &credits = turns.execution.credits;
-  if (credits.resolve && !result.created.empty()) {
-    auto extra = credits.resolve(credits.context, result.created, 0, turns.hz);
-    completed.object_credits.insert(completed.object_credits.end(), extra.begin(), extra.end());
+  auto &turns = actions.handlers;
+  CompletedInvocation completed;
+  react::Invocation invocation;
+  start_invocation(turns.execution, turns.journal, plan.handler, plan.input, invocation, completed);
+  while (completed.outcome.status == react::RunOutcome::Status::Action) {
+    if (std::chrono::steady_clock::now() >= invocation.deadline) {
+      completed.outcome = react::resume_handler(turns.execution.vm, invocation, {});
+      break;
+    }
+    finish_invocation(turns.execution, turns.journal, invocation, completed);
+    reconcile_effects(turns, completed.effects, completed.origin);
+    react::DeferredEffects prefix;
+    prefix.ordered.swap(completed.effects.ordered);
+    prefix.background.swap(completed.effects.background);
+    react::publish_effects(std::move(prefix), completed.origin, plan.input.step, turns.queues,
+                           turns.timers, turns.journal, turns.event_limit);
+    auto action = std::move(*completed.outcome.action);
+    const auto result =
+        perform_action(actions, std::move(action.request), std::move(action.arguments),
+                       completed.origin, {}, invocation.deadline);
+    completed.effects.changed |= result.reply.value("effect", "") == "applied";
+    if (created && result.reply.contains("created"))
+      for (const auto &value : result.reply.at("created"))
+        if (auto h = parse_handle(value.get<std::string>());
+            h && std::ranges::find(*created, *h) == created->end())
+          created->push_back(*h);
+    const auto state = turns.execution.states.find(invocation.self);
+    if (!turns.values.identity.valid(invocation.self.object) ||
+        state == turns.execution.states.end() || &state->second != invocation.state) {
+      invocation.state = nullptr;
+      invocation.random = nullptr;
+    }
+    completed.outcome = react::resume_handler(turns.execution.vm, invocation, result.reply);
   }
-  reconcile_effects(turns, completed.effects, plan.input.origin);
-  return std::move(completed);
+  finish_invocation(turns.execution, turns.journal, invocation, completed);
+  reconcile_effects(turns, completed.effects, completed.origin);
+  return completed;
 }
 void consume_event(void *context, drive::EventTurn turn) {
-  auto &handlers = *static_cast<HandlerTurns *>(context);
+  auto &actions = *static_cast<ActionTurns *>(context);
+  auto &handlers = actions.handlers;
   if (!drive::valid_event(turn, handlers.values.identity, handlers.values.processes,
                           handlers.selectors.subscriptions))
     return;
@@ -57,11 +80,11 @@ void consume_event(void *context, drive::EventTurn turn) {
                                  handlers.clock.step, handlers.hz);
   for (const auto &plan : plans)
     publish_invocation(handlers.journal, handlers.queues, handlers.timers,
-                       run_invocation(handlers, plan), turn.event.origin, handlers.event_limit);
+                       run_invocation(actions, plan), turn.event.origin, handlers.event_limit);
 }
 void consume_watch(void *context, step::WatchWork work) {
-  auto &turns = *static_cast<WatchTurns *>(context);
-  auto &handlers = turns.handlers;
+  auto &actions = *static_cast<ActionTurns *>(context);
+  auto &handlers = actions.handlers;
   if (!handlers.values.identity.valid(work.source.subject) &&
       !handlers.selectors.subscriptions.rows.contains(work.source))
     return;
@@ -74,12 +97,13 @@ void consume_watch(void *context, step::WatchWork work) {
     step::schedule(handlers.timers, std::move(timer));
   for (const auto &invocation : plan.invocations)
     publish_invocation(handlers.journal, handlers.queues, handlers.timers,
-                       run_invocation(handlers, invocation), work.origin, handlers.event_limit);
+                       run_invocation(actions, invocation), work.origin, handlers.event_limit);
   if (plan.shared_gap)
-    turns.gaps.push_back({plan.shared_gap->subject, plan.shared_gap->term, 0, 0, work.origin});
+    actions.gaps.push_back({plan.shared_gap->subject, plan.shared_gap->term, 0, 0, work.origin});
 }
 void consume_background(void *context, step::BackgroundItem work) {
-  auto &handlers = *static_cast<HandlerTurns *>(context);
+  auto &actions = *static_cast<ActionTurns *>(context);
+  auto &handlers = actions.handlers;
   auto plan = drive::plan_background(
       handlers.selectors.subscriptions, handlers.selectors.links, handlers.values,
       handlers.allocation.allocations, handlers.triggers, handlers.selectors.scripts,
@@ -90,6 +114,6 @@ void consume_background(void *context, step::BackgroundItem work) {
     step::schedule(handlers.timers, std::move(timer));
   for (const auto &invocation : plan.invocations)
     publish_invocation(handlers.journal, handlers.queues, handlers.timers,
-                       run_invocation(handlers, invocation), work.origin, handlers.event_limit);
+                       run_invocation(actions, invocation), work.origin, handlers.event_limit);
 }
 } // namespace amber::bindings

@@ -31,8 +31,7 @@ Settings read_settings(const std::filesystem::path &path) {
                real("scripts", "HANDLER_MS"), size("scripts", "EVENT_FIELDS_MAX")};
   s.event_queue_max = size("scripts", "EVENT_QUEUE_MAX");
   s.authors_max = size("scripts", "AUTHORS_MAX");
-  s.pose_batch_max = size("scripts", "POSE_BATCH_MAX");
-  s.exchange_max = size("construction", "EXCHANGE_MAX");
+  s.part_batch_max = size("scripts", "PART_BATCH_MAX");
   s.mailbox_max = size("permissions", "MAILBOX_MAX");
   s.grant_reminder_seconds = real("permissions", "GRANT_REMINDER_SECONDS");
   s.deadlines_per_step = size("permissions", "DEADLINES_PER_STEP");

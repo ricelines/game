@@ -1,483 +1,242 @@
-#include "bindings/physical.hpp"
-#include "space_fixture.hpp"
-namespace ob = amber::observe;
-namespace re = amber::react;
-namespace bi = amber::bindings;
-namespace pe = amber::perm;
-using namespace testspace;
-struct Fixture {
-  Scene scene;
-  pe::Players players;
-  pe::Grants grants;
-  pe::Plots plots;
-  pe::OwnerLimits limits;
-  Relation parts;
-  step::Intents intents;
-  std::vector<step::IntentEnding> endings;
-  std::vector<sp::RelationChange> changes;
-  bi::MechanicalCauses causes;
-  re::Properties properties;
-  re::Processes processes;
-  re::Terms terms;
-  re::Vm vm{{4096, 50, 5, 64}};
-  re::ScriptState state;
-  re::DeferredEffects effects;
-  SparseColumn<std::vector<ScriptId>> installations;
-  catalog::Models models;
-  ob::Hearing hearing;
-  std::vector<ob::Listener> listeners;
-  Handle body, source, destination, other;
-  bi::NavigationBinding navigation;
-  bi::AttachmentBinding attachment;
-  bi::ImpulseBinding impulse;
-  bi::SweepBinding sweep;
-  bi::QuantityBinding quantity;
-  bi::AvatarControlBinding avatar;
-  bi::SoundBinding sound;
-  Fixture()
-      : body(scene.character({0, 0, 0})),
-        source(scene.box({.2f, .2f, .3f}, {0, 1, 0}, sp::Motion::Dynamic, 0, false)),
-        destination(scene.box({.5f, .5f, .5f}, {1, 0, 0}, sp::Motion::Dynamic, 0, false)),
-        other(scene.box({.5f, .5f, .5f}, {-1, 0, 0}, sp::Motion::Dynamic, 0, false)),
-        navigation{intents,
-                   endings,
-                   identity(scene.objects),
-                   authority(scene.objects),
-                   limits,
-                   players,
-                   grants,
-                   plots,
-                   parts},
-        attachment{scene.space,
-                   identity(scene.objects),
-                   transforms(scene.objects),
-                   parents(scene.objects),
-                   space_flags(scene.objects),
-                   scene.relations,
-                   {10, 11, 12, 13},
-                   parts,
-                   authority(scene.objects),
-                   limits,
-                   players,
-                   grants,
-                   1.5f,
-                   causes},
-        impulse{scene.space,
-                identity(scene.objects),
-                authority(scene.objects),
-                limits,
-                players,
-                grants,
-                parts,
-                causes},
-        sweep{scene.space,
-              identity(scene.objects),
-              transforms(scene.objects),
-              authority(scene.objects),
-              limits,
-              players,
-              grants,
-              parts,
-              causes},
-        quantity{properties,
-                 processes,
-                 terms,
-                 identity(scene.objects),
-                 authority(scene.objects),
-                 parents(scene.objects),
-                 parts,
-                 scene.relations.attached_to,
-                 limits,
-                 players,
-                 grants},
-        avatar{grants,        players, identity(scene.objects), authority(scene.objects),
-               installations, models},
-        sound{hearing, identity(scene.objects), transforms(scene.objects), listeners} {
-    players.rows.resize(3);
-    models.rows.resize(3);
-    scene.objects.owner[body.slot()] = 1;
-    scene.objects.owner[source.slot()] = 1;
-    scene.objects.owner[destination.slot()] = 2;
-    scene.objects.owner[other.slot()] = 1;
-    terms.rows.resize(2);
-    terms.rows[1].id = 1;
-    terms.rows[1].name = "author.parcel";
-    terms.by_name["author.parcel"] = 1;
-    terms.rows[1].conserved = true;
-    properties.resize(2);
-    processes.resize(2);
-    properties[1].set(source.slot(), Value(5.));
-    properties[1].set(destination.slot(), Value(1.));
-    auto bind = [&](const char *name, auto function, auto &data) {
-      re::register_binding(vm, name, function, &data);
-    };
-    bind("navigate", bi::navigate_binding, navigation);
-    bind("cancel_motion", bi::cancel_motion_binding, navigation);
-    bind("attach", bi::attach_binding, attachment);
-    bind("grasp", bi::grasp_binding, attachment);
-    bind("release", bi::release_binding, attachment);
-    bind("impulse", bi::impulse_binding, impulse);
-    bind("sweep", bi::sweep_binding, sweep);
-    bind("transfer", bi::transfer_binding, quantity);
-    bind("allow_avatar", bi::allow_avatar_binding, avatar);
-    bind("revoke_avatar", bi::revoke_avatar_binding, avatar);
-    bind("sound", bi::sound_binding, sound);
-  }
-  void load(std::string_view source) {
-    auto c = re::compile_script(source);
-    require(c.errors.empty(), "script compile");
-    re::ScriptDeclaration d;
-    d.id = 1;
-    auto result = re::load_script(vm, c, d);
-    require(result.status == re::RunOutcome::Status::Ok, result.error.c_str());
-  }
-  re::RunOutcome run(const char *name, bool direct = true, Step step = 0,
-                     std::vector<std::string> mechanics = {"transfer", "grasp", "release",
-                                                           "impulse", "sweep", "attachment",
-                                                           "navigation", "avatar_control", "sound"},
-                     Handle selected = {}) {
-    re::Invocation inv;
-    inv.self = {body, 1};
-    inv.step = step;
-    inv.hz = 20;
-    inv.acquired = {source, destination, other};
-    inv.payload = std::vector<EventField>{
-        {"source", Value(source)}, {"destination", Value(destination)}, {"other", Value(other)}};
-    inv.state = &state;
-    std::uint64_t rng = 1;
-    inv.random = &rng;
-    inv.effects = &effects;
-    inv.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
-    if (direct)
-      inv.direct_body = re::BodyEndpoints{body, selected ? selected : destination, source, 1,
-                                          std::move(mechanics)};
-    return re::run_handler(vm, {1, name}, inv);
-  }
-  void ok(const char *name, bool direct = true, Step step = 0,
-          std::vector<std::string> mechanics = {"transfer", "grasp", "release", "impulse", "sweep",
-                                                "attachment", "navigation", "avatar_control",
-                                                "sound"},
-          Handle selected = {}) {
-    auto r = run(name, direct, step, std::move(mechanics), selected);
-    require(r.status == re::RunOutcome::Status::Ok, r.error.c_str());
-  }
-  double amount(Handle h, Step now = 0) {
-    return re::read_state(properties, processes, h, 1, now, 20).value.numeric();
-  }
-};
-void transfer_authority_and_process_conservation() {
-  Fixture f;
-  f.load(R"(return {on={
-    first_name=function(self,_,a) local r=self:transfer(a.source,a.destination,'author.parcel',2); self.state.result=type(r)=='number' and r or r.effect end,
-    other_name=function(self,_,a) local r=self:transfer(a.source,a.destination,'author.parcel',1); self.state.result=type(r)=='number' and r or r.effect end,
-    unrelated=function(self,_,a) self:transfer(a.other,a.destination,'author.parcel',1) end,
-    retain=function(self,_,a) self.state.saved=a.source end,
-    resume=function(self,_,a) self:transfer(self.state.saved,a.destination,'author.parcel',1) end
-  }})");
-  require(sp::attach(f.scene.space, identity(f.scene.objects), transforms(f.scene.objects),
-                     parents(f.scene.objects), space_flags(f.scene.objects),
-                     f.scene.relations.contains, f.scene.relations.supports,
-                     f.scene.relations.attached_to, {f.source, f.body, {{0, 1, 1}, {}}, true},
-                     f.changes)
-                  .status == sp::Status::Ok,
-          "fixture grasp");
-  f.ok("first_name");
-  require(f.amount(f.source) == 5 && f.amount(f.destination) == 1,
-          "denied receive cannot debit source");
-  f.scene.objects.preset[f.destination.slot()] = pe::bit(pe::Verb::Use);
-  f.ok("first_name");
-  require(f.amount(f.source) == 3 && f.amount(f.destination) == 3,
-          "first authored handler transfers through primitive");
-  f.ok("other_name");
-  require(f.amount(f.source) == 2 && f.amount(f.destination) == 4,
-          "differently named handler composes same primitive");
-  f.properties[1].set(f.other.slot(), Value(9.));
-  f.ok("unrelated");
-  require(f.amount(f.other) == 9 && f.amount(f.destination) == 4,
-          "acquired unrelated endpoint cannot use player authority");
-  f.ok("retain");
-  f.ok("resume", false);
-  require(f.amount(f.source) == 2, "timer cannot reuse retained actor authority");
-  f.ok("other_name", true, 0, {});
-  require(f.amount(f.source) == 2, "unlisted mechanical scope grants no direct actor authority");
-  f.processes[1].set(f.source.slot(), re::Process{5, 0, -1, 0, 10, 1});
-  f.processes[1].set(f.destination.slot(), re::Process{1, 0, 1, 0, 10, 1});
-  f.ok("first_name", true, 20);
-  require(f.amount(f.source, 20) == 2 && f.amount(f.destination, 20) == 4,
-          "process values settled before equal transfer");
-  require(f.processes[1].get(f.source.slot())->rate == -1 &&
-              f.processes[1].get(f.destination.slot())->rate == 1,
-          "transfer preserves ongoing rates");
-  f.processes[1].set(f.destination.slot(), re::Process{9, 20, 1, 0, 10, 3});
-  auto before = f.amount(f.source, 20);
-  require(f.run("first_name", true, 20).status == re::RunOutcome::Status::Error,
-          "process bound failure reports handler error");
-  require(f.amount(f.source, 20) == before && f.amount(f.destination, 20) == 9,
-          "failed bound preflight leaves both endpoints unchanged");
-}
-void hold_release_navigation_sound_and_avatar() {
-  Fixture f;
-  f.load(R"(return {on={
-    hold=function(self,_,a) self.state.result=self:grasp(a.source,{position=vector.create(0,1,1)}).effect end,
-    drop=function(self,_,a) self.state.result=self:release(a.source,vector.create(2,0,2)).effect end,
-    walk=function(self) self:navigate(vector.create(2,4,0),{speed_m_s=0.3}) end,
-    stop=function(self) self:cancel_motion() end,
-    audible=function(self) self:sound({text='hello',level=2},5) end,
-    spoken=function(self) self:sound('spoken words',5,nil,{kind='speech'}) end,
-    stored_and_spoken=function(self) self.state.utterances=(self.state.utterances or 0)+1; self:sound('stored words',5,nil,{kind='speech'}) end,
-    consent=function(self,_,a) local r=self:allow_avatar(a.destination,7,3,1); if type(r)=='number' then self.state.grant=r end end,
-    instance_consent=function(self,_,a) local r=self:allow_avatar(a.destination,8,1,1); if type(r)=='number' then self.state.instance_grant=r end end,
-    revoke=function(self) self:revoke_avatar(self.state.grant) end
-  }})");
-  f.ok("hold", true, 0, {"grasp"}, f.source);
-  require(f.scene.objects.parent[f.source.slot()] == f.body, "selected Take performs actual grasp");
-  // Revoke item Take after grasp; relinquishing must remain possible.
-  f.scene.objects.owner[f.source.slot()] = 2;
-  f.ok("drop");
-  require(!(f.scene.objects.flags[f.source.slot()] & Held),
-          "release clears held after Take revocation");
-  auto initial = f.scene.objects.position[f.source.slot()];
-  for (int i = 0; i < 5; ++i)
-    f.scene.tick();
-  require(f.scene.objects.position[f.source.slot()].x > initial.x + .2f,
-          "released velocity produces actual flight");
-  f.effects = {};
-  f.ok("walk");
-  require(!f.effects.changed && !f.intents.moving.empty(),
-          "own navigation starts an intent without changing world facts");
-  require(f.intents.moving.at(f.body.bits).speed_m_s == .3f,
-          "authored navigation selects requested speed");
-  f.ok("stop");
-  require(!f.effects.changed, "canceling own navigation does not change world facts");
-  require(f.intents.moving.empty(), "authored cancellation");
-  f.listeners = {{1, f.body, {0, 0, 1}}, {2, f.body, {20, 0, 1}}};
-  f.effects = {};
-  f.ok("audible");
-  std::size_t omitted;
-  auto heard = ob::take_heard(f.hearing, 1, 40, omitted);
-  require(heard.size() == 1 && !f.hearing.queues.contains(2), "typed sound delivered by distance");
-  const auto &audio_record = std::get<record::Event>(f.effects.ordered.back());
-  require(audio_record.kind == record::Kind::System && audio_record.name == "sound" &&
-              audio_record.detail["data"]["text"] == "hello" && !audio_record.changed &&
-              !audio_record.detail.at("agent").get<bool>() && !f.effects.changed,
-          "ordinary sound records typed payload without inferring speech");
-  f.ok("spoken");
-  const auto &speech_record = std::get<record::Event>(f.effects.ordered.back());
-  require(speech_record.kind == record::Kind::Speech &&
-              speech_record.actor.kind == record::Actor::Kind::Player &&
-              speech_record.actor.id == 1 && speech_record.detail["data"] == "spoken words" &&
-              speech_record.result == record::Result::Applied && !speech_record.changed &&
-              !speech_record.detail.at("agent").get<bool>() && !f.effects.changed,
-          "authored channel explicitly produces attributed Speech record");
-  f.ok("spoken", false);
-  require(std::get<record::Event>(f.effects.ordered.back()).actor.kind ==
-              record::Actor::Kind::Script,
-          "autonomous speech retains actual script actor");
-  f.effects = {};
-  f.ok("stored_and_spoken");
-  require(f.effects.changed && std::get<double>(f.state.at(std::string("utterances"))) == 1 &&
-              !std::get<record::Event>(f.effects.ordered.back()).changed,
-          "speech preserves a stored state change from the same handler without counting its "
-          "event as another mutation");
-  f.models.rows[f.scene.objects.model[f.destination.slot()]].script = 7;
-  f.ok("consent");
-  auto holder = pe::Holder::script(7, f.destination);
-  auto scope = pe::Scope::avatar(f.body);
-  require(bool(pe::check_scope(holder, scope, 3, f.grants, 0)),
-          "explicit body consent creates ordinary grant");
-  require(!pe::check_scope(holder, scope, 3, f.grants, 20), "avatar consent expires");
-  f.installations.set(f.destination.slot(), std::vector<ScriptId>{8});
-  f.ok("instance_consent");
-  require(bool(pe::check_scope(pe::Holder::script(8, f.destination), scope, 1, f.grants, 0)),
-          "explicit instance script consent alongside active model default");
-  auto count = f.grants.rows.size();
-  f.ok("consent", false);
-  require(f.grants.rows.size() == count, "timer cannot grant actor avatar authority");
-  f.ok("revoke");
-  require(!pe::check_scope(holder, scope, 3, f.grants, 0),
-          "explicit direct action revokes prior consent");
-}
-void real_sweep_and_body_attachment() {
-  Fixture f;
-  bi::PartPoseBinding part_pose{f.scene.space, identity(f.scene.objects),
-                                transforms(f.scene.objects), f.parts, f.causes};
-  re::register_binding(f.vm, "move_part", bi::move_part_binding, &part_pose);
-  f.load(R"(return {on={
-    slide=function(self,_,a) self.state.result=self:sweep(a.other,vector.create(-2,0,0)).effect end,
-    part=function(self,_,a) self.state.result=self:move_part(a.other,vector.create(-0.5,0,1),{x=0,y=0,z=0,w=1}).effect end,
-    foreign=function(self,_,a) self.state.result=self:move_part(a.destination,vector.create(9,9,9),{x=0,y=0,z=0,w=1}).effect end,
-    invalid=function(self,_,a) self:move_part(a.other,vector.create(9,9,9),{x=0,y=0,z=0,w=2}) end,
-    seat=function(self,_,a) self.state.result=self:attach(self.handle,a.destination,{position=vector.create(0,0,0.5)}).effect end,
-    leave=function(self) self.state.result=self:release(self.handle).effect end
-  }})");
-  f.parts.out.set(f.body.slot(), std::vector<Handle>{f.other});
-  f.parts.in.set(f.other.slot(), std::vector<Handle>{f.body});
-  require(sp::attach(f.scene.space, identity(f.scene.objects), transforms(f.scene.objects),
-                     parents(f.scene.objects), space_flags(f.scene.objects),
-                     f.scene.relations.contains, f.scene.relations.supports,
-                     f.scene.relations.attached_to, {f.other, f.body, {{-1, 0, 0}, {}}, false},
-                     f.changes)
-                  .status == sp::Status::Ok,
-          "ordinary moving part");
-  require(sp::body_motion(f.scene.space, identity(f.scene.objects), f.other)->motion ==
-              sp::Motion::Kinematic,
-          "ordinary attachment creates the actual kinematic scripted part");
-  f.scene.box({.5f, .5f, 1}, {-2, 0, 0}, sp::Motion::Static, 0, false);
-  f.ok("slide", false);
-  require(std::get<std::string>(f.state.at(std::string("result"))) == "obstructed" &&
-              f.scene.objects.position[f.other.slot()].x > -1.6f,
-          "own-part sweep stops at real chair geometry");
-  f.ok("part", false);
-  require(f.scene.objects.position[f.other.slot()] == Vec3{-.5f, 0, 1},
-          "move_part sets actual declared independent solid part world pose");
-  f.ok("foreign", false);
-  require(std::get<std::string>(f.state.at(std::string("result"))) == "denied" &&
-              f.scene.objects.position[f.destination.slot()] == Vec3{1, 0, 0},
-          "move_part does not authorize foreign endpoints");
-  require(f.run("invalid", false).status == re::RunOutcome::Status::Error &&
-              f.scene.objects.position[f.other.slot()] == Vec3{-.5f, 0, 1},
-          "move_part rejects nonunit rotation before changing geometry");
-  f.scene.tick();
-  require(f.scene.objects.position[f.other.slot()] ==
-              f.scene.objects.position[f.body.slot()] + Vec3{-.5f, 0, 1},
-          "move_part updates actual attachment offset across physics steps");
-  f.scene.objects.preset[f.destination.slot()] = pe::bit(pe::Verb::Use);
-  f.ok("seat");
-  require(f.scene.objects.parent[f.body.slot()] == f.destination,
-          "authored attachment seats actual body");
-  f.ok("leave");
-  require(!f.scene.objects.parent[f.body.slot()], "authored release detaches own body");
-}
+#include "checked_actions_fixture.hpp"
 
-void checked_pose_batches(bool benchmark = false) {
-  Fixture f;
-  f.scene.box({100, 100, .1f}, {0, 0, -.1f});
-  bi::PoseBatchBinding batch{f.scene.space,
-                             identity(f.scene.objects),
-                             transforms(f.scene.objects),
-                             authority(f.scene.objects),
-                             f.limits,
-                             f.players,
-                             f.grants,
-                             f.parts,
-                             1024,
-                             f.causes};
-  bi::PositionBinding position{identity(f.scene.objects), transforms(f.scene.objects)};
-  re::RelationsRead relation_read;
-  Relation members;
-  re::RelationBinding related{relation_read, f.terms};
-  f.terms.rows.resize(3);
-  f.terms.rows[2].id = 2;
-  f.terms.rows[2].name = "maker.members";
-  f.terms.rows[2].kind = re::Kind::Relation;
-  f.terms.by_name["maker.members"] = 2;
-  relation_read.columns[2] = &members;
-  re::register_binding(f.vm, "pose_batch", bi::pose_batch_binding, &batch);
-  re::register_binding(f.vm, "related", re::related_binding, &related);
-  re::register_binding(f.vm, "transform", bi::transform_binding, &position);
-  f.load(R"(return {on={
-    cycle=function(self)
-      self.state.phase=(self.state.phase or 0)+0.01
-      local rows={};for index,object in self:related('maker.members','out') do
-        rows[index]={object=object,position=vector.create(index%20*0.05,index//20*0.05,1+math.sin(self.state.phase)*0.2)}
-      end
-      local r=self:pose_batch(rows);self.state.result=type(r)=='number' and r or r.effect
-    end,
-    badmode=function(self,_,args)
-      local rows=self:related('maker.members','out');self:pose_batch({{object=rows[1],position=vector.create(20,20,20)}, {object=args.destination,position=vector.create(0,0,0)}})
-    end,
-    frame=function(self,_,args) self.state.rotation=self:transform(args.destination).rotation.w end
-  }})");
-  Box shape({.03f, .08f, .03f});
-  auto geometry = sp::import_geometry(f.scene.space, shape.source());
-  std::vector<Handle> objects;
-  std::vector<GrantId> grants;
+using namespace amber;
+using test_runtime::require;
+namespace {
+void ordinary_transfer_and_live_processes() {
+  test_actions::Fixture f;
+  f.load("return {kind='model',on={['novel.touch']=function(self)end}}");
+  f.f.properties[1].set(f.f.b.slot(), Value(5.));
+  f.f.properties[1].set(f.f.c.slot(), Value(1.));
+  const auto args = nlohmann::json{{"to", to_string(f.f.c)}, {"term", "novel.heat"}, {"amount", 2}};
+  auto result = f.act("engine.transfer", f.f.b, args);
+  require(result.reply.contains("denied") && f.f.properties[1].get(f.f.b.slot())->numeric() == 5,
+          "a body-installed script cannot borrow its owner's source rights");
+  f.grant(f.f.b, perm::bit(perm::Verb::Move));
+  result = f.act("engine.transfer", f.f.b, args);
+  require(result.reply.contains("denied") && f.f.properties[1].get(f.f.b.slot())->numeric() == 5,
+          "receiver Use is checked before moving the quantity");
+  f.f.objects.preset[f.f.c.slot()] = perm::bit(perm::Verb::Use);
+  result = f.act("engine.transfer", f.f.b, args);
+  require(result.reply.at("ok") && result.reply.at("amount") == 2 &&
+              f.f.properties[1].get(f.f.b.slot())->numeric() == 3 &&
+              f.f.properties[1].get(f.f.c.slot())->numeric() == 3,
+          "ordinary action transfers the exact conserved quantity");
+  f.f.processes[1].set(f.f.b.slot(), react::Process{5, 0, -1, 0, 10, 1});
+  f.f.processes[1].set(f.f.c.slot(), react::Process{1, 0, 1, 0, 10, 1});
+  f.clock.step = 20;
+  result = f.act("engine.transfer", f.f.b, args);
+  require(
+      result.reply.at("ok") &&
+          react::read_state(f.f.properties, f.f.processes, f.f.b, 1, 20, 20).value.numeric() == 2 &&
+          react::read_state(f.f.properties, f.f.processes, f.f.c, 1, 20, 20).value.numeric() == 4 &&
+          f.f.processes[1].get(f.f.b.slot())->rate == -1 &&
+          f.f.processes[1].get(f.f.c.slot())->rate == 1,
+      "transfer settles sampled values and preserves both rates");
+  f.f.processes[1].set(f.f.c.slot(), react::Process{9, 20, 1, 0, 10, 3});
+  result = f.act("engine.transfer", f.f.b, args);
+  require(
+      !result.reply.at("ok").get<bool>() &&
+          react::read_state(f.f.properties, f.f.processes, f.f.b, 1, 20, 20).value.numeric() == 2 &&
+          react::read_state(f.f.properties, f.f.processes, f.f.c, 1, 20, 20).value.numeric() == 9,
+      "a numerical bound violation leaves both endpoints unchanged");
+}
+void actual_body_script_nested_actions_and_flight() {
+  test_actions::Fixture f;
+  const auto script = f.load(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={
+    ['novel.touch']=function(self,selected,args)
+      if args.mode=='hold' then
+        local r=self:act('engine.grasp',selected,{local_pose={position=vector.create(0,1,1)}})
+        self.state.accepted=r.ok
+      elseif args.mode=='drop' then
+        local r=self:act('engine.release',selected,{linear=vector.create(3,0,2)})
+        assert(r.ok);self.state.released=true
+      elseif args.mode=='seat' then
+        assert(self:act('engine.attach',self.handle,{parent=selected,
+          local_pose={position=vector.create(0,0,0.6)}}).ok)
+      else assert(self:act('engine.release',self.handle).ok) end
+    end}})");
+  auto result = f.player(f.f.b, {{"mode", "hold"}});
+  require(!f.f.objects.parent[f.f.b.slot()] &&
+              !std::get<bool>(f.f.states.at({f.f.a, script}).at(std::string("accepted"))),
+          "nested denied Take is returned to Lua before it continues");
+  const auto take = f.grant(f.f.b, perm::bit(perm::Verb::Take));
+  result = f.player(f.f.b, {{"mode", "hold"}});
+  require(result.reply.at("effect") == "applied" && f.f.objects.parent[f.f.b.slot()] == f.f.a,
+          "ordinary granted grasp changes actual Jolt attachment before Lua resumes");
+  perm::revoke(f.grants, f.players, take);
+  result = f.player(f.f.b, {{"mode", "drop"}});
+  require(result.reply.at("effect") == "applied" && !(f.f.objects.flags[f.f.b.slot()] & Held),
+          "ordinary release clears actual held state");
+  auto before = f.f.objects.position[f.f.b.slot()];
+  for (int step = 0; step < 5; ++step)
+    f.tick();
+  require(f.f.objects.position[f.f.b.slot()].x > before.x + .3f,
+          "released object follows actual dynamic velocity");
+  f.f.objects.preset[f.f.c.slot()] = perm::bit(perm::Verb::Use);
+  result = f.player(f.f.c, {{"mode", "seat"}});
+  require(f.f.objects.parent[f.f.a.slot()] == f.f.c, "ordinary attach seats the physical body");
+  result = f.player({}, {{"mode", "stand"}});
+  require(!f.f.objects.parent[f.f.a.slot()] &&
+              space::body_motion(f.space, identity(f.f.objects), f.f.a)->motion ==
+                  space::Motion::Character,
+          "detaching a Body restores its character controller");
+}
+void own_motion_queries_and_speech() {
+  test_actions::Fixture f;
+  f.instance_texts.rows[f.f.a.bits].name = "Public speaker";
+  f.listeners = {{1, f.f.a, {0, 0, 1}}};
+  const auto script = f.load(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={
+    ['novel.touch']=function(self,_,args)
+      if args.mode=='walk' then self:navigate(vector.create(4,0,0),{speed_m_s=0.3})
+      elseif args.mode=='stop' then self:cancel_motion()
+      elseif args.mode=='speech' then self:sound('hello',5,nil,{kind='speech'})
+      else self.state.said=true;self:sound('hello',5,nil,{kind='speech'}) end
+    end}})");
+  auto result = f.player({}, {{"mode", "walk"}});
+  require(result.reply.at("effect") == "started" && !f.intents.moving.empty() &&
+              f.intents.moving.at(f.f.a.bits).speed_m_s == .3f,
+          "own navigation starts an intent with authored speed");
+  result = f.player({}, {{"mode", "stop"}});
+  require(result.reply.at("effect") == "none" && f.intents.moving.empty(),
+          "own intent control is not a stored world mutation");
+  f.journal.take();
+  result = f.player({}, {{"mode", "speech"}});
+  require(result.reply.at("effect") == "none", "speech alone is not a stored world change");
+  auto logs = f.journal.take();
+  require(logs.back().at("kind") == "speech" && logs.back().at("actor") == "p:1" &&
+              !logs.back().at("changed").get<bool>() && !logs.back().at("agent").get<bool>(),
+          "explicit speech preserves player display and nonchosen event classification");
+  std::size_t omitted = 0;
+  auto heard = observe::take_heard(f.hearing, 1, 10, omitted);
+  require(heard.size() == 1 && heard[0].sound.speech && heard[0].sound.name == "Public speaker",
+          "heard speech carries canonical public speaker metadata");
+  result = f.player({}, {{"mode", "stored"}});
+  require(result.reply.at("effect") == "applied" &&
+              std::get<bool>(f.f.states.at({f.f.a, script}).at(std::string("said"))),
+          "speech preserves an independent earlier state write");
+}
+void declared_part_batch_and_foreign_rejection(bool benchmark = false) {
+  test_actions::Fixture f;
+  std::vector<Handle> parts;
   for (int index = 0; index < 300; ++index) {
-    ObjectInit init;
-    init.model = 1;
-    init.owner = 2;
-    init.flags = ScriptedMotion;
-    init.position = {0, 0, 1};
-    auto h = create(f.scene.objects, init);
-    objects.push_back(h);
-    require(sp::add(f.scene.space, identity(f.scene.objects), transforms(f.scene.objects),
-                    {h,
-                     geometry.geometry,
-                     sp::Motion::Kinematic,
-                     {.5f, 0, 0},
-                     .2f,
-                     false,
-                     false,
-                     {},
-                     false})
-                    .status == sp::Status::Ok,
-            "non-solid ordinary body add");
-    auto holder = pe::Holder::script(1, f.body);
-    auto scope = pe::Scope::object(h);
-    auto result = pe::create_grant(f.grants, f.players,
-                                   {2, holder, scope, pe::bit(pe::Verb::Move), 0, 0, 10000},
-                                   {scope, 2, pe::all_rights, 0, false}, {holder, 1, true}, 0);
-    require(bool(result), "installed script grant for ordinary batch endpoint");
-    grants.push_back(result.grant);
+    auto h = f.box({.03f, .08f, .03f}, {0, 0, 1}, space::Motion::Kinematic, false);
+    parts.push_back(h);
+    f.parts.in.set(h.slot(), std::vector<Handle>{f.f.a});
   }
-  members.out.set(f.body.slot(), objects);
-  f.ok("cycle", false);
-  require(std::get<double>(f.state.at(std::string("result"))) == 300,
-          "one actual Lua batch changes300 independent granted entities");
-  auto first = f.scene.objects.position[objects[0].slot()];
-  f.ok("badmode", false);
-  require(f.scene.objects.position[objects[0].slot()] == first,
-          "unsupported later batch row leaves earlier pose unchanged");
-  pe::revoke(f.grants, f.players, grants.back());
-  f.ok("cycle", true);
-  require(f.scene.objects.position[objects[0].slot()] == first,
-          "later denied endpoint cannot borrow player's authority or half-apply batch");
-  // Re-arm the explicit installed holder, then measure actual movement every iteration.
-  const auto holder = pe::Holder::script(1, f.body);
-  auto scope = pe::Scope::object(objects.back());
-  require(bool(pe::create_grant(f.grants, f.players,
-                                {2, holder, scope, pe::bit(pe::Verb::Move), 0, 0, 10000},
-                                {scope, 2, pe::all_rights, 0, false}, {holder, 1, true}, 0)),
-          "re-arm revoked script grant");
-  f.ok("frame");
-  require(std::get<double>(f.state.at(std::string("rotation"))) == 1,
-          "read-only transform exposes current quaternion");
-  std::vector<double> handler, frame;
-  for (int index = 0; index < (benchmark ? 200 : 2); ++index) {
+  f.parts.out.set(f.f.a.slot(), parts);
+  const auto script = f.load(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={
+    ['novel.touch']=function(self,selected,args)
+      if args.mode=='foreign' then self:move_part(selected,vector.create(10,0,0),{x=0,y=0,z=0,w=1});return end
+      self.state.phase=(self.state.phase or 0)+.1
+      local rows={}
+      for index,part in self:parts() do
+        rows[index]={object=part,position=vector.create(index%20*.05,index//20*.05,1+math.sin(self.state.phase)*.2)}
+      end
+      self.state.count=self:move_part(rows)
+    end}})");
+  auto result = f.player();
+  if (result.reply.contains("script_errors"))
+    throw std::runtime_error(result.reply.dump());
+  require(result.reply.at("effect") == "applied" &&
+              std::get<double>(f.f.states.at({f.f.a, script}).at(std::string("count"))) == 300,
+          "one script batches all actual declared part poses without foreign Move grants");
+  const auto before = f.f.objects.position[f.f.c.slot()];
+  result = f.player(f.f.c, {{"mode", "foreign"}});
+  require(result.reply.contains("script_errors") && f.f.objects.position[f.f.c.slot()] == before,
+          "acquisition does not confer own-part mutation authority");
+  std::vector<double> costs;
+  for (int index = 0; index < (benchmark ? 100 : 1); ++index) {
     auto start = std::chrono::steady_clock::now();
-    f.effects = {};
-    f.ok("cycle", false, Step(index));
-    auto end = std::chrono::steady_clock::now();
-    f.scene.tick();
-    handler.push_back(std::chrono::duration<double, std::micro>(end - start).count());
-    frame.push_back(
+    result = f.player();
+    require(!result.reply.contains("script_errors"), "actual batch completes");
+    costs.push_back(
         std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
             .count());
+    f.journal.take();
+    f.tick();
   }
   if (benchmark) {
-    std::sort(handler.begin(), handler.end());
-    std::sort(frame.begin(), frame.end());
-    std::cout << "Lua_pose_batch_300 us p50=" << handler[100] << " p95=" << handler[190]
-              << " max=" << handler.back() << '\n';
-    std::cout << "Lua_batch_and_Jolt_step_300 us p50=" << frame[100] << " p95=" << frame[190]
-              << " max=" << frame.back() << '\n';
+    std::sort(costs.begin(), costs.end());
+    std::cout << "ordinary_own_parts_300_us p50=" << costs[50] << " p95=" << costs[95]
+              << " max=" << costs.back() << '\n';
   }
 }
-
+void exact_queries_do_not_grant_event_authority() {
+  test_actions::Fixture f;
+  f.f.properties[1].set(f.f.b.slot(), Value(7.));
+  f.load(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={
+    ['novel.touch']=function(self,sender,args)
+      if args.mode=='related' then
+        self:emit(self:related('novel.link','out')[1],'novel.cue',true)
+      elseif args.mode=='event' then self:emit(sender,'novel.cue',true)
+      else
+        local nearby=world.near(self,5)
+        assert(nearby.complete and #nearby.objects>=2)
+        local hit=world.raycast(vector.create(0,3,.2),vector.create(0,.5,.2))
+        assert(hit.complete and hit.object~=nil)
+        self.state.read=self:read(hit.object,'novel.heat')
+        self.state.world_readonly=not pcall(function() world.near=nil end)
+        if args.mode=='emit_query' then self:emit(hit.object,'novel.cue',true) end
+      end
+    end}})");
+  const auto read = f.player({}, {{"mode", "read"}});
+  require(!read.reply.contains("script_errors") &&
+              std::get<double>(f.f.states.at({f.f.a, f.script}).at(std::string("read"))) == 7 &&
+              std::get<bool>(f.f.states.at({f.f.a, f.script}).at(std::string("world_readonly"))),
+          "readonly world queries return actual handles usable for readonly facts");
+  const auto denied = f.player({}, {{"mode", "emit_query"}});
+  require(denied.reply.contains("script_errors") && f.queues.causal.empty(),
+          "an exact query grants no event mutation authority on an unrelated object");
+  react::set_relation(f.f.relations.at(3), 3, f.f.a, f.f.b, true, f.f.effects);
+  const auto related = f.player({}, {{"mode", "related"}});
+  require(!related.reply.contains("script_errors") && !f.queues.causal.empty(),
+          "an actual related endpoint remains eligible for emitted events");
+  while (step::pop_foreground(f.queues)) {
+  }
+  const auto event = f.player(f.f.c, {{"mode", "event"}});
+  require(!event.reply.contains("script_errors") && !f.queues.causal.empty(),
+          "the current event sender remains eligible for emitted events");
+}
+void foreign_avatar_motion_requires_its_own_scope() {
+  test_actions::Fixture f;
+  f.load("return {kind='model',on={['novel.touch']=function(self)end}}");
+  f.f.objects.flags[f.f.c.slot()] |= Body;
+  f.f.objects.preset[f.f.c.slot()] = perm::bit(perm::Verb::Move);
+  f.grant(f.f.c, perm::bit(perm::Verb::Move));
+  const auto args = nlohmann::json{{"momentum", {4, 0, 0}}, {"point", {1, 0, .2}}};
+  auto result = f.act("engine.impulse", f.f.c, args);
+  require(!result.reply.at("ok").get<bool>() && result.reply.at("denied").at("need") == "animate",
+          "public and object Move cannot replace explicit foreign Avatar authority");
+  const auto holder = perm::Holder::script(f.script, f.f.a);
+  const auto scope = perm::Scope::avatar(f.f.c);
+  const auto grant = perm::create_grant(f.grants, f.players, perm::Holder::player(2),
+                                        {2, holder, scope, 1, 0, 0, 10000}, {scope, 2, 3, 0, false},
+                                        {holder, 1, true}, 0);
+  require(bool(grant), "avatar owner explicitly grants animation to the installed script");
+  result = f.act("engine.impulse", f.f.c, args);
+  require(result.reply.at("ok") && result.reply.at("effect") == "applied",
+          "the exact Avatar grant admits actual native motion");
+  perm::revoke(f.grants, f.players, grant.grant);
+  require(!f.act("engine.impulse", f.f.c, args).reply.at("ok").get<bool>(),
+          "revoking Avatar authority affects the next ordinary action");
+}
+} // namespace
 int main(int argc, char **argv) {
   try {
     if (argc == 2 && std::string_view(argv[1]) == "--bench") {
-      checked_pose_batches(true);
+      declared_part_batch_and_foreign_rejection(true);
       return 0;
     }
-    checked_pose_batches();
-    transfer_authority_and_process_conservation();
-    hold_release_navigation_sound_and_avatar();
-    real_sweep_and_body_attachment();
-    std::cout << "physical Luau binding checks passed\n";
-    return 0;
-  } catch (const std::exception &e) {
-    std::cerr << e.what() << '\n';
+    ordinary_transfer_and_live_processes();
+    actual_body_script_nested_actions_and_flight();
+    own_motion_queries_and_speech();
+    declared_part_batch_and_foreign_rejection();
+    exact_queries_do_not_grant_event_authority();
+    foreign_avatar_motion_requires_its_own_scope();
+    std::cout << "Ordinary physical actions and own-part Lua primitives passed\n";
+  } catch (const std::exception &error) {
+    std::cerr << error.what() << '\n';
     return 1;
   }
 }

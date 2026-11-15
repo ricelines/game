@@ -1,25 +1,12 @@
 #pragma once
 
-#include "bindings/resources/resources.hpp"
-#include "catalog/catalog.hpp"
+#include "bindings/structural/structural.hpp"
 
 namespace amber::bindings {
-struct ConstructionBinding {
-  const catalog::Models &models;
-  const catalog::ParameterBlocks &parameters;
-  const react::Terms &terms;
-  const react::Properties &properties;
-  const react::Processes &processes;
-  std::size_t exchange_max;
+struct ConstructionActions {
+  TermId create, destroy, reconfigure;
 };
-struct RemovalBinding {
-  IdentityRead identity;
-  const react::Terms &terms;
-  const react::Properties &properties;
-  const react::Processes &processes;
-  std::size_t exchange_max;
-};
-int create_binding(lua_State *);
-int remove_binding(lua_State *);
-int replace_binding(lua_State *);
+ConstructionActions declare_construction_actions(react::Terms &, command::NativeActions &);
+void register_construction_actions(drive::NativeOperations &, ConstructionActions,
+                                   CreateOperation &, RemoveOperation &, ReplaceOperation &);
 } // namespace amber::bindings

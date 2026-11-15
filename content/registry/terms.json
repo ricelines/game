@@ -453,22 +453,6 @@
     "description": "reservoir"
   },
   {
-    "name": "aq.school",
-    "kind": "relation",
-    "source": "state",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "school"
-  },
-  {
     "name": "base.on",
     "kind": "flag",
     "source": "state",
@@ -1493,38 +1477,6 @@
     "description": "swim"
   },
   {
-    "name": "aq.status",
-    "kind": "event",
-    "source": "state",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "status"
-  },
-  {
-    "name": "aq.population",
-    "kind": "event",
-    "source": "state",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "population"
-  },
-  {
     "name": "base.move_to",
     "kind": "action",
     "source": "state",
@@ -2155,38 +2107,5 @@
       0
     ],
     "description": "Authored land-accounting institution selector"
-  },
-  {
-    "name": "base.revise_model",
-    "kind": "action",
-    "source": "state",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "Apply a baked geometry revision to every instance of your model, settling the total material change from your stock.",
-    "inputs": [
-      {
-        "name": "model",
-        "type": "string",
-        "optional": false
-      },
-      {
-        "name": "revision_model",
-        "type": "string",
-        "optional": false
-      },
-      {
-        "name": "expected_source_hash",
-        "type": "string",
-        "optional": false
-      }
-    ]
   }
 ]

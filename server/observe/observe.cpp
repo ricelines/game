@@ -102,7 +102,6 @@ nlohmann::json full(const PreparedThing &p, bool far) {
       {"says",
        {{"name", d.says.name}, {"description", d.says.description}, {"writing", d.says.writing}}},
       {"lit", s.lit},
-      {"lux", s.lux},
       {"held", s.held}};
   if (!d.elaborated.empty())
     row["elaborated"] = d.elaborated;
@@ -411,7 +410,7 @@ Scan scan(const space::Space &world, IdentityRead identity, TransformRead transf
               illumination.lux,
               is_held,
               illumination.lux >= observer.dim_lux,
-              dist <= settings.reach_m,
+              distance(transforms.position[observer.body.slot()], b) <= settings.reach_m,
               visible.through,
               near     ? Seen::Salience::Near
               : large  ? Seen::Salience::Large
@@ -467,36 +466,30 @@ std::vector<Heard> take_heard(Hearing &hearing, std::uint64_t session, std::size
 void remove_listener(Hearing &h, std::uint64_t session) {
   h.queues.erase(session);
 }
-nlohmann::json observation(SessionCache &cache, Step now, double hz, const SelfDescription &self,
+nlohmann::json observation(Step now, double hz, const SelfDescription &self,
                            std::span<const PreparedThing> things,
-                           std::span<const PreparedThing> far, std::span<const Heard> heard,
+                           std::span<const PreparedThing> far,
                            std::span<const std::string> body_actions,
                            std::span<const std::string> player_actions) {
   nlohmann::json result{{"step", now},
                         {"time_s", now / hz},
                         {"self",
-                         {{"body", to_string(self.body)},
-                          {"pos", vector(self.position)},
+                         {{"h", to_string(self.body)},
+                          {"at", vector(self.position)},
                           {"facing", self.facing_degrees},
                           {"holding", self.holding ? nlohmann::json(to_string(self.holding))
                                                    : nlohmann::json(nullptr)},
                           {"intent", self.intent},
-                          {"zones", nlohmann::json::array()}}},
+                          {"zone", self.zones.empty() ? "" : self.zones.front().second}}},
                         {"things", nlohmann::json::array()},
                         {"far", nlohmann::json::array()},
-                        {"events", nlohmann::json::array()}};
-  for (auto &[h, name] : self.zones)
-    result["self"]["zones"].push_back({{"h", to_string(h)}, {"name", name}});
-  std::unordered_set<std::uint64_t> present;
+                        {"heard", nlohmann::json::array()},
+                        {"events", nlohmann::json::array()},
+                        {"body_actions", body_actions},
+                        {"player_actions", player_actions}};
   auto rows = [&](std::span<const PreparedThing> rows, const char *key, bool distant) {
     for (const auto &p : rows) {
       auto row = full(p, distant);
-      auto it = cache.known.find(p.seen.object.bits);
-      bool changed = it == cache.known.end() || it->second != row;
-      cache.known[p.seen.object.bits] = row;
-      present.insert(p.seen.object.bits);
-      if (!changed)
-        row = {{"h", to_string(p.seen.object)}};
       row["dist_m"] = p.seen.distance_m;
       row["bearing"] = p.seen.bearing_degrees;
       result[key].push_back(std::move(row));
@@ -504,29 +497,6 @@ nlohmann::json observation(SessionCache &cache, Step now, double hz, const SelfD
   };
   rows(things, "things", false);
   rows(far, "far", true);
-  std::erase_if(cache.known, [&](const auto &entry) { return !present.contains(entry.first); });
-  auto action_list = [&](auto &cached, std::span<const std::string> actions, const char *key) {
-    std::vector<std::string> value(actions.begin(), actions.end());
-    if (!cached || *cached != value) {
-      result[key] = value;
-      cached = std::move(value);
-    }
-  };
-  action_list(cache.body_actions, body_actions, "body_actions");
-  action_list(cache.player_actions, player_actions, "player_actions");
-  for (const auto &event : heard)
-    result["events"].push_back({{"kind", "sound"},
-                                {"source", to_string(event.sound.source)},
-                                {"at", vector(event.sound.at)},
-                                {"dist_m", event.distance_m},
-                                {"speaker", event.sound.speaker},
-                                {"data", event_payload_json(event.sound.payload)},
-                                {"root", event.sound.origin.root}});
   return result;
-}
-void forget(SessionCache &cache) {
-  cache.known.clear();
-  cache.body_actions.reset();
-  cache.player_actions.reset();
 }
 } // namespace amber::observe

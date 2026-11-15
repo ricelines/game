@@ -70,9 +70,15 @@ describe_object(Handle h, IdentityRead identity, const catalog::Models &models,
                 {"params", asset.manifest.at("params")},
                 {"size_m", vec(asset.maximum - asset.minimum)},
                 {"volume_m3", asset.volume},
-                {"capacity_m3", asset.capacity},
-                {"material", {{"id", material}, {"name", values.terms.rows.at(material).name}}},
+                {"capacity_l", asset.capacity * 1000},
+                {"material", values.terms.rows.at(material).name},
                 {"values", Json::object()}};
+  if (values.density) {
+    const auto density =
+        react::read_intrinsic(values.materials, material, values.terms.rows.at(values.density));
+    if (density.present)
+      measured["mass_kg"] = react::read_mass(asset.volume, density.value.numeric());
+  }
   for (auto term : inspected) {
     auto value = react::read(values, h, term, now, hz);
     if (value.present)

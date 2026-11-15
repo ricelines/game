@@ -24,10 +24,14 @@ template <class Fn> void rejects(Fn fn, const char *message) {
 } // namespace
 int main(int argc, char **argv) {
   try {
-    if (argc != 3)
-      throw std::invalid_argument("start_test PLAN.json ASSET_ROOT");
+    if (argc != 4)
+      throw std::invalid_argument("start_test PLAN.json ASSET_ROOT NATIVE_REGISTRY.json");
     const auto started = std::chrono::steady_clock::now();
-    const auto plan = read_plan(argv[1]);
+    auto plan = read_plan(argv[1]);
+    const auto registry_path = std::filesystem::path(argv[3]);
+    const auto native_registry =
+        catalog::read_registry(registry_path.parent_path(), registry_path.stem().string());
+    plan["registry"] = native_registry.data;
     const auto directory = std::filesystem::current_path() / ".cache/start-test";
     std::filesystem::remove_all(directory);
     react::Terms terms;
@@ -111,9 +115,18 @@ int main(int argc, char **argv) {
             "generated credentials must remain private");
     install_land(plan, plots, groups, players);
     perm::Ledger ledger;
-    install_money(plan, players, ledger);
-    require(perm::balance(ledger, 2) == 1000,
-            "actual player account receives its authored initial balance");
+    auto money_plan = plan;
+    groups.rows.push_back({1, 1, "Funded institution"});
+    money_plan["balances"].push_back({{"holder", "public.treasury"}, {"amount", 100}});
+    money_plan["balances"].push_back({{"holder", "group:1"}, {"amount", 25}});
+    install_money(money_plan, symbols, identity(objects), authority(std::as_const(objects)),
+                  players, groups, ledger);
+    require(perm::balance(ledger, perm::Account::player(2)) == 1000 &&
+                perm::balance(
+                    ledger, perm::Account::object(symbols.objects.at("public.treasury"))) == 100 &&
+                perm::balance(ledger, perm::Account::group(1)) == 25 &&
+                perm::balance(ledger, perm::Account::player(1)) == 0,
+            "startup aliased an object or group account to its controller's player wallet");
     react::RuleVersions rules;
     for (const auto &script : scripts.rows)
       if (script.id && script.declaration.kind == react::ScriptDeclaration::Kind::Rule)
@@ -141,7 +154,7 @@ int main(int argc, char **argv) {
     const perm::OwnerLimits limits;
     perm::Grants grants;
     install_grants(plan, symbols, values, authority(std::as_const(objects)), limits, models,
-                   scripts, installations, rules, plots, profiles, grants, players, 0, 20);
+                   scripts, installations, rules, plots, profiles, grants, players, 0, 20, groups);
     require(grants.rows.size() == plan.at("grants").size() + 1,
             "every initial grant passed real permission creation");
     auto wrong_owner = plan;
@@ -153,7 +166,7 @@ int main(int argc, char **argv) {
         [&] {
           install_grants(wrong_owner, symbols, values, authority(std::as_const(objects)), limits,
                          models, scripts, installations, rules, plots, profiles, rejected_grants,
-                         players, 0, 20);
+                         players, 0, 20, groups);
         },
         "plan cannot forge current goods control");
     auto wrong_installation = plan;
@@ -163,7 +176,7 @@ int main(int argc, char **argv) {
         [&] {
           install_grants(wrong_installation, symbols, values, authority(std::as_const(objects)),
                          limits, models, scripts, installations, rules, plots, profiles,
-                         rejected_grants, players, 0, 20);
+                         rejected_grants, players, 0, 20, groups);
         },
         "plan cannot claim an uninstalled script is installed");
     step::WorkQueues queues;

@@ -1,6 +1,5 @@
 #include "bindings/authoring/authoring.hpp"
 #include "bindings/authoring/failures.hpp"
-#include "bindings/authority/authority.hpp"
 #include "bindings/causality_snapshot.hpp"
 #include "bindings/checkpoint/checkpoint.hpp"
 #include "bindings/commerce/admin.hpp"
@@ -21,7 +20,6 @@
 #include "bindings/physical.hpp"
 #include "bindings/projection.hpp"
 #include "bindings/replication.hpp"
-#include "bindings/revision/revision.hpp"
 #include "bindings/scene.hpp"
 #include "bindings/start/start.hpp"
 #include "bindings/structural/revision.hpp"
@@ -222,7 +220,6 @@ void permissions_changed(void *local) {
   for (auto &[session, view] : b.views.rows) {
     (void)session;
     view.pending = {};
-    observe::forget(view.sent);
   }
 }
 void activate_rule(void *local, ScriptId script, bi::elaboration::RuleUpdate update, Step now,
@@ -339,10 +336,9 @@ int main(int argc, char **argv) {
     const auto admin_declarations = bi::commerce::declare_admin(terms, native_declarations);
     const auto elaboration_declarations =
         bi::elaboration::declare_elaboration(terms, native_declarations);
-    if (!restored)
-      registry = catalog::read_registry(
-          launch.data / "registry",
-          catalog::save_registry(launch.data / "registry", terms, materials, {}, mechanical));
+    const auto construction_declarations =
+        bi::declare_construction_actions(terms, native_declarations);
+    const auto model_edit_declaration = bi::declare_model_edit(terms, native_declarations);
     const auto role = [&](const char *group, const char *name) {
       return mechanical.values.at(group).at(name).get<TermId>();
     };
@@ -476,8 +472,7 @@ int main(int argc, char **argv) {
     react::StateBinding state{properties, processes, terms};
     react::RelationBinding related{relations, terms};
     react::ContributionBinding contribute{shared, gives_to, terms, relations};
-    react::ShareBinding share{allocations, terms};
-    bi::ContextBinding context{auth};
+    react::ShareBinding share{values};
     bi::ObjectBinding object{ids, poses, auth, parent, objects.params, models, installations};
     bi::AssetReadBinding asset{ids, objects.params, models, parameters, assets};
     bi::MaterialReadBinding material{terms, materials};
@@ -488,22 +483,8 @@ int main(int argc, char **argv) {
         materials, models, parameters,     assets,         values.density};
     bi::MeterReadBinding meter{meters, terms, ids};
     bi::PlotReadBinding plot{plots, auth};
-    bi::ExchangeBinding exchange{properties, processes, terms, settings.exchange_max};
-    bi::ConstructionBinding construction{models,     parameters, terms,
-                                         properties, processes,  settings.exchange_max};
-    bi::RemovalBinding removal{ids, terms, properties, processes, settings.exchange_max};
-    bi::ModelRevisionRead revision_read{ids,    objects.params, parts, models,        parameters,
-                                        assets, materials,      terms, values.density};
-    bi::ModelRevisionMeasure revision_measure{revision_read};
-    bi::ModelRevisionQueue revision_queue{models, properties, processes, terms,
-                                          settings.exchange_max};
-    bi::PlotTransferBinding transfer_plot{plots, grants, players, &permission_changes,
-                                          permissions_changed};
-    bi::BalanceBinding balance{ledger, ids, auth, players};
-    bi::PaymentBinding payment{ledger, grants, players};
-    bi::IssuanceBinding issuance{ledger, grants, players};
-    bi::NavigationBinding navigation{intents, intent_endings, ids,   auth,          owner_limits,
-                                     players, grants,         plots, declared_parts};
+    bi::IssuanceBinding issuance{ledger, grants, players, ids, auth, groups};
+    bi::NavigationBinding navigation{intents, intent_endings, ids, players, grants, plots};
     bi::AttachmentBinding attachment{space,
                                      ids,
                                      poses,
@@ -519,30 +500,24 @@ int main(int argc, char **argv) {
                                      players,
                                      grants,
                                      settings.perception.reach_m,
-                                     mechanical_causes};
-    bi::ImpulseBinding impulse{space,   ids,    auth,           owner_limits,
-                               players, grants, declared_parts, mechanical_causes};
+                                     mechanical_causes,
+                                     plot_membership(objects),
+                                     plots};
+    bi::ImpulseBinding impulse{space, ids, mechanical_causes};
     bi::SweepBinding sweep{
-        space, ids, poses, auth, owner_limits, players, grants, declared_parts, mechanical_causes};
-    bi::PoseBatchBinding pose_batch{space,
-                                    ids,
-                                    poses,
-                                    auth,
-                                    owner_limits,
-                                    players,
-                                    grants,
-                                    declared_parts,
-                                    settings.pose_batch_max,
-                                    mechanical_causes};
-    bi::PartPoseBinding part_pose{space, ids, poses, declared_parts, mechanical_causes};
-    bi::QuantityBinding transfer{
-        properties,   processes, terms,          ids,
-        auth,         parent,    declared_parts, physical_relations.attached_to,
-        owner_limits, players,   grants};
-    bi::PositionBinding position{ids, poses};
-    bi::QueryBinding query{space, ids, settings.perception.far_m};
-    bi::SoundBinding sound{hearing, ids, poses, listeners};
-    bi::AvatarControlBinding avatar{grants, players, ids, auth, installations, models};
+        space, ids, poses, declared_parts, mechanical_causes, plot_membership(objects), plots};
+    bi::PartPoseBinding part_pose{space,
+                                  ids,
+                                  poses,
+                                  declared_parts,
+                                  mechanical_causes,
+                                  plot_membership(objects),
+                                  plots,
+                                  settings.part_batch_max};
+    bi::QuantityBinding transfer{properties, processes,    terms,   ids,
+                                 auth,       owner_limits, players, grants};
+    bi::QueryBinding query{space, ids, poses};
+    bi::SoundBinding sound{hearing, ids, poses, listeners, instance_text, model_text};
     bi::PlotObjectsBinding plot_objects{ids, objects.plot, declared_parts, plots};
     bi::HoldGoodsBinding hold_goods{space,
                                     ids,
@@ -557,7 +532,10 @@ int main(int argc, char **argv) {
                                     delivery,
                                     settings.mailbox_max,
                                     relation_changes,
-                                    scene_projection};
+                                    scene_projection,
+                                    poses,
+                                    plot_membership(objects),
+                                    plots};
     const auto bind = [&](const char *name, auto function, auto &local) {
       react::register_binding(vm, name, function, &local);
     };
@@ -570,7 +548,6 @@ int main(int argc, char **argv) {
     bind("related", react::related_binding, related);
     bind("contribute", react::contribute_binding, contribute);
     bind("get_share", react::share_binding, share);
-    bind("context", bi::context_binding, context);
     bind("object", bi::object_binding, object);
     bind("asset", bi::asset_binding, asset);
     bind("material", bi::material_binding, material);
@@ -578,35 +555,23 @@ int main(int argc, char **argv) {
     bind("measure_instance", bi::measure_instance_binding, measure_instance);
     bind("meter", bi::meter_binding, meter);
     bind("plot", bi::plot_binding, plot);
-    bind("exchange", bi::exchange_binding, exchange);
-    bind("create", bi::create_binding, construction);
-    bind("replace", bi::replace_binding, construction);
-    bind("remove", bi::remove_binding, removal);
-    bind("measure_model_change", bi::measure_model_change_binding, revision_measure);
-    bind("revise_model", bi::revise_model_binding, revision_queue);
-    bind("transfer_plot", bi::transfer_plot_binding, transfer_plot);
-    bind("balance", bi::balance_binding, balance);
-    bind("pay", bi::payment_binding, payment);
-    bind("issue", bi::issuance_binding, issuance);
     bind("navigate", bi::navigate_binding, navigation);
     bind("cancel_motion", bi::cancel_motion_binding, navigation);
-    bind("attach", bi::attach_binding, attachment);
-    bind("grasp", bi::grasp_binding, attachment);
-    bind("release", bi::release_binding, attachment);
-    bind("impulse", bi::impulse_binding, impulse);
     bind("sweep", bi::sweep_binding, sweep);
-    bind("pose_batch", bi::pose_batch_binding, pose_batch);
     bind("move_part", bi::move_part_binding, part_pose);
-    bind("transfer", bi::transfer_binding, transfer);
-    bind("position", bi::position_binding, position);
-    bind("transform", bi::transform_binding, position);
-    bind("near", bi::near_binding, query);
-    bind("ray", bi::ray_binding, query);
+    bind("world.near", bi::near_binding, query);
+    bind("world.raycast", bi::ray_binding, query);
     bind("sound", bi::sound_binding, sound);
-    bind("allow_avatar", bi::allow_avatar_binding, avatar);
-    bind("revoke_avatar", bi::revoke_avatar_binding, avatar);
     bind("plot_objects", bi::plot_objects_binding, plot_objects);
-    bind("hold_goods", bi::hold_goods_binding, hold_goods);
+
+    bi::register_physical_actions(terms, native_declarations, native_operations, attachment,
+                                  impulse, transfer);
+    bi::register_issuance_action(terms, native_declarations, native_operations, issuance);
+    bi::register_hold_goods_action(terms, native_declarations, native_operations, hold_goods);
+    if (!restored)
+      registry = catalog::read_registry(
+          launch.data / "registry",
+          catalog::save_registry(launch.data / "registry", terms, materials, {}, mechanical));
 
     bi::start::Symbols symbols;
     std::vector<Handle> initial;
@@ -649,8 +614,8 @@ int main(int argc, char **argv) {
           [&queues, &intents, &next_record, &inputs](snap::Input &in) {
             next_record = bi::checkpoint::read_queues(in, queues, intents, inputs);
           },
-          [&requests, &gap_counts, &last_gaps, &captures, &fixtures](snap::Input &in) {
-            bi::checkpoint::read_reqs(in, requests, gap_counts, last_gaps, captures, fixtures);
+          [&requests, &gap_counts, &last_gaps, &captures](snap::Input &in) {
+            bi::checkpoint::read_reqs(in, requests, gap_counts, last_gaps, captures);
           },
           [&random](snap::Input &in) { react::read_random(in, random); },
           [&restored_motion, &restored_causes](snap::Input &in) {
@@ -659,23 +624,13 @@ int main(int argc, char **argv) {
           }};
       snap::decode(*restored, readers);
       clock.step = restored->header.step;
+      // Active fixture subprocesses belong to the old process. Do not turn
+      // interrupted approvals into durable workflows or replay their actions.
+      std::erase_if(inputs.rows, [](const auto &row) { return row.second.awaiting; });
       for (auto &[id, input] : inputs.rows) {
-        bool fixture_pending = false;
-        for (auto &[job_id, job] : fixtures.rows) {
-          (void)job_id;
-          if (job.order.session == std::to_string(input.session) &&
-              job.order.sequence == input.sequence && input.awaiting) {
-            job.order.session = "0";
-            job.order.sequence = id;
-            fixture_pending = true;
-          }
-        }
+        (void)id;
         input.session = 0;
-        input.sequence = fixture_pending ? id : 0;
-        if (input.awaiting && !fixture_pending) {
-          input.awaiting = false;
-          step::append_inputs(queues, {step::InputWork{id}});
-        }
+        input.sequence = 0;
       }
       for (auto &[hash, capture] : captures.rows)
         if (capture.status == elaborate::CaptureStatus::Pending) {
@@ -761,10 +716,10 @@ int main(int argc, char **argv) {
       bi::start::install_profiles(plan, symbols, profiles, players,
                                   std::filesystem::current_path());
       bi::start::install_land(plan, plots, groups, players);
-      bi::start::install_money(plan, players, ledger);
+      bi::start::install_money(plan, symbols, ids, auth, players, groups, ledger);
       bi::start::install_grants(plan, symbols, values, auth, owner_limits, models, scripts,
                                 installations, rules, plots, profiles, grants, players, clock.step,
-                                hz);
+                                hz, groups);
     }
     install::RuleChange fixture_rule_change;
     if (fixture_case) {
@@ -987,7 +942,9 @@ int main(int argc, char **argv) {
         declared_parts,
         {role("relations", "contains"), role("relations", "supports"),
          role("relations", "attached_to"), role("relations", "in_zone")},
-        scene_projection};
+        scene_projection,
+        plot_membership(objects),
+        plots};
     bi::commerce::RetirementBinding commerce_retirement{offers, trades, permission_flags(objects),
                                                         commerce_custody};
     bi::commerce::RebindOffersBinding revised_goods{offers, trades, permission_flags(objects),
@@ -1005,7 +962,7 @@ int main(int argc, char **argv) {
     bi::ObjectLifecycle object_lifecycle({lifetimes, scene_projection, reaction_birth,
                                           rebound_priorities, reaction_death, commerce_retirement,
                                           navigation_diagnostics, spatial_death, grants, players,
-                                          owner_limits, auth, role("events", "start")});
+                                          owner_limits, auth, role("events", "start"), ledger});
     bi::InvocationInput initial_input;
     initial_input.step = clock.step;
     initial_input.hz = hz;
@@ -1027,7 +984,6 @@ int main(int argc, char **argv) {
     if (!restored)
       bi::start::queue_bootstrap(plan, symbols, terms, queues, settings.event_queue_max);
 
-    bi::ResourceCommit resource_commit{ids, properties, processes, states, terms, vm};
     bi::StructuralRights structural_rights{
         ids,     auth,   poses, declared_parts, owner_limits,
         players, grants, plots, space,          settings.perception.reach_m};
@@ -1038,11 +994,10 @@ int main(int argc, char **argv) {
                                geometry_installation,
                                placement,
                                structural_rights,
-                               resource_commit,
                                object_lifecycle,
+                               plot_membership(objects),
                                credits};
-    bi::RemoveOperation remove{lifetimes, structural_rights, resource_commit, object_lifecycle,
-                               credits};
+    bi::RemoveOperation remove{lifetimes, structural_rights, object_lifecycle, credits};
     bi::ReplaceOperation replace{lifetimes,
                                  parts,
                                  {models, parameters, assets},
@@ -1052,8 +1007,8 @@ int main(int argc, char **argv) {
                                  physical_relations,
                                  relation_changes,
                                  structural_rights,
-                                 resource_commit,
                                  object_lifecycle,
+                                 plot_membership(objects),
                                  credits};
     bi::CatalogPublication publication{models,
                                        scripts,
@@ -1071,27 +1026,24 @@ int main(int argc, char **argv) {
                                         role("appearance", "blue"), role("appearance", "alpha"),
                                         role("appearance", "metallic"),
                                         role("appearance", "roughness")}};
-    bi::ModelRevisionOperation revision{
-        revision_read,
+    bi::ModelDefinitionEdit revision{
         models,
         parameters,
         model_text,
         model_settings,
+        assets,
         baked_measurements,
         {role("measurements", "volume"), role("measurements", "capacity")},
         bi::replacement_edit(replace),
         publication,
-        {&revised_goods, bi::commerce::preflight_rebound_offers, bi::commerce::rebind_offers}};
-    drive::StructuralOperations structural{
-        {{react::StructuralRequest::Kind::Create, {bi::create_instance, &create}},
-         {react::StructuralRequest::Kind::Destroy, {bi::remove_instance, &remove}},
-         {react::StructuralRequest::Kind::ReplaceBinding, {bi::replace_instance, &replace}},
-         {react::StructuralRequest::Kind::ReviseModel, {bi::revise_model, &revision}}}};
+        revised_goods};
+    bi::register_construction_actions(native_operations, construction_declarations, create, remove,
+                                      replace);
+    bi::register_model_edit(native_operations, model_edit_declaration, revision);
     std::vector<FactKey> mutated;
     bi::MassReconciliation mass_reconciliation{masses, values, declared_parts,
                                                runtime_measurements};
     bi::HandlerTurns handlers{execution,
-                              structural,
                               triggers,
                               values,
                               {subscriptions, watch_links, scripts, rules},
@@ -1105,27 +1057,17 @@ int main(int argc, char **argv) {
                               allocation,
                               &mass_reconciliation};
     std::vector<bi::GapDraft> gaps;
-    bi::WatchTurns watches{handlers, gaps};
     bi::MaterialRefresh material_refresh{space,  geometry, models,        parameters,
                                          assets, values,   physics_roles, physics_defaults};
-    bi::RegistryPersistence registry_publication{terms,
-                                                 materials,
-                                                 rules,
-                                                 scripts,
-                                                 mechanical,
-                                                 registry,
-                                                 launch.data / "registry",
-                                                 material_refresh,
-                                                 clock,
-                                                 hz,
-                                                 publication};
-    const bi::editing::RegistryCommit registry_commit{&registry_publication, bi::commit_registry};
+    bi::RegistryPersistence registry_publication{
+        terms,      materials, rules, scripts, mechanical, registry, launch.data / "registry",
+        publication};
     const bi::editing::EditAccess edit_access{ids, auth, owner_limits, players, grants};
     bi::editing::ScriptEditing editing_scripts{
-        installations,  triggers,    subscriptions, watch_links, states,   shared,
-        gives_to,       allocations, values,        models,      scripts,  auth,
-        owner_limits,   players,     grants,        plots,       profiles, role("events", "start"),
-        editing_changes};
+        installations,   triggers,    subscriptions, watch_links, states,   shared,
+        gives_to,        allocations, values,        models,      scripts,  auth,
+        owner_limits,    players,     grants,        plots,       profiles, role("events", "start"),
+        editing_changes, groups};
     bi::editing::TextEditing editing_text{instance_text, model_text,  authored_text,
                                           models,        edit_access, editing_changes};
     bi::editing::PropertyEditing editing_properties{
@@ -1142,15 +1084,16 @@ int main(int argc, char **argv) {
         {role("relations", "contains"), role("relations", "supports"),
          role("relations", "attached_to"), role("relations", "in_zone")},
         editing_changes};
-    bi::editing::RegistryEditing editing_registry{terms,    materials,       values,
-                                                  profiles, registry_commit, editing_changes};
+    bi::editing::RegistryEditing editing_registry{
+        terms,           materials,       values, profiles, registry_publication,
+        editing_changes, material_refresh};
     bi::editing::register_actions(native_operations, editing_declarations, editing_scripts,
                                   editing_text, editing_properties, editing_registry);
     const auto native = [&](TermId term, auto validate, auto function, auto &local) {
       drive::register_native(native_operations, term, {validate, function, &local});
     };
-    bi::commerce::PaymentBinding commerce_pay{ledger, grants, players, ids, auth};
-    bi::commerce::BalanceBinding commerce_balance{ledger, players, ids, auth};
+    bi::commerce::PaymentBinding commerce_pay{ledger, grants, players, ids, auth, groups};
+    bi::commerce::BalanceBinding commerce_balance{ledger, players, ids, auth, groups};
     bi::commerce::InventoryBinding commerce_inventory{players};
     bi::commerce::MailboxDelivery mailbox_delivery{players, auth, commerce_custody};
     bi::commerce::GiveBinding commerce_give{
@@ -1169,7 +1112,8 @@ int main(int argc, char **argv) {
                                                 owner_limits,
                                                 commerce_custody,
                                                 delivery,
-                                                settings.mailbox_max};
+                                                settings.mailbox_max,
+                                                groups};
     bi::commerce::TradeOpenBinding commerce_trade_open{trades, players, ids, delivery};
     bi::commerce::TradeChangeBinding commerce_trade_change{
         trades, offers,       permission_flags(objects), players, grants,
@@ -1220,10 +1164,11 @@ int main(int argc, char **argv) {
            bi::commerce::place_existing, commerce_place);
     const bi::commerce::AdminInvalidation admin_invalidation{&permission_changes,
                                                              permissions_changed};
-    const bi::authority::ScopeRead scopes{ids, auth, owner_limits, players, plots, profiles};
+    const bi::authority::ScopeRead scopes{ids,   auth,     owner_limits, players,
+                                          plots, profiles, groups};
     bi::commerce::GrantBinding admin_grant{
         grants, players, scopes, models, scripts, installations, rules, values, admin_invalidation};
-    bi::commerce::RevokeBinding admin_revoke{grants, players, profiles, admin_invalidation};
+    bi::commerce::RevokeBinding admin_revoke{grants, players, scopes, admin_invalidation};
     bi::commerce::ListGrantsBinding admin_list_grants{grants, players};
     bi::commerce::GrantMaintenance grant_maintenance{grants, players, admin_invalidation};
     bi::commerce::PresetBinding admin_preset{{objects.group, objects.preset},
@@ -1266,7 +1211,6 @@ int main(int argc, char **argv) {
                             players,
                             grants,
                             space,
-                            physical_relations.attached_to,
                             intents,
                             gaps,
                             settings.perception.reach_m};
@@ -1318,10 +1262,6 @@ int main(int argc, char **argv) {
            bi::elaboration::refuse, elaboration_detail);
     native(elaboration_declarations.rule_activation, bi::elaboration::validate_rule_activation,
            bi::elaboration::rule_activation, elaboration_activation);
-    for (const auto &[id, job] : fixtures.rows) {
-      (void)id;
-      fixture_worker.submit(job);
-    }
     ObserverInterest observed_interest{sessions, transport};
     drive::InputOperations input_operations;
     bi::QueuedControl queued{inputs, queues};
@@ -1392,7 +1332,6 @@ int main(int argc, char **argv) {
                                   clock.step,
                                   hz,
                                   0,
-                                  settings.scripts.handler_ms,
                                   {&observed_interest, observer_interest},
                                   {&observation_record, record_observation}};
     bi::viewing::InspectBinding inspect{session_views,
@@ -1488,9 +1427,8 @@ int main(int argc, char **argv) {
           bi::checkpoint::write_queues(out, queues, intents, journal.next_id(), inputs,
                                        checkpoint_filter.objects);
         },
-        [&requests, &gap_counts, &last_gaps, &captures, &fixtures,
-         &checkpoint_filter](snap::Output &out) {
-          bi::checkpoint::write_reqs(out, requests, gap_counts, last_gaps, captures, fixtures,
+        [&requests, &gap_counts, &last_gaps, &captures, &checkpoint_filter](snap::Output &out) {
+          bi::checkpoint::write_reqs(out, requests, gap_counts, last_gaps, captures,
                                      checkpoint_filter.handles());
         },
         [&random, &checkpoint_filter](snap::Output &out) {
@@ -1599,9 +1537,8 @@ int main(int argc, char **argv) {
         event.detail["agent"] = false;
         journal.append(std::move(event));
       }
-      drive::drain_foreground(queues, frame, {&handlers, bi::consume_event},
-                              {&watches, bi::consume_watch}, {&actions, bi::consume_action},
-                              {&input_delivery, bi::consume_input});
+      drive::drain_foreground(queues, frame, {&actions, bi::consume_event},
+                              {&actions, bi::consume_watch}, {&input_delivery, bi::consume_input});
       publication.flush(sessions);
       bi::checkpoint::flush_gaps(gap_captures,
                                  {"ambergris-0.1", clock.step, hash_bytes(registry.hash)});
@@ -1686,22 +1623,21 @@ int main(int argc, char **argv) {
         else if (const auto *control = std::get_if<net::Control>(&input);
                  control && !sessions.principal(control->session))
           remove_session(control->session);
-        drive::drain_foreground(queues, frame, {&handlers, bi::consume_event},
-                                {&watches, bi::consume_watch}, {&actions, bi::consume_action},
+        drive::drain_foreground(queues, frame, {&actions, bi::consume_event},
+                                {&actions, bi::consume_watch},
                                 {&input_delivery, bi::consume_input});
         publication.flush(sessions);
         bi::checkpoint::flush_gaps(gap_captures,
                                    {"ambergris-0.1", clock.step, hash_bytes(registry.hash)});
       }
-      drive::drain_foreground(queues, frame, {&handlers, bi::consume_event},
-                              {&watches, bi::consume_watch}, {&actions, bi::consume_action},
-                              {&input_delivery, bi::consume_input});
+      drive::drain_foreground(queues, frame, {&actions, bi::consume_event},
+                              {&actions, bi::consume_watch}, {&input_delivery, bi::consume_input});
       publication.flush(sessions);
       bi::checkpoint::flush_gaps(gap_captures,
                                  {"ambergris-0.1", clock.step, hash_bytes(registry.hash)});
-      drive::drain_background(queues, frame, {&handlers, bi::consume_background},
-                              {&handlers, bi::consume_event}, {&watches, bi::consume_watch},
-                              {&actions, bi::consume_action}, {&input_delivery, bi::consume_input});
+      drive::drain_background(queues, frame, {&actions, bi::consume_background},
+                              {&actions, bi::consume_event}, {&actions, bi::consume_watch},
+                              {&input_delivery, bi::consume_input});
       publication.flush(sessions);
       bi::checkpoint::flush_gaps(gap_captures,
                                  {"ambergris-0.1", clock.step, hash_bytes(registry.hash)});
@@ -1732,6 +1668,20 @@ int main(int argc, char **argv) {
       space::StepResult physics;
       space::step(space, ids, poses, parent, physical_flags, physical_relations, clock.step,
                   1.0f / hz, moving, physics);
+      const auto crossed_plots =
+          perm::update_plots(ids, poses, plot_membership(objects), plots, physics.moved, true);
+      for (const auto object : crossed_plots) {
+        const auto origin =
+            mechanical_causes.lookup(space::motion_cause(space, ids, object)).origin;
+        react::DeferredEffects effects;
+        bi::reconcile_object_priorities(values, allocation, object, effects, clock.step, hz);
+        for (const auto &term : terms.rows)
+          if (term.source == react::Source::Setting)
+            effects.ordered.emplace_back(step::WatchWork{{object, term.id}, origin});
+        bi::reconcile_effects(handlers, effects, origin);
+        react::publish_effects(std::move(effects), origin, clock.step, queues, timers, journal,
+                               settings.event_queue_max);
+      }
       physics.relations.insert(physics.relations.end(), relation_changes.begin(),
                                relation_changes.end());
       relation_changes.clear();
@@ -1752,17 +1702,28 @@ int main(int argc, char **argv) {
                            : ending.reason == step::IntentEnd::Blocked
                                ? role("events", "blocked")
                                : role("events", "cancelled");
-        step::enqueue_event(queues,
-                            {ending.body,
-                             {},
-                             event,
-                             std::vector<EventField>{
-                                 {"intent", Value(static_cast<std::int64_t>(ending.intent.id))},
-                                 {"reason", std::string(ending.reason == step::IntentEnd::Replaced
-                                                            ? "replaced"
-                                                            : terms.rows[event].name)}},
-                             ending.intent.origin},
-                            settings.event_queue_max);
+        const auto queued_ending = step::enqueue_event(
+            queues,
+            {ending.body,
+             {},
+             event,
+             std::vector<EventField>{
+                 {"intent", Value(static_cast<std::int64_t>(ending.intent.id))},
+                 {"reason", std::string(ending.reason == step::IntentEnd::Replaced
+                                            ? "replaced"
+                                            : terms.rows[event].name)}},
+             ending.intent.origin},
+            settings.event_queue_max);
+        if (queued_ending == step::PushResult::Overflow) {
+          record::Event dropped;
+          dropped.step = clock.step;
+          dropped.kind = record::Kind::System;
+          dropped.name = "overflow";
+          dropped.things = {ending.body};
+          dropped.detail = {
+              {"queue", "events"}, {"limit", settings.event_queue_max}, {"dropped_term", event}};
+          journal.append(std::move(dropped), ending.intent.origin);
+        }
         if (ids.valid(ending.body))
           sessions.event_for_player(
               auth.owner[ending.body.slot()],
@@ -1825,10 +1786,19 @@ int main(int argc, char **argv) {
       bi::viewing::append_records(feed, records, ids, poses);
       writer.submit(std::move(records));
       if ((snapshot_every && clock.step % snapshot_every == 0) ||
-          (launch.snapshot_at_end && clock.step == final_step))
-        (void)bi::checkpoint::save_snapshot(
-            snapshot_writer, checkpoint_encoding, snapshot_progress,
-            {"ambergris-0.1", clock.step, hash_bytes(registry.hash)});
+          (launch.snapshot_at_end && clock.step == final_step)) {
+        if (!bi::checkpoint::save_snapshot(
+                snapshot_writer, checkpoint_encoding, snapshot_progress,
+                {"ambergris-0.1", clock.step, hash_bytes(registry.hash)})) {
+          record::Event dropped;
+          dropped.step = clock.step;
+          dropped.kind = record::Kind::System;
+          dropped.name = "overflow";
+          dropped.detail = {
+              {"queue", "snapshot_buffers"}, {"reason", "writer_busy"}, {"skipped", "snapshot"}};
+          journal.append(std::move(dropped));
+        }
+      }
       const auto now = drive::Monotonic::now();
       const auto duration = std::chrono::duration<double, std::milli>(now - frame.started).count();
       if (phase_ms.size() < phase_samples_max)

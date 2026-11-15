@@ -32,12 +32,10 @@ struct Fixture {
     models.rows[1].script = 1;
     models.rows[2].id = 2;
     models.rows[2].script = 2;
-    scripts.rows[1].declaration.actions.push_back(
-        {1, "use", "invented.turn", "selected", true, {"impulse", "sound"}});
-    scripts.rows[2].declaration.actions.push_back({1, "edit", "invented.turn", "self", false, {}});
+    scripts.rows[1].declaration.actions.push_back({1, "use", "invented.turn", true});
+    scripts.rows[2].declaration.actions.push_back({1, "edit", "invented.turn", false});
     scripts.rows[3].declaration.kind = react::ScriptDeclaration::Kind::Instance;
-    scripts.rows[3].declaration.actions.push_back(
-        {1, "move", "invented.turn", "self", false, {"navigation"}});
+    scripts.rows[3].declaration.actions.push_back({1, "move", "invented.turn", false});
     ObjectInit init;
     init.model = 1;
     init.owner = 1;
@@ -55,17 +53,16 @@ void body_receiver_never_becomes_the_foreign_permission_target() {
   Fixture f;
   auto result = f.resolve(PlayerId{1}, 1, f.target);
   require(result && result.route == command::Route::Body && result.receiver == f.body &&
-              result.permission_target == f.target && result.right == "use" && result.reach &&
-              result.mechanics == std::vector<std::string>{"impulse", "sound"},
-          "body action lost installation/permission separation");
+              result.permission_target == f.body && result.right == "use" && result.reach,
+          "body action must check its installed receiver and separately require selected reach");
   f.installed.set(f.body.slot(), std::vector<ScriptId>{3});
   result = f.resolve(PlayerId{1}, 1, {});
   require(result && result.receiver == f.body && result.permission_target == f.body &&
               result.declaration_script == 3 && result.right == "move",
-          "instance action did not override declaration with explicit self endpoint");
+          "instance action did not override the body declaration");
   f.installed.erase(f.body.slot());
   require(f.resolve(PlayerId{1}, 1, {}).failure == command::Failure::MissingTarget,
-          "selected endpoint silently became body");
+          "reach-required body action silently lost its selected target");
   f.scripts.rows[1].declaration.actions.clear();
   result = f.resolve(PlayerId{1}, 1, f.target);
   require(result && result.route == command::Route::Selected && result.receiver == f.target &&
@@ -80,8 +77,8 @@ void script_callers_fallbacks_and_reserved_native_actions_are_distinct() {
           "script caller borrowed supplied player body");
   result = f.resolve(script, 2, f.target);
   require(result && result.route == command::Route::Fallback && result.receiver == f.target &&
-              result.right == "use",
-          "unknown declared-object action skipped rule fallback");
+              result.right == "use" && result.reach,
+          "undeclared actions keep the ordinary Use and reach checks before rule fallback");
   require(f.resolve(script, 2, {}).failure == command::Failure::MissingTarget,
           "script action invented a player receiver");
   f.native.rows.emplace(1, command::NativeDeclaration{1, {}, false});

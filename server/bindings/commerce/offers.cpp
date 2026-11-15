@@ -26,7 +26,7 @@ drive::NativeCompletion give(void *local, const drive::NativeCall &call) {
       perm::give(b.players, b.grants, b.authority, b.flags, b.limits, detail::actor(call),
                  item.root, recipient, body, bool(body), b.mailbox_max, call.step, item.parts);
   if (!given)
-    return detail::denied(given.reason);
+    return detail::denied(given.reason, "transfer", to_string(item.root.object), item.root.owner);
   auto out = detail::result(true, {{"goods", to_string(item.root.object)},
                                    {"recipient", "p:" + std::to_string(recipient)},
                                    {"location", body ? "inventory" : "mailbox"},
@@ -51,14 +51,15 @@ drive::NativeCompletion offer(void *local, const drive::NativeCall &call) {
        !(item.root.flags & Held));
   // Permission operation rejects unplaced goods; avoid asking Space to reveal them.
   if (!placed || (item.root.flags & Held))
-    return detail::denied(perm::Reason::NotPlaced);
+    return detail::denied(perm::Reason::NotPlaced, "placed", to_string(item.root.object),
+                          item.root.owner);
   detail::preflight(b.custody, {item.root.object, {}, true});
   const auto offered =
       perm::offer(b.offers, b.flags, detail::actor(call), item.root, b.players, b.grants,
                   call.arguments.at("price").get<std::int64_t>(), buyer,
                   duration ? call.step + duration : 0, true, call.step, item.parts);
   if (!offered)
-    return detail::denied(offered.reason);
+    return detail::denied(offered.reason, "transfer", to_string(item.root.object), item.root.owner);
   auto out = detail::result(true, {{"offer", "offer:" + std::to_string(offered.offer)},
                                    {"goods", to_string(item.root.object)}});
   detail::apply(b.custody, offered.custody, out.effects);
@@ -68,7 +69,7 @@ drive::NativeCompletion offer(void *local, const drive::NativeCall &call) {
 }
 drive::NativeCompletion offers(void *local, const drive::NativeCall &call) {
   const auto &b = *static_cast<const OffersBinding *>(local);
-  const auto player = detail::default_wallet(call, b.identity, b.authority, b.players);
+  const auto player = detail::controller(call, b.identity, b.authority, b.players);
   auto rows = Json::array();
   for (const auto &row : b.offers.rows)
     if (row.id && row.live && !row.trade && (!row.expires_step || row.expires_step > call.step) &&
@@ -90,24 +91,36 @@ drive::NativeCompletion accept(void *local, const drive::NativeCall &call) {
   const auto beneficiary = call.arguments.contains("beneficiary")
                                ? detail::player_id(call.arguments.at("beneficiary"), b.players)
                                : detail::player(call);
+  const authority::AccountRead accounts{b.custody.identity, b.authority, b.players, b.groups};
   const auto payer = call.arguments.contains("payer")
-                         ? detail::player_id(call.arguments.at("payer"), b.players)
-                         : detail::default_wallet(call, b.custody.identity, b.authority, b.players);
+                         ? authority::account(call.arguments.at("payer"), accounts)
+                         : detail::default_account(call, accounts);
   const auto body = detail::present(b.delivery, b.custody.identity, beneficiary);
   detail::preflight(b.custody, {row.goods, body, false});
   const auto bought =
       perm::accept(b.offers, b.ledger, b.grants, b.players, b.authority, b.flags, b.limits,
                    {detail::actor(call), beneficiary, payer, body, bool(body)}, item.root, id,
                    b.mailbox_max, call.step, item.parts);
-  if (!bought)
-    return detail::denied(bought.reason);
+  if (!bought) {
+    const bool account = bought.reason == perm::Reason::MissingRight ||
+                         bought.reason == perm::Reason::Expired ||
+                         bought.reason == perm::Reason::Allowance ||
+                         bought.reason == perm::Reason::InsufficientBalance;
+    return detail::denied(bought.reason, account ? "spend" : "accept",
+                          account ? perm::account_name(payer.account)
+                                  : "offer:" + std::to_string(id),
+                          account ? payer.controller : row.seller);
+  }
   auto out = detail::result(true, {{"goods", to_string(item.root.object)},
                                    {"recipient", "p:" + std::to_string(beneficiary)},
                                    {"location", body ? "inventory" : "mailbox"},
                                    {"revoked", detail::grants(bought.revoked)}});
   detail::apply(b.custody, bought.custody, out.effects);
   detail::record(out, call, "accept", item.closure,
-                 {{"offer", id}, {"price", row.price}, {"payer", payer}, {"seller", row.seller}});
+                 {{"offer", id},
+                  {"price", row.price},
+                  {"payer", perm::account_name(payer.account)},
+                  {"seller", row.seller}});
   return out;
 }
 drive::NativeCompletion cancel_offer(void *local, const drive::NativeCall &call) {
@@ -119,7 +132,8 @@ drive::NativeCompletion cancel_offer(void *local, const drive::NativeCall &call)
   const auto cancelled = perm::cancel_offer(b.offers, b.flags, detail::actor(call), item.root,
                                             b.players, b.grants, id, call.step, item.parts);
   if (!cancelled)
-    return detail::denied(cancelled.reason);
+    return detail::denied(cancelled.reason, "transfer", to_string(item.root.object),
+                          item.root.owner);
   auto out = detail::result(true, {{"offer", "offer:" + std::to_string(id)}});
   detail::apply(b.custody, cancelled.custody, out.effects);
   detail::record(out, call, "cancel_offer", item.closure, out.reply);

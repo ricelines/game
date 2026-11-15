@@ -59,7 +59,7 @@ Json scope_record(perm::Scope scope) {
   case perm::ScopeKind::OwnedOnPlot:
     return {{"owner", "p:" + std::to_string(scope.owner)}, {"plot", scope.subject}};
   case perm::ScopeKind::Account:
-    return {{"account", "p:" + std::to_string(scope.subject)}};
+    return {{"account", perm::account_name(scope.account())}};
   case perm::ScopeKind::Avatar:
     return {{"avatar", to_string(Handle{scope.subject})}};
   case perm::ScopeKind::Plot:
@@ -212,7 +212,7 @@ control::Reply inspect_handler(void *local, const control::Invocation &call) {
       for (const auto h : player.mailbox)
         if (b.catalog.values.identity.valid(h))
           result["mailbox"].push_back(object_record(b, h, call));
-      result["balance"] = perm::balance(b.ledger, call.principal.player);
+      result["balance"] = perm::balance(b.ledger, perm::Account::player(call.principal.player));
     } else if (name == "grants") {
       result = {{"held", Json::array()}, {"given", Json::array()}};
       const auto &player = b.players.rows.at(call.principal.player);
@@ -251,7 +251,7 @@ control::Reply inspect_handler(void *local, const control::Invocation &call) {
       const auto object = detail::target(b.catalog, call);
       result = object_record(b, object, call);
       if (name == "self")
-        result["balance"] = perm::balance(b.ledger, call.principal.player);
+        result["balance"] = perm::balance(b.ledger, perm::Account::player(call.principal.player));
     }
     result["ok"] = true;
     append_heard(result, b.hearing, call.session,

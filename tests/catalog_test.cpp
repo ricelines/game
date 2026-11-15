@@ -249,7 +249,7 @@ void script_worker_and_artifact() {
       {"use", "take", "move", "edit", "copy", "transfer", "destroy"}};
   const std::string source = R"(return {
     kind='model', watches={'invented.t6'}, contributes={'invented.t11'},
-    actions={['invented.t5']={right='use',right_on='self',reach=true,mechanics={'transfer'}}},
+    actions={['invented.t5']={right='use',reach=true}},
     on={['invented.t6']=function(self) self:contribute(self.handle,'invented.t11',3) end,
         ['invented.t5']=function(self) self:set('invented.t6',not self:get('invented.t6')) end,
         ['invented.t7']=function(self) end,
@@ -265,17 +265,14 @@ void script_worker_and_artifact() {
   require(!prepared.declaration.approved, "source cannot approve itself");
   require(prepared.declaration.handlers == std::vector<TermId>{1, 5, 6, 7},
           "complete typed handler index comes from actual on entries");
-  require(prepared.declaration.actions[0].right_on == "self" &&
-              prepared.declaration.actions[0].reach &&
-              prepared.declaration.actions[0].mechanics == std::vector<std::string>{"transfer"},
-          "validated body routing/mechanics extracted from source");
+  require(prepared.declaration.actions[0].reach, "declared action reach extracted from source");
 
   const auto hash = prepared.hash;
   write_script(f.root / "scripts" / hash, prepared);
   auto loaded = read_script(f.root / "scripts", hash, f.pins, pin, f.terms, rights);
   require(loaded.compiled.bytecode == prepared.compiled.bytecode, "immutable bytecode roundtrip");
-  require(loaded.declaration.actions[0].mechanics == prepared.declaration.actions[0].mechanics,
-          "body action metadata survives artifact normalization");
+  require(loaded.declaration.actions[0].reach == prepared.declaration.actions[0].reach,
+          "action metadata survives artifact normalization");
   require(loaded.declaration.handlers == prepared.declaration.handlers,
           "handler index survives immutable artifact normalization");
   Scripts scripts;

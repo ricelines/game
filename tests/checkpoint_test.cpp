@@ -17,8 +17,8 @@ void round_trip_and_real_vm_continuation() {
   Fixture loaded;
   snap::decode(view, loaded.readers());
   require(view.sections.size() == 13 && loaded.next_record == 31 &&
-              loaded.pending.rows.size() == 1 && loaded.inputs.rows.size() == 1 &&
-              loaded.motion.size() == 2 && loaded.parts.get(original.f.b.slot()),
+              loaded.inputs.rows.size() == 1 && loaded.motion.size() == 2 &&
+              loaded.parts.get(original.f.b.slot()),
           "all thirteen owner sections restore their actual nonempty tables");
   require(loaded.f.processes[1].get(original.f.a.slot())->revision ==
                   original.f.processes[1].get(original.f.a.slot())->revision &&
@@ -27,7 +27,10 @@ void round_trip_and_real_vm_continuation() {
               loaded.profiles.by_key == original.profiles.by_key &&
               loaded.grants.by_key == original.grants.by_key,
           "restore rebuilds indexes without changing authoritative process/watch revisions");
-  require(loaded.parameters.by_model_asset == original.parameters.by_model_asset &&
+  require(loaded.parameters.rows.size() == original.parameters.rows.size() &&
+              loaded.parameters.rows[1].model == original.parameters.rows[1].model &&
+              loaded.parameters.rows[1].asset == original.parameters.rows[1].asset &&
+              loaded.parameters.rows[1].parts == original.parameters.rows[1].parts &&
               loaded.offers.rows[1].parts == original.offers.rows[1].parts &&
               loaded.trades.rows[1].live && loaded.limits.get(original.f.a.slot()) &&
               loaded.authored_text.details_by_target.size() == 2,
@@ -47,7 +50,7 @@ void round_trip_and_real_vm_continuation() {
           loaded.f.subscriptions.next_revision == before,
       "runtime watch-link rehydration preserves saved last answers and does not duplicate timers");
   const install::InvocationPlan cue{
-      {original.script, "novel.cue", 1, 1, true, false}, original.f.a, original.f.b, 6, {}, {}};
+      {original.script, "novel.cue", 1, 1, true}, original.f.a, original.f.b, 6, {}, {}};
   original.f.run(std::span<const install::InvocationPlan>(&cue, 1), 13);
   loaded.f.run(std::span<const install::InvocationPlan>(&cue, 1), 13);
   require(original.f.states.at({original.f.a, original.script}) ==
@@ -108,8 +111,12 @@ void local_capture_filters_authority_and_runtime_rows() {
               captured.parameters.rows[1].parts.at("piece") == 3,
           "catalog capture keeps original ID high water and parameter topology without unrelated "
           "submissions");
-  require(captured.ledger.balance.size() == original.players.rows.size() &&
-              captured.ledger.balance[1] == 100 && captured.ledger.balance[3] == 0 &&
+  require(captured.ledger.balance.size() == 3 &&
+              captured.ledger.balance[perm::Account::player(1)] == 100 &&
+              !captured.ledger.balance.contains(perm::Account::player(3)) &&
+              perm::balance(captured.ledger, perm::Account::object(original.f.a)) == 17 &&
+              !captured.ledger.balance.contains(perm::Account::object(original.f.c)) &&
+              perm::balance(captured.ledger, perm::Account::group(1)) == 29 &&
               captured.grants.rows[3].id == 0 && captured.grants.rows[2].parent == 1 &&
               captured.grants.by_key.size() == 2 && captured.profiles.rows[3].id == 0 &&
               captured.players.rows[1].inventory == std::vector<Handle>{original.f.b} &&
@@ -118,10 +125,9 @@ void local_capture_filters_authority_and_runtime_rows() {
           "captured authority preserves delegation and complete local valuables while excluding "
           "remote wallets and goods");
   require(captured.queues.causal.size() == 1 && captured.queues.turns.empty() &&
-              captured.inputs.rows.empty() && captured.pending.rows.empty() &&
-              captured.intents.moving.size() == 1 && captured.motion.size() == 1 &&
-              captured.requests.rows[2].id == 0 && captured.captures.rows.size() == 1 &&
-              captured.gaps.rows.size() == 1,
+              captured.inputs.rows.empty() && captured.intents.moving.size() == 1 &&
+              captured.motion.size() == 1 && captured.requests.rows[2].id == 0 &&
+              captured.captures.rows.size() == 1 && captured.gaps.rows.size() == 1,
           "capture filters local queued work, motions, requests and capture refs and starts no "
           "prior external jobs");
   require(captured.f.model_settings.rows.size() == 1 && captured.f.plots.rows.size() == 1,

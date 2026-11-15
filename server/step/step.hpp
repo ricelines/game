@@ -20,14 +20,10 @@ struct WatchWork {
   FactKey source;
   record::Origin origin;
 };
-struct ActionWork {
-  ActionRequest request;
-  record::Origin origin;
-};
 struct InputWork {
   std::uint64_t id = 0;
 };
-using Work = std::variant<EventWork, WatchWork, ActionWork, InputWork>;
+using Work = std::variant<EventWork, WatchWork, InputWork>;
 struct BackgroundItem {
   Handle receiver;
   TermId trigger = 0;
@@ -87,7 +83,6 @@ void promote_due(TimerWheel &, Step now, WorkQueues &);
 std::optional<ForegroundItem> pop_foreground(WorkQueues &);
 std::optional<BackgroundItem> pop_background(WorkQueues &);
 PushResult enqueue_event(WorkQueues &, EventWork, std::size_t limit);
-PushResult enqueue_action(WorkQueues &, ActionWork, std::size_t limit);
 PushResult enqueue_watch(WorkQueues &, WatchWork);
 void enqueue_background(WorkQueues &, BackgroundItem);
 void schedule(TimerWheel &, Timer);

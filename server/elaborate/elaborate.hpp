@@ -123,6 +123,7 @@ struct FixtureJob {
   FixtureLimits limits;
 };
 struct PendingFixtures {
+  // Active subprocesses only; requests and accepted answers outlive the process.
   JobId next_id = 1;
   std::map<JobId, FixtureJob> rows;
 };

@@ -49,12 +49,13 @@ void install_relations(const Json &, const Symbols &, const react::Terms &,
 void install_profiles(const Json &, const Symbols &, control::Profiles &, perm::Players &,
                       const std::filesystem::path &key_root);
 void install_land(const Json &, perm::Plots &, perm::Groups &, perm::Players &);
-void install_money(const Json &, const perm::Players &, perm::Ledger &);
+void install_money(const Json &, const Symbols &, IdentityRead, AuthorityRead,
+                   const perm::Players &, const perm::Groups &, perm::Ledger &);
 void install_grants(const Json &, const Symbols &, const react::ValueRead &, AuthorityRead,
                     const perm::OwnerLimits &, const catalog::Models &, const catalog::Scripts &,
                     const install::InstanceScripts &, const react::RuleVersions &,
                     const perm::Plots &, const control::Profiles &, perm::Grants &, perm::Players &,
-                    Step, double hz);
+                    Step, double hz, const perm::Groups &);
 void install_script_state(const Json &, const Symbols &, react::ScriptStates &);
 void queue_bootstrap(const Json &, const Symbols &, const react::Terms &, step::WorkQueues &,
                      std::size_t event_limit);

@@ -127,8 +127,7 @@ void write_queues(snap::Output &, const step::WorkQueues &, const step::Intents 
 std::uint64_t read_queues(snap::Input &, step::WorkQueues &, step::Intents &, drive::Inputs &);
 void write_reqs(snap::Output &, const elaborate::Requests &, const elaborate::GapCounts &,
                 const elaborate::LastGaps &, const elaborate::CaptureRefs &,
-                const elaborate::PendingFixtures &,
                 std::optional<std::span<const Handle>> selected = {});
 void read_reqs(snap::Input &, elaborate::Requests &, elaborate::GapCounts &, elaborate::LastGaps &,
-               elaborate::CaptureRefs &, elaborate::PendingFixtures &);
+               elaborate::CaptureRefs &);
 } // namespace amber::bindings::checkpoint

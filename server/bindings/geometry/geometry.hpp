@@ -32,6 +32,7 @@ struct PhysicalSubject {
   TermId material;
   PlotId plot;
   Handle instance;
+  ModelId settings_model = 0;
 };
 struct PhysicalDefinition {
   space::BodySpec body;

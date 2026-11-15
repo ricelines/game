@@ -79,7 +79,8 @@ struct SlotRequest {
 std::vector<SlotRequest> choices(const Json &rows, const catalog::Script &source,
                                  const ScriptEditing &binding, const drive::NativeCall &call) {
   const authority::ScopeRead scopes{binding.values.identity, binding.authority, binding.limits,
-                                    binding.players,         binding.plots,     binding.profiles};
+                                    binding.players,         binding.plots,     binding.profiles,
+                                    binding.groups};
   std::vector<SlotRequest> result;
   std::set<std::string> chosen;
   for (const auto &row : rows) {
@@ -89,7 +90,10 @@ std::vector<SlotRequest> choices(const Json &rows, const catalog::Script &source
       throw std::invalid_argument("unknown or repeated script slot");
     if (row.at("rights").size() != 1 || row.at("rights")[0] != name)
       throw std::invalid_argument("a slot choice must grant exactly its declared right");
-    const auto issuer = detail::player(call);
+    const auto actor = detail::holder(call);
+    const auto issuer = actor.kind == perm::HolderKind::Player
+                            ? actor.id
+                            : binding.authority.owner[actor.installed_on.slot()];
     const auto control = authority::scope(row.at("scope"), scopes, issuer);
     const auto expires = authority::duration_steps(row.at("expires_s").get<double>(), call.hz);
     if (!expires || expires > std::numeric_limits<Step>::max() - call.step)
@@ -108,14 +112,24 @@ Json preview(const catalog::Script &source, Handle object, const ScriptEditing &
   Json slots = Json::array();
   for (const auto &name : source.declaration.slots) {
     Json selected_scope = {{"object", to_string(object)}};
-    if (name == "spend")
-      selected_scope = {{"account", "p:" + std::to_string(detail::player(call))}};
-    else if (name == "issue")
+    if (name == "spend") {
+      const auto actor = detail::holder(call);
+      selected_scope = {{"account", actor.kind == perm::HolderKind::Player
+                                        ? "p:" + std::to_string(actor.id)
+                                        : to_string(actor.installed_on)}};
+    } else if (name == "issue")
       selected_scope = {{"issuance", true}};
-    else if (name == "animate" || name == "camera")
-      selected_scope = {{"avatar", call.body ? Json(to_string(call.body)) : Json(nullptr)}};
-    else if (name == "build" || name == "enter" || name == "run_scripts")
-      selected_scope = {{"plot", binding.authority.plot[object.slot()]}};
+    else if (name == "animate" || name == "camera") {
+      const auto actor = detail::holder(call);
+      const auto body = actor.kind == perm::HolderKind::Player ? call.body : actor.installed_on;
+      selected_scope = body && binding.values.identity.valid(body) &&
+                               (binding.values.identity.flags[body.slot()] & Body)
+                           ? Json{{"avatar", to_string(body)}}
+                           : Json(nullptr);
+    } else if (name == "build" || name == "enter" || name == "run_scripts") {
+      const auto plot = binding.authority.plot[object.slot()];
+      selected_scope = plot ? Json{{"plot", plot}} : Json(nullptr);
+    }
     slots.push_back({{"slot", name},
                      {"suggested",
                       {{"scope", selected_scope},
@@ -142,11 +156,18 @@ drive::NativeCompletion install_script(void *local, const drive::NativeCall &cal
           false, {{"slots", preview(source, object, binding, call)}, {"requires_commit", true}});
     const auto requested = choices(call.arguments.at("choices"), source, binding, call);
     const auto plot = binding.authority.plot[object.slot()];
-    if (plot &&
-        (plot >= binding.plots.rows.size() ||
-         !perm::check_land(perm::Holder::player(detail::player(call)), perm::LandVerb::RunScripts,
-                           binding.plots.rows[plot], binding.players, binding.grants, call.step)))
-      throw std::invalid_argument("run_scripts denied on current plot");
+    if (plot) {
+      if (plot >= binding.plots.rows.size())
+        throw std::invalid_argument("unknown current plot");
+      const auto allowed =
+          perm::check_land(detail::holder(call), perm::LandVerb::RunScripts,
+                           binding.plots.rows[plot], binding.players, binding.grants, call.step);
+      if (!allowed)
+        throw detail::PolicyDenied("run_scripts", "plot:" + std::to_string(plot),
+                                   std::string(perm::reason_text(allowed.reason)),
+                                   "obtain RunScripts from p:" +
+                                       std::to_string(binding.plots.rows[plot].owner));
+    }
     const auto before = install::installed_scripts(binding.models, binding.instances,
                                                    binding.values.identity, object);
     auto out =
@@ -166,8 +187,8 @@ drive::NativeCompletion install_script(void *local, const drive::NativeCall &cal
                                      binding.authority.owner[object.slot()], true};
     std::set<std::string> filled;
     for (const auto &choice : requested) {
-      const auto granted = perm::create_grant(binding.grants, binding.players, choice.request,
-                                              choice.control, holder, call.step);
+      const auto granted = perm::create_grant(binding.grants, binding.players, detail::holder(call),
+                                              choice.request, choice.control, holder, call.step);
       if (granted) {
         out.reply["grants"].push_back({{"slot", choice.name}, {"grant", granted.grant}});
         filled.insert(choice.name);

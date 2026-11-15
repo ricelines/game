@@ -4,15 +4,23 @@
 #include "bindings/illumination.hpp"
 #include "bindings/viewing/viewing.hpp"
 #include "control/control.hpp"
-#include "drive/drive.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <lua.h>
 #include <lualib.h>
 #include <map>
 #include <numeric>
 
 namespace amber::bindings {
+namespace {
+std::vector<std::uint32_t> identifiers(std::size_t rows) {
+  std::vector<std::uint32_t> result(rows - 1);
+  std::iota(result.begin(), result.end(), 1);
+  return result;
+}
+} // namespace
 void invalidate_metadata(MetadataChanges &changes, std::span<const Handle> objects) {
   viewing::invalidate(changes.views, objects);
   changes.objects.insert(changes.objects.end(), objects.begin(), objects.end());
@@ -33,10 +41,7 @@ CatalogPublication::CatalogPublication(
     : models_(models), scripts_(scripts), terms_(terms), materials_(materials),
       model_text_(model_text), instance_text_(instance_text), values_(values),
       authority_(authority), parents_(parents), triggers_(triggers), priorities_(priorities),
-      changes_(changes), appearance_(appearance), model_ids_(models.rows.size() - 1),
-      term_ids_(terms.rows.size() - 1) {
-  std::iota(model_ids_.begin(), model_ids_.end(), 1);
-  std::iota(term_ids_.begin(), term_ids_.end(), 1);
+      changes_(changes), appearance_(appearance) {
   for (const auto &term : terms.rows) {
     if (term.kind == react::Kind::Material)
       material_ids_.push_back(term.id);
@@ -44,14 +49,12 @@ CatalogPublication::CatalogPublication(
       inspection_terms_.push_back(term.id);
   }
   catalog_ = {{"t", "catalog"},
-              {"models", model_metadata(models_, model_text_, model_ids_)},
-              {"terms", term_metadata(terms_, term_ids_)},
+              {"models", model_metadata(models_, model_text_, identifiers(models_.rows.size()))},
+              {"terms", term_metadata(terms_, identifiers(terms_.rows.size()))},
               {"materials", material_metadata(terms_, materials_, appearance_, material_ids_)},
               {"world", {{"ambient_lux", 0}}}};
 }
 void CatalogPublication::definitions_changed(std::span<const ModelId> changed) {
-  while (model_ids_.size() + 1 < models_.rows.size())
-    model_ids_.push_back(static_cast<ModelId>(model_ids_.size() + 1));
   for (auto model : changed)
     install::project_model(triggers_, models_, scripts_, terms_, model);
   metadata_changed(changes_, {}, changed);
@@ -70,7 +73,6 @@ void CatalogPublication::flush(control::Sessions &sessions) {
   deduplicate(changed_materials_);
   if (!added_terms_.empty()) {
     for (auto id : added_terms_) {
-      term_ids_.push_back(id);
       const auto &term = terms_.rows[id];
       if (term.kind == react::Kind::Quantity || term.kind == react::Kind::Flag)
         inspection_terms_.push_back(id);
@@ -78,7 +80,7 @@ void CatalogPublication::flush(control::Sessions &sessions) {
         material_ids_.push_back(id);
     }
     react::rebuild_priorities(priorities_, values_);
-    catalog_["terms"] = term_metadata(terms_, term_ids_);
+    catalog_["terms"] = term_metadata(terms_, identifiers(terms_.rows.size()));
     sessions.broadcast({{"t", "catalog"}, {"terms", term_metadata(terms_, added_terms_)}});
     added_terms_.clear();
   }
@@ -92,7 +94,7 @@ void CatalogPublication::flush(control::Sessions &sessions) {
   if (!changes_.models.empty()) {
     auto &changed = changes_.models;
     deduplicate(changed);
-    catalog_["models"] = model_metadata(models_, model_text_, model_ids_);
+    catalog_["models"] = model_metadata(models_, model_text_, identifiers(models_.rows.size()));
     sessions.broadcast(
         {{"t", "catalog"}, {"models", model_metadata(models_, model_text_, changed)}});
     changed.clear();
@@ -106,24 +108,24 @@ void CatalogPublication::flush(control::Sessions &sessions) {
     changed.clear();
   }
 }
-catalog::Hash commit_registry(void *local, std::span<const TermId> terms,
+catalog::Hash commit_registry(RegistryPersistence &state, std::span<const TermId> terms,
                               std::span<const TermId> materials) {
-  auto &state = *static_cast<RegistryPersistence *>(local);
-  const auto physics =
-      prepare_material_refresh(state.physics, materials, state.clock.step, state.hz);
-  const auto hash = catalog::save_registry(state.directory, state.terms, state.materials,
-                                           state.rules, state.mechanical);
-  state.document = catalog::read_registry(state.directory, hash);
-  apply_material_refresh(state.physics.space, state.physics.values.identity, physics);
+  catalog::Hash hash;
+  try {
+    hash = catalog::save_registry(state.directory, state.terms, state.materials, state.rules,
+                                  state.mechanical);
+    state.document = catalog::read_registry(state.directory, hash);
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "Fatal registry persistence failure: %s\n", error.what());
+    std::abort();
+  }
   state.publication.registry_changed(terms, materials);
   return hash;
 }
 void publish_rule_registry(void *local, ScriptId script, bool approved, bool active, Step now,
                            double, const record::Origin &, react::DeferredEffects &effects) {
   auto &state = *static_cast<RegistryPersistence *>(local);
-  const auto pin = catalog::save_registry(state.directory, state.terms, state.materials,
-                                          state.rules, state.mechanical);
-  state.document = catalog::read_registry(state.directory, pin);
+  const auto pin = commit_registry(state, {}, {});
   const auto &source = state.scripts.rows.at(script);
   record::Event event;
   event.step = now;
@@ -256,32 +258,6 @@ void push_measurements(lua_State *L, ModelId model, std::uint32_t params, TermId
   lua_setreadonly(L, -1, true);
 }
 } // namespace
-int context_binding(lua_State *L) {
-  const auto &b = *static_cast<ContextBinding *>(react::binding_data(L));
-  const auto &inv = react::invocation(L);
-  lua_createtable(L, 0, 9);
-  number_field(L, "script", inv.self.script);
-  handle_field(L, "object", inv.self.object);
-  handle_field(L, "sender", inv.sender);
-  text(L, "p:" + std::to_string(b.authority.owner[inv.self.object.slot()]));
-  lua_setfield(L, -2, "owner");
-  if (inv.action_caller) {
-    if (const auto *player = std::get_if<PlayerId>(&*inv.action_caller)) {
-      text(L, "p:" + std::to_string(*player));
-      lua_setfield(L, -2, "actor");
-      handle_field(L, "body", inv.action_body);
-    } else {
-      const auto &script = std::get<ScriptHolder>(*inv.action_caller);
-      number_field(L, "caller_script", script.script);
-      handle_field(L, "caller_object", script.object);
-    }
-    handle_field(L, "selected", inv.action_target);
-  }
-  if (inv.direct_body)
-    handle_field(L, "held", inv.direct_body->held);
-  lua_setreadonly(L, -1, true);
-  return 1;
-}
 int object_binding(lua_State *L) {
   const auto &b = *static_cast<ObjectBinding *>(react::binding_data(L));
   const auto object = object_arg(L, 2, b.identity);

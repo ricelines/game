@@ -9,24 +9,23 @@
 
 namespace amber::bindings {
 struct MechanicalCauses::Data {
-  struct Entry {
-    CauseSummary summary;
-    space::CauseToken previous = 0;
-    bool pending = false;
-  };
   std::size_t authors_max;
   space::CauseToken next = 1;
-  std::unordered_map<space::CauseToken, Entry> entries;
+  std::unordered_map<space::CauseToken, CauseSummary> entries;
   std::unordered_map<std::uint64_t, space::CauseToken> interned;
 };
 MechanicalCauses::MechanicalCauses(std::size_t authors_max) : data(std::make_unique<Data>()) {
   data->authors_max = authors_max;
 }
 MechanicalCauses::~MechanicalCauses() = default;
-space::CauseToken MechanicalCauses::intern(const record::Origin &origin) {
+space::CauseToken MechanicalCauses::intern(const record::Origin &origin,
+                                           space::CauseToken previous) {
+  if (previous)
+    return restore(combine(lookup(previous), {origin, false}));
   if (!origin.cause && !origin.root)
     return 0;
-  if (auto found = data->interned.find(origin.cause); found != data->interned.end())
+  if (auto found = data->interned.find(origin.cause);
+      found != data->interned.end() && lookup(found->second).origin == origin)
     return found->second;
   auto token = restore({origin, false});
   data->interned[origin.cause] = token;
@@ -34,25 +33,11 @@ space::CauseToken MechanicalCauses::intern(const record::Origin &origin) {
 }
 space::CauseToken MechanicalCauses::restore(CauseSummary summary) {
   auto token = data->next++;
-  data->entries.emplace(token, Data::Entry{std::move(summary)});
+  data->entries.emplace(token, std::move(summary));
   return token;
-}
-space::CauseToken MechanicalCauses::begin(space::CauseToken previous, bool additive) {
-  auto token = data->next++;
-  data->entries.emplace(token, Data::Entry{{}, additive ? previous : 0, true});
-  return token;
-}
-void MechanicalCauses::finalize(space::CauseToken token, const record::Origin &origin) {
-  auto &entry = data->entries.at(token);
-  entry.summary = combine(lookup(entry.previous), {origin, false});
-  entry.previous = 0;
-  entry.pending = false;
-}
-void MechanicalCauses::abandon(space::CauseToken token) {
-  data->entries.erase(token);
 }
 CauseSummary MechanicalCauses::lookup(space::CauseToken token) const {
-  return token ? data->entries.at(token).summary : CauseSummary{};
+  return token ? data->entries.at(token) : CauseSummary{};
 }
 CauseSummary MechanicalCauses::combine(const CauseSummary &a, const CauseSummary &b) const {
   const auto empty = [](const CauseSummary &v) {
@@ -83,15 +68,9 @@ CauseSummary MechanicalCauses::combine(const CauseSummary &a, const CauseSummary
 }
 void MechanicalCauses::retain(std::span<const space::CauseToken> tokens) {
   std::unordered_set<space::CauseToken> live(tokens.begin(), tokens.end());
-  std::erase_if(data->entries,
-                [&](const auto &row) { return !row.second.pending && !live.contains(row.first); });
+  std::erase_if(data->entries, [&](const auto &row) { return !live.contains(row.first); });
   std::erase_if(data->interned,
                 [&](const auto &row) { return !data->entries.contains(row.second); });
-}
-react::CausalReceipt motion_receipt(MechanicalCauses &causes, space::CauseToken token) {
-  return {&causes, token, [](void *owner, std::uint64_t receipt, const record::Origin &origin) {
-            static_cast<MechanicalCauses *>(owner)->finalize(receipt, origin);
-          }};
 }
 namespace {
 TermId relation_term(const PhysicalRelationTerms &terms, space::RelationKind kind) {
@@ -109,8 +88,14 @@ TermId relation_term(const PhysicalRelationTerms &terms, space::RelationKind kin
 }
 record::Origin published_origin(PhysicalPublication &b, const CauseSummary &summary, Step step,
                                 std::span<const Handle> things) {
-  if (!summary.ambiguous)
-    return summary.origin;
+  if (!summary.ambiguous) {
+    auto origin = summary.origin;
+    if (b.credits.resolve) {
+      const auto credits = b.credits.resolve(b.credits.context, things, 0, b.hz);
+      b.journal.include_credits(origin, credits);
+    }
+    return origin;
+  }
   record::Event event;
   event.step = step;
   event.kind = record::Kind::System;
@@ -140,14 +125,25 @@ void publish_physical(PhysicalPublication &b, const space::StepResult &physics, 
     const auto origin = published_origin(b, summary, now, things);
     for (const auto &[receiver, sender, normal] :
          {std::tuple{contact.first, contact.second, contact.normal},
-          std::tuple{contact.second, contact.first, contact.normal * -1}})
-      step::enqueue_event(b.queues,
-                          {receiver, sender, b.terms.contact,
-                           std::vector<EventField>{{"point", contact.point},
-                                                   {"normal", normal},
-                                                   {"started", Value(contact.started)}},
-                           origin},
-                          b.event_limit);
+          std::tuple{contact.second, contact.first, contact.normal * -1}}) {
+      const auto result = step::enqueue_event(
+          b.queues,
+          {receiver, sender, b.terms.contact,
+           std::vector<EventField>{
+               {"point", contact.point}, {"normal", normal}, {"started", Value(contact.started)}},
+           origin},
+          b.event_limit);
+      if (result == step::PushResult::Overflow) {
+        record::Event event;
+        event.step = now;
+        event.kind = record::Kind::System;
+        event.name = "overflow";
+        event.things = {receiver, sender};
+        event.detail = {
+            {"queue", "events"}, {"limit", b.event_limit}, {"dropped_term", b.terms.contact}};
+        b.journal.append(std::move(event), origin);
+      }
+    }
   }
   std::map<std::pair<std::uint64_t, TermId>, CauseSummary> facts;
   for (const auto &change : physics.relations) {

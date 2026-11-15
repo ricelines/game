@@ -1,33 +1,25 @@
 #include "bindings/editing/editing.hpp"
+#include "bindings/geometry/geometry.hpp"
 #include "bindings/illumination.hpp"
 #include "bindings/metadata/metadata.hpp"
 #include "bindings/viewing/viewing.hpp"
 #include "runtime_fixture.hpp"
+#include "space_fixture.hpp"
 #include "step/snapshot.hpp"
 
 #include <chrono>
+#include <csignal>
+#include <fstream>
 #include <iostream>
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 using namespace amber;
 namespace ed = amber::bindings::editing;
 using test_runtime::require;
 using Json = nlohmann::json;
 namespace {
-struct RegistryPublication {
-  const react::Terms &terms;
-  const react::Materials &materials;
-  const react::RuleVersions &rules;
-  catalog::MechanicalBindings mechanical;
-  std::filesystem::path directory;
-  bool fail = false;
-};
-catalog::Hash publish_registry(void *local, std::span<const TermId>, std::span<const TermId>) {
-  auto &publication = *static_cast<RegistryPublication *>(local);
-  if (publication.fail)
-    throw std::runtime_error("test registry writer failure");
-  return catalog::save_registry(publication.directory, publication.terms, publication.materials,
-                                publication.rules, publication.mechanical);
-}
 drive::NativeCall call(PlayerId caller, Handle target, Json arguments) {
   return {{caller, 0, target, {}}, std::move(arguments), {}, 10, 20, {}};
 }
@@ -56,6 +48,7 @@ int main() {
     };
     const auto gain = add("novel.gain", react::Source::Setting);
     const auto intrinsic = add("novel.hardness", react::Source::Intrinsic);
+    const auto transmission = add("novel.transmission", react::Source::Intrinsic);
     const auto measured = add("novel.volume", react::Source::Measured);
     const auto mechanical = add("novel.attachment", react::Source::State, react::Kind::Relation);
     const auto connection = add("novel.connection", react::Source::State, react::Kind::Relation);
@@ -100,6 +93,7 @@ int main() {
     perm::Players players;
     players.rows.resize(4);
     perm::Grants grants;
+    perm::Groups groups;
     perm::OwnerLimits limits;
     perm::Plots plots;
     control::Profiles profiles;
@@ -120,7 +114,7 @@ int main() {
                               f.states,    f.shared,   gives,           f.allocations,
                               values,      f.models,   f.scripts,       authority(f.objects),
                               limits,      players,    grants,          plots,
-                              profiles,    6,          changes};
+                              profiles,    6,          changes,         groups};
     catalog::ModelTexts model_text;
     catalog::InstanceTexts instance_text;
     catalog::AuthoredTexts details;
@@ -132,9 +126,52 @@ int main() {
     const auto registry_directory =
         std::filesystem::current_path() / ".cache/editing-registry-test";
     std::filesystem::remove_all(registry_directory);
-    RegistryPublication publication{f.terms, f.materials, f.rules, {}, registry_directory};
-    const ed::RegistryCommit commit{&publication, publish_registry};
-    ed::RegistryEditing registry{f.terms, f.materials, values, profiles, commit, changes};
+    react::PriorityLinks priorities;
+    bindings::CatalogPublication publication{f.models,
+                                             f.scripts,
+                                             f.terms,
+                                             f.materials,
+                                             model_text,
+                                             instance_text,
+                                             values,
+                                             authority(f.objects),
+                                             parents(f.objects),
+                                             f.triggers,
+                                             priorities,
+                                             changes,
+                                             {}};
+    catalog::MechanicalBindings mechanical_roles;
+    catalog::RegistryDocument document;
+    bindings::RegistryPersistence persistence{
+        f.terms,  f.materials,        f.rules,    f.scripts, mechanical_roles,
+        document, registry_directory, publication};
+    space::Space physics(testspace::settings());
+    bindings::GeometryAssets geometries;
+    catalog::Assets baked;
+    catalog::ParameterBlocks parameters;
+    testspace::Box box({1, 1, 1});
+    catalog::Asset box_asset;
+    box_asset.hash = std::string(64, 'a');
+    box_asset.volume = 1;
+    box_asset.manifest = {{"bindings", Json::object()}};
+    baked.rows.emplace(box_asset.hash, box_asset);
+    geometries.rows[box_asset.hash].collision =
+        space::import_geometry(physics, box.source()).geometry;
+    f.materials.rows[8] = {{intrinsic, Value(1.)}, {transmission, Value(0.)}};
+    f.models.rows[1].asset = box_asset.hash;
+    f.models.rows[2].asset = box_asset.hash;
+    bindings::MaterialRefresh physical_materials{
+        physics, geometries, f.models, parameters, baked, values, {intrinsic, transmission},
+        {.6f, 0}};
+    for (auto object : {f.a, f.b, f.c}) {
+      const auto physical = bindings::describe_physics(
+          geometries, box_asset, values, {f.objects.model[object.slot()], 0, 8, 0, object},
+          f.objects.flags[object.slot()], {intrinsic, transmission}, {.6f, 0}, 0, 20);
+      bindings::install_physics(physics, identity(f.objects), transforms(f.objects),
+                                space_flags(f.objects), object, physical);
+    }
+    ed::RegistryEditing registry{f.terms, f.materials,       values, profiles, persistence,
+                                 changes, physical_materials};
     drive::NativeOperations operations;
     ed::register_actions(operations, declared, scripts, texts, properties, registry);
     require(operations.rows.size() == 12 &&
@@ -431,21 +468,21 @@ int main() {
              .reply["ok"]
              .get<bool>(),
         "registry accepted an invalid allocation pairing");
-    const auto count_before_failure = f.terms.rows.size();
-    publication.fail = true;
-    require(!invoke(declared.define_term,
-                    call(3, {},
-                         {{"proposal", {{"name", "unpublished"}, {"kind", "event"}}},
-                          {"choice", {{"none_fits", "publication failure fixture"}}}}))
-                    .reply["ok"]
-                    .get<bool>() &&
-                f.terms.rows.size() == count_before_failure &&
-                !f.terms.by_name.contains("p3.unpublished"),
-            "failed registry publication exposed an unpinned term");
-    publication.fail = false;
+    const auto previous_material = f.materials.rows.at(8);
+    const auto previous_pin = document.hash;
+    const auto invalid_physics =
+        invoke(declared.define_material,
+               call(3, {},
+                    {{"material", "novel.mat"},
+                     {"values", {{"novel.hardness", -1}, {"novel.transmission", 0}}}}));
+    require(invalid_physics.reply.at("error") == "bad_input" &&
+                f.materials.rows.at(8) == previous_material && document.hash == previous_pin,
+            "invalid material physics changed catalog rows or registry pin");
     const auto material =
         invoke(declared.define_material,
-               call(3, {}, {{"material", "novel.mat"}, {"values", {{"novel.hardness", 4}}}}));
+               call(3, {},
+                    {{"material", "novel.mat"},
+                     {"values", {{"novel.hardness", 4}, {"novel.transmission", 0}}}}));
     require(material.changed && dirty(material, f.a, intrinsic) &&
                 dirty(material, f.c, intrinsic) &&
                 react::read(values, f.a, intrinsic, 10, 20).value.numeric() == 4,
@@ -456,6 +493,89 @@ int main() {
                     .get<bool>() &&
                 f.materials.rows.at(8).at(intrinsic).numeric() == 4,
             "material declaration forged measured geometry");
+    const auto blocked = registry_directory / "not-a-directory";
+    std::ofstream(blocked) << "registry output is deliberately blocked";
+    const auto child = fork();
+    require(child >= 0, "start registry disk-failure subprocess");
+    if (child == 0) {
+      const rlimit no_core{0, 0};
+      setrlimit(RLIMIT_CORE, &no_core);
+      persistence.directory = blocked;
+      invoke(declared.define_term,
+             call(3, {},
+                  {{"proposal", {{"name", "unpublished"}, {"kind", "event"}}},
+                   {"choice", {{"none_fits", "real disk failure fixture"}}}}));
+      _exit(1);
+    }
+    int child_status = 0;
+    require(waitpid(child, &child_status, 0) == child && WIFSIGNALED(child_status) &&
+                WTERMSIG(child_status) == SIGABRT,
+            "registry disk failure continued under an obsolete persisted pin");
+    const auto script_edit = [&](TermId action, Handle target, Json arguments) {
+      auto request = call(1, target, std::move(arguments));
+      request.request.caller = ScriptHolder{script, f.a};
+      return invoke(action, std::move(request));
+    };
+    const auto denied = [](const drive::NativeCompletion &out, std::string_view need,
+                           const Json &on) {
+      return !out.reply.at("ok").get<bool>() && out.reply.contains("denied") &&
+             out.reply.at("denied").at("need") == need && out.reply.at("denied").at("on") == on &&
+             !out.reply.at("denied").at("why").get<std::string>().empty() &&
+             !out.reply.at("denied").at("fix").get<std::string>().empty() &&
+             !out.reply.contains("error");
+    };
+    require(script_edit(declared.edit_text, f.a, {{"text", {{"name", "Self-authored"}}}}).changed &&
+                script_edit(declared.set_setting, f.a, {{"values", {{"novel.gain", 8}}}}).changed,
+            "installed script could not use its own implicit Edit");
+    require(denied(script_edit(declared.edit_text, f.b, {{"text", {{"name", "Borrowed"}}}}), "edit",
+                   to_string(f.b)),
+            "script borrowed its installation owner's Edit on another object");
+    f.objects.preset[f.c.slot()] = 0;
+    const auto editor = perm::Holder::script(script, f.a);
+    const auto edit_grant = perm::create_grant(
+        grants, players, perm::Holder::player(1),
+        {1, editor, perm::Scope::object(f.b), perm::bit(perm::Verb::Edit), 0, 0, 100},
+        {perm::Scope::object(f.b), 1, perm::all_rights}, {editor, 1, true}, 10);
+    require(
+        edit_grant &&
+            script_edit(declared.edit_text, f.b, {{"text", {{"name", "Granted edit"}}}}).changed,
+        "script with an actual other-object Edit grant could not edit it");
+    for (const auto &[action, arguments] : std::vector<std::pair<TermId, Json>>{
+             {declared.model_text, {{"model", "m:1"}, {"text", {{"name", "Borrowed author"}}}}},
+             {declared.model_setting, {{"model", "m:1"}, {"values", {{"novel.gain", 99}}}}},
+             {declared.model_script, {{"model", "m:1"}, {"script", nullptr}}}})
+      require(denied(script_edit(action, {}, arguments), "model_author", "m:1"),
+              "script inherited its installation owner's model authorship");
+    profiles.rows[1].roles = {"elaborator"};
+    require(denied(script_edit(declared.patch_state, f.a, {{"values", {{"novel.heat", 50}}}}),
+                   "player_caller", to_string(f.a)) &&
+                denied(script_edit(declared.define_term, {}, {{"proposal", quantity}}),
+                       "player_caller", "administration"),
+            "script inherited its installation owner's elaborator role");
+    profiles.rows[1].roles.clear();
+    const auto invalid_setting =
+        script_edit(declared.set_setting, f.a, {{"values", {{"novel.volume", 999}}}});
+    require(invalid_setting.reply.at("error") == "bad_input" &&
+                !invalid_setting.reply.at("problem").get<std::string>().empty() &&
+                !invalid_setting.reply.contains("denied"),
+            "invalid property input was misreported as a permission denial");
+    perm::Plot plot;
+    plot.id = 1;
+    plot.owner = 1;
+    plots.rows.push_back(plot);
+    f.objects.plot[f.b.slot()] = 1;
+    const Json install_other = {{"script", "s:" + std::to_string(second_script)},
+                                {"choices", Json::array()}};
+    require(denied(script_edit(declared.install, f.b, install_other), "run_scripts", "plot:1"),
+            "script borrowed its installation owner's plot RunScripts right");
+    const auto run_right = perm::Rights{1} << static_cast<unsigned>(perm::LandVerb::RunScripts);
+    const auto run_grant =
+        perm::create_grant(grants, players, perm::Holder::player(1),
+                           {1, editor, perm::Scope::plot(1), run_right, 0, 0, 100},
+                           {perm::Scope::plot(1), 1, perm::Rights{7}}, {editor, 1, true}, 10);
+    require(run_grant && script_edit(declared.install, f.b, install_other).changed,
+            "script with actual Edit and RunScripts grants could not install behavior");
+    f.objects.plot[f.b.slot()] = 0;
     std::filesystem::remove_all(registry_directory);
     for (int index = 0; index < 2000; ++index) {
       ObjectInit object;

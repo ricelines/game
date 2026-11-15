@@ -33,11 +33,22 @@ Step duration_steps(double seconds, double hz) {
     throw std::invalid_argument("invalid grant duration");
   return static_cast<Step>(value);
 }
-PlayerId account(const Json &value, const ScopeRead &binding) {
-  const auto id = identifier(value, "p:");
-  if (id >= binding.players.rows.size())
-    throw std::invalid_argument("unknown player wallet");
-  return id;
+perm::AccountTarget account(const Json &value, const AccountRead &binding) {
+  const auto &name = value.get_ref<const std::string &>();
+  if (name.starts_with("p:")) {
+    const auto id = identifier(value, "p:");
+    if (id >= binding.players.rows.size())
+      throw std::invalid_argument("unknown player account");
+    return perm::AccountTarget::player(id);
+  }
+  if (name.starts_with("group:")) {
+    const auto id = identifier(value, "group:");
+    if (id >= binding.groups.rows.size() || binding.groups.rows[id].id != id)
+      throw std::invalid_argument("unknown group account");
+    return {perm::Account::group(id), binding.groups.rows[id].controller};
+  }
+  const auto object = live_handle(value, binding.identity);
+  return {perm::Account::object(object), binding.authority.owner[object.slot()]};
 }
 perm::ScopeControl scope(const Json &row, const ScopeRead &binding, PlayerId issuer) {
   if (row.size() != 1)
@@ -60,8 +71,9 @@ perm::ScopeControl scope(const Json &row, const ScopeRead &binding, PlayerId iss
     return {perm::Scope::owned_on_plot(owner, plot), owner, perm::all_rights, plot, false};
   }
   if (row.contains("account")) {
-    const auto key = account(row.at("account"), binding);
-    return {perm::Scope::account(key), key, 1, 0, false};
+    const auto target = account(
+        row.at("account"), {binding.identity, binding.authority, binding.players, binding.groups});
+    return {perm::Scope::account(target.account), target.controller, 1, 0, false};
   }
   if (row.contains("avatar")) {
     const auto body = live_handle(row.at("avatar"), binding.identity);

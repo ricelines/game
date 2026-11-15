@@ -151,9 +151,7 @@ nlohmann::json declaration_json(const react::ScriptDeclaration &declaration) {
     result["actions"].push_back({{"term", action.action},
                                  {"right", action.right},
                                  {"function", action.function},
-                                 {"right_on", action.right_on},
-                                 {"reach", action.reach},
-                                 {"mechanics", action.mechanics}});
+                                 {"reach", action.reach}});
   return result;
 }
 react::ScriptDeclaration declaration_from_json(const nlohmann::json &data) {
@@ -196,9 +194,7 @@ react::ScriptDeclaration declaration_from_json(const nlohmann::json &data) {
   if (data.contains("actions"))
     for (const auto &action : data["actions"])
       d.actions.push_back({action.at("term"), action.at("right"), action.at("function"),
-                           action.value("right_on", std::string("selected")),
-                           action.value("reach", false),
-                           action.value("mechanics", std::vector<std::string>{})});
+                           action.value("reach", false)});
   return d;
 }
 TermId append_term(react::Terms &terms, const TermProposal &proposal,
@@ -310,7 +306,6 @@ Hash save_registry(const std::filesystem::path &root, const react::Terms &terms,
                              {"author", h.author},
                              {"version", h.version},
                              {"enabled", h.enabled},
-                             {"world_rule", h.world_rule},
                              {"trigger", rule.trigger},
                              {"selector", rule.selector},
                              {"flag_selector", rule.flag_selector}});
@@ -379,12 +374,8 @@ void load_rules(const RegistryDocument &document, const Scripts &scripts,
     if (!id || id >= scripts.rows.size() ||
         scripts.rows[id].declaration.kind != react::ScriptDeclaration::Kind::Rule)
       throw std::runtime_error("unknown rule script");
-    react::HandlerRef h{id,
-                        value.at("function"),
-                        value.at("author"),
-                        value.at("version"),
-                        value.at("enabled"),
-                        value.at("world_rule")};
+    react::HandlerRef h{id, value.at("function"), value.at("author"), value.at("version"),
+                        value.at("enabled")};
     result.history.push_back(
         {h, value.at("trigger"), value.at("selector"), value.at("flag_selector")});
   }

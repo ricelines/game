@@ -308,6 +308,9 @@ struct MotionRow {
 void capture_motion(const Space &, IdentityRead, std::vector<MotionRow> &);
 void capture_motion(const Space &, IdentityRead, std::span<const Handle>, std::vector<MotionRow> &);
 std::optional<MotionRow> motion(const Space &, IdentityRead, Handle);
+// Matches the speed clamp used by character navigation; absent for other bodies.
+std::optional<float> movement_speed(const Space &, IdentityRead, Handle,
+                                    std::optional<float> requested = {});
 void restore_motion(Space &, IdentityRead, std::span<const MotionRow>);
 void rebuild_attachments(Space &, IdentityRead, TransformRead, ParentRead,
                          const Edges &attached_to);

@@ -44,7 +44,7 @@ struct GrantBinding {
 struct RevokeBinding {
   perm::Grants &grants;
   perm::Players &players;
-  const control::Profiles &profiles;
+  authority::ScopeRead scopes;
   AdminInvalidation invalidation;
 };
 struct ListGrantsBinding {

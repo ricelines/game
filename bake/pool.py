@@ -186,23 +186,28 @@ class BakePool:
             if ancestor in (self.jobs_root, self.assets):
                 break
 
-    def _validate(self, directory, expected_hash):
+    def _validate(self, directory, expected_hash, validated=None):
         self._asset_directory(directory)
+        if validated is None:
+            validated = {}
         manifest = json.loads(self._regular(directory / "manifest.json").read_text())
         if manifest["hash"] != expected_hash:
             raise ValueError("Asset identity mismatch")
         for lod in manifest["lods"]:
             if lod["file"] not in {"lod0.glb", "lod1.glb", "lod2.glb"}:
                 raise ValueError("Unexpected LOD path")
-            self._regular(directory / lod["file"])
-            result = subprocess.run(
-                [str(self.native), "--validate-glb", str(directory / lod["file"])],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=self.config["BAKE_S"],
-            )
-            actual = json.loads(result.stdout)
+            path = self._regular(directory / lod["file"])
+            key = ("glb", hashlib.sha256(path.read_bytes()).digest())
+            actual = validated.get(key)
+            if actual is None:
+                result = subprocess.run(
+                    [str(self.native), "--validate-glb", str(path)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.config["BAKE_S"],
+                )
+                actual = validated[key] = json.loads(result.stdout)
             if (
                 actual["triangles"] != lod["triangles"]
                 or actual["triangles"] > self.config["TRIS_MAX"]
@@ -213,13 +218,16 @@ class BakePool:
             if filename is not None:
                 if filename not in {"collision.bin", "convex.bin"}:
                     raise ValueError("Unexpected collision path")
-                self._regular(directory / filename)
-                subprocess.run(
-                    [str(self.native), "--inspect", str(directory / filename)],
-                    check=True,
-                    capture_output=True,
-                    timeout=self.config["BAKE_S"],
-                )
+                path = self._regular(directory / filename)
+                key = (role, hashlib.sha256(path.read_bytes()).digest())
+                if key not in validated:
+                    subprocess.run(
+                        [str(self.native), "--inspect", str(path)],
+                        check=True,
+                        capture_output=True,
+                        timeout=self.config["BAKE_S"],
+                    )
+                    validated[key] = True
         return manifest
 
     def _publish(self, request, result):
@@ -228,7 +236,10 @@ class BakePool:
         self._asset_directory(directory)
         manifest = json.loads(self._regular(directory / "manifest.json").read_text())
         expected = asset_hash(request["source"], manifest["params"], self.config["BAKE_VERSION"])
-        self._validate(directory, expected)
+        # Repeated parts can contain exactly the same compiled artifacts.
+        # Validate bytes once in this publication, never trust an authored ID.
+        validated = {}
+        self._validate(directory, expected, validated)
         for name, part in manifest["parts"].items():
             if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", name):
                 raise ValueError("Invalid child path")
@@ -236,7 +247,7 @@ class BakePool:
             if part["asset"] != child_hash:
                 raise ValueError("Invalid child identity")
             child_dir = directory / "parts" / name
-            self._validate(child_dir, child_hash)
+            self._validate(child_dir, child_hash, validated)
             self._install(child_dir, child_hash, request["source"])
         shutil.rmtree(directory / "parts", ignore_errors=True)
         for filename in ("result.json", "job.log"):

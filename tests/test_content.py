@@ -1,6 +1,5 @@
 """Checks over the authored package and real bake/validator artifacts."""
 
-import hashlib
 import json
 import runpy
 import subprocess
@@ -31,8 +30,9 @@ def test_every_start_has_closed_references_and_private_connection_modes(authored
                 "stakes" if stakes else "stakes_free"
             }
             assert all("key" not in p and "key_file" in p for p in plan["profiles"])
-            fish = [o for o in plan["objects"] if o["model"] == "fish"]
-            assert len(fish) == (300 if mode == "seeded" else 0)
+            assert not any(o["model"] == "fish" for o in plan["objects"])
+            assert not any(row["key"] == "fish" for row in plan["scripts"])
+            assert sum(o["model"] == "school" for o in plan["objects"]) == (mode == "seeded")
             stock = [s for s in plan["script_state"] if s["script"] == "stakes"]
             assert len(stock) == (6 if mode == "seeded" and stakes else 0)
 
@@ -56,32 +56,62 @@ def test_registry_preserves_sources_dimensions_and_shared_pairs():
         assert values[terms["base.embodied_energy"]["id"]] > 0
 
 
-def test_all_fish_are_ordinary_shared_assets_with_per_endpoint_authority(authored):
+def test_school_uses_declared_parts_with_one_script(authored):
     plan = select(authored, "seeded", True)
-    fish = {o["key"] for o in plan["objects"] if o["model"] == "fish"}
-    members = {r["to"] for r in plan["relations"] if r["term"] == "aq.school"}
-    movable = {
-        g["scope"]["object"]
-        for g in plan["grants"]
-        if g["holder"] == {"script": "school", "on": "cafe.school"} and g["rights"] == ["move"]
-    }
-    assert len(fish) == 300 and fish == members == movable
+    model = next(row for row in plan["models"] if row["key"] == "school")
+    assert model["file"] == "models/school.py" and model["script"] == "school"
+    assert not any(
+        row.get("holder") == {"script": "school", "on": "cafe.school"} for row in plan["grants"]
+    )
+    assert not any(row["term"] == "aq.school" for row in plan["relations"])
     assert all(g["expires_s"] > 0 for g in plan["grants"])
 
 
-def test_money_is_only_in_player_wallets_with_explicit_script_allowances(authored):
+def test_leases_and_avatar_consent_have_real_root_and_child_grants(authored):
+    for stakes in (True, False):
+        plan = select(authored, "seeded", stakes)
+        assert all(plot["owner"] == 1 for plot in plan["plots"])
+        rent = {"script": "rent", "on": "public.rent"}
+        leases = [row for row in plan["grants"] if row.get("caller") == rent]
+        assert len(leases) == 18
+        for row in leases:
+            roots = [
+                root
+                for root in plan["grants"]
+                if root["holder"] == rent and root["scope"] == row["scope"]
+            ]
+            assert len(roots) == 1 and row["expires_s"] <= roots[0]["expires_s"]
+            assert set(row["rights"]) <= set(roots[0]["rights"])
+        assert sum(isinstance(row["holder"], str) for row in leases) == 6
+        avatars = [row for row in plan["grants"] if "avatar" in row["scope"]]
+        assert len(avatars) == 6
+        assert all(
+            row["holder"] == {"script": "body", "on": row["scope"]["avatar"]}
+            and row["rights"] == ["animate", "camera"]
+            for row in avatars
+        )
+
+
+def test_institution_account_has_an_explicit_script_allowance(authored):
     plan = select(authored, "seeded", True)
     assert all(row["holder"].startswith("p:") for row in plan["balances"])
     treasury_spend = [
         row
         for row in plan["grants"]
-        if row["holder"]["script"] == "treasury" and row["rights"] == ["spend"]
+        if isinstance(row["holder"], dict)
+        and row["holder"]["script"] == "treasury"
+        and row["rights"] == ["spend"]
     ]
     assert len(treasury_spend) == 1
-    assert treasury_spend[0]["scope"] == {"account": "p:1"}
+    assert treasury_spend[0]["scope"] == {"account": "public.treasury"}
     assert treasury_spend[0]["cap"] > 0 and treasury_spend[0]["expires_s"] > 0
     plan["balances"].append({"holder": "public.treasury", "amount": 100})
-    with pytest.raises(ValueError, match="player's wallet"):
+    validate_symbols(plan)
+    plan["groups"] = [{"id": 1, "controller": 1, "name": "Test group"}]
+    plan["balances"].append({"holder": "group:1", "amount": 25})
+    validate_symbols(plan)
+    plan["balances"].append({"holder": "group:999", "amount": 25})
+    with pytest.raises(ValueError, match="Unknown group"):
         validate_symbols(plan)
 
 
@@ -159,6 +189,15 @@ def test_actual_stair_deck_and_moving_part_ownership(baked_plan):
     assert door["parts"]["leaf"]["position"] == [0, -0.25, 0]
     assert door["volume"] + child["volume"] == pytest.approx(door["assembly"]["volume"])
     assert manifest("body")["bindings"]["character"]["mass"] == "base.mass"
+    school = manifest("school")
+    assert len(school["parts"]) == 300
+    assert set(school["parts"]) == {f"fish_{index:03}" for index in range(300)}
+    for part in school["parts"].values():
+        child = json.loads((ROOT / "assets" / part["asset"] / "manifest.json").read_text())
+        assert child["volume"] > 0 and child["default_script"] is None
+        assert child["replicated"] == ["aq.health", "aq.alive"]
+        assert child["bindings"]["motion"]["mode"] == "kinematic"
+        assert child["bindings"]["physics"]["collision_solid"] is False
 
 
 def test_door_entire_authored_sweep_clears_actual_curved_shell():
@@ -181,13 +220,71 @@ def test_door_entire_authored_sweep_clears_actual_curved_shell():
     assert sum(solid.volume for solid in (shell & blocked).solids()) > 0.001
 
 
-def test_all_sources_pass_actual_luau_declaration_worker(tmp_path):
+def test_all_sources_pass_actual_luau_declaration_worker(tmp_path, baked_plan):
     worker = ROOT / ".build/release/server/catalog/amb_script_validate"
     assert worker.exists(), "Build the Release targets before the content gate"
-    data = registry(ROOT / "content/registry")
-    pin = hashlib.sha256(
-        json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    # Get reserved engine declarations from the real composition, rather than
+    # maintaining a second copy of native signatures in this Python test.
+    plan = json.loads(json.dumps(baked_plan))
+    for profile in plan["profiles"]:
+        profile["key_file"] = str(tmp_path / "keys" / f"{profile['id']}.key")
+    plan_file = tmp_path / "plan.json"
+    plan_file.write_text(json.dumps(plan))
+    data_dir = tmp_path / "world"
+    report = tmp_path / "report.json"
+    native = subprocess.run(
+        [
+            str(ROOT / ".build/release/amb-server"),
+            "--plan",
+            str(plan_file),
+            "--config",
+            str(ROOT / "config.toml"),
+            "--assets",
+            str(ROOT / "assets"),
+            "--data",
+            str(data_dir),
+            "--no-network",
+            "--unpaced",
+            "--steps",
+            "4",
+            "--report",
+            str(report),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert native.returncode == 0, (native.stdout, native.stderr)
+    state = json.loads(report.read_text())
+    assert state["script_errors"] == 0
+    assert len(state["objects"]) == 361
+    assert sum("aq.health" in row["values"] for row in state["objects"]) >= 300
+    registries = list((data_dir / "registry").glob("*.json"))
+    final = max(registries, key=lambda path: path.stat().st_mtime_ns)
+    data = json.loads(final.read_text())
+    pin = final.stem
+    start = subprocess.run(
+        [
+            str(ROOT / ".build/release/server/bindings/start/start_test"),
+            str(plan_file),
+            str(ROOT / "assets"),
+            str(final),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert start.returncode == 0, (start.stdout, start.stderr)
+    assert {row["name"] for row in data["terms"]} >= {
+        "engine.create",
+        "engine.grasp",
+        "engine.issue",
+        "engine.grant",
+    }
     config = tomllib.loads((ROOT / "config.toml").read_text())
     limits = config["scripts"]
     for source in sorted((ROOT / "content/scripts").glob("*.luau")):

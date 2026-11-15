@@ -2,9 +2,20 @@
 
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Body/MotionProperties.h>
+#include <algorithm>
 #include <cmath>
 
 namespace amber::space {
+std::optional<float> movement_speed(const Space &space, IdentityRead identity, Handle object,
+                                    std::optional<float> requested) {
+  if (!identity.valid(object))
+    return {};
+  const auto found = space.native->bodies.find(object.bits);
+  if (found == space.native->bodies.end() || !found->second.spec.character)
+    return {};
+  const auto maximum = found->second.spec.character->max_speed_m_s;
+  return std::clamp(requested.value_or(maximum), 0.f, maximum);
+}
 OperationResult set_properties(Space &space, IdentityRead identity, Handle object,
                                BodyProperties properties) {
   auto &n = *space.native;

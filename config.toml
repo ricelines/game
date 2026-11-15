@@ -11,7 +11,7 @@ HANDLER_MS = 5
 SCRIPT_KB = 4096
 DECLARATION_MS = 50
 EVENT_FIELDS_MAX = 64 # protective flat event record field cap
-POSE_BATCH_MAX = 1024 # one checked native transform batch; ordinary handles and Move rights
+PART_BATCH_MAX = 1024 # one checked native transform batch; own declared-part transforms
 EVENT_QUEUE_MAX = 1000000
 AUTHORS_MAX = 8
 
@@ -47,7 +47,7 @@ LIGHT_SOURCE_RADIUS_M = 0.05 # finite near-source photometric denominator; asset
 SWING_SPEED = 6.0
 
 [bake]
-BAKE_VERSION = "ambergris-bake-3"
+BAKE_VERSION = "ambergris-bake-4"
 BAKE_S = 20
 BAKE_MB = 2048
 MODEL_MAX_M = 256.0
@@ -69,9 +69,6 @@ SUPPORT_NORMAL_MAX_DEG = 10.0
 MAILBOX_MAX = 100
 GRANT_REMINDER_SECONDS = 30 # tuning: notify issuers before expiring script/spending authority
 DEADLINES_PER_STEP = 256 # tuning: due grant/offer cleanup waits in its index beyond this batch
-
-[construction]
-EXCHANGE_MAX = 64
 
 [elaboration]
 GAP_CAPTURES = 3

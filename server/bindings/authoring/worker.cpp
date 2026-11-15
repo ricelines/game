@@ -78,9 +78,6 @@ VariantRequest variant_request(const Json &row) {
   const auto asset = asset_request(row);
   request.asset = asset.asset;
   request.canonical_params = asset.canonical_params;
-  request.expected_source_hash = row.at("expected_source_hash").get<std::string>();
-  if (!catalog::valid_hash(request.expected_source_hash))
-    throw std::invalid_argument("variant source hash is invalid");
   return request;
 }
 namespace {
@@ -134,9 +131,7 @@ PreparedModel prepare_model(ModelRequest request, const RegistrySnapshot &regist
 PreparedVariant prepare_variant(VariantRequest request, const RegistrySnapshot &registry,
                                 const WorkerSettings &settings) {
   auto assets = prepare_assets(request.asset, request.canonical_params, registry, settings);
-  if (assets.front().asset.source_hash != request.expected_source_hash)
-    throw std::invalid_argument("variant source does not match the expected model source");
-  return {request.model, std::move(request.expected_source_hash), std::move(assets)};
+  return {request.model, std::move(assets)};
 }
 } // namespace
 struct Worker::Impl {

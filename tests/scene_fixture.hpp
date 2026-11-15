@@ -65,7 +65,8 @@ struct Lifecycle {
             const lifecycle::Parts &parts, const Relation &declared,
             space::PhysicalRelations &physical, std::vector<space::RelationChange> &changes,
             Projection &projection, perm::Players &players, perm::Grants &grants,
-            perm::OwnerLimits &limits, perm::Offers &offers, perm::Trades &trades)
+            perm::OwnerLimits &limits, perm::Offers &offers, perm::Trades &trades,
+            const perm::Plots &plots, perm::Ledger &ledger)
       : allocation{f.allocations, meters, priorities},
         reactions{f.models,   f.scripts,       f.installed, f.rules,      *f.projection,
                   f.triggers, f.subscriptions, f.links,     f.allocations},
@@ -92,10 +93,12 @@ struct Lifecycle {
                 parts,
                 declared,
                 {},
-                projection.scene},
+                projection.scene,
+                plot_membership(f.objects),
+                plots},
         commerce{offers, trades, permission_flags(f.objects), custody},
         lifecycle({instances, projection.scene, reactions, priority_rebind, reaction_retirement,
-                   commerce, navigation, spatial, grants, players, limits, authority(f.objects),
-                   6}) {}
+                   commerce, navigation, spatial, grants, players, limits, authority(f.objects), 6,
+                   ledger}) {}
 };
 } // namespace amber::testscene

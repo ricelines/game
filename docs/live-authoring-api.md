@@ -1,63 +1,54 @@
-# Live parametric and definition editing
+# Live model authoring
 
-The live API supports variant registration and edits of an existing model definition. It follows Technicals §11 and §18 and Specs S8, preserving actual measurements and the approved authored construction law.
+The [Technicals](02-t.0.md) §13 and S8 distinguish a model definition from its
+immutable geometry artifacts. A model edit changes the definition and every
+current instance that uses it. It does not require the model author to own those
+instances. Ordinary per-instance editing remains permission checked separately.
 
-## Asset availability and the box proxy
+The gateway exposes two authoring submissions:
 
-Technicals §11 first separates external authoring (submit, bake, receive hash/errors) from in-world placement. S8 similarly returns a usable model when the bake finishes. Those interfaces provide no dimensions, mass, material debit or usable model ID for an unfinished arbitrary program. Do not invent free placement or authoritative guessed measurements during Python execution.
+- `submit_variant {model,params}` reads the model's current public source, bakes
+  those parameters, and registers the verified artifact under the same model.
+  Registration compares the artifact's actual source with the current model
+  source. If they differ, the caller must rebake the current source. No supplied
+  expected hash or public manifest grants trust.
+- `edit_model {model,source}` bakes the new source's defaults and each distinct
+  explicit parameter set of the current model. Retained parameter names keep
+  their values; removed names are dropped; new names take the new defaults.
+  Out-of-range retained values produce the bake's actual error. Completed
+  artifacts are registered together as one ordinary proposal model, with one
+  chosen S7 registration record. The result includes `{model,proposal}`.
 
-The minimal consistent prototype interpretation is: place a ready baked model in the next simulation step, and show a temporary viewer box while its immutable manifest/GLB downloads and imports. Collision/resource accounting already use the verified asset. The viewer shows an explicit temporary box when no LOD is available, updates its size from actual manifest bounds when available, and replaces it after import. The box is a display placeholder, never measured world geometry. Test deliberately delayed asset HTTP delivery, immediate object/proxy visibility, replacement and preserved handle/pose. Document that this does not implement placement of an unfinished arbitrary CAD job. The source's reference to proxies awaiting a finished bake is otherwise underspecified; a provisional native model/resource system would add substantial unrequested policy.
+Baking runs outside the simulation step and outside the gateway mutation lock.
+Only completed registrations use the session's ordered mutation lane. Queries
+and unrelated actions remain available while CAD runs. Failed sandbox jobs
+publish one authenticated failed-authoring record; a native receipt prevents a
+second record for a failure already published by registration.
 
-Baking is outside the world. Do not retain a session's world-mutation lock during CAD execution. The completed registration enters that session's ordered native input lane; observations and unrelated ordinary actions remain usable while Python works.
+The actual model author applies a ready proposal with the ordinary native action
+`base.revise_model {model,proposal}`. A script cannot borrow its installation
+owner's model-author authority. There is no saved edit plan, compare-and-swap
+hash, resource exchange, editor workflow, or rollback operation.
 
-## Variant registration
+Applying a definition first cancels affected offers/trades through ordinary
+custody. This cancellation remains an explicit effect if the subsequent geometry
+edit is rejected. Geometry descriptors, retirement constraints, and combined
+native capacity are checked before changing the definition. Each affected rigid
+assembly is rebuilt once. Existing object handles, owners, state, instance
+settings, and root poses remain; retained named children preserve their authored
+material/script/text/settings defaults, while new children use proposal defaults.
+Removed children follow ordinary retirement. Hidden goods remain hidden.
 
-Extend model authoring with an optional existing model selector for **variant** submission. This reuses that model's exact current source; it does not create a new root ModelId. Gateway accepts `submit_variant {model, params}`, obtains the inspectable original source/current source hash, bakes the requested parameter values, and sends a completion carrying `{model, expected_source_hash, asset, canonical_params}`. The native writer rechecks source identity before registration. A stale source produces an ordinary retryable error.
+Default parameter block `0` adopts the new defaults. Existing explicit block IDs
+are updated to their matching baked geometry, so reconfiguration cannot select a
+superseded definition. All registered blocks are checked, including blocks not
+currently placed. Immutable source and geometry files remain content addressed.
+The edit refreshes actual measurements and ordinary watcher, spatial, navigation,
+light, observation, and replication projections through the normal lifecycle.
 
-`authoring::CatalogInstall` holds mutable Assets, Models, ParameterBlocks, ModelTexts, ModelSettings, AssetMeasurements and public source cache; const Scripts/Terms/measurement roles; and the existing exact geometry-import hook. Model and variant completion share this catalog capability. No object, VM, permission, wallet, transport or scene table is needed. Verified worker output is imported, `catalog::add_variant` builds the real named-part graph, and measurement projection fills the returned global parameter block. Reply is `{ok, model, params, hash, measured}`. Variant registration changes no instance or resource balance. `base.reconfigure` already applies a ready block through the actual approved law and native replacement path.
-
-The source is public authoring material, so baking a variant need not grant permission to edit an instance. Native registration derives provenance from the existing model. Ordinary model/instance authority is checked when the variant is actually applied. Source edits use the separate definition path below.
-
-## Definition edit: one rebake per parameter set, one normal action
-
-Proposal staging is one authenticated `register_model` input containing its default artifact and optional ready `variants` array. Its copied worker request verifies the complete batch; writer geometry preparation and existing catalog validation in fresh proposal-only scratch tables finish before any live proposal identity is published. Default and variant rows then install together, returning one actual chosen Create receipt. Automatic parameter staging emits no additional chosen requests; an explicit user `submit_variant` remains a separate choice. This uses the accepted server input's Origin, without client-supplied attribution or a retained authoring workflow table.
-
-Use an ordinary newly submitted model as the proposed immutable geometry definition. It has its own normal submission identity/author/asset, rather than introducing pending-model identities or a proposal workflow table. The gateway's definition-edit submission takes `{model, source}`; it copies the target's current source hash and canonical parameter sets, bakes the new source once for each distinct set, registers the proposal model and its variants, and returns `{model, revision_model, expected_source_hash}`. Failure of any required parameter set leaves the live definition unchanged. A source edit that removes a required parameter or makes an existing value invalid fails explicitly rather than clamping or guessing. Default block 0 adopts the new source's actual defaults. Explicit current blocks retain their existing values; newly introduced parameters take the new source defaults. The gateway uses the same literal PARAMS resolver and canonical encoding as the bake subsystem, deduplicating resolved sets before execution, so equal effective values bake once even if old JSON formatting differs.
-
-The target model's author then invokes an authored action, for example `base.revise_model {model, revision_model, expected_source_hash}`. This is an ordinary live input, with no editor session or global lock. The existing body/world-rule construction pattern supplies the handler. A geometry-definition change deliberately updates all current instances referencing that definition, including instances owned by others: that follows the source's model-author relationship, not impersonation of instance owners. The native operation checks the actual immediate caller against the target model's author, and does not borrow foreign owners' Build/Edit/Move rights or reach.
-
-Add two narrow host operations:
-
-* `measure_model_change(model, revision_model)` reads only catalog definitions/assets/parameter blocks, identity/material/parameter columns and declared parts. It returns current affected-root count and aggregate old/new disjoint material masses. It is an explicit rare edit query; it is not a per-step world scan. Root material overrides remain; the new real part graph supplies child materials. Root and retained named-child script/text/settings/material defaults and existing instance overrides remain separate from a geometry edit. Retained named children receive fresh geometry aliases that clone their previous defaults and authorship; new names use the proposal defaults. Old child definitions remain immutable.
-* `revise_model(model, revision_model, expected_source_hash, exchange)` is available only to the current approved active world-rule invocation. It queues a typed structural request. The authored rule computes the editor's stock delta from the aggregate measurements and supplies the existing expected-answer `ResourceExchange`; C++ supplies no fabrication formula.
-
-The structural definition operation retains the catalog binding writer, lifecycle/geometry replacement operations, resource-commit adapter and actual catalog publication owner. Rebind uses the fixed `ObjectLifecycle` operation. It receives no all-world host. It does the following without yielding:
-
-1. Recheck model author, expected current source, approved rule and exact affected full handles/current bindings. Resolve every actual current parameter set against a ready proposal asset. If another input introduced an unbaked set during authoring, fail and request a rebake; do not freeze the world while waiting.
-2. Prepare every replacement, preserving poses, ownership, attribution, overrides, matching named-part handles, external occupants and motion. Preflight the **aggregate** final Jolt/sensor demand, all lifecycle removals and the one resource exchange before changing any definition, object or stock. Per-object capacity checks alone do not prove batch capacity.
-3. Commit the model's current asset/source binding, create current-revision parameter blocks, rebind the prepared current instances through the existing actual lifecycle/Space path, and apply the one preflighted stock exchange. Old immutable assets/parameter rows remain historical values; current instances use the new mapping. No rollback or retained reservation machinery is introduced.
-4. Rebind retained objects through `objects_rebound`, which synchronizes reactions, priorities and scene projections in fixed order. Publish one chosen edit record and ordinary causal instance/part changes. A model with no instances can still update its definition without resource charge.
-
-The author identity and root ModelId remain stable. Past geometry remains identified by immutable source/asset hashes and old parameter rows; no file is rewritten under an old hash. A proposed model is still an ordinary independently attributed submission. An edit never merges those submission identities. Root/part source changes and default parameter mappings must survive the existing TEXT/OBJS codecs and automatic recovery.
-
-## Acceptance
-
-Actual live tests must submit a parameter variant, obtain a nonzero block and apply it through the ordinary law; reject a wrong-source variant; replace a family with at least two live parameter sets and two owners; prove every matching instance changes after the same completion with each unique variant baked once; preserve matching part handles and perform real topology creation/removal; reject insufficient stock, stale revision and aggregate native capacity without any partial definition/instance/debit change; preserve a held assembly and navigation updates; and restore the resulting current definition/parameter mapping from a fresh native process. A delayed-HTTP viewer test proves the display proxy separately from CAD execution.
-
-## Concrete catalog and completion interfaces
-
-`catalog::plan_revision(Models const&, ParameterBlocks const&, Assets const&, model, proposal, referencedBlocks)` resolves default plus every current explicit parameter block and predicts fresh child aliases/parameter IDs without changing live rows. `revision_variant(plan, oldBlock)` supplies each replacement mapping. `commit_revision(Models&, ParameterBlocks&, ModelTexts&, ModelSettings&, plan)` rejects stale source or table highwaters before writing, preserves root author/time/defaults, clones retained child defaults into aliases, and appends current explicit blocks. `project_revision_measurements(AssetMeasurements&, plan, Assets const&, roles)` fills only immutable measured projections. Rare native preflight uses local catalog-owner copies of these tables, rather than temporarily mutating the live definitions or copying the world.
-
-`authoring::Worker::submit(inputId, VariantRequest, RegistrySnapshot)` verifies the actual root/part artifacts outside the step. Its copied `PreparedVariant` is imported by `install_variant(prepared, CatalogInstall&)` on the writer after a second current-source check. S6 `register_variant` accepts exactly `model`, `expected_source_hash`, `asset`, `canonical_params` and the public `manifest` object; the manifest is not trusted in place of artifacts. Its result contains the global nonzero `params` block, model, asset hash and verified measurements. Duplicate registration reuses the existing block.
-
-A successful batch definition edit also invalidates affected ordinary sales and bilateral trades: their quoted part snapshots and confirmations no longer describe the goods. `ModelRevisionOperation` receives one explicit prerequisite pair. Readonly `commerce::preflight_rebound_offers` receives affected and removed full handles, checks all normal prior custody using the old real bodies, and returns plain `space::VisibleCustody {goods,parent,grasp}` forecasts. Native preparation rejects a forecast parent removed by the edit, validates the new geometry for restored grasps, and includes their exact promotion/aggregate capacity. Hidden inventory custodian retirement is also rejected before any quote mutation. After every resource, lifetime and aggregate native preflight succeeds, `commerce::rebind_offers` cancels the affected quotes **before native extraction**. Extraction captures the restored parent/grasp and rebuild matches its forecast. The context contains only Offers, Trades, permission flags and mechanical Custody; no commerce table enters structural code.
-
-The cancellation clears both confirmations and current closure escrow without moving money or ownership, and emits causal `goods_offers_invalidated` with reason `definition_changed`. Visibility remains the same: visible escrow stays visible, prior held goods reattach, and inventory stays hidden. Current native grasp restoration itself allocates no extra body; adding a first physical part may require compound promotion during the later geometry rebuild, which is explicitly included in the forecast capacity check. Cancelling before removal also prevents retirement cleanup from trying to restore a quotation's root while that root is extracted.
-
-The optimized catalog benchmark executes actual planning, catalog-owner copies, commit and measured projection for 100 parameter sets over 200 samples, checking retained defaults and mappings on every sample. On this development host under concurrent compilation: median 396.855µs, p95 737.062µs, maximum 1,315.82µs. This measures catalog work only; it does not claim Jolt replacement timing or the full live action latency. Reproduce with `model_revision_test --bench`.
-
-The native benchmark runs the actual approved Luau rule and structural batch for 100 live assemblies split across two owners and parameter sets. Each of 100 independent samples preserves a held root and a child material override, creates real Jolt bodies for the revised named-part graph, commits the single resource exchange, and publishes measured-value watches. Fixture setup, post-commit assertions, later physics ticks and asynchronous navigation completion are outside the timed region. Under simultaneous root Release and two-job sanitizer compilation, median was 4.099ms, p95 7.312ms and maximum 11.994ms. This is a contended development-host result, not a hardware-independent frame guarantee. Reproduce with `structural_test --bench-revision`; exact binary hash and scope are retained in `reports/model-revision-native-2026-11-15.json`.
-
-Rebinding preserves existing watch answers, then queues only the already indexed subscribed facts on each changed full handle. This covers local watches and observers following that object through an authored relation, for baked, intrinsic, default and runtime answers. Normal answer comparison suppresses unchanged values; no material or term name is special. The actual Lua regression installs a model script before placement, changes both parameter sets repeatedly, revises the definition without changing the default binding tuple, and then changes material. Own and foreign-along mass handlers fire with the published action cause, volume and transmission handlers see their actual changes, and unchanged capacity or repeated material values remain silent.
-
-The final native sanitizer checkpoint built 52 test/probe/integration targets and passed all 47 registered tests in 24.022s with AddressSanitizer leak detection/abort and UndefinedBehaviorSanitizer halt enabled. The actual Bake2 `start_test` and `authoring_test` integrations also passed, using the final prepared plan SHA256 `1eaa07b36531a3ecfacc13034fecf7e1be36286e5126759a1b531f4be38bf189` and separate temporary working directories. The authoring test includes single-choice batched registration, invalid-batch atomicity and failed-CAD recording. Nine objects depending on late-changing authoring/viewing headers were explicitly rebuilt; the final source/config/dependency-export manifest stayed unchanged throughout the build and tests. Structural regressions cover the two-owner/two-parameter batch, insufficient stock, stale source, aggregate capacity without partial mutation, matched child state/material/identity preservation, future first-child grasp promotion, quoted-child removal through normal retirement, hidden inventory topology edits and actual measured/intrinsic watch delivery. Reports: `reports/native-sanitizer-timers-2026-11-15.json`, its retained logs and source manifest. Earlier checkpoints remain recorded separately. Native modules are instrumented; the separately built pinned third-party archives, including Jolt, are not. This does not claim a sanitizer run of the main server process.
+Native `register_variant` accepts `model`, `asset`, `canonical_params`, and
+`manifest`. The worker loads verified artifacts outside the step; the writer
+checks their source against the actual model. The reply contains the model,
+parameter block, asset hash, and measured manifest. Duplicate variants reuse the
+existing block. `register_model` can additionally carry ready variant artifacts;
+the complete proposed family is validated before allocating its public identity.

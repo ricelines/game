@@ -104,7 +104,7 @@ def test_variant_uses_current_verified_source_and_native_stale_check():
         assert pool.submissions == [(SOURCE, {"width": 3})]
         kind, fields = session.calls[-1]
         assert kind == "register_variant" and "material" not in fields and "text" not in fields
-        assert fields["expected_source_hash"] == hashlib.sha256(SOURCE.encode()).hexdigest()
+        assert "expected_source_hash" not in fields
         assert fields["canonical_params"] == '{"width":3.0}'
         session.stale = True
         result = await author.submit_variant(session, {"model": "m:5", "params": {"width": 4}})
@@ -129,13 +129,13 @@ def test_definition_edit_bakes_each_unique_set_and_stages_without_applying():
         result = await author.edit_model(session, {"model": "m:5", "source": changed})
         await asyncio.gather(*list(author.tasks))
         job = author.status(session, result["job"])
-        assert job["status"] == "done" and job["effect"] == "revision_staged"
-        assert job["model"] == "m:5" and job["revision_model"] == "m:9"
+        assert job["status"] == "done" and job["effect"] == "proposal_ready"
+        assert job["model"] == "m:5" and job["proposal"] == "m:9"
         assert pool.submissions == [(changed, {"width": 1.0}), (changed, {"width": 2.0})]
         assert [kind for kind, _fields in session.calls] == ["inspect", "register_model"]
         assert session.calls[-1][1]["variants"][0]["canonical_params"] == '{"width":2.0}'
         assert job["variants"][0]["params"] == 12 and job["record_id"] == 90
-        assert job["expected_source_hash"] == hashlib.sha256(SOURCE.encode()).hexdigest()
+        assert "expected_source_hash" not in job
         await author.close()
 
     asyncio.run(run())
@@ -156,6 +156,28 @@ def test_definition_default_changes_and_new_parameters_use_actual_bake_resolutio
             {"depth": 0.25, "width": 2.0},
         ]
         assert session.calls[1][1]["manifest"]["params"]["width"] == 1.5
+        await author.close()
+
+    asyncio.run(run())
+
+
+def test_definition_edit_drops_removed_parameter_keys():
+    class OldDefinition(NativeTransport):
+        async def request(self, kind, **fields):
+            reply = await super().request(kind, **fields)
+            if kind == "inspect":
+                reply["variants"] = [
+                    {"canonical_params": '{"width":2.0,"removed":7.0}'},
+                ]
+            return reply
+
+    async def run():
+        pool, session = ArtifactQueue(), OldDefinition()
+        author = Authoring(pool)
+        result = await author.edit_model(session, {"model": "m:5", "source": SOURCE})
+        await asyncio.gather(*list(author.tasks))
+        assert author.status(session, result["job"])["status"] == "done"
+        assert pool.submissions == [(SOURCE, {"width": 1.0}), (SOURCE, {"width": 2.0})]
         await author.close()
 
     asyncio.run(run())
@@ -258,7 +280,7 @@ def test_baked_job_is_not_done_until_its_native_registration_completes():
 
 
 def test_http_cli_and_harness_expose_same_authoring_operations(tmp_path):
-    assert parser().parse_args(["look", "--full"]).full is True
+    assert parser().parse_args(["look", "--limit", "5"]).limit == 5
     assert parser().parse_args(["variant", "m:5", "--params", '{"width":2}']).params == {"width": 2}
     assert parser().parse_args(["edit-model", "m:5", str(tmp_path / "source.py")]).model == "m:5"
     assert {"submit_variant", "edit_model"} <= {tool["name"] for tool in AUTHOR_TOOLS}

@@ -19,15 +19,16 @@ int main() {
     const auto actor = Holder::player(2);
     for (std::uint32_t index = 1; index <= count; ++index) {
       const auto scope = Scope::object(Handle::make(index, 1));
-      const auto granted = create_grant(grants, players, {1, actor, scope, bit(Verb::Use), 0, 0, 0},
+      const auto granted = create_grant(grants, players, Holder::player(1),
+                                        {1, actor, scope, bit(Verb::Use), 0, 0, 0},
                                         {scope, 1, all_rights}, {actor}, 1);
       if (!granted)
         return 1;
     }
     const auto plot_scope = Scope::owned_on_plot(1, 3);
-    const auto plot_grant =
-        create_grant(grants, players, {1, actor, plot_scope, bit(Verb::Use), 0, 0, 0},
-                     {plot_scope, 1, all_rights}, {actor}, 1);
+    const auto plot_grant = create_grant(grants, players, Holder::player(1),
+                                         {1, actor, plot_scope, bit(Verb::Use), 0, 0, 0},
+                                         {plot_scope, 1, all_rights}, {actor}, 1);
     if (!plot_grant)
       return 1;
     constexpr std::uint32_t samples = 1000000;

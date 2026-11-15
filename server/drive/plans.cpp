@@ -4,6 +4,12 @@
 #include <cmath>
 
 namespace amber::drive {
+std::string_view required_right(std::string_view right, Caller caller, const perm::Target &target) {
+  const auto *script = std::get_if<ScriptHolder>(&caller);
+  return right == "move" && (target.flags & Body) && script && script->object != target.object
+             ? "animate"
+             : right;
+}
 Gate check_right(std::string_view right, Caller caller, const perm::Target &target,
                  const perm::Players &players, const perm::Grants &grants, Step now) {
   if (right.empty())
@@ -22,8 +28,11 @@ Gate check_right(std::string_view right, Caller caller, const perm::Target &targ
           return perm::Holder::script(actor.script, actor.object);
       },
       caller);
-  const auto decision = perm::check(holder, static_cast<perm::Verb>(found - rights.begin()), target,
-                                    players, grants, now);
+  const auto decision =
+      required_right(right, caller, target) == "animate"
+          ? perm::check_scope(holder, perm::Scope::avatar(target.object), 1, grants, now)
+          : perm::check(holder, static_cast<perm::Verb>(found - rights.begin()), target, players,
+                        grants, now);
   return {bool(decision),
           decision ? std::string{} : std::string(perm::reason_text(decision.reason))};
 }
@@ -80,7 +89,7 @@ std::vector<PlannedInvocation> plan_event(const react::Triggers &triggers,
 std::vector<PlannedInvocation> plan_action(const react::Triggers &triggers,
                                            const react::ValueRead &values,
                                            const command::Resolution &resolution,
-                                           const ActionRequest &request, Handle body, Handle held,
+                                           const ActionRequest &request, Handle body,
                                            const record::Origin &origin, Step now, double hz) {
   std::vector<PlannedInvocation> plans;
   if (!resolution || resolution.route == command::Route::Native)
@@ -104,10 +113,6 @@ std::vector<PlannedInvocation> plan_action(const react::Triggers &triggers,
     input.action_caller = request.caller;
     input.action_body = body;
     input.action_target = request.target;
-    if (player && resolution.route == command::Route::Body &&
-        handler.script == resolution.declaration_script)
-      input.direct_body =
-          react::BodyEndpoints{body, request.target, held, *player, resolution.mechanics};
     plans.push_back({handler, std::move(input)});
   }
   return plans;

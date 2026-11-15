@@ -82,30 +82,12 @@ Origin Journal::append(Event event, const Origin &inherited, std::span<const Cre
   Origin origin = inherited;
   origin.cause = id;
   origin.root = inherited.root ? inherited.root : id;
-  auto add_author = [&](PlayerId author) {
-    if (author == 0 || std::binary_search(seed_actors_.begin(), seed_actors_.end(), author) ||
-        std::find(origin.authors.begin(), origin.authors.end(), author) != origin.authors.end())
-      return;
-    if (origin.authors.size() < authors_max_)
-      origin.authors.push_back(author);
-    else
-      origin.more = true;
-  };
   if (event.actor.kind == Actor::Kind::Player)
-    add_author(event.actor.id);
+    include_author(origin, event.actor.id);
   if (event.script_author)
-    add_author(*event.script_author);
-  auto include_credit = [&](const Credit &credit) {
-    if (credit.seed || std::binary_search(seed_actors_.begin(), seed_actors_.end(), credit.author))
-      return;
-    add_author(credit.author);
-    if (credit.created_s && (!origin.oldest || *credit.created_s < *origin.oldest))
-      origin.oldest = credit.created_s;
-  };
-  for (const auto &credit : credits)
-    include_credit(credit);
-  for (const auto &credit : event.credits)
-    include_credit(credit);
+    include_author(origin, *event.script_author);
+  include_credits(origin, credits);
+  include_credits(origin, event.credits);
   nlohmann::json value = {
       {"id", id},
       {"step", event.step},
@@ -140,6 +122,44 @@ std::vector<nlohmann::json> Journal::take() {
   std::vector<nlohmann::json> result;
   result.swap(pending_);
   return result;
+}
+
+void Journal::include_author(Origin &origin, PlayerId author) const {
+  if (!author || std::binary_search(seed_actors_.begin(), seed_actors_.end(), author) ||
+      std::ranges::find(origin.authors, author) != origin.authors.end())
+    return;
+  if (origin.authors.size() < authors_max_)
+    origin.authors.push_back(author);
+  else
+    origin.more = true;
+}
+void Journal::include_credits(Origin &origin, std::span<const Credit> credits) const {
+  for (const auto &credit : credits) {
+    if (credit.seed || std::binary_search(seed_actors_.begin(), seed_actors_.end(), credit.author))
+      continue;
+    include_author(origin, credit.author);
+    if (credit.created_s && (!origin.oldest || *credit.created_s < *origin.oldest))
+      origin.oldest = credit.created_s;
+  }
+}
+Origin Journal::finish(Origin origin, Result result, bool changed, nlohmann::json detail,
+                       std::span<const Credit> credits) {
+  assert(!pending_.empty());
+  const auto first = pending_.front().at("id").get<std::uint64_t>();
+  auto &row = pending_.at(static_cast<std::size_t>(origin.cause - first));
+  assert(row.at("id") == origin.cause);
+  include_credits(origin, credits);
+  row["result"] = name(result);
+  row["changed"] = changed;
+  row["authors"] = nlohmann::json::array();
+  for (auto author : origin.authors)
+    row["authors"].push_back("p:" + std::to_string(author));
+  row["oldest"] = origin.oldest ? nlohmann::json(*origin.oldest) : nlohmann::json(nullptr);
+  if (origin.more)
+    row["more"] = true;
+  for (auto &[key, value] : detail.items())
+    row[key] = std::move(value);
+  return origin;
 }
 
 void Journal::restore_next_id(std::uint64_t next_id) {

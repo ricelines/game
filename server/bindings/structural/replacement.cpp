@@ -9,63 +9,32 @@
 namespace amber::bindings {
 namespace {
 using namespace structural_detail;
-struct EditActor {
-  perm::Holder holder;
-  Handle body;
-  bool immediate;
-};
-EditActor edit_actor(const drive::StructuralCall &call) {
-  EditActor actor{perm::Holder::script(call.handler.script, call.invocation.receiver),
-                  call.invocation.receiver, false};
-  if (call.invocation.action_caller && call.request.target == call.invocation.action_target) {
-    actor.holder = permission_holder(*call.invocation.action_caller);
-    actor.immediate = true;
-    if (std::holds_alternative<PlayerId>(*call.invocation.action_caller))
-      actor.body = call.invocation.action_body;
-  }
-  return actor;
-}
-std::string edit_rights(const ReplaceOperation &operation, const drive::StructuralCall &call,
-                        const EditActor &actor, std::span<const Handle> selected) {
+std::string edit_rights(const ReplaceOperation &operation, const drive::NativeCall &call,
+                        std::span<const Handle> selected) {
   const auto &rights = operation.rights;
+  const auto actor = permission_holder(call.request.caller);
   for (auto h : selected) {
     if (rights.identity.flags[h.slot()] & Escrow)
       return "edit: object belongs to an active offer or trade";
     const auto target = perm::target(rights.identity, rights.authority, rights.limits, h);
-    // Approved scripts have their normal own-object/declared-part mechanical rights.
     const bool own =
-        actor.holder.kind == perm::HolderKind::Script &&
-        declared_descendant(rights.declared_parts, rights.identity, actor.holder.installed_on, h);
+        actor.kind == perm::HolderKind::Script &&
+        declared_descendant(rights.declared_parts, rights.identity, actor.installed_on, h);
     const auto decision = own ? perm::Decision{perm::Reason::Allowed}
-                              : perm::check(actor.holder, perm::Verb::Edit, target, rights.players,
-                                            rights.grants, call.invocation.step);
+                              : perm::check(actor, perm::Verb::Edit, target, rights.players,
+                                            rights.grants, call.step);
     if (!decision)
       return "edit: " + std::string(perm::reason_text(decision.reason));
   }
-  if (!actor.immediate)
-    return {};
-  if (!rights.identity.valid(actor.body))
-    return "edit actor body is no longer alive";
-  const auto target = call.request.target;
-  const bool own_inventory = actor.holder.kind == perm::HolderKind::Player &&
-                             rights.authority.owner[target.slot()] == actor.holder.id &&
-                             operation.parents.parent[target.slot()] == actor.body &&
-                             (rights.identity.flags[target.slot()] & Held);
-  if (own_inventory)
-    return {};
-  const auto bounds = space::bounds(rights.space, rights.identity, target);
-  if (!bounds || !drive::in_reach(rights.transforms.position[actor.body.slot()],
-                                  {bounds->min, bounds->max}, rights.reach_m))
-    return "edit target is out of reach";
   return {};
 }
 } // namespace
 
 namespace structural_detail {
 PreparedReplacement prepare_replacement(const ReplacementEdit &operation,
-                                        const drive::StructuralCall &call,
-                                        lifecycle::Replacement plan, ConstructionCatalog catalog,
-                                        const react::ValueRead &values) {
+                                        const drive::NativeCall &call, lifecycle::Replacement plan,
+                                        ConstructionCatalog catalog, const react::ValueRead &values,
+                                        bool preserve_defaults) {
   PreparedReplacement prepared;
   prepared.plan = std::move(plan);
   const auto &plan_ref = prepared.plan;
@@ -86,10 +55,13 @@ PreparedReplacement prepare_replacement(const ReplacementEdit &operation,
                      bool new_part = false) {
     const auto effective =
         catalog::resolve_asset(catalog.models, catalog.parameters, binding.model, binding.params);
+    if (preserve_defaults && h)
+      binding.material = operation.identity.material[h.slot()];
     auto definition = describe_physics(
         operation.geometry.geometry, catalog.assets.rows.at(effective.hash), values,
-        {binding.model, binding.params, binding.material, plot, h}, flags, operation.geometry.roles,
-        operation.geometry.defaults, call.invocation.step, call.invocation.hz);
+        {binding.model, binding.params, binding.material, plot, h,
+         preserve_defaults && h ? operation.identity.model[h.slot()] : 0},
+        flags, operation.geometry.roles, operation.geometry.defaults, call.step, call.hz);
     if (new_part) {
       definition.body.motion = space::Motion::Kinematic;
       definition.mode_flags = ScriptedMotion;
@@ -146,26 +118,34 @@ PreparedReplacement prepare_replacement(const ReplacementEdit &operation,
                                                   prepared.sensors, before, promote);
   return prepared;
 }
-void commit_replacement(ReplacementEdit &operation, const drive::StructuralCall &call,
-                        PreparedReplacement &prepared, const space::AssemblyEdit &edit,
-                        PlayerId maker, drive::StructuralCompletion &out) {
-  const auto &plan = prepared.plan;
-  const auto mechanical_root = prepared.mechanical_root;
-  const auto &removed = prepared.removed;
-  const auto &old_internal = prepared.old_internal;
-  const auto &rebound = prepared.rebound;
-  std::vector<record::Credit> removed_credits;
-  if (operation.credits.resolve && !removed.empty())
-    removed_credits =
-        operation.credits.resolve(operation.credits.context, removed, 0, call.invocation.hz);
+void commit_replacements(ReplacementEdit &operation, const drive::NativeCall &call,
+                         std::span<PreparedReplacement *> replacements,
+                         const space::AssemblyEdit &edit, PlayerId maker,
+                         drive::NativeCompletion &out) {
+  const auto mechanical_root = edit.root;
+  auto definitions = replacements.front()->retained;
+  auto old_internal = replacements.front()->old_internal;
+  std::unordered_set<std::uint64_t> rebound;
+  std::vector<lifecycle::Created> created;
+  std::vector<std::vector<record::Credit>> removed_credits;
   react::DeferredEffects effects;
-  if (!removed.empty())
-    retire_objects(operation.lifecycle, removed, call.invocation, effects);
-  const auto created = operation.instances.replace(plan, maker, call.invocation.step);
-  for (std::size_t i = 0; i < created.objects.size(); ++i) {
-    auto definition = prepared.added[i];
-    definition.body.object = created.objects[i];
-    prepared.retained.emplace(created.objects[i].bits, definition);
+  for (auto *prepared : replacements) {
+    const auto &plan = prepared->plan;
+    for (const auto &row : plan.retained)
+      definitions[row.object.bits] = prepared->retained.at(row.object.bits);
+    rebound.insert(prepared->rebound.begin(), prepared->rebound.end());
+    removed_credits.push_back(
+        operation.credits.resolve && !prepared->removed.empty()
+            ? operation.credits.resolve(operation.credits.context, prepared->removed, 0, call.hz)
+            : std::vector<record::Credit>{});
+    if (!prepared->removed.empty())
+      retire_objects(operation.lifecycle, prepared->removed, native_input(call), effects);
+    created.push_back(operation.instances.replace(plan, maker, call.step));
+    for (std::size_t i = 0; i < created.back().objects.size(); ++i) {
+      auto definition = prepared->added[i];
+      definition.body.object = created.back().objects[i];
+      definitions.emplace(created.back().objects[i].bits, definition);
+    }
   }
   const auto after = lifecycle::collect(operation.parts, operation.identity, mechanical_root);
   std::vector<space::BodySpec> bodies;
@@ -173,7 +153,7 @@ void commit_replacement(ReplacementEdit &operation, const drive::StructuralCall 
   std::vector<space::VolumeSpec> volumes;
   std::vector<space::Attachment> attachments;
   for (auto h : after) {
-    const auto &definition = prepared.retained.at(h.bits);
+    const auto &definition = definitions.at(h.bits);
     if (definition.body.geometry)
       bodies.push_back(definition.body);
     else
@@ -197,39 +177,53 @@ void commit_replacement(ReplacementEdit &operation, const drive::StructuralCall 
   if (rebuilt.status != space::Status::Ok)
     throw std::logic_error("preflighted assembly rebuild failed: " +
                            std::string(space::status_text(rebuilt.status)));
-  objects_rebound(operation.lifecycle, plan.retained, prepared.in_scene, call.invocation, effects);
-  objects_created(operation.lifecycle, created.objects, prepared.in_scene, call.invocation,
-                  effects);
-  out.changed = true;
-  out.created.insert(out.created.end(), created.objects.begin(), created.objects.end());
-  std::vector<Handle> changed;
-  for (const auto &row : plan.retained)
-    changed.push_back(row.object);
-  auto event = structural_record(call, record::Kind::System, "instance_binding", changed);
-  const auto &original = plan.retained.front().before;
-  event.detail = {{"target", to_string(plan.root)},
-                  {"before",
-                   {{"model", "m:" + std::to_string(original.model)},
-                    {"params", original.params},
-                    {"material", original.material}}},
-                  {"after",
-                   {{"model", "m:" + std::to_string(plan.retained.front().after.model)},
-                    {"params", plan.retained.front().after.params},
-                    {"material", plan.retained.front().after.material}}}};
-  if (operation.credits.resolve)
-    event.credits =
-        operation.credits.resolve(operation.credits.context, changed, 0, call.invocation.hz);
-  out.records.push_back(std::move(event));
-  if (!removed.empty()) {
-    auto destroyed = structural_record(call, record::Kind::Destroy, "parts", removed);
-    destroyed.credits = std::move(removed_credits);
-    out.records.push_back(std::move(destroyed));
+  perm::update_plots(operation.identity, operation.transforms, operation.membership, operation.land,
+                     after, edit.in_scene);
+  for (std::size_t i = 0; i < replacements.size(); ++i) {
+    const auto &plan = replacements[i]->plan;
+    const auto &removed = replacements[i]->removed;
+    const auto &made = created[i];
+    objects_rebound(operation.lifecycle, plan.retained, edit.in_scene, native_input(call), effects);
+    objects_created(operation.lifecycle, made.objects, edit.in_scene, native_input(call), effects);
+    out.changed = true;
+    created_objects(out, made.objects);
+    out.result = record::Result::Applied;
+    out.reply["ok"] = true;
+    out.reply["effect"] = "applied";
+    std::vector<Handle> changed;
+    for (const auto &row : plan.retained)
+      changed.push_back(row.object);
+    auto event = structural_record(call, record::Kind::System, "instance_binding", changed);
+    const auto &original = plan.retained.front().before;
+    event.detail = {{"target", to_string(plan.root)},
+                    {"before",
+                     {{"model", "m:" + std::to_string(original.model)},
+                      {"params", original.params},
+                      {"material", original.material}}},
+                    {"after",
+                     {{"model", "m:" + std::to_string(plan.retained.front().after.model)},
+                      {"params", plan.retained.front().after.params},
+                      {"material", plan.retained.front().after.material}}}};
+    if (operation.credits.resolve)
+      event.credits = operation.credits.resolve(operation.credits.context, changed, 0, call.hz);
+    out.records.push_back(std::move(event));
+    if (!removed.empty()) {
+      auto destroyed = structural_record(call, record::Kind::Destroy, "parts", removed);
+      destroyed.credits = std::move(removed_credits[i]);
+      out.records.push_back(std::move(destroyed));
+    }
+    for (auto h : made.objects)
+      out.records.push_back(birth_record(call, h, operation.identity, operation.owners,
+                                         operation.plots, operation.geometry.values.params, maker,
+                                         operation.credits));
   }
-  for (auto h : created.objects)
-    out.records.push_back(birth_record(call, h, operation.identity, operation.owners,
-                                       operation.plots, operation.geometry.values.params, maker,
-                                       operation.credits));
   completed_effects(out, std::move(effects));
+}
+void commit_replacement(ReplacementEdit &operation, const drive::NativeCall &call,
+                        PreparedReplacement &prepared, const space::AssemblyEdit &edit,
+                        PlayerId maker, drive::NativeCompletion &out) {
+  PreparedReplacement *row = &prepared;
+  commit_replacements(operation, call, std::span(&row, 1), edit, maker, out);
 }
 } // namespace structural_detail
 
@@ -244,59 +238,54 @@ ReplacementEdit replacement_edit(ReplaceOperation &operation) {
           operation.parents,
           operation.physical,
           operation.changes,
-          operation.resources,
           operation.lifecycle,
+          operation.membership,
+          operation.rights.plots,
           operation.credits};
 }
 
-drive::StructuralCompletion replace_instance(void *context, const drive::StructuralCall &call) {
+drive::NativeCompletion replace_instance(void *context, const drive::NativeCall &call) {
   auto &operation = *static_cast<ReplaceOperation *>(context);
   const auto &rights = operation.rights;
-  drive::StructuralCompletion out;
-  if (!call.handler.world_rule || !rights.identity.valid(call.invocation.receiver)) {
-    out.error = "replacement requires a live approved world-rule receiver";
-    return out;
-  }
-  if (!rights.identity.valid(call.request.target)) {
-    out.error = "edit target is no longer alive";
-    return out;
-  }
   const auto selected = lifecycle::collect(operation.parts, rights.identity, call.request.target);
-  const auto actor = edit_actor(call);
-  const auto maker = actor.holder.kind == perm::HolderKind::Player
-                         ? PlayerId(actor.holder.id)
-                         : rights.authority.owner[call.invocation.receiver.slot()];
-  out.error = edit_rights(operation, call, actor, selected);
-  if (!out.error.empty())
-    return out;
+  const auto error = edit_rights(operation, call, selected);
+  if (!error.empty())
+    return structural_denied(
+        "edit", to_string(call.request.target), error,
+        "ask p:" + std::to_string(rights.authority.owner[call.request.target.slot()]) +
+            " for Edit on this object and its declared parts");
+  const auto input = native_input(call);
+  const auto maker = std::holds_alternative<PlayerId>(call.request.caller)
+                         ? std::get<PlayerId>(call.request.caller)
+                         : rights.authority.owner[input.receiver.slot()];
+  const auto binding =
+      instance_binding(call.arguments, operation.catalog, operation.geometry.values.terms);
   auto assembly = lifecycle::expand(operation.catalog.models, operation.catalog.parameters,
-                                    operation.catalog.assets, call.request.binding.model,
-                                    call.request.binding.params);
-  assembly.material = call.request.binding.material;
+                                    operation.catalog.assets, binding.model, binding.params);
+  assembly.material = binding.material;
   auto plan = lifecycle::plan_replace(operation.catalog.models, operation.parts, rights.identity,
                                       rights.transforms, operation.geometry.values.params,
-                                      call.request.target, assembly, call.request.binding.material);
+                                      call.request.target, assembly, binding.material);
+  drive::NativeCompletion out;
+  out.reply = {{"ok", true}, {"effect", "none"}};
   if (plan.retained.front().before == plan.retained.front().after)
-    return out;
-  out.error = check_resources(operation.resources, call);
-  if (!out.error.empty())
     return out;
   auto edit_context = replacement_edit(operation);
   auto prepared = prepare_replacement(edit_context, call, std::move(plan), operation.catalog,
                                       operation.geometry.values);
   if (prepared.capacity.status != space::Status::Ok &&
-      (prepared.in_scene || prepared.capacity.status != space::Status::Capacity)) {
-    out.error = "replacement physics: " + std::string(space::status_text(prepared.capacity.status));
-    return out;
-  }
-  if (!can_retire_objects(operation.lifecycle, prepared.removed, out.error))
-    return out;
-  react::DeferredEffects effects;
-  commit_resources(operation.resources, call, effects);
+      (prepared.in_scene || prepared.capacity.status != space::Status::Capacity))
+    return structural_denied("physical_capacity", to_string(call.request.target),
+                             space::status_text(prepared.capacity.status),
+                             "choose a compatible model or remove unused physical objects");
+  std::string retirement_error;
+  if (!can_retire_objects(operation.lifecycle, prepared.removed, retirement_error))
+    return structural_denied("retirement", to_string(call.request.target),
+                             std::move(retirement_error),
+                             "cancel the object's active offers or attachments before retrying");
   auto edit =
       space::extract_assembly(operation.geometry.space, rights.identity, prepared.mechanical_root,
                               std::span(prepared.before).subspan(1));
-  completed_effects(out, std::move(effects));
   commit_replacement(edit_context, call, prepared, edit, maker, out);
   return out;
 }

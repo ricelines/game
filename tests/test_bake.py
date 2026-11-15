@@ -362,8 +362,8 @@ def build(p):
     ).exists()
 
 
-@pytest.mark.parametrize("version", ["ambergris-bake-1", "ambergris-bake-2"])
-def test_both_previous_bake_versions_use_trusted_geometry(tmp_path, config, native, version):
+@pytest.mark.parametrize("version", ["ambergris-bake-1", "ambergris-bake-2", "ambergris-bake-3"])
+def test_previous_bake_versions_use_trusted_geometry(tmp_path, config, native, version):
     config["BAKE_VERSION"] = version
     source = "from amb.shapes import hollow_box\ndef build(p):return hollow_box(1,1,1,.05,.05)\n"
     manifest = build(source, tmp_path, config, native)

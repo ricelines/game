@@ -1,3 +1,4 @@
+#include "bindings/geometry/geometry.hpp"
 #include "common.hpp"
 
 namespace amber::bindings::editing {
@@ -5,7 +6,9 @@ namespace {
 void registry_editor(const control::Profiles &profiles, const drive::NativeCall &call) {
   const auto player = detail::player(call);
   if (!detail::role(profiles, player, "architect") && !detail::role(profiles, player, "elaborator"))
-    throw std::invalid_argument("registry edits require architect or elaborator role");
+    throw detail::PolicyDenied("architect_or_elaborator", "registry",
+                               "registry edits require architect or elaborator role",
+                               "have an architect or elaborator make this registry change");
 }
 react::Term proposal(const react::Terms &terms, Json data, PlayerId author) {
   const auto short_name = data.at("name").get<std::string>();
@@ -29,6 +32,22 @@ react::Term proposal(const react::Terms &terms, Json data, PlayerId author) {
 bool equivalent(const react::Term &a, const react::Term &b) {
   return a.kind == b.kind && a.source == b.source && a.combine == b.combine &&
          a.dimensions == b.dimensions;
+}
+MaterialRefreshPlan material_change(const RegistryEditing &binding, TermId material,
+                                    const react::Values &after, Step step, double hz) {
+  react::Materials proposed;
+  proposed.rows.emplace(material, after);
+  const auto &v = binding.values;
+  const react::ValueRead values{v.terms,          v.identity,      v.plots,
+                                v.params,         proposed,        v.assets,
+                                v.properties,     v.processes,     v.instance_settings,
+                                v.model_settings, v.plot_settings, v.world_settings,
+                                v.shared,         v.relations,     v.runtime,
+                                v.density};
+  const auto &p = binding.physics;
+  const MaterialRefresh preview{p.space,  p.geometry, p.models, p.parameters,
+                                p.assets, values,     p.roles,  p.defaults};
+  return prepare_material_refresh(preview, std::span{&material, 1}, step, hz);
 }
 } // namespace
 drive::NativeCompletion define_term(void *local, const drive::NativeCall &call) {
@@ -59,17 +78,8 @@ drive::NativeCompletion define_term(void *local, const drive::NativeCall &call) 
     selected.none_fits = choice.at("none_fits").get<std::string>();
     if (selected.none_fits.empty())
       throw std::invalid_argument("none_fits needs a distinction");
-    if (!binding.commit.publish)
-      throw std::runtime_error("registry publication is unavailable");
     const auto id = catalog::append_term(binding.terms, {term}, selected);
-    catalog::Hash pin;
-    try {
-      pin = binding.commit.publish(binding.commit.local, std::span{&id, 1}, {});
-    } catch (...) {
-      binding.terms.by_name.erase(term.name);
-      binding.terms.rows.pop_back();
-      throw;
-    }
+    const auto pin = commit_registry(binding.persistence, std::span{&id, 1}, {});
     return detail::result(true, {{"term", id},
                                  {"name", binding.terms.rows[id].name},
                                  {"definition", catalog::term_json(binding.terms.rows[id])},
@@ -100,8 +110,6 @@ drive::NativeCompletion define_material(void *local, const drive::NativeCall &ca
     const auto before = existed ? existing->second : react::Values{};
     if (before == after && existed)
       return detail::result(false);
-    if (!binding.commit.publish)
-      throw std::runtime_error("registry publication is unavailable");
     std::set<TermId> affected;
     for (const auto &[id, value] : before) {
       (void)value;
@@ -126,17 +134,10 @@ drive::NativeCompletion define_material(void *local, const drive::NativeCall &ca
         for (auto id : affected)
           old_values[{object, id}] = react::read(binding.values, object, id, call.step, call.hz);
       }
+    const auto physics = material_change(binding, material, after, call.step, call.hz);
     catalog::set_material(binding.materials, binding.values.terms, material, after);
-    catalog::Hash pin;
-    try {
-      pin = binding.commit.publish(binding.commit.local, {}, std::span{&material, 1});
-    } catch (...) {
-      if (existed)
-        binding.materials.rows[material] = before;
-      else
-        binding.materials.rows.erase(material);
-      throw;
-    }
+    const auto pin = commit_registry(binding.persistence, {}, std::span{&material, 1});
+    apply_material_refresh(binding.physics.space, binding.values.identity, physics);
     auto out = detail::result(true, {{"material", material},
                                      {"name", binding.values.terms.rows[material].name},
                                      {"registry", pin}});

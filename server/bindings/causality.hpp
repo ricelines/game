@@ -16,11 +16,8 @@ public:
   ~MechanicalCauses();
   MechanicalCauses(const MechanicalCauses &) = delete;
   MechanicalCauses &operator=(const MechanicalCauses &) = delete;
-  space::CauseToken intern(const record::Origin &);
+  space::CauseToken intern(const record::Origin &, space::CauseToken previous = 0);
   space::CauseToken restore(CauseSummary);
-  space::CauseToken begin(space::CauseToken previous, bool additive);
-  void finalize(space::CauseToken, const record::Origin &);
-  void abandon(space::CauseToken);
   CauseSummary lookup(space::CauseToken) const;
   CauseSummary combine(const CauseSummary &, const CauseSummary &) const;
   void retain(std::span<const space::CauseToken>);
@@ -29,7 +26,6 @@ private:
   struct Data;
   std::unique_ptr<Data> data;
 };
-react::CausalReceipt motion_receipt(MechanicalCauses &, space::CauseToken);
 struct PhysicalRelationTerms {
   TermId contains, supports, attached_to, in_zone;
 };

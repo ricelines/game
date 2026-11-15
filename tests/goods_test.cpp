@@ -29,6 +29,10 @@ struct Fixture {
   re::DeferredEffects effects;
   bi::PlotObjectsBinding query;
   bi::HoldGoodsBinding hold;
+  command::NativeActions declarations;
+  drive::NativeOperations operations;
+  nlohmann::json reply;
+  TermId action = 0;
   Fixture()
       : values{data.terms,
                identity(scene.objects),
@@ -66,7 +70,10 @@ struct Fixture {
              delivery,
              1,
              changes,
-             projections.scene} {
+             projections.scene,
+             transforms(scene.objects),
+             plot_membership(scene.objects),
+             plots} {
     data.models.rows.resize(3);
     const auto asset_hash = catalog::sha256("goods fixture");
     for (auto id : {1u, 2u}) {
@@ -99,15 +106,11 @@ struct Fixture {
                     .status == sp::Status::Ok,
             "fixture declared child attachment");
     re::register_binding(vm, "plot_objects", bi::plot_objects_binding, &query);
-    re::register_binding(vm, "hold_goods", bi::hold_goods_binding, &hold);
+    bi::register_hold_goods_action(data.terms, declarations, operations, hold);
+    action = data.terms.by_name.at("engine.hold_goods");
     auto code = re::compile_script(R"(
       return {
-        inspect=function(self) self.state.count=#self:plot_objects(1) end,
-        collect=function(self,_,args)
-          local result=self:hold_goods(args.object,args.recipient)
-          self.state.effect=result.effect; self.state.reason=result.reason
-          self.state.location=result.location
-        end
+        inspect=function(self) self.state.count=#self:plot_objects(1) end
       }
     )");
     re::ScriptDeclaration declaration;
@@ -118,42 +121,52 @@ struct Fixture {
   }
   GrantId grant(pe::Scope scope, pe::Rights rights, Step expiry = 100) {
     auto holder = pe::Holder::script(1, controller);
-    auto result = pe::create_grant(grants, players, {1, holder, scope, rights, 0, 0, expiry},
+    auto result = pe::create_grant(grants, players, perm::Holder::player(1),
+                                   {1, holder, scope, rights, 0, 0, expiry},
                                    {scope, 1, pe::all_rights, 1, false}, {holder, 1, true}, 0);
     require(bool(result), "fixture owner-approved installed grant");
     return result.grant;
   }
-  void run(const char *function, Handle target = {}, PlayerId recipient = 1, Step step = 1,
-           Handle installation = {}) {
+  void inspect() {
     effects = {};
     re::Invocation i;
-    i.self = {installation ? installation : controller, 1};
-    i.step = step;
+    i.self = {controller, 1};
+    i.step = 1;
     i.hz = 20;
-    i.acquired = {target ? target : root, child, body};
-    i.payload = std::vector<EventField>{{"object", Value(target ? target : root)},
-                                        {"recipient", "p:" + std::to_string(recipient)}};
     i.state = &state;
     i.effects = &effects;
-    std::uint64_t random = 1;
-    i.random = &random;
     i.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
-    auto result = re::run_handler(vm, {1, function}, i);
+    const auto result = re::run_handler(vm, {1, "inspect"}, i);
     require(result.status == re::RunOutcome::Status::Ok, result.error.c_str());
   }
-  std::string result() { return std::get<std::string>(state.at(std::string("effect"))); }
+  void collect(Handle target = {}, Step step = 1, Handle installation = {},
+               nlohmann::json args = nlohmann::json::object()) {
+    drive::NativeCall call;
+    call.request = {ScriptHolder{1, installation ? installation : controller},
+                    action,
+                    target ? target : root,
+                    {}};
+    call.arguments = std::move(args);
+    call.step = step;
+    call.hz = 20;
+    auto result = drive::invoke_native(operations, std::move(call));
+    reply = std::move(result.reply);
+    effects = std::move(result.effects);
+    effects.changed |= result.changed;
+  }
 };
 void explicit_authority_and_online_assembly() {
   Fixture f;
-  f.run("inspect");
+  f.inspect();
   require(std::get<double>(f.state.at(std::string("count"))) == 1,
           "placed plot query excludes Body and declared children");
   f.grant(pe::Scope::plot(1), pe::Rights{1} << unsigned(pe::LandVerb::Transfer));
-  f.run("collect");
-  require(f.result() == "denied" && !(f.scene.objects.flags[f.root.slot()] & Held),
+  f.collect();
+  require(!f.reply.value("ok", false) && !(f.scene.objects.flags[f.root.slot()] & Held),
           "plot transfer authority never confers goods custody");
-  auto id = f.grant(pe::Scope::owned_on_plot(1, 1),
-                    pe::bit(pe::Verb::Transfer) | pe::bit(pe::Verb::Destroy));
+  f.grant(pe::Scope::owned_on_plot(1, 1), pe::bit(pe::Verb::Transfer));
+  const auto id =
+      f.grant(pe::Scope::object(f.root), pe::bit(pe::Verb::Transfer) | pe::bit(pe::Verb::Destroy));
   f.delivery.present_bodies[1] = f.body;
   require(sp::attach(f.scene.space, identity(f.scene.objects), transforms(f.scene.objects),
                      parents(f.scene.objects), space_flags(f.scene.objects),
@@ -162,8 +175,8 @@ void explicit_authority_and_online_assembly() {
                      f.changes)
                   .status == sp::Status::Ok,
           "owner seated on collected goods");
-  f.run("collect");
-  require(f.result() == "held" && f.players.rows[1].inventory == std::vector<Handle>{f.root},
+  f.collect();
+  require(f.reply.value("ok", false) && f.players.rows[1].inventory == std::vector<Handle>{f.root},
           "online goods enter actual owner inventory");
   require(f.scene.objects.parent[f.root.slot()] == f.body &&
               f.scene.objects.parent[f.child.slot()] == f.root &&
@@ -185,51 +198,52 @@ void explicit_authority_and_online_assembly() {
               !f.projections.replicas.rows.contains(f.child.bits) &&
               f.projections.replicas.rows.contains(f.body.bits) && f.effects.changed,
           "custody immediately removes real goods replicas while preserving the avatar");
-  f.run("collect");
+  f.collect();
   require(f.players.rows[1].inventory.size() == 1 && !f.effects.changed,
           "repeated custody is idempotent and reports no state change");
-  f.run("inspect");
+  f.inspect();
   require(std::get<double>(f.state.at(std::string("count"))) == 0,
           "stored goods leave placed plot query");
 }
 void denials_and_offline_delivery() {
   Fixture f;
   auto id = f.grant(pe::Scope::object(f.root), pe::bit(pe::Verb::Transfer), 10);
-  f.run("collect", {}, 2);
-  require(f.result() == "denied" && f.players.rows[2].mailbox.empty(),
+  f.collect({}, 1, {}, {{"recipient", "p:2"}});
+  require(!f.reply.value("ok", false) && f.players.rows[2].mailbox.empty(),
           "recipient must remain owner");
-  f.run("collect", {}, 1, 10);
-  require(f.result() == "denied", "expired goods grant denied");
-  f.run("collect", {}, 1, 1, f.body);
-  require(f.result() == "denied", "same script on another installation has no grant");
+  f.collect({}, 10);
+  require(!f.reply.value("ok", false), "expired goods grant denied");
+  f.collect({}, 1, f.body);
+  require(!f.reply.value("ok", false), "same script on another installation has no grant");
   f.limits.set(f.child.slot(), pe::inherited_rights & ~pe::bit(pe::Verb::Transfer));
-  f.run("collect");
-  require(f.result() == "denied" && sp::bounds(f.scene.space, identity(f.scene.objects), f.root),
+  f.collect();
+  require(!f.reply.value("ok", false) &&
+              sp::bounds(f.scene.space, identity(f.scene.objects), f.root),
           "part ceiling denial leaves whole world assembly intact");
   f.limits.erase(f.child.slot());
   f.players.rows[1].mailbox.push_back(f.controller);
-  f.run("collect");
-  require(f.result() == "denied" && !(f.scene.objects.flags[f.root.slot()] & Held),
+  f.collect();
+  require(!f.reply.value("ok", false) && !(f.scene.objects.flags[f.root.slot()] & Held),
           "full mailbox fails before native custody changes");
   f.players.rows[1].mailbox.clear();
   permission_flags(f.scene.objects).set(f.root.slot(), Escrow);
-  f.run("collect");
-  require(f.result() == "denied", "escrow remains unavailable to custody script");
+  f.collect();
+  require(!f.reply.value("ok", false), "escrow remains unavailable to custody script");
   permission_flags(f.scene.objects).set(f.root.slot(), 0);
-  f.run("collect", f.body);
-  require(f.result() == "denied", "avatar is never ordinary goods");
-  f.run("collect", f.child);
-  require(f.result() == "denied", "declared member cannot bypass assembly root custody");
-  f.run("collect");
-  require(f.result() == "held" && f.players.rows[1].mailbox == std::vector<Handle>{f.root} &&
+  f.collect(f.body);
+  require(!f.reply.value("ok", false), "avatar is never ordinary goods");
+  f.collect(f.child);
+  require(!f.reply.value("ok", false), "declared member cannot bypass assembly root custody");
+  f.collect();
+  require(f.reply.value("ok", false) && f.players.rows[1].mailbox == std::vector<Handle>{f.root} &&
               !f.scene.objects.parent[f.root.slot()] && f.grants.rows[id].live,
           "offline custody stores one root without revoking grants");
-  f.run("collect");
-  require(f.result() == "held" && f.players.rows[1].mailbox.size() == 1 && !f.effects.changed,
+  f.collect();
+  require(f.reply.value("ok", false) && f.players.rows[1].mailbox.size() == 1 && !f.effects.changed,
           "full mailbox accepts same already stored root idempotently");
   pe::revoke(f.grants, f.players, id);
-  f.run("collect");
-  require(f.result() == "denied", "custody never retains revoked caller authority");
+  f.collect();
+  require(!f.reply.value("ok", false), "custody never retains revoked caller authority");
 }
 void benchmark() {
   Fixture f;
@@ -241,7 +255,7 @@ void benchmark() {
   std::vector<double> times;
   for (unsigned i = 0; i < 100; ++i) {
     auto begin = std::chrono::steady_clock::now();
-    f.run("inspect");
+    f.inspect();
     times.push_back(
         std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - begin)
             .count());

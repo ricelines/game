@@ -10,6 +10,7 @@ import concurrent.futures
 import hashlib
 import json
 import time
+import tomllib
 from copy import deepcopy
 from pathlib import Path
 
@@ -103,6 +104,7 @@ def validate_symbols(plan: dict) -> None:
     models = {row["key"] for row in plan["models"]}
     scripts = {row["key"] for row in plan["scripts"]}
     players = {row["id"] for row in plan["profiles"]}
+    groups = {row["id"] for row in plan["groups"]}
 
     def wallet(reference):
         if (
@@ -112,6 +114,15 @@ def validate_symbols(plan: dict) -> None:
             or int(reference[2:]) not in players
         ):
             raise ValueError("Money belongs to a registered player's wallet")
+
+    def account(reference):
+        if reference in objects:
+            return
+        if isinstance(reference, str) and reference.startswith("group:"):
+            if reference[6:].isdigit() and int(reference[6:]) in groups:
+                return
+            raise ValueError("Unknown group account")
+        wallet(reference)
 
     for field, keys in (("objects", objects), ("models", models), ("scripts", scripts)):
         if len(keys) != len(plan[field]):
@@ -128,16 +139,25 @@ def validate_symbols(plan: dict) -> None:
     for row in plan["bootstrap"] + plan.get("script_state", []):
         if row["target"] not in objects:
             raise ValueError(f"Missing target {row['target']}")
+
+    def holder(reference):
+        if isinstance(reference, str):
+            wallet(reference)
+        elif reference["script"] not in scripts or reference["on"] not in objects:
+            raise ValueError(f"Missing installed grant holder: {reference}")
+
     for row in plan["grants"]:
-        if row["holder"]["script"] not in scripts or row["holder"]["on"] not in objects:
-            raise ValueError(f"Missing installed grant holder: {row}")
-        endpoint = row["scope"].get("object")
-        if endpoint and endpoint not in objects:
-            raise ValueError(f"Missing grant endpoint {endpoint}")
+        holder(row["holder"])
+        if "caller" in row:
+            holder(row["caller"])
+        for field in ("object", "avatar"):
+            endpoint = row["scope"].get(field)
+            if endpoint and endpoint not in objects:
+                raise ValueError(f"Missing grant endpoint {endpoint}")
         if "account" in row["scope"]:
-            wallet(row["scope"]["account"])
+            account(row["scope"]["account"])
     for row in plan["balances"]:
-        wallet(row["holder"])
+        account(row["holder"])
 
 
 def prepare(
@@ -149,10 +169,16 @@ def prepare(
     restricted: bool,
     workers: int = 2,
     cgroup_root: Path | None = None,
+    config: Path = ROOT / "config.toml",
 ) -> dict:
     original = source.read_bytes()
     plan = select(json.loads(original), mode, stakes)
     validate_symbols(plan)
+    settings = tomllib.loads(config.read_text())
+    for term, value in plan["world_settings"].items():
+        if isinstance(value, dict) and "config" in value:
+            section, key = value["config"].split(".")
+            plan["world_settings"][term] = settings[section][key]
     plan["source"] = {
         "start_sha256": hashlib.sha256(original).hexdigest(),
         "mode": mode,
@@ -172,7 +198,9 @@ def prepare(
 
     def bake_chunk(chunk):
         completed = []
-        with BakePool(assets, require_cgroup=not restricted, cgroup_root=cgroup_root) as pool:
+        with BakePool(
+            assets, config=settings["bake"], require_cgroup=not restricted, cgroup_root=cgroup_root
+        ) as pool:
             for index, row in chunk:
                 cad = (source.parent / row["file"]).read_text()
                 started = time.perf_counter()
@@ -221,6 +249,7 @@ def main() -> None:
     parser.add_argument("--workers", type=int, choices=range(1, 9), default=2)
     parser.add_argument("--restricted-host-bake", action="store_true")
     parser.add_argument("--cgroup-root", type=Path)
+    parser.add_argument("--config", type=Path, default=ROOT / "config.toml")
     args = parser.parse_args()
     plan = prepare(
         args.start,
@@ -230,6 +259,7 @@ def main() -> None:
         restricted=args.restricted_host_bake,
         workers=args.workers,
         cgroup_root=args.cgroup_root,
+        config=args.config,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     temporary = args.output.with_suffix(".pending")

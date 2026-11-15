@@ -20,9 +20,10 @@ int main() {
     constexpr std::size_t batch = 256;
     for (unsigned i = 0; i < count; ++i) {
       const auto scope = Scope::object(Handle::make(i + 1, 1));
-      const auto result = create_grant(
-          grants, players, {1, holder, scope, bit(Verb::Use), 0, 0, first_expiry + i % 100},
-          {scope, 1, all_rights}, {holder, 1, true}, 1);
+      const auto result =
+          create_grant(grants, players, Holder::player(1),
+                       {1, holder, scope, bit(Verb::Use), 0, 0, first_expiry + i % 100},
+                       {scope, 1, all_rights}, {holder, 1, true}, 1);
       if (!result)
         throw std::runtime_error("real grant setup failed");
     }

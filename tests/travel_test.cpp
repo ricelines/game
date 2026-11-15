@@ -32,9 +32,9 @@ int main() {
     const auto holder = perm::Holder::player(2);
     const auto scope = perm::Scope::plot(1);
     const auto enter = perm::Rights{1} << static_cast<unsigned>(perm::LandVerb::Enter);
-    const auto grant =
-        perm::create_grant(grants, players, {1, holder, scope, enter, 0, 0, 10},
-                           {scope, 1, perm::all_rights, 1, false}, {holder, 2, true}, 1);
+    const auto grant = perm::create_grant(
+        grants, players, perm::Holder::player(1), {1, holder, scope, enter, 0, 0, 10},
+        {scope, 1, perm::all_rights, 1, false}, {holder, 2, true}, 1);
     require(bool(grant), "ordinary land entry grant must be created");
     bindings::invalidate_travel(cache, grants, 1);
     require(boundaries(9).empty(), "a current ordinary Enter grant allows movement");

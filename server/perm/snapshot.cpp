@@ -37,7 +37,15 @@ SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Han
     case ScopeKind::Plot:
       return selected.plots.contains(scope.subject);
     case ScopeKind::Account:
-      return selected.players.contains(static_cast<PlayerId>(scope.subject));
+      switch (scope.account_kind) {
+      case AccountKind::Player:
+        return selected.players.contains(static_cast<PlayerId>(scope.subject));
+      case AccountKind::Object:
+        return selected.objects.contains(Handle{scope.subject});
+      case AccountKind::Group:
+        return selected.groups.contains(static_cast<GroupId>(scope.subject));
+      }
+      return false;
     case ScopeKind::Issuance:
       return true;
     }
@@ -92,6 +100,11 @@ template <class S> void serialize(S &s, Scope &v) {
   s.value1b(v.kind);
   s.value8b(v.subject);
   s.value4b(v.owner);
+  s.value1b(v.account_kind);
+}
+template <class S> void serialize(S &s, Account &v) {
+  s.value1b(v.kind);
+  s.value8b(v.subject);
 }
 template <class S> void serialize(S &s, Player &v) {
   snap::field(s, v.groups);
@@ -171,12 +184,24 @@ void write_players(snap::Output &out, const Players &players, const Ledger &ledg
       std::erase_if(row.grants_held, [&](GrantId g) { return !selected->grants.contains(g); });
     }
   out.container(selected ? player_rows : players.rows, snap::max_collection());
-  auto balances = ledger.balance;
-  if (selected)
-    for (PlayerId id = 0; id < balances.size(); ++id)
-      if (!selected->players.contains(id))
-        balances[id] = 0;
-  snap::field(out, balances);
+  auto included = [&](Account account) {
+    return !selected ||
+           (account.kind == AccountKind::Player && selected->players.contains(account.subject)) ||
+           (account.kind == AccountKind::Object &&
+            selected->objects.contains(Handle{account.subject})) ||
+           (account.kind == AccountKind::Group && selected->groups.contains(account.subject));
+  };
+  auto count = static_cast<std::uint32_t>(
+      std::count_if(ledger.balance.begin(), ledger.balance.end(),
+                    [&](const auto &row) { return included(row.first); }));
+  out.value4b(count);
+  for (const auto &[key, amount] : ledger.balance)
+    if (included(key)) {
+      auto account = key;
+      auto value = amount;
+      out.object(account);
+      out.value8b(value);
+    }
   auto plot_rows = selected ? plots.rows : std::vector<Plot>{};
   auto group_rows = selected ? groups.rows : std::vector<Group>{};
   if (selected) {
@@ -192,10 +217,18 @@ void write_players(snap::Output &out, const Players &players, const Ledger &ledg
 }
 void read_players(snap::Input &in, Players &players, Ledger &ledger, Plots &plots, Groups &groups) {
   snap::field(in, players.rows);
-  snap::field(in, ledger.balance);
-  if (ledger.balance.size() != players.rows.size() || ledger.balance.empty() ||
-      ledger.balance[0] != 0)
-    throw std::invalid_argument("player wallet rows do not match players");
+  std::uint32_t count = 0;
+  in.value4b(count);
+  ledger.balance.clear();
+  while (count--) {
+    Account account;
+    std::int64_t value = 0;
+    in.object(account);
+    in.value8b(value);
+    if (!account.subject || account.kind > AccountKind::Group || value < 0 ||
+        !ledger.balance.emplace(account, value).second)
+      throw std::invalid_argument("invalid or duplicate account balance");
+  }
   snap::field(in, plots.rows);
   snap::field(in, groups.rows);
 }

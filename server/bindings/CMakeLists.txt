@@ -6,7 +6,6 @@ add_library(amber_bindings STATIC
   authoring/failures.cpp
   authoring/install.cpp
   authoring/worker.cpp
-  authority/authority.cpp
   authority/descriptors.cpp
   causality.cpp
   causality_snapshot.cpp
@@ -46,8 +45,6 @@ add_library(amber_bindings STATIC
   presentation.cpp
   projection.cpp
   replication.cpp
-  resources/resources.cpp
-  revision/revision.cpp
   scene.cpp
   start/catalog.cpp
   start/objects.cpp
@@ -139,6 +136,8 @@ if(BUILD_TESTING)
   add_executable(editing_test ${PROJECT_SOURCE_DIR}/tests/editing_test.cpp)
   set_target_properties(editing_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/editing")
   target_link_libraries(editing_test PRIVATE amber_bindings)
+  target_link_libraries(editing_test PRIVATE Ambergris::Jolt Ambergris::tomlplusplus)
+  target_compile_definitions(editing_test PRIVATE AMBER_CONFIG_PATH="${PROJECT_SOURCE_DIR}/config.toml")
   add_test(NAME editing COMMAND editing_test)
   set_tests_properties(editing PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/editing")
   add_executable(elaboration_bindings_test ${PROJECT_SOURCE_DIR}/tests/elaboration_bindings_test.cpp)
@@ -148,7 +147,8 @@ if(BUILD_TESTING)
   set_tests_properties(elaboration_bindings PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/elaboration")
   add_executable(financial_test ${PROJECT_SOURCE_DIR}/tests/financial_test.cpp)
   set_target_properties(financial_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/finance")
-  target_link_libraries(financial_test PRIVATE amber_bindings)
+  target_link_libraries(financial_test PRIVATE amber_bindings Ambergris::Jolt Ambergris::tomlplusplus)
+  target_compile_definitions(financial_test PRIVATE AMBER_CONFIG_PATH="${PROJECT_SOURCE_DIR}/config.toml")
   add_test(NAME financial COMMAND financial_test)
   set_tests_properties(financial PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/finance")
   add_executable(rule_activation_test ${PROJECT_SOURCE_DIR}/tests/rule_activation_test.cpp)
@@ -161,7 +161,8 @@ if(BUILD_TESTING)
   target_link_libraries(rule_activation_bench PRIVATE amber_bindings)
   add_executable(allocation_test ${PROJECT_SOURCE_DIR}/tests/allocation_test.cpp)
   set_target_properties(allocation_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/installation")
-  target_link_libraries(allocation_test PRIVATE amber_bindings)
+  target_link_libraries(allocation_test PRIVATE amber_bindings Ambergris::Jolt Ambergris::tomlplusplus)
+  target_compile_definitions(allocation_test PRIVATE AMBER_CONFIG_PATH="${PROJECT_SOURCE_DIR}/config.toml")
   add_test(NAME allocation COMMAND allocation_test)
   set_tests_properties(allocation PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/installation")
   add_executable(script_metadata_test ${PROJECT_SOURCE_DIR}/tests/script_metadata_test.cpp)
@@ -169,14 +170,11 @@ if(BUILD_TESTING)
   target_link_libraries(script_metadata_test PRIVATE amber_bindings)
   add_test(NAME script_metadata COMMAND script_metadata_test)
   set_tests_properties(script_metadata PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/metadata")
-  add_executable(resources_test ${PROJECT_SOURCE_DIR}/tests/resources_test.cpp)
-  set_target_properties(resources_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/resources")
-  target_link_libraries(resources_test PRIVATE amber_bindings)
-  add_test(NAME resources COMMAND resources_test)
-  set_tests_properties(resources PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/resources")
+
   add_executable(model_revision_bindings_test ${PROJECT_SOURCE_DIR}/tests/model_revision_bindings_test.cpp)
   set_target_properties(model_revision_bindings_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/revision")
-  target_link_libraries(model_revision_bindings_test PRIVATE amber_bindings)
+  target_link_libraries(model_revision_bindings_test PRIVATE amber_bindings Ambergris::Jolt Ambergris::tomlplusplus)
+  target_compile_definitions(model_revision_bindings_test PRIVATE AMBER_CONFIG_PATH="${PROJECT_SOURCE_DIR}/config.toml")
   add_test(NAME model_revision_bindings COMMAND model_revision_bindings_test)
   set_tests_properties(model_revision_bindings PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/revision")
   add_executable(start_test ${PROJECT_SOURCE_DIR}/tests/start_test.cpp)

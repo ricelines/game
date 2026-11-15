@@ -27,7 +27,7 @@ struct InvocationInput {
   std::vector<Handle> acquired;
   std::optional<Caller> action_caller;
   Handle action_body, action_target;
-  std::optional<react::BodyEndpoints> direct_body;
+  std::chrono::steady_clock::time_point deadline{};
 };
 struct CompletedInvocation {
   react::HandlerRef handler;
@@ -36,22 +36,14 @@ struct CompletedInvocation {
   Step step = 0;
   react::RunOutcome outcome;
   react::DeferredEffects effects;
-  std::vector<record::Event> structural_records;
   std::vector<Handle> things{};
   std::vector<record::Credit> object_credits{}, script_credits{};
+  record::Origin origin{};
 };
-CompletedInvocation execute(Execution &, const react::HandlerRef &, InvocationInput);
+void start_invocation(Execution &, record::Journal &, const react::HandlerRef &, InvocationInput,
+                      react::Invocation &, CompletedInvocation &);
+void finish_invocation(Execution &, record::Journal &, react::Invocation &, CompletedInvocation &);
 record::Origin publish_invocation(record::Journal &, step::WorkQueues &, step::TimerWheel &,
                                   CompletedInvocation &&, const record::Origin &,
                                   std::size_t event_limit);
-struct ActionCompletion {
-  record::Origin origin;
-  std::size_t handlers = 0;
-  bool changed = false;
-  std::vector<std::string> errors;
-};
-ActionCompletion publish_action(record::Journal &, step::WorkQueues &, step::TimerWheel &,
-                                record::Event action, std::vector<CompletedInvocation>,
-                                const record::Origin &, std::span<const record::Credit>,
-                                std::size_t event_limit);
 } // namespace amber::bindings

@@ -127,7 +127,6 @@ void write_parameters(snap::Output &out, const ParameterBlocks &parameters,
 }
 void read_parameters(snap::Input &in, ParameterBlocks &parameters) {
   read_rows(in, parameters.rows, parameter<snap::Input>);
-  rebuild_parameter_index(parameters);
 }
 void write_scripts(snap::Output &out, const Scripts &scripts, ScriptSelection selected) {
   write_rows(out, scripts.rows, selected, script<snap::Output>);

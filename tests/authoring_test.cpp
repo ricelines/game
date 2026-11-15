@@ -197,10 +197,8 @@ int main(int argc, char **argv) {
             "actual parts, public source, measurements or authorship lost");
     require(first.at("measured") == assets.rows.at(decoded.asset).manifest,
             "reply measurements came from submitted claims");
-    Json variant_fields = {{"model", "m:1"},
-                           {"expected_source_hash", models.rows[1].source_hash},
-                           {"asset", decoded.asset},
-                           {"canonical_params", decoded.canonical_params}};
+    Json variant_fields = {
+        {"model", "m:1"}, {"asset", decoded.asset}, {"canonical_params", decoded.canonical_params}};
     const auto variant_request_value = variant_request(variant_fields);
     pending.next_id = 106;
     input.operation = "register_variant";
@@ -208,21 +206,18 @@ int main(int argc, char **argv) {
     require(!drive::invoke_input(pending, operations, drive::enqueue_input(pending, input)) &&
                 pending.rows.at(106).awaiting,
             "variant submission did not use the shared registered queue");
-    auto wrong_source = variant_request_value;
-    wrong_source.expected_source_hash = catalog::sha256("different model source");
-    worker.submit(107, wrong_source, {terms, registry.hash});
-    auto variants = wait_for(worker, 2);
-    require(std::holds_alternative<PreparedVariant>(variants[0].result) &&
-                std::holds_alternative<Failure>(variants[1].result),
-            "variant worker must derive the actual source identity from verified artifacts");
+    auto variants = wait_for(worker, 1);
+    require(std::holds_alternative<PreparedVariant>(variants[0].result),
+            "variant worker must load the verified immutable artifact");
     auto variant = std::get<PreparedVariant>(std::move(variants[0].result));
     const auto completed_variant = variant;
-    auto stale_variant = variant;
-    stale_variant.expected_source_hash = wrong_source.expected_source_hash;
+    const auto source_before = models.rows[1].source_hash;
+    models.rows[1].source_hash = catalog::sha256("a different current model source");
     const auto count_before_variant = models.rows.size();
-    require(!install_variant(std::move(stale_variant), install).at("ok").get<bool>() &&
+    require(!install_variant(variant, install).at("ok").get<bool>() &&
                 models.rows.size() == count_before_variant && parameters.rows.size() == 1,
-            "stale variant completion must preserve current model/parameter identities");
+            "a verified variant from another source must not alter model/parameter identities");
+    models.rows[1].source_hash = source_before;
     const auto registered_variant = install_variant(std::move(variant), install);
     require(registered_variant.at("ok") && registered_variant.at("params") == 1 &&
                 registered_variant.at("model") == "m:1" && parameters.rows[1].model == 1 &&

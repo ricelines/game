@@ -24,7 +24,6 @@ def parser():
     commands = root.add_subparsers(dest="command", required=True)
     look = commands.add_parser("look")
     look.add_argument("--limit", type=int)
-    look.add_argument("--full", action="store_const", const=True)
     inspect = commands.add_parser("inspect")
     inspect.add_argument("target")
     actions = commands.add_parser("actions")
@@ -111,7 +110,7 @@ async def run(options):
                     return {"error": "http_error", "status": response.status, "problem": raw}
 
         if options.command in ("look", "inspect", "actions", "do", "cancel"):
-            fields = ("limit", "full", "target", "name", "page", "action", "args", "events_limit")
+            fields = ("limit", "target", "name", "page", "action", "args", "events_limit")
             arguments = {
                 field: getattr(options, field)
                 for field in fields

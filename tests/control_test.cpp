@@ -86,17 +86,13 @@ void protocol() {
                    R"({"t":"look","id":1.5})", R"({"t":8,"id":1})"})
     require(!parse(bad).error.empty(), "malformed envelope rejected");
   require(validate_look({{"limit", 1}}).empty(), "look valid");
-  require(validate_look({{"full", true}}).empty() &&
-              validate_look({{"limit", 3}, {"full", false}}).empty(),
-          "look full is an optional boolean");
-  for (const auto &bad : {Json(1), Json("true"), Json(nullptr)})
-    require(!validate_look({{"full", bad}}).empty(), "nonboolean full rejected");
+  require(!validate_look({{"full", true}}).empty(),
+          "native look must not manage gateway presentation state");
   require(!validate_look({{"limit", false}}).empty(), "bool is not integer");
   require(!validate_do({{"action", "arbitrary.action"}, {"player", "p:2"}}).empty(),
           "player spoof field rejected");
   require(!validate_inspect(Json::object()).empty(), "inspect target required");
   Json variant = {{"model", "m:7"},
-                  {"expected_source_hash", "source"},
                   {"asset", "asset"},
                   {"canonical_params", "{}"},
                   {"manifest", Json::object()}};

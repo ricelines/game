@@ -68,6 +68,7 @@ struct Mirror {
     Step sampled = 0, due = 0;
     Vec3 center, velocity;
     std::uint64_t volumes = 0, path = 0;
+    bool reconcile_zones = true, containers_dirty = true;
   } membership;
   BodySpec spec;
   Pose pose;
@@ -119,14 +120,19 @@ public:
 class BroadFilter final : public JPH::ObjectVsBroadPhaseLayerFilter {
 public:
   bool ShouldCollide(JPH::ObjectLayer layer, JPH::BroadPhaseLayer broad) const override {
-    return layer != 4 && (layer != 0 || broad.GetValue() != 0);
+    return layer == 4 ? broad.GetValue() == 1 : layer != 0 || broad.GetValue() != 0;
   }
 };
 class PairFilter final : public JPH::ObjectLayerPairFilter {
 public:
   bool ShouldCollide(JPH::ObjectLayer a, JPH::ObjectLayer b) const override {
-    return a != 4 && b != 4 && !(a == 0 && b == 0) && !(a == 2 && b == 2);
+    if (a == 4 || b == 4)
+      return a == 2 || b == 2;
+    return !(a == 0 && b == 0) && !(a == 2 && b == 2);
   }
+};
+struct CachedContact : Contact {
+  std::optional<VolumeKind> sensor;
 };
 struct Space::Native {
   Settings settings;
@@ -148,6 +154,7 @@ struct Space::Native {
   std::set<std::uint64_t> dirty_objects;
   std::vector<Bounds> dirty_bounds;
   std::vector<Contact> contacts;
+  std::vector<RelationChange> zone_changes;
   struct CauseStamp {
     CauseToken token;
     CauseScope scope;
@@ -158,8 +165,9 @@ struct Space::Native {
   std::unordered_map<std::uint32_t, Handle> handles;
   struct Listener final : JPH::ContactListener {
     Native &state;
-    std::map<JPH::SubShapeIDPair, Contact> pairs;
+    std::map<JPH::SubShapeIDPair, CachedContact> pairs;
     explicit Listener(Native &n) : state(n) {}
+    void add(const JPH::Body &, const JPH::Body &, const JPH::ContactManifold &, bool);
     void OnContactAdded(const JPH::Body &, const JPH::Body &, const JPH::ContactManifold &,
                         JPH::ContactSettings &) override;
     void OnContactPersisted(const JPH::Body &, const JPH::Body &, const JPH::ContactManifold &,
@@ -169,7 +177,7 @@ struct Space::Native {
   struct CharacterListener final : JPH::CharacterContactListener {
     Native &state;
     using Key = std::tuple<std::uint64_t, std::uint32_t, std::uint32_t, std::uint32_t>;
-    std::map<Key, Contact> pairs;
+    std::map<Key, CachedContact> pairs;
     explicit CharacterListener(Native &n) : state(n) {}
     void add(const JPH::CharacterVirtual *, const JPH::CharacterContact &, bool);
     void remove(const JPH::CharacterVirtual *, const JPH::BodyID &, const JPH::CharacterID &,
@@ -237,6 +245,8 @@ void query_shape(Space::Native &, Mirror &, bool query);
 void extract_native(Space::Native &, Handle);
 void remove_compound_member(Space &, IdentityRead, SpaceFlags, Handle);
 void flags_for(SpaceFlags, Handle, Motion, bool held = false);
+void sensor_contact_changed(Space::Native &, const CachedContact &, bool added);
+bool has_sensor_contact(const Space::Native &, const CachedContact &);
 OperationResult can_release_occupants(const Space &, Handle, std::span<const Handle>,
                                       bool retiring_body);
 void release_occupants(Space &, IdentityRead, Handle, std::span<const Handle>, ParentWrite,

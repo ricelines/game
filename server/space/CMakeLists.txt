@@ -4,7 +4,7 @@ target_link_libraries(amber_space PUBLIC amber_store PRIVATE amber_snap Ambergri
 target_link_libraries(amber_space PRIVATE Ambergris::TracyClient)
 if(BUILD_TESTING)
   add_executable(space_test ../../tests/space_test.cpp)
-  target_link_libraries(space_test PRIVATE amber_space Ambergris::Jolt Ambergris::tomlplusplus)
+  target_link_libraries(space_test PRIVATE amber_space amber_perm Ambergris::Jolt Ambergris::tomlplusplus)
   target_compile_definitions(space_test PRIVATE AMBER_CONFIG_PATH="${PROJECT_SOURCE_DIR}/config.toml")
   add_test(NAME space COMMAND space_test)
 endif()

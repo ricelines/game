@@ -168,7 +168,6 @@ void snapshot_and_attributed_text() {
   write_gaps(out, counts, std::span<const GapKey>(gaps));
   write_last_gaps(out, last, std::span<const Handle>(handles));
   write_capture_refs(out, captures, std::span<const Hash>(hashes));
-  write_pending_fixtures(out, pending);
   out.adapter().flush();
   bytes.resize(out.adapter().writtenBytesCount());
   Requests loaded;
@@ -181,7 +180,6 @@ void snapshot_and_attributed_text() {
   read_gaps(in, loaded_counts);
   read_last_gaps(in, loaded_last);
   read_capture_refs(in, loaded_refs);
-  read_pending_fixtures(in, loaded_jobs);
   snap::check_complete(in);
   require(loaded.rows.size() == table.rows.size() && !loaded.rows.back().id &&
               loaded.rows[explicit_id].claimed_by == 6,
@@ -190,14 +188,17 @@ void snapshot_and_attributed_text() {
               loaded_last.rows.at(4).origin == last.rows.at(4).origin &&
               loaded_refs.rows.size() == 1,
           "only selected gaps and full causal provenance restored");
-  require(loaded_jobs.next_id == pending.next_id &&
-              loaded_jobs.rows.at(job.id).order.sequence == 42 &&
-              loaded_jobs.rows.at(job.id).candidate.tests == suite(),
-          "pending copied job survives restart");
-  discard_fixture(loaded_jobs, job.id);
-  require(!session_pending(loaded_jobs, "session"),
-          "failed fixture releases session without closing request");
-  require(loaded.rows[explicit_id].status == Status::Claimed, "failure preserves retryable claim");
+  require(loaded_jobs.rows.empty() && loaded_jobs.next_id == 1 &&
+              !session_pending(loaded_jobs, "session"),
+          "a restored process has no active fixture subprocess or copied job");
+  require(!check_fixture_completion(loaded_jobs, loaded, {6, true}, passing(job)).accepted,
+          "a report from a previous process cannot finish a restored request");
+  auto retried = begin_rule_answer(loaded_jobs, loaded, loaded_refs, {6, true}, explicit_id,
+                                   candidate, {"new-session", 1}, {1000, 128, 65536});
+  discard_fixture(loaded_jobs, retried.id);
+  require(!session_pending(loaded_jobs, "new-session") &&
+              loaded.rows[explicit_id].status == Status::Claimed,
+          "the elaborator can explicitly answer the retained claim again after restart");
   catalog::ModelTexts maker;
   maker.rows[1] = {"maker name", "maker description", "maker writing"};
   catalog::AuthoredTexts texts;

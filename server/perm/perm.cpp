@@ -2,9 +2,34 @@
 
 #include <algorithm>
 #include <limits>
+#include <stdexcept>
 #include <unordered_set>
 
 namespace amber::perm {
+std::vector<Handle> update_plots(IdentityRead identity, TransformRead poses, PlotWrite membership,
+                                 const Plots &plots, std::span<const Handle> objects,
+                                 bool in_world) {
+  std::vector<Handle> changed;
+  for (auto object : objects) {
+    if (!identity.valid(object))
+      continue;
+    PlotId next = 0;
+    if (in_world) {
+      const auto point = poses.position[object.slot()];
+      for (const auto &plot : plots.rows)
+        if (plot.id && point.x >= plot.bounds[0] && point.y >= plot.bounds[1] &&
+            point.x < plot.bounds[2] && point.y < plot.bounds[3]) {
+          next = plot.id;
+          break;
+        }
+    }
+    if (membership.plot[object.slot()] != next) {
+      membership.plot[object.slot()] = next;
+      changed.push_back(object);
+    }
+  }
+  return changed;
+}
 std::string_view reason_text(Reason reason) {
   static constexpr std::array names{"allowed",
                                     "unknown holder",
@@ -108,6 +133,8 @@ std::vector<GrantId> erase_marked(Grants &grants, Players &players,
     if (!grant.live || !marked[grant.id])
       continue;
     grants.by_key.erase({grant.holder, grant.scope});
+    grants.expiring.erase({grant.expires_step, grant.id});
+    grants.reminders.erase({grant.expires_step, grant.id});
     grant.live = false;
     removed.push_back(grant.id);
     affected.push_back(grant.issuer);
@@ -146,7 +173,20 @@ bool monetary(Scope scope) {
 std::size_t GrantKeyHash::operator()(const GrantKey &key) const {
   return mix(key.holder.id | (std::uint64_t{static_cast<unsigned>(key.holder.kind)} << 32)) ^
          mix(key.holder.installed_on.bits) ^ mix(key.scope.subject) ^
-         mix(key.scope.owner | (std::uint64_t{static_cast<unsigned>(key.scope.kind)} << 32));
+         mix(key.scope.owner | (std::uint64_t{static_cast<unsigned>(key.scope.kind)} << 32)) ^
+         mix(static_cast<unsigned>(key.scope.account_kind));
+}
+
+std::string account_name(Account account) {
+  switch (account.kind) {
+  case AccountKind::Player:
+    return "p:" + std::to_string(account.subject);
+  case AccountKind::Object:
+    return to_string(Handle{account.subject});
+  case AccountKind::Group:
+    return "group:" + std::to_string(account.subject);
+  }
+  throw std::invalid_argument("unknown account kind");
 }
 
 Target target(IdentityRead identity, AuthorityRead authority, const OwnerLimits &limits, Handle h) {
@@ -221,19 +261,20 @@ Decision check_land(Holder actor, LandVerb verb, const Plot &plot, const Players
   return check_scope(actor, Scope::plot(plot.id), required, grants, now);
 }
 
-Decision check_account(Holder actor, PlayerId wallet, std::int64_t amount, const Grants &grants,
-                       Step now) {
+Decision check_account(Holder actor, AccountTarget target, std::int64_t amount,
+                       const Grants &grants, Step now) {
   if (amount < 0)
     return {Reason::BadAmount};
-  if (!wallet || !actor.id)
+  if (!target.account.subject || !target.controller || !actor.id)
     return {Reason::UnknownHolder};
-  if (actor.kind == HolderKind::Player && actor.id == wallet)
+  if (actor.kind == HolderKind::Player && actor.id == target.controller)
     return {Reason::Allowed};
-  return budget(grants, find(grants, actor, Scope::account(wallet)), amount, now);
+  return budget(grants, find(grants, actor, Scope::account(target.account)), amount, now);
 }
 
-std::int64_t balance(const Ledger &ledger, PlayerId player) {
-  return player < ledger.balance.size() ? ledger.balance[player] : 0;
+std::int64_t balance(const Ledger &ledger, Account account) {
+  const auto row = ledger.balance.find(account);
+  return row == ledger.balance.end() ? 0 : row->second;
 }
 
 std::int64_t allowance(const Grants &grants, GrantId id, Step now) {
@@ -250,15 +291,20 @@ std::int64_t allowance(const Grants &grants, GrantId id, Step now) {
   return remaining;
 }
 
-GrantResult create_grant(Grants &grants, Players &players, const GrantRequest &request,
-                         const ScopeControl &control, const HolderControl &holder, Step now) {
+GrantResult create_grant(Grants &grants, Players &players, Holder issuer,
+                         const GrantRequest &request, const ScopeControl &control,
+                         const HolderControl &holder, Step now) {
   if (request.issuer == 0 || request.issuer >= players.rows.size() || request.holder.id == 0 ||
+      !issuer.id || (issuer.kind == HolderKind::Player && issuer.id != request.issuer) ||
+      (issuer.kind == HolderKind::Script && !issuer.installed_on) ||
       (request.holder.kind == HolderKind::Player && request.holder.id >= players.rows.size()))
     return {Reason::UnknownHolder};
   if (control.scope != request.scope || request.verbs == 0 ||
       (request.scope.kind == ScopeKind::Account &&
-       (!request.scope.subject || request.scope.subject >= players.rows.size() ||
-        control.controller != request.scope.subject)))
+       (!request.scope.subject || !control.controller ||
+        (request.scope.account_kind == AccountKind::Player &&
+         (request.scope.subject >= players.rows.size() ||
+          control.controller != request.scope.subject)))))
     return {Reason::InvalidScope};
   const Rights scope_mask = request.scope.kind == ScopeKind::Avatar ? Rights{3}
                             : request.scope.kind == ScopeKind::Plot
@@ -274,7 +320,8 @@ GrantResult create_grant(Grants &grants, Players &players, const GrantRequest &r
   if (request.holder.kind == HolderKind::Script &&
       (holder.holder != request.holder || !holder.installed || !request.holder.installed_on))
     return {Reason::InvalidScope};
-  const bool needs_expiry = monetary(request.scope) || request.holder.kind == HolderKind::Script;
+  const bool needs_expiry = monetary(request.scope) || request.holder.kind == HolderKind::Script ||
+                            issuer.kind == HolderKind::Script;
   if (needs_expiry && request.expires_step == 0)
     return {Reason::ExpiryRequired};
   if ((request.expires_step && request.expires_step <= now) || request.cap < 0 ||
@@ -282,15 +329,16 @@ GrantResult create_grant(Grants &grants, Players &players, const GrantRequest &r
     return {Reason::InvalidScope};
 
   GrantId parent_id = 0;
-  const bool controls = request.scope.kind == ScopeKind::Issuance
-                            ? control.issuer_is_architect
-                            : request.issuer == control.controller;
+  const bool controls =
+      issuer.kind == HolderKind::Player &&
+      (request.scope.kind == ScopeKind::Issuance ? control.issuer_is_architect
+                                                 : request.issuer == control.controller);
   if (!controls) {
-    const Holder issuer = Holder::player(request.issuer);
     auto eligible = [&](const Grant *candidate) {
       return candidate && candidate->live && !expired(*candidate, now) && !candidate->parent &&
              covered(*candidate, control) && (request.verbs & candidate->verbs) == request.verbs &&
-             request.holder.kind == HolderKind::Script && holder.controller == request.issuer &&
+             (issuer.kind == HolderKind::Script ||
+              (request.holder.kind == HolderKind::Script && holder.controller == request.issuer)) &&
              (!monetary(request.scope) || request.cap <= candidate->cap) &&
              (!candidate->expires_step ||
               (request.expires_step && request.expires_step <= candidate->expires_step));
@@ -345,7 +393,9 @@ std::vector<GrantId> revoke_objects(Grants &grants, Players &players,
   std::vector<bool> marked(grants.rows.size());
   for (const auto &grant : grants.rows) {
     const bool scope =
-        (grant.scope.kind == ScopeKind::Object || grant.scope.kind == ScopeKind::Avatar) &&
+        (grant.scope.kind == ScopeKind::Object || grant.scope.kind == ScopeKind::Avatar ||
+         (grant.scope.kind == ScopeKind::Account &&
+          grant.scope.account_kind == AccountKind::Object)) &&
         handles.contains(grant.scope.subject);
     const bool installed =
         grant.holder.kind == HolderKind::Script && handles.contains(grant.holder.installed_on.bits);
@@ -422,39 +472,77 @@ void rebuild_grant_lookup(Grants &grants) {
     }
 }
 
-TransferResult pay(Ledger &ledger, Grants &grants, Holder actor, PlayerId payer, PlayerId recipient,
-                   std::int64_t amount, Step now) {
-  if (!payer || payer >= ledger.balance.size() || !recipient || recipient >= ledger.balance.size())
+TransferResult pay(Ledger &ledger, Grants &grants, Holder actor, AccountTarget payer,
+                   Account recipient, std::int64_t amount, Step now) {
+  if (!payer.account.subject || !recipient.subject)
     return {Reason::UnknownHolder};
   const auto permission = check_account(actor, payer, amount, grants, now);
   if (!permission)
     return {permission.reason};
-  if (ledger.balance[payer] < amount)
+  if (balance(ledger, payer.account) < amount)
     return {Reason::InsufficientBalance};
-  if (payer == recipient || amount == 0)
+  if (payer.account == recipient || amount == 0)
     return {Reason::Allowed, 0};
-  if (amount > std::numeric_limits<std::int64_t>::max() - ledger.balance[recipient])
+  if (amount > std::numeric_limits<std::int64_t>::max() - balance(ledger, recipient))
     return {Reason::BalanceOverflow};
   spend(grants, permission.grant, amount, now);
-  ledger.balance[payer] -= amount;
+  ledger.balance[payer.account] -= amount;
   ledger.balance[recipient] += amount;
   return {Reason::Allowed, amount};
 }
 
-TransferResult issue(Ledger &ledger, Grants &grants, Holder actor, PlayerId recipient,
+TransferResult issue(Ledger &ledger, Grants &grants, Holder actor, Account recipient,
                      std::int64_t amount, Step now) {
-  if (!recipient || recipient >= ledger.balance.size())
+  if (!recipient.subject)
     return {Reason::UnknownHolder};
   if (amount < 0)
     return {Reason::BadAmount};
   const auto permission = budget(grants, find(grants, actor, Scope::issuance()), amount, now);
   if (!permission)
     return {permission.reason};
-  if (amount > std::numeric_limits<std::int64_t>::max() - ledger.balance[recipient])
+  if (amount > std::numeric_limits<std::int64_t>::max() - balance(ledger, recipient))
     return {Reason::BalanceOverflow};
   spend(grants, permission.grant, amount, now);
   ledger.balance[recipient] += amount;
   return {Reason::Allowed, amount};
+}
+
+Reason can_refund_object_accounts(const Ledger &ledger, AuthorityRead authority,
+                                  std::span<const Handle> objects) {
+  std::map<PlayerId, std::int64_t> refunds;
+  for (auto object : objects) {
+    const auto amount = balance(ledger, Account::object(object));
+    if (!amount)
+      continue;
+    const auto owner = authority.owner[object.slot()];
+    auto &total = refunds[owner];
+    if (amount > std::numeric_limits<std::int64_t>::max() - total)
+      return Reason::BalanceOverflow;
+    total += amount;
+  }
+  for (const auto &[owner, amount] : refunds)
+    if (amount > std::numeric_limits<std::int64_t>::max() - balance(ledger, Account::player(owner)))
+      return Reason::BalanceOverflow;
+  return Reason::Allowed;
+}
+
+std::vector<AccountRefund> refund_object_accounts(Ledger &ledger, AuthorityRead authority,
+                                                  std::span<const Handle> objects) {
+  assert(can_refund_object_accounts(ledger, authority, objects) == Reason::Allowed);
+  std::vector<AccountRefund> refunds;
+  for (auto object : objects) {
+    const auto account = Account::object(object);
+    const auto row = ledger.balance.find(account);
+    if (row == ledger.balance.end())
+      continue;
+    const auto owner = authority.owner[object.slot()];
+    const auto amount = row->second;
+    ledger.balance[Account::player(owner)] += amount;
+    ledger.balance.erase(row);
+    if (amount)
+      refunds.push_back({object, owner, amount});
+  }
+  return refunds;
 }
 
 namespace {
@@ -506,6 +594,10 @@ std::vector<Handle> part_handles(std::span<const Target> parts) {
   for (const auto &part : parts)
     handles.push_back(part.object);
   return handles;
+}
+void close_offer(Offers &offers, Offer &row) {
+  offers.expiring.erase({row.expires_step, row.id});
+  row.live = false;
 }
 void escrow_parts(PermissionFlags flags, std::span<const Handle> parts, bool set) {
   for (auto handle : parts) {
@@ -576,7 +668,7 @@ OfferResult cancel_offer(Offers &offers, PermissionFlags flags, Holder actor, co
   const auto permission = check(actor, Verb::Transfer, goods, players, grants, now);
   if (!permission)
     return {permission.reason, 0, {}};
-  row.live = false;
+  close_offer(offers, row);
   flags.set(goods.object.slot(), flags.get(goods.object.slot()) & ~Escrow);
   escrow_parts(flags, row.parts, false);
   return {Reason::Allowed, id, {{goods.object, {}, true}}};
@@ -600,7 +692,7 @@ std::vector<OfferId> advance_offers(Offers &offers, IdentityRead identity, Permi
     auto &row = offers.rows[id];
     if (!row.live || row.trade || row.expires_step != due)
       continue;
-    row.live = false;
+    close_offer(offers, row);
     if (identity.valid(row.goods))
       flags.set(row.goods.slot(), flags.get(row.goods.slot()) & ~Escrow);
     for (auto part : row.parts)
@@ -639,7 +731,8 @@ SwapResult accept(Offers &offers, Ledger &ledger, Grants &grants, Players &playe
   if (!buyer.present && recipient.mailbox.size() >= mailbox_max)
     return {Reason::MailboxFull, {}, {}};
   if (row.price) {
-    const auto payment = pay(ledger, grants, buyer.actor, buyer.payer, row.seller, row.price, now);
+    const auto payment =
+        pay(ledger, grants, buyer.actor, buyer.payer, Account::player(row.seller), row.price, now);
     if (!payment)
       return {payment.reason, {}, {}};
   }
@@ -649,7 +742,7 @@ SwapResult accept(Offers &offers, Ledger &ledger, Grants &grants, Players &playe
   (buyer.present ? recipient.inventory : recipient.mailbox).push_back(goods.object);
   flags.set(goods.object.slot(), flags.get(goods.object.slot()) & ~Escrow);
   escrow_parts(flags, row.parts, false);
-  row.live = false;
+  close_offer(offers, row);
   return {Reason::Allowed,
           {{goods.object, buyer.present ? buyer.custodian : Handle{}, false}},
           std::move(revoked)};
@@ -680,36 +773,33 @@ SwapResult give(Players &players, Grants &grants, AuthorityWrite authority, Perm
   return {Reason::Allowed, {{goods.object, present ? body : Handle{}, false}}, std::move(revoked)};
 }
 
-StoreGoodsPlan prepare_store_goods(const Players &players, const Grants &grants, Holder actor,
-                                   const Target &goods, std::span<const Target> parts,
-                                   PlayerId recipient, Handle body, bool present,
-                                   std::size_t mailbox_max, Step now) {
+SwapResult store_goods(Players &players, const Grants &grants, Holder actor, const Target &goods,
+                       std::span<const Target> parts, PlayerId recipient, Handle body, bool present,
+                       std::size_t mailbox_max, Step now) {
   if (goods.flags & Body)
-    return {Reason::NotGoods, {}, {}, 0, false};
+    return {Reason::NotGoods, {}, {}};
   if (goods.flags & Escrow)
-    return {Reason::InEscrow, {}, {}, 0, false};
+    return {Reason::InEscrow, {}, {}};
   if (!recipient || recipient >= players.rows.size())
-    return {Reason::UnknownHolder, {}, {}, 0, false};
+    return {Reason::UnknownHolder, {}, {}};
   if (recipient != goods.owner)
-    return {Reason::NotController, {}, {}, 0, false};
-  auto permission = check(actor, Verb::Transfer, goods, players, grants, now);
+    return {Reason::NotController, {}, {}};
+  const auto permission = check(actor, Verb::Transfer, goods, players, grants, now);
   if (!permission)
-    return {permission.reason, {}, {}, 0, false};
-  auto components = check_parts(goods, parts);
+    return {permission.reason, {}, {}};
+  const auto components = check_parts(goods, parts);
   if (!components)
-    return {components.reason, {}, {}, 0, false};
-  const auto &mailbox = players.rows[recipient].mailbox;
-  if (!present && mailbox.size() >= mailbox_max &&
-      std::find(mailbox.begin(), mailbox.end(), goods.object) == mailbox.end())
-    return {Reason::MailboxFull, {}, {}, 0, false};
-  return {Reason::Allowed, goods.object, present ? body : Handle{}, recipient, present};
-}
-void commit_store_goods(Players &players, const StoreGoodsPlan &plan) {
-  assert(plan);
-  auto &player = players.rows[plan.recipient];
-  std::erase(player.inventory, plan.goods);
-  std::erase(player.mailbox, plan.goods);
-  (plan.present ? player.inventory : player.mailbox).push_back(plan.goods);
+    return {components.reason, {}, {}};
+  auto &player = players.rows[recipient];
+  if (!present && player.mailbox.size() >= mailbox_max &&
+      std::find(player.mailbox.begin(), player.mailbox.end(), goods.object) == player.mailbox.end())
+    return {Reason::MailboxFull, {}, {}};
+  auto &stored = present ? player.inventory : player.mailbox;
+  auto &other = present ? player.mailbox : player.inventory;
+  std::erase(other, goods.object);
+  if (std::find(stored.begin(), stored.end(), goods.object) == stored.end())
+    stored.push_back(goods.object);
+  return {Reason::Allowed, {{goods.object, present ? body : Handle{}, false}}, {}};
 }
 
 std::vector<CustodyChange> deliver_mailbox(Players &players, PlayerId id, Handle body) {
@@ -772,7 +862,7 @@ TradeResult change_trade(Trades &trades, Offers &offers, PermissionFlags flags,
   }
   TradeResult result{Reason::Allowed, id, false, {}, {}};
   if (previous.offer) {
-    offers.rows[previous.offer].live = false;
+    close_offer(offers, offers.rows[previous.offer]);
     if (old_goods && (!goods || old_goods != goods->object)) {
       flags.set(old_goods.slot(), flags.get(old_goods.slot()) & ~Escrow);
       escrow_parts(flags, offers.rows[previous.offer].parts, false);
@@ -812,7 +902,7 @@ std::vector<CustodyChange> invalidate_goods_offers(Offers &offers, Trades &trade
         flags.set(part.slot(), flags.get(part.slot()) & ~Escrow);
       }
       custody.push_back({row.goods, {}, true});
-      row.live = false;
+      close_offer(offers, row);
     }
   }
   return custody;
@@ -848,7 +938,7 @@ TradeResult confirm_trade(Trades &trades, Offers &offers, Ledger &ledger, Grants
       if (!components)
         return {components.reason, id, false, {}, {}};
     }
-    const auto available = balance(ledger, trade.players[side]);
+    const auto available = balance(ledger, Account::player(trade.players[side]));
     if (available < part.money)
       return {Reason::InsufficientBalance, id, false, {}, {}};
     const auto remainder = available - part.money;
@@ -864,7 +954,7 @@ TradeResult confirm_trade(Trades &trades, Offers &offers, Ledger &ledger, Grants
     return result;
   // Both players spend their own wallets. Two fixed final balances avoid a partial pair of pays.
   for (std::size_t index = 0; index != 2; ++index)
-    ledger.balance[trade.players[index]] = final_balance[index];
+    ledger.balance[Account::player(trade.players[index])] = final_balance[index];
   for (std::size_t index = 0; index != 2; ++index) {
     auto &row = offers.rows[trade.sides[index].offer];
     if (row.goods) {
@@ -878,7 +968,7 @@ TradeResult confirm_trade(Trades &trades, Offers &offers, Ledger &ledger, Grants
       escrow_parts(flags, row.parts, false);
       result.custody.push_back({row.goods, bodies[1 - index], false});
     }
-    row.live = false;
+    close_offer(offers, row);
   }
   trade.live = false;
   result.completed = true;
@@ -905,7 +995,7 @@ TradeResult cancel_trade(Trades &trades, Offers &offers, PermissionFlags flags, 
       escrow_parts(flags, row.parts, false);
       result.custody.push_back(side.prior_custody);
     }
-    row.live = false;
+    close_offer(offers, row);
   }
   trade.live = false;
   return result;

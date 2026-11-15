@@ -1,6 +1,6 @@
 # Bake subsystem contract
 
-Version 1, implementing original S8. This is the interface between the Python bake worker, asset consumers and the future HTTP adapter. Baking has no access to live world tables. A successful completion is an ordinary model-registration input on the server's writer. The server assigns the model ID and attribution; geometry cache identity never substitutes for model identity.
+Version 1, implementing original S8. This is the interface between the Python bake worker, asset consumers and the HTTP adapter. Baking has no access to live world tables. A successful completion is an ordinary model-registration input on the server's writer. The server assigns the model ID and attribution; geometry cache identity never substitutes for model identity.
 
 ## Requests and completion
 
@@ -33,7 +33,8 @@ All integers/floats are little-endian. `index_count` is divisible by three. The 
 {
   "version": 1,
   "hash": "64-lowercase-hex",
-  "bake_version": "ambergris-bake-1",
+  "geometry_hash": "64-lowercase-hex",
+  "bake_version": "ambergris-bake-4",
   "coordinates": "z_up_meters",
   "params": {"height": 0.1},
   "parameter_schema": {"height": [0.1, 0.05, 0.3]},
@@ -56,6 +57,8 @@ All integers/floats are little-endian. `index_count` is divisible by three. The 
 
 The sample polygon/numbers illustrate field types, not a geometrically valid cup. Bounds/size/volume/capacity/supports are measured, never copied from claimed metadata. `mass` is not stored: the engine evaluates measured solid volume times current material density. Static mesh/convex artifacts are geometry only. Site/part/render/state declarations are extracted as JSON-compatible data; native consumers resolve registered term names and validate their roles.
 
+`geometry_hash` is SHA-256 over the three ordered GLB files, each preceded by its little-endian u64 byte length. It identifies render geometry independently of authored asset identity, text, material and settings. The viewer shares GLB imports and opaque instance batches by this digest and LOD; different materials retain separate batches. Distinct part manifests remain independently inspectable.
+
 ## Geometry execution
 
 A program exports `PARAMS`, optional `MATERIAL`, `SCRIPT`, `SITES`, `PARTS`, `REPLICATED`, `BINDINGS`, and `build(params)`. The result is a valid build123d solid or compound of closed solids, in meters, base Z=0 and centered in XY. All source code runs in a forked job child, including declaration evaluation. No metadata extraction executes untrusted code in the supervisor.
@@ -63,6 +66,8 @@ A program exports `PARAMS`, optional `MATERIAL`, `SCRIPT`, `SITES`, `PARTS`, `RE
 `amb.shapes` provides box, slab, cylinder, sphere, hollow_box, hollow_cylinder and stair. These return actual build123d shapes. Exact capacity provenance is retained only while the returned topology is unchanged; Boolean edits or arbitrary geometry use voxel capacity. Standard stair construction validates rise/run/width from config. Arbitrary build123d remains supported.
 
 Solid volume is OCCT volume. Supports are upward planar faces within the configured normal/area criteria. Tessellation uses configured absolute/relative tolerance and fails beyond the triangle/bounds limits. Meshoptimizer generates 40% and 10% target LODs with topology-preserving error limits; actual counts are recorded because topology may prevent the exact target. General capacity implements S8's surface-conservative voxel marking and priority flood at `CAPACITY_GRID`, with one padded exterior layer. Standard hollows have exact parameter capacity. No model/term/name recognizer supplies a result.
+
+Within one job, exact float32 mesh vertices/indices and the fixed native request select reusable compiled collision, capacity and GLB artifacts. Every part still receives freshly measured CAD bounds, volume and supports. The imported complete assembly is topology-validated once; selecting its solids and applying rigid locations does not require repeating that same validation. Supervisor publication similarly validates identical artifact bytes once per publication while checking every manifest's own triangle counts. Neither cache survives the job or uses authored claims as a key.
 
 ### Moving parts are ordinary child assets
 
@@ -80,7 +85,7 @@ One warm trusted Python worker imports build123d before jobs. Every job forks a 
 
 Startup probes each required facility and reports specific failed operations. Strict production mode requires cgroup delegation, namespaces, bubblewrap, seccomp and Landlock; it never silently executes in the service process. Explicit `require_cgroup=False` selects a restricted-host test mode that still enforces namespaces, Landlock, seccomp, address-space and CPU limits; every result marks that limitation. It is not a pass of the original cgroup gate. The trusted pipeline may also be exercised directly by labelled internal geometry tests. Passing those tests does not count as passing any sandbox gate.
 
-Errors have `{stage, message}` and optional numeric diagnostics; no traceback with environment/secret data is returned to a caller. Job timing records warm import, fork/setup, CAD build, tessellation, capacity, native/LOD/collision and total durations separately. Timeouts terminate the job cgroup, not an arbitrary process-name match. Partial directories are never published. Cache hits validate the final manifest and return separately recorded cache timing.
+Errors have `{stage, message}` and optional numeric diagnostics; no traceback with environment/secret data is returned to a caller. Benchmarks report coarse total job time separately from warm import and cache hits. Timeouts terminate the job cgroup, not an arbitrary process-name match. Partial directories are never published. Cache hits validate the final manifest.
 
 ## Sources and checks
 

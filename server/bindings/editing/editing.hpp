@@ -5,7 +5,9 @@
 
 namespace amber::bindings {
 struct MetadataChanges;
-}
+struct RegistryPersistence;
+struct MaterialRefresh;
+} // namespace amber::bindings
 namespace amber::bindings::editing {
 using Json = nlohmann::json;
 struct Declarations {
@@ -43,6 +45,7 @@ struct ScriptEditing {
   const control::Profiles &profiles;
   TermId start_event = 0;
   MetadataChanges &changes;
+  const perm::Groups &groups;
 };
 struct TextEditing {
   catalog::InstanceTexts &instance_texts;
@@ -66,18 +69,14 @@ struct PropertyEditing {
   std::array<TermId, 4> mechanical_relations{};
   MetadataChanges &changes;
 };
-struct RegistryCommit {
-  void *local = nullptr;
-  catalog::Hash (*publish)(void *, std::span<const TermId> new_terms,
-                           std::span<const TermId> changed_materials) = nullptr;
-};
 struct RegistryEditing {
   react::Terms &terms;
   react::Materials &materials;
   const react::ValueRead &values;
   const control::Profiles &profiles;
-  RegistryCommit commit;
+  RegistryPersistence &persistence;
   MetadataChanges &changes;
+  MaterialRefresh &physics;
 };
 // Registers all twelve editing actions; contexts outlive the operation registry.
 void register_actions(drive::NativeOperations &, const Declarations &, ScriptEditing &,

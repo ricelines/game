@@ -108,13 +108,6 @@ PushResult enqueue_event(WorkQueues &q, EventWork w, std::size_t limit) {
   ++q.emitted_events;
   return PushResult::Queued;
 }
-PushResult enqueue_action(WorkQueues &q, ActionWork w, std::size_t limit) {
-  if (q.emitted_events >= limit)
-    return PushResult::Overflow;
-  q.causal.push_back({std::move(w), {}});
-  ++q.emitted_events;
-  return PushResult::Queued;
-}
 PushResult enqueue_watch(WorkQueues &q, WatchWork w) {
   if (!q.watch_queued.insert(w.source).second)
     return PushResult::Coalesced;

@@ -6,11 +6,10 @@ end
 return {
     kind='rule', applies_to={flag='base.fabricator'},
     actions={
-        ['base.make_material']={right='use',right_on='self'},
-        ['base.place']={right='use',right_on='self'},
-        ['base.dismantle']={right='use',right_on='self'},
-        ['base.reconfigure']={right='use',right_on='self'},
-        ['base.revise_model']={right='use',right_on='self'},
+        ['base.make_material']={right='use'},
+        ['base.place']={right='use'},
+        ['base.dismantle']={right='use'},
+        ['base.reconfigure']={right='use'},
     },
     tests={{given={subject='target',state={['base.charge']=1}},
         when={action={term='base.make_material',target='target',args={material='base.wood',kg=1}}},
@@ -18,23 +17,23 @@ return {
     on={
         ['base.make_material']=function(self, _, args)
             assert(args.kg > 0, 'Material mass must be positive.')
-            self:exchange({state={[args.material]=(self.state[args.material] or 0)+args.kg}})
+            self.state[args.material] = (self.state[args.material] or 0)+args.kg
         end,
         ['base.place']=function(self, _, args)
-            self:create(args.model,args.params,args.material,args.position,rotation(args.yaw))
+            local result = self:act('engine.create',nil,{model=args.model,params=args.params,material=args.material,
+                position=args.position,rotation=rotation(args.yaw)})
+            assert(result.ok,result.problem or result.error or 'Placement denied.')
         end,
-        ['base.dismantle']=function(self)
-            local target = self:context().selected
+        ['base.dismantle']=function(self, target)
             assert(target,'Select goods to dismantle.')
-            self:remove(target)
+            local result = self:act('engine.destroy',target,{})
+            assert(result.ok,result.problem or result.error or 'Dismantling denied.')
         end,
-        ['base.reconfigure']=function(self, _, args)
-            local target = self:context().selected
+        ['base.reconfigure']=function(self, target, args)
             assert(target,'Select goods to reconfigure.')
-            self:replace(target,args.model,args.params,args.material)
+            local result = self:act('engine.reconfigure',target,{model=args.model,params=args.params,material=args.material})
+            assert(result.ok,result.problem or result.error or 'Reconfiguration denied.')
         end,
-        ['base.revise_model']=function(self, _, args)
-            self:revise_model(args.model,args.revision_model,args.expected_source_hash)
-        end,
+
     },
 }

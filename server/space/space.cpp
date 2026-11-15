@@ -102,6 +102,14 @@ bool navigates(const Mirror &body) {
          (body.spec.navigation_surface || body.spec.navigation_obstacle);
 }
 void native_pose(Space::Native &n, Mirror &body, Pose pose) {
+  if ((pose.position != body.pose.position || pose.rotation != body.pose.rotation) &&
+      (body.spec.motion == Motion::Static || n.compound_parent.contains(body.spec.object.bits) ||
+       (body.character && n.attachments.contains(body.spec.object.bits)))) {
+    // Static query parts and attached virtual characters do not run Jolt's
+    // ordinary moving-body/virtual-character sensor contact update.
+    body.membership.reconcile_zones = true;
+    body.membership.containers_dirty = true;
+  }
   if (body.character) {
     body.character->SetPosition(jv(pose.position));
     body.character->SetRotation(jq(pose.rotation));
@@ -171,10 +179,12 @@ void extract_native(Space::Native &n, Handle object) {
     const auto &contact = entry.second;
     if (contact.first != object && contact.second != object)
       return false;
-    auto removed = contact;
-    removed.started = false;
-    removed.causes = native_causes(n, removed.first, removed.second);
-    n.contacts.push_back(removed);
+    if (!contact.sensor) {
+      auto removed = contact;
+      removed.started = false;
+      removed.causes = native_causes(n, removed.first, removed.second);
+      n.contacts.push_back(removed);
+    }
     return true;
   });
   n.character_handles.erase(object.bits);
@@ -323,9 +333,38 @@ class SolidObjects final : public JPH::ObjectLayerFilter {
 public:
   bool ShouldCollide(JPH::ObjectLayer l) const override { return l != 2 && l != 4; }
 };
-void membership(Space::Native &n, IdentityRead identity, ParentWrite parents,
+std::vector<Handle> overlapping_zones(Space::Native &n, IdentityRead identity, const Mirror &body) {
+  class Sensors final : public JPH::ObjectLayerFilter {
+    bool ShouldCollide(JPH::ObjectLayer layer) const override { return layer == 2; }
+  } sensors;
+  const auto shape = body.character ? body.character->GetShape()
+                                    : n.physics.GetBodyInterface().GetShape(body.body).GetPtr();
+  const auto transform =
+      JPH::RMat44::sRotationTranslation(jq(body.pose.rotation), jv(body.pose.position))
+          .PreTranslated(shape->GetCenterOfMass());
+  JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> hits;
+  n.physics.GetNarrowPhaseQuery().CollideShape(shape, JPH::Vec3::sReplicate(1), transform,
+                                               JPH::CollideShapeSettings{}, JPH::RVec3::sZero(),
+                                               hits, {}, sensors);
+  std::vector<Handle> zones;
+  for (const auto &hit : hits.mHits) {
+    const auto volume = std::ranges::find(n.volumes, hit.mBodyID2, &Volume::body);
+    if (volume != n.volumes.end() && volume->spec.kind == VolumeKind::Zone &&
+        volume->spec.owner != body.spec.object && identity.valid(volume->spec.owner))
+      zones.push_back(volume->spec.owner);
+  }
+  std::sort(zones.begin(), zones.end());
+  zones.erase(std::unique(zones.begin(), zones.end()), zones.end());
+  return zones;
+}
+void membership(Space &space, IdentityRead identity, ParentWrite parents,
                 PhysicalRelations &relations, std::vector<RelationChange> &changes, Step now,
                 float seconds) {
+  auto &n = *space.native;
+  for (const auto &change : n.zone_changes)
+    if (identity.valid(change.from) && identity.valid(change.to))
+      edge(relations.in_zone, RelationKind::InZone, change.from, change.to, change.added, changes);
+  n.zone_changes.clear();
   for (auto bits : n.dirty_objects) {
     Handle object{bits};
     if (!identity.valid(object))
@@ -334,44 +373,53 @@ void membership(Space::Native &n, IdentityRead identity, ParentWrite parents,
     if (found == n.bodies.end())
       continue;
     auto &body = found->second;
-    auto center = body.character
-                      ? body.pose.position + Vec3{0, 0, body.spec.character->height_m * .5f}
-                      : av(n.physics.GetBodyInterface().GetCenterOfMassPosition(body.body));
+    auto &predicted = body.membership;
+    const bool reconcile = predicted.reconcile_zones;
+    if (reconcile) {
+      // New/rebuilt/explicitly relocated static geometry has no historical
+      // sensor contacts. Ordinary motion uses the contact changes above.
+      set_out(relations.in_zone, RelationKind::InZone, object, overlapping_zones(n, identity, body),
+              changes);
+      predicted.reconcile_zones = false;
+    }
+    if (!predicted.containers_dirty)
+      continue;
+    const auto center = body.character
+                            ? body.pose.position + Vec3{0, 0, body.spec.character->height_m * .5f}
+                            : av(n.physics.GetBodyInterface().GetCenterOfMassPosition(body.body));
+    if (!reconcile && predicted.volumes == n.volume_revision && center == predicted.center) {
+      predicted.containers_dirty = false;
+      continue;
+    }
     const bool following = body.character && body.intent && body.waypoint < body.route.size() &&
                            !n.attachments.contains(bits);
-    auto &predicted = body.membership;
-    if (following && predicted.volumes == n.volume_revision &&
+    if (!reconcile && following && predicted.volumes == n.volume_revision &&
         predicted.path == body.path_revision && now < predicted.due) {
-      auto expected =
+      const auto expected =
           predicted.center + predicted.velocity * (float(now - predicted.sampled) * seconds);
       if ((expected - center).length_squared() <=
           n.settings.contact_slop_m * n.settings.contact_slop_m)
         continue;
     }
-    std::vector<Handle> zones, containers;
+    std::vector<Handle> containers;
+    volumes_at(space, identity, center, VolumeKind::Container, Deadline::max(), containers);
+    std::erase(containers, object);
     float smallest = INFINITY;
     Handle immediate;
-    for (const auto &volume : n.volumes) {
-      if (volume.spec.owner == object || !identity.valid(volume.spec.owner))
-        continue;
-      const auto &shape = *n.geometries[volume.spec.geometry];
-      if (!point_in(shape, volume.world, center))
-        continue;
-      if (volume.spec.kind == VolumeKind::Zone)
-        zones.push_back(volume.spec.owner);
-      else {
-        containers.push_back(volume.spec.owner);
-        auto size = shape.bounds.max - shape.bounds.min;
-        auto size3 = size.x * size.y * size.z;
-        if (size3 < smallest) {
-          smallest = size3;
-          immediate = volume.spec.owner;
-        }
+    for (auto container : containers) {
+      const auto volume = std::ranges::find_if(n.volumes, [&](const Volume &v) {
+        return v.spec.owner == container && v.spec.kind == VolumeKind::Container;
+      });
+      const auto &bounds = n.geometries[volume->spec.geometry]->bounds;
+      const auto size = bounds.max - bounds.min;
+      const auto size3 = size.x * size.y * size.z;
+      if (size3 < smallest) {
+        smallest = size3;
+        immediate = container;
       }
     }
-    set_out(relations.in_zone, RelationKind::InZone, object, zones, changes);
     auto *prior = relations.contains.in.get(object.slot());
-    auto previous = prior ? *prior : std::vector<Handle>{};
+    const auto previous = prior ? *prior : std::vector<Handle>{};
     for (auto container : previous)
       if (std::find(containers.begin(), containers.end(), container) == containers.end())
         edge(relations.contains, RelationKind::Contains, container, object, false, changes);
@@ -379,18 +427,20 @@ void membership(Space::Native &n, IdentityRead identity, ParentWrite parents,
       edge(relations.contains, RelationKind::Contains, container, object, true, changes);
     if (!n.attachments.contains(bits))
       parents.parent[object.slot()] = immediate;
-    predicted = {};
+    predicted = {now, 0, center, {}, n.volume_revision, body.path_revision, false, false};
     if (following) {
-      auto velocity = av(body.character->GetLinearVelocity());
+      const auto velocity = av(body.character->GetLinearVelocity());
       const float speed = velocity.length();
       if (speed > n.settings.contact_slop_m / seconds) {
-        float duration = (body.route[body.waypoint] - body.pose.position).length() / speed;
+        const float duration = (body.route[body.waypoint] - body.pose.position).length() / speed;
         float boundary = duration;
         for (const auto &volume : n.volumes) {
+          if (volume.spec.kind != VolumeKind::Container)
+            continue;
           const auto *shape = n.geometries[volume.spec.geometry]->mesh.GetPtr();
-          auto inverse = jq(volume.world.rotation).Conjugated();
-          auto from = inverse * jv(center - volume.world.position) - shape->GetCenterOfMass();
-          auto direction = inverse * jv(velocity * duration);
+          const auto inverse = jq(volume.world.rotation).Conjugated();
+          const auto from = inverse * jv(center - volume.world.position) - shape->GetCenterOfMass();
+          const auto direction = inverse * jv(velocity * duration);
           JPH::AllHitCollisionCollector<JPH::CastRayCollector> intersections;
           JPH::RayCastSettings settings;
           settings.SetBackFaceMode(JPH::EBackFaceMode::CollideWithBackFaces);
@@ -400,12 +450,8 @@ void membership(Space::Native &n, IdentityRead identity, ParentWrite parents,
             if (hit.mFraction > std::numeric_limits<float>::epsilon())
               boundary = std::min(boundary, hit.mFraction * duration);
         }
-        predicted = {now,
-                     now + std::max<Step>(1, Step(std::ceil(boundary / seconds))),
-                     center,
-                     velocity,
-                     n.volume_revision,
-                     body.path_revision};
+        predicted.due = now + std::max<Step>(1, Step(std::ceil(boundary / seconds)));
+        predicted.velocity = velocity;
       }
     }
   }
@@ -464,39 +510,83 @@ Space::~Space() = default;
 void Space::Native::Listener::OnContactAdded(const JPH::Body &a, const JPH::Body &b,
                                              const JPH::ContactManifold &m,
                                              JPH::ContactSettings &) {
-  if (a.IsSensor() || b.IsSensor())
+  add(a, b, m, true);
+}
+void sensor_contact_changed(Space::Native &n, const CachedContact &contact, bool added) {
+  if (contact.sensor == VolumeKind::Zone)
+    n.zone_changes.push_back({RelationKind::InZone, contact.first, contact.second, added});
+  else if (auto body = n.bodies.find(contact.first.bits); body != n.bodies.end()) {
+    body->second.membership.containers_dirty = true;
+    n.dirty_objects.insert(contact.first.bits);
+  }
+}
+bool has_sensor_contact(const Space::Native &n, const CachedContact &contact) {
+  auto matches = [&](const auto &pair) {
+    const auto &other = pair.second;
+    return other.sensor == contact.sensor && other.first == contact.first &&
+           other.second == contact.second;
+  };
+  return std::any_of(n.listener.pairs.begin(), n.listener.pairs.end(), matches) ||
+         std::any_of(n.character_listener.pairs.begin(), n.character_listener.pairs.end(), matches);
+}
+void Space::Native::Listener::add(const JPH::Body &a, const JPH::Body &b,
+                                  const JPH::ContactManifold &m, bool started) {
+  const JPH::SubShapeIDPair key{a.GetID(), m.mSubShapeID1, b.GetID(), m.mSubShapeID2};
+  if (a.IsSensor() || b.IsSensor()) {
+    const auto &sensor = a.IsSensor() ? a : b;
+    const auto &subject = a.IsSensor() ? b : a;
+    if (sensor.GetUserData() == subject.GetUserData())
+      return;
+    // Free characters use CharacterVirtual's callbacks; attached characters
+    // skip that update and are detected through their inner rigid body.
+    if (state.character_handles.contains(subject.GetUserData()) &&
+        !state.attachments.contains(subject.GetUserData()))
+      return;
+    auto found = pairs.find(key);
+    if (found == pairs.end()) {
+      const auto volume = std::ranges::find(state.volumes, sensor.GetID(), &Volume::body);
+      if (volume == state.volumes.end())
+        return;
+      CachedContact contact{{{subject.GetUserData()}, {sensor.GetUserData()}, {}, {}, true, {}},
+                            volume->spec.kind};
+      pairs.emplace(key, contact);
+      sensor_contact_changed(state, contact, true);
+    } else if (found->second.sensor == VolumeKind::Container) {
+      const auto subject_body = state.bodies.find(found->second.first.bits);
+      if (subject_body != state.bodies.end())
+        subject_body->second.membership.containers_dirty = true;
+    }
     return;
+  }
   Contact contact{{a.GetUserData()},
                   {b.GetUserData()},
                   av(m.GetWorldSpaceContactPointOn1(0)),
                   av(m.mWorldSpaceNormal),
-                  true,
+                  started,
                   native_causes(state, {a.GetUserData()}, {b.GetUserData()})};
-  pairs[{a.GetID(), m.mSubShapeID1, b.GetID(), m.mSubShapeID2}] = contact;
-  state.contacts.push_back(contact);
+  pairs[key] = {contact, {}};
+  if (started)
+    state.contacts.push_back(contact);
 }
 void Space::Native::Listener::OnContactRemoved(const JPH::SubShapeIDPair &ids) {
   auto it = pairs.find(ids);
   if (it != pairs.end()) {
     auto contact = it->second;
+    pairs.erase(it);
+    if (contact.sensor) {
+      if (!has_sensor_contact(state, contact))
+        sensor_contact_changed(state, contact, false);
+      return;
+    }
     contact.started = false;
     contact.causes = native_causes(state, contact.first, contact.second);
     state.contacts.push_back(contact);
-    pairs.erase(it);
   }
 }
 void Space::Native::Listener::OnContactPersisted(const JPH::Body &a, const JPH::Body &b,
                                                  const JPH::ContactManifold &manifold,
                                                  JPH::ContactSettings &) {
-  if (a.IsSensor() || b.IsSensor())
-    return;
-  pairs[{a.GetID(), manifold.mSubShapeID1, b.GetID(), manifold.mSubShapeID2}] = {
-      {a.GetUserData()},
-      {b.GetUserData()},
-      av(manifold.GetWorldSpaceContactPointOn1(0)),
-      av(manifold.mWorldSpaceNormal),
-      false,
-      native_causes(state, {a.GetUserData()}, {b.GetUserData()})};
+  add(a, b, manifold, false);
 }
 Bounds Space::Native::world_bounds(const Mirror &body) const {
   return world_bounds(body, body.pose);
@@ -1008,12 +1098,18 @@ OperationResult add_volume(Space &space, IdentityRead identity, TransformRead tr
   auto pose =
       compose({transforms.position[spec.owner.slot()], transforms.rotation[spec.owner.slot()]},
               spec.local_pose);
-  JPH::BodyCreationSettings settings(n.geometries[spec.geometry]->mesh, jv(pose.position),
-                                     jq(pose.rotation), JPH::EMotionType::Static, 2);
+  const auto &geometry = *n.geometries[spec.geometry];
+  // Authored volumes are solid sensor boxes; imported fixtures may carry a
+  // triangle surface plus its solid convex representation.
+  const auto *shape = geometry.hull ? geometry.hull.GetPtr() : geometry.mesh.GetPtr();
+  JPH::BodyCreationSettings settings(shape, jv(pose.position), jq(pose.rotation),
+                                     JPH::EMotionType::Kinematic, 2);
+  // Active kinematic sensors track sleeping and static subjects too.
   settings.mIsSensor = true;
+  settings.mCollideKinematicVsNonDynamic = true;
+  settings.mAllowSleeping = false;
   settings.mUserData = spec.owner.bits;
-  auto body =
-      n.physics.GetBodyInterface().CreateAndAddBody(settings, JPH::EActivation::DontActivate);
+  auto body = n.physics.GetBodyInterface().CreateAndAddBody(settings, JPH::EActivation::Activate);
   if (body.IsInvalid())
     return {Status::UnsupportedMotion, {}};
   n.handles[body.GetIndexAndSequenceNumber()] = spec.owner;
@@ -1739,6 +1835,8 @@ void step(Space &space, IdentityRead identity, TransformWrite transforms, Parent
       } else if (body.spec.motion != Motion::Static) {
         for (const auto &[pair, contact] : n.listener.pairs) {
           (void)pair;
+          if (contact.sensor)
+            continue;
           if (contact.first.bits == bits && contact.normal.z < 0)
             support = contact.second;
           if (contact.second.bits == bits && contact.normal.z > 0)
@@ -1787,7 +1885,7 @@ void step(Space &space, IdentityRead identity, TransformWrite transforms, Parent
         n.wake(bounds);
       }
     }
-  membership(n, identity, parents, relations, out.relations, now, seconds);
+  membership(space, identity, parents, relations, out.relations, now, seconds);
   for (auto &change : out.relations)
     change.causes = native_causes(n, change.from, change.to);
   n.dirty_objects.clear();

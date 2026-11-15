@@ -87,22 +87,11 @@ void unlink(WatchLinks &links, WatchKey key) {
       links.by_dependency.erase(index);
   }
   links.rows.erase(found);
-  auto consumer = links.by_consumer.find(key.consumer);
-  std::erase(consumer->second, key);
-  if (consumer->second.empty()) {
-    links.by_consumer.erase(consumer);
-    auto scripts = links.by_script.find(key.consumer.script);
-    std::erase(scripts->second, key.consumer);
-    if (scripts->second.empty())
-      links.by_script.erase(scripts);
-  }
 }
 void link(WatchLinks &links, WatchKey key, WatchLink value) {
   unlink(links, key);
   for (auto dependency : value.dependencies)
     unique(links.by_dependency[dependency], key);
-  unique(links.by_consumer[key.consumer], key);
-  unique(links.by_script[key.consumer.script], key.consumer);
   links.rows.emplace(key, std::move(value));
 }
 void arm(WatchChanges &result, const react::Subscriptions &subscriptions,
@@ -142,11 +131,14 @@ void remove_watches(react::Subscriptions &subscriptions, WatchLinks &links, Scri
     react::unbind_watch(subscriptions, consumer, key.index);
     unlink(links, key);
   }
-  if (auto found = links.by_consumer.find(consumer); found != links.by_consumer.end()) {
-    const auto keys = found->second;
-    for (auto key : keys)
-      unlink(links, key);
+  std::vector<WatchKey> remaining;
+  for (const auto &[key, value] : links.rows) {
+    (void)value;
+    if (key.consumer == consumer)
+      remaining.push_back(key);
   }
+  for (const auto key : remaining)
+    unlink(links, key);
 }
 WatchChanges sync_watches(react::Subscriptions &subscriptions, WatchLinks &links,
                           const react::ValueRead &values, const react::AllocationRows &allocations,

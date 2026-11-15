@@ -1,3 +1,4 @@
+#include "checked_actions_fixture.hpp"
 #include "space_fixture.hpp"
 
 #include "bindings/controls/controls.hpp"
@@ -17,6 +18,7 @@ void only_actual_player_actions_are_chosen_events() {
   f.objects.owner[f.b.slot()] = 1;
   f.objects.owner[f.c.slot()] = 2;
   f.objects.model[f.b.slot()] = 2;
+  f.objects.model[f.c.slot()] = 2;
   f.models.rows.resize(3);
   f.models.rows[2].id = 2;
   const auto script = f.add(R"(return {kind='model',actions={['novel.touch']={right='use'}},
@@ -32,9 +34,10 @@ void only_actual_player_actions_are_chosen_events() {
   perm::Grants grants;
   const auto holder = perm::Holder::script(script, f.a);
   const auto scope = perm::Scope::object(f.a);
-  const auto grant = perm::create_grant(
-      grants, players, {1, holder, scope, perm::bit(perm::Verb::Use), 0, 0, 1000},
-      {scope, 1, perm::all_rights, 0, false}, {holder, 1, true}, 0);
+  const auto grant =
+      perm::create_grant(grants, players, perm::Holder::player(1),
+                         {1, holder, scope, perm::bit(perm::Verb::Use), 0, 0, 1000},
+                         {scope, 1, perm::all_rights, 0, false}, {holder, 1, true}, 0);
   require(bool(grant), "real script action requires its explicit object grant");
   control::Profiles profiles;
   profiles.rows.resize(3);
@@ -42,9 +45,8 @@ void only_actual_player_actions_are_chosen_events() {
   profiles.rows[1].body = f.b;
   profiles.rows[2].id = 2;
   profiles.rows[2].body = f.c;
-  Relation parts, grasped;
+  Relation parts;
   bindings::Execution execution{f.vm, f.states, f.random, identity(f.objects), parts, 7};
-  drive::StructuralOperations structural;
   drive::Clock clock;
   clock.step = 12;
   record::Journal journal(8, {});
@@ -55,19 +57,10 @@ void only_actual_player_actions_are_chosen_events() {
   react::MeterRows meters;
   react::PriorityLinks priorities;
   bindings::AllocationReconciliation allocation{f.allocations, meters, priorities};
-  bindings::HandlerTurns handlers{execution,
-                                  structural,
-                                  f.triggers,
-                                  *f.projection,
-                                  {f.subscriptions, f.links, f.scripts, f.rules},
-                                  journal,
-                                  queues,
-                                  timers,
-                                  mutated,
-                                  clock,
-                                  20,
-                                  1000,
-                                  allocation};
+  bindings::HandlerTurns handlers{
+      execution, f.triggers, *f.projection, {f.subscriptions, f.links, f.scripts, f.rules},
+      journal,   queues,     timers,        mutated,
+      clock,     20,         1000,          allocation};
   command::NativeActions declarations;
   drive::NativeOperations native;
   perm::OwnerLimits limits;
@@ -87,21 +80,13 @@ void only_actual_player_actions_are_chosen_events() {
                                 players,
                                 grants,
                                 physical,
-                                grasped,
                                 intents,
                                 gaps,
                                 2};
   const auto root = bindings::perform_action(actions, {PlayerId{1}, 7, f.a, Value{}}, {}, {});
-  require(root.reply.value("effect", "") == "applied" && queues.causal.size() == 1,
-          "actual chosen player action executes Lua and queues a real descendant action");
-  auto queued = step::pop_foreground(queues);
-  require(queued && std::holds_alternative<step::ActionWork>(queued->work),
-          "Lua self:act emits typed action work");
-  auto descendant = std::get<step::ActionWork>(std::move(queued->work));
-  const auto parent = descendant.origin;
-  require(std::get<ScriptHolder>(descendant.request.caller) == ScriptHolder{script, f.a},
-          "queued action retains the actual installed script holder");
-  bindings::consume_action(&actions, std::move(descendant));
+  require(root.reply.value("effect", "") == "applied" && queues.causal.empty(),
+          "player action finishes its real nested action before returning");
+  record::Origin parent;
   auto records = journal.take();
   require(records.size() == 4 && records[0]["kind"] == "action" && records[0]["actor"] == "p:1" &&
               records[0]["agent"] == true && records[0]["cause"].is_null() &&
@@ -110,11 +95,13 @@ void only_actual_player_actions_are_chosen_events() {
   require(
       records[2]["kind"] == "action" && records[2]["actor"] == "s:" + std::to_string(script) &&
           records[2]["agent"] == false && records[2]["cause"] == records[1]["id"] &&
-          records[2]["cause"] == parent.cause && records[2]["root"] == records[0]["id"] &&
-          records[2]["result"] == "applied" && records[3]["cause"] == records[2]["id"] &&
+          records[2]["root"] == records[0]["id"] && records[2]["result"] == "applied" &&
+          records[3]["cause"] == records[2]["id"] &&
           std::get<double>(f.states.at({f.a, script}).at(std::string("calls"))) == 2 &&
           queues.causal.empty(),
       "real nested script action is nonchosen while actor, handler cause, root and effect survive");
+  parent.cause = records[1]["id"].get<std::uint64_t>();
+  parent.root = records[0]["id"].get<std::uint64_t>();
   perm::revoke(grants, players, grant.grant);
   const auto denied =
       bindings::perform_action(actions, {ScriptHolder{script, f.a}, 7, f.a, Value{}}, {}, parent);
@@ -156,18 +143,14 @@ void only_actual_player_actions_are_chosen_events() {
               std::get<std::string>(f.states.at({f.a, typed}).at(std::string("note"))) == "omitted",
           "the advertised typed signature must invoke actual Lua with its optional field absent");
 
-  bindings::consume_event(&handlers, {step::EventWork{f.a, {}, 6, {}, {}}, {}});
-  auto malformed = step::pop_foreground(queues);
-  require(malformed && std::holds_alternative<step::ActionWork>(malformed->work),
-          "actual Lua action must reach the normal action queue");
-  auto bad_action = std::get<step::ActionWork>(std::move(malformed->work));
-  const auto rejected = bindings::perform_action(
-      actions, bad_action.request, observe::event_payload_json(bad_action.request.args),
-      bad_action.origin);
-  require(
-      rejected.reply["error"] == "bad_input" && rejected.reply["signature"] == signature &&
-          std::get<double>(f.states.at({f.a, typed}).at(std::string("amount"))) == 2.5,
-      "malformed actual Lua self:act must report the same signature without invoking its target");
+  journal.take();
+  bindings::consume_event(&actions, {step::EventWork{f.a, {}, 6, {}, {}}, {}});
+  records = journal.take();
+  require(queues.causal.empty() && records.size() == 2 &&
+              records[1]["response"]["error"] == "bad_input" &&
+              records[1]["response"]["signature"] == signature &&
+              std::get<double>(f.states.at({f.a, typed}).at(std::string("amount"))) == 2.5,
+          "actual Lua act returns and records the same typed rejection before continuing");
 
   observe::Hearing hearing;
   bindings::DoInput input_binding{actions, hearing, 40};
@@ -180,6 +163,7 @@ void only_actual_player_actions_are_chosen_events() {
                   {"args", {{"amount", "not a number"}}}};
   const auto action_response = [](nlohmann::json reply) {
     reply.erase("events");
+    reply.erase("heard");
     reply.erase("events_omitted");
     return reply;
   };
@@ -252,6 +236,46 @@ void only_actual_player_actions_are_chosen_events() {
               native_error.reply["problem"] == "amount is missing",
           "native descriptor validation must return the signature before its mutation adapter");
 }
+void canonical_action_results_and_reach() {
+  test_actions::Fixture f;
+  f.load(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={
+    ['novel.touch']=function(self,_,args)
+      self:navigate(vector.create(9,0,0),{speed_m_s=args.mode=='fast' and 9 or .3})
+    end}})");
+  auto result = f.player({}, {{"mode", "fast"}});
+  require(result.reply["effect"] == "started" &&
+              std::abs(result.reply["eta_s"].get<double>() - 5) < 1e-5,
+          "movement estimate uses the actual character speed clamp");
+  result = f.player({}, {{"mode", "slow"}});
+  require(result.reply["effect"] == "started" &&
+              std::abs(result.reply["eta_s"].get<double>() - 30) < 1e-5,
+          "movement estimate honors a slower authored intent");
+  f.load(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={}})");
+  result = f.player();
+  require(result.reply["effect"] == "none" && result.reply["reason"] == "no_handler" &&
+              f.gaps.empty(),
+          "declared action without a handler is distinct from an unmodeled gap");
+  f.f.models.rows[2].script = 0;
+  install::project_model(f.f.triggers, f.f.models, f.f.scripts, f.f.terms, 2);
+  result = f.player(f.f.b);
+  require(result.reply["reason"] == "not_modeled" && f.gaps.size() == 1,
+          "undeclared nearby action records an actual unmodeled gap");
+  result = f.player();
+  require(result.reply["reason"] == "not_modeled" && f.gaps.size() == 2,
+          "targetless fallback dispatch reaches the caller's own body for world rules");
+  require(space::set_pose(f.space, identity(f.f.objects), transforms(f.f.objects), f.f.b,
+                          {{0, 20, 0}, {}})
+                  .status == space::Status::Ok,
+          "move actual target beyond reach");
+  result = f.player(f.f.b);
+  require(result.reply["denied"]["need"] == "reach" &&
+              result.reply["denied"]["on"] == to_string(f.f.b) &&
+              result.reply["denied"]["fix"] == "move closer" && f.gaps.size() == 2,
+          "undeclared actions cannot bypass reach or create remote gap captures");
+  result = bindings::perform_action(f.actions, {PlayerId{2}, 7, f.f.b, Value{}}, {}, {});
+  for (const auto *field : {"need", "on", "why", "fix"})
+    require(result.reply["denied"].contains(field), "rights denial has every S5 result field");
+}
 void threshold_turn_uses_current_subscriptions_and_one_rearm(bool benchmark = false) {
   test_runtime::Fixture f;
   f.state(f.a, 1, 0);
@@ -296,7 +320,6 @@ void threshold_turn_uses_current_subscriptions_and_one_rearm(bool benchmark = fa
     step::schedule(timers, std::move(timer));
   Relation parts;
   bindings::Execution execution{f.vm, f.states, f.random, identity(f.objects), parts, 7};
-  drive::StructuralOperations structural;
   drive::Clock clock;
   record::Journal journal(8, {});
   journal.restore_next_id(10);
@@ -305,27 +328,42 @@ void threshold_turn_uses_current_subscriptions_and_one_rearm(bool benchmark = fa
   react::MeterRows meters;
   react::PriorityLinks priorities;
   bindings::AllocationReconciliation allocation{f.allocations, meters, priorities};
-  bindings::HandlerTurns handlers{execution,
-                                  structural,
-                                  f.triggers,
-                                  *f.projection,
-                                  {f.subscriptions, f.links, f.scripts, f.rules},
-                                  journal,
-                                  queues,
-                                  timers,
-                                  mutated,
-                                  clock,
-                                  20,
-                                  1000,
-                                  allocation};
-  bindings::WatchTurns watches{handlers, gaps};
+  bindings::HandlerTurns handlers{
+      execution, f.triggers, *f.projection, {f.subscriptions, f.links, f.scripts, f.rules},
+      journal,   queues,     timers,        mutated,
+      clock,     20,         1000,          allocation};
+  command::NativeActions declarations;
+  drive::NativeOperations native;
+  control::Profiles profiles;
+  perm::Players players;
+  perm::Grants grants;
+  perm::OwnerLimits limits;
+  step::Intents intents;
+  space::Space physical{testspace::settings()};
+  bindings::ActionTurns actions{handlers,
+                                declarations,
+                                native,
+                                f.models,
+                                f.scripts,
+                                f.installed,
+                                f.rules,
+                                profiles,
+                                authority(f.objects),
+                                transforms(f.objects),
+                                limits,
+                                players,
+                                grants,
+                                physical,
+                                intents,
+                                gaps,
+                                1.5f};
   auto advance = [&](Step step) {
     clock.step = step;
     step::promote_due(timers, step, queues);
     drive::Frame frame;
     frame.handler_deadline = drive::Monotonic::now() + std::chrono::seconds(2);
-    drive::drain_foreground(queues, frame, {&handlers, bindings::consume_event},
-                            {&watches, bindings::consume_watch}, {}, {});
+    drive::drain_foreground(queues, frame, {&actions, bindings::consume_event},
+                            {&actions, bindings::consume_watch}, {});
   };
   advance(21);
   for (auto key : std::array<ScriptKey, 2>{{{f.a, direct}, {f.b, along}}}) {
@@ -350,7 +388,7 @@ void threshold_turn_uses_current_subscriptions_and_one_rearm(bool benchmark = fa
               std::get<double>(f.states.at({f.b, along}).at(std::string("count"))) == 2 &&
               step::timers(timers).size() == 2,
           "later crossings retain one actual callback and bounded timer count per consumer");
-  bindings::consume_event(&handlers, {obsolete.event, obsolete.threshold});
+  bindings::consume_event(&actions, {obsolete.event, obsolete.threshold});
   require(queues.causal.empty(), "obsolete observed-answer token cannot enqueue another watch");
   auto binding = f.subscriptions.rows.at({f.a, 1})[0];
   const auto previous_high_water = f.subscriptions.next_revision;
@@ -387,7 +425,7 @@ void threshold_turn_uses_current_subscriptions_and_one_rearm(bool benchmark = fa
   auto sample_start = drive::Monotonic::now();
   for (std::size_t i = 0; i < rearms; ++i) {
     bindings::consume_event(
-        &handlers, {step::EventWork{f.a, {}, 6, Value(i % 2 ? .000001 : .000002), origin}, {}});
+        &actions, {step::EventWork{f.a, {}, 6, Value(i % 2 ? .000001 : .000002), origin}, {}});
     advance(41);
     require(timers.thresholds.size() == 2,
             "actual repeated Lua rate changes retain one pending threshold per own/along watch");
@@ -404,7 +442,7 @@ void threshold_turn_uses_current_subscriptions_and_one_rearm(bool benchmark = fa
               next.back().event.origin.cause == records.back()["id"] &&
               std::get<double>(f.states.at({f.a, direct}).at(std::string("count"))) == 2,
           "far-future replacement keeps exact latest Origin without inventing threshold callbacks");
-  bindings::consume_event(&handlers, {step::EventWork{f.a, {}, 6, Value(-.5), origin}, {}});
+  bindings::consume_event(&actions, {step::EventWork{f.a, {}, 6, Value(-.5), origin}, {}});
   advance(41);
   const auto crossing = step::timers(timers).front().due;
   advance(crossing);
@@ -425,6 +463,7 @@ void threshold_turn_uses_current_subscriptions_and_one_rearm(bool benchmark = fa
 int main(int argc, char **argv) {
   try {
     only_actual_player_actions_are_chosen_events();
+    canonical_action_results_and_reach();
     const bool benchmark = argc == 2 && std::string_view(argv[1]) == "--bench";
     require(argc == 1 || benchmark, "usage: turns_test [--bench]");
     threshold_turn_uses_current_subscriptions_and_one_rearm(benchmark);

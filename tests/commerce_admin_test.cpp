@@ -45,10 +45,10 @@ int main() {
     const ad::AdminInvalidation sink{&invalidations, changed};
     const auto values = f.values();
     const bindings::authority::ScopeRead scopes{
-        identity(f.objects), authority(f.objects), limits, players, plots, profiles};
+        identity(f.objects), authority(f.objects), limits, players, plots, profiles, groups};
     ad::GrantBinding grant_binding{grants,      players, scopes, f.models, f.scripts,
                                    f.installed, f.rules, values, sink};
-    ad::RevokeBinding revoke_binding{grants, players, profiles, sink};
+    ad::RevokeBinding revoke_binding{grants, players, scopes, sink};
     ad::ListGrantsBinding list_binding{grants, players};
     ad::PresetBinding preset_binding{{f.objects.group, f.objects.preset},
                                      permission_flags(f.objects),
@@ -92,29 +92,35 @@ int main() {
                 !ad::validate_revoke({{"grant", "grant:1"}, {"holder", "p:2"}}).empty() &&
                 !ad::validate_plot_permissions({{"plot", -1}}).empty() &&
                 !ad::validate_group_create({{"name", " \t"}}).empty() &&
+                !ad::validate_group_member({{"group", "g:1"}, {"player", "p:2"}, {"member", true}})
+                     .empty() &&
+                !ad::validate_preset({{"group", "g:1"}}).empty() &&
                 native.rows.at(ids.grant).inputs_schema["properties"]["holder"].contains("oneOf"),
             "structured administration schemas accepted malformed inputs or hid holder shape");
-    require(run(1, ids.group_create, f.a, {{"name", "Independent workshop"}}).changed &&
+    const auto created_group = run(1, ids.group_create, f.a, {{"name", "Independent workshop"}});
+    require(created_group.changed && created_group.reply.at("group") == "group:1" &&
                 groups.rows[1].controller == 1 && players.rows[1].groups == std::vector<GroupId>{1},
             "group creation failed to install actual controller/membership");
-    require(!run(2, ids.group_member, f.b, {{"group", "g:1"}, {"player", "p:2"}, {"member", true}})
-                 .reply["ok"],
-            "non-controller added themself to group");
     require(
-        run(1, ids.group_member, f.a, {{"group", "g:1"}, {"player", "p:2"}, {"member", true}})
+        !run(2, ids.group_member, f.b, {{"group", "group:1"}, {"player", "p:2"}, {"member", true}})
+             .reply["ok"],
+        "non-controller added themself to group");
+    require(
+        run(1, ids.group_member, f.a, {{"group", "group:1"}, {"player", "p:2"}, {"member", true}})
                 .changed &&
-            !run(1, ids.group_member, f.a, {{"group", "g:1"}, {"player", "p:2"}, {"member", true}})
+            !run(1, ids.group_member, f.a,
+                 {{"group", "group:1"}, {"player", "p:2"}, {"member", true}})
                  .changed &&
             players.rows[2].groups == std::vector<GroupId>{1},
         "controller membership mutation was not sorted/idempotent");
     auto settings = run(1, ids.preset, f.a,
                         {{"everyone", {"use"}},
                          {"group_rights", {"edit"}},
-                         {"group", "g:1"},
+                         {"group", "group:1"},
                          {"next_owner", {"use", "transfer"}},
                          {"no_copy", true}});
-    require(settings.changed && f.objects.group[f.a.slot()] == 1 &&
-                (f.objects.flags[f.a.slot()] & NoCopy) &&
+    require(settings.changed && settings.reply.at("preset").at("group") == "group:1" &&
+                f.objects.group[f.a.slot()] == 1 && (f.objects.flags[f.a.slot()] & NoCopy) &&
                 perm::check(perm::Holder::player(2), perm::Verb::Edit,
                             perm::target(identity(f.objects), authority(f.objects), limits, f.a),
                             players, grants, 10) &&
@@ -122,8 +128,13 @@ int main() {
                              perm::target(identity(f.objects), authority(f.objects), limits, f.a),
                              players, grants, 10),
             "actual group preset/no-copy checks disagree with administration result");
-    require(!run(2, ids.preset, f.a, {{"everyone", {"destroy"}}}).reply["ok"],
-            "group Edit improperly authorized changing the owner's preset");
+    const auto not_owner = run(2, ids.preset, f.a, {{"everyone", {"destroy"}}}).reply;
+    require(not_owner.at("ok") == false && not_owner.at("denied").at("need") == "owner" &&
+                not_owner.at("denied").at("on") == to_string(f.a) &&
+                not_owner.at("denied").at("fix").get<std::string>().find("p:1") !=
+                    std::string::npos &&
+                !not_owner.contains("problem"),
+            "owner denial must identify the actual goods, missing authority and useful fix");
     limits.set(f.c.slot(), perm::bit(perm::Verb::Transfer));
     const auto restricted_before = f.objects.preset[f.c.slot()];
     require(!run(3, ids.preset, f.c, {{"everyone", {"copy"}}}).reply["ok"] &&
@@ -136,14 +147,15 @@ int main() {
             "escrow preset edit changed valuable flags");
     f.objects.flags[f.a.slot()] &= ~Escrow;
     const auto preset_before = f.objects.preset[f.b.slot()];
-    require(!run(2, ids.preset, f.b, {{"everyone", {"destroy"}}, {"group", "g:999"}}).reply["ok"] &&
-                f.objects.preset[f.b.slot()] == preset_before,
-            "invalid group assignment partially committed preset bits");
+    require(
+        !run(2, ids.preset, f.b, {{"everyone", {"destroy"}}, {"group", "group:999"}}).reply["ok"] &&
+            f.objects.preset[f.b.slot()] == preset_before,
+        "invalid group assignment partially committed preset bits");
     require(run(1, ids.plot_permissions, f.a,
                 {{"plot", 1},
                  {"everyone", {"enter"}},
                  {"group_rights", {"build"}},
-                 {"group", "g:1"},
+                 {"group", "group:1"},
                  {"banned", {"p:3", "p:2", "p:3"}}})
                     .changed &&
                 plots.rows[1].banned == std::vector<PlayerId>({2, 3}) &&
@@ -158,11 +170,13 @@ int main() {
             !run(1, ids.plot_permissions, f.a, {{"plot", 1}, {"everyone", {"transfer"}}})
                  .reply["ok"],
         "plot preset accepted non-owner edit or invented a public land-transfer bit");
-    require(run(2, ids.group_member, f.b, {{"group", "g:1"}, {"player", "p:2"}, {"member", false}})
-                    .changed &&
-                players.rows[2].groups.empty(),
-            "member could not leave their own group");
-    require(!run(2, ids.preset, f.b, {{"group", "g:1"}}).reply["ok"],
+    require(
+        run(2, ids.group_member, f.b, {{"group", "group:1"}, {"player", "p:2"}, {"member", false}})
+                .changed &&
+            players.rows[2].groups.empty(),
+        "member could not leave their own group");
+    require(run(2, ids.preset, f.b, {{"group", "group:1"}}).reply.at("denied").at("need") ==
+                "group_membership",
             "former member assigned group they no longer belong to");
     const auto script = f.add("return {kind='instance',on={}}", 2);
     f.models.rows[1].script = script;
@@ -214,9 +228,43 @@ int main() {
                  .reply["ok"],
         "script grant omitted expiry or inherited ceiling was widened");
     perm::Ledger ledger;
-    ledger.balance = {0, 200, 0, 0, 0};
-    require(bool(perm::pay(ledger, grants, perm::Holder::script(script, f.b), 1, 3, 30, 10)),
+    ledger.balance[perm::Account::player(1)] = 200;
+    require(bool(perm::pay(ledger, grants, perm::Holder::script(script, f.b),
+                           perm::AccountTarget::player(1), perm::Account::player(3), 30, 10)),
             "actual delegated script could not spend its allowance");
+    const auto object_account = perm::Account::object(f.a);
+    const auto group_account = perm::Account::group(1);
+    ledger.balance[object_account] = 40;
+    ledger.balance[group_account] = 40;
+    require(!perm::pay(ledger, grants, perm::Holder::script(script, f.b), {object_account, 1},
+                       perm::Account::player(3), 1, 10) &&
+                !perm::pay(ledger, grants, perm::Holder::script(script, f.b), {group_account, 1},
+                           perm::Account::player(3), 1, 10),
+            "player-wallet Spend grant must not alias object/group accounts");
+    const auto object_grant = grant_id(
+        run(1, ids.grant, f.a,
+            {{"holder", {{"script", "s:" + std::to_string(script)}, {"on", to_string(f.b)}}},
+             {"scope", {{"account", to_string(f.a)}}},
+             {"rights", {"spend"}},
+             {"cap", 5},
+             {"period_s", 60},
+             {"expires_s", 30}}));
+    require(perm::pay(ledger, grants, perm::Holder::script(script, f.b), {object_account, 1},
+                      perm::Account::player(3), 5, 10) &&
+                ledger.balance.at(object_account) == 35 && ledger.balance.at(group_account) == 40 &&
+                ledger.balance.at(perm::Account::player(1)) == 170,
+            "ordinary account grant must debit exactly the selected object's bounded balance");
+    require(run(1, ids.revoke, f.a, {{"grant", "grant:" + std::to_string(object_grant)}}).changed,
+            "explicit object-account grant revocation");
+    const auto group_denial = run(2, ids.grant, f.b,
+                                  {{"holder", "p:2"},
+                                   {"scope", {{"account", "group:1"}}},
+                                   {"rights", {"spend"}},
+                                   {"cap", 5},
+                                   {"period_s", 60},
+                                   {"expires_s", 30}});
+    require(group_denial.reply.contains("denied"),
+            "group account uses actual controller authority rather than membership or ID alias");
     auto listed = run(2, ids.list_grants, f.b, Json::object());
     require(listed.reply["held"].size() == 1 && listed.reply["held"][0]["remaining"] == 70 &&
                 listed.reply["given"].size() == 1 && listed.reply["given"][0]["remaining"] == 40 &&
@@ -245,8 +293,80 @@ int main() {
             "holder revocation removed a different issuer's grants");
     auto script_call = call(1, ids.group_create, f.a, {{"name", "No borrowed controller"}});
     script_call.request.caller = ScriptHolder{script, f.a};
-    require(!drive::invoke_native(operations, script_call).reply["ok"],
-            "script caller borrowed object-owner administration authority");
+    const auto player_only = drive::invoke_native(operations, script_call).reply;
+    require(player_only.at("ok") == false && player_only.at("denied").at("need") == "player_caller",
+            "script caller receives the actual player-only policy denial");
+    auto script_run = [&](ScriptHolder actor, TermId action, Json arguments) {
+      auto input = call(1, action, actor.object, std::move(arguments));
+      input.request.caller = actor;
+      return drive::invoke_native(operations, std::move(input));
+    };
+    require(!script_run({script, f.c}, ids.grant,
+                        {{"holder", "p:1"},
+                         {"scope", {{"object", to_string(f.c)}}},
+                         {"rights", {"use"}},
+                         {"expires_s", 30}})
+                 .reply["ok"],
+            "script issuing a grant inherited its object's owner's authority");
+    const auto institution = grant_id(
+        run(1, ids.grant, f.a,
+            {{"holder", {{"script", "s:" + std::to_string(script)}, {"on", to_string(f.a)}}},
+             {"scope", {{"plot", 1}}},
+             {"rights", {"build", "enter", "run_scripts"}},
+             {"expires_s", 120}}));
+    const auto lease = grant_id(script_run({script, f.a}, ids.grant,
+                                           {{"holder", "p:2"},
+                                            {"scope", {{"plot", 1}}},
+                                            {"rights", {"build", "enter"}},
+                                            {"expires_s", 60}}));
+    require(grants.rows[lease].parent == institution &&
+                perm::check_scope(perm::Holder::player(2), perm::Scope::plot(1), 3, grants, 10),
+            "ordinary institutional script could not delegate its explicit grant to a tenant");
+    const auto listing = script_run({script, f.a}, ids.list_grants, Json::object()).reply;
+    require(listing["held"].size() == 1 &&
+                listing["held"][0]["id"] == "grant:" + std::to_string(institution) &&
+                listing["given"].size() == 1 &&
+                listing["given"][0]["id"] == "grant:" + std::to_string(lease),
+            "script grant listing borrowed owner's grants or lost its actual issued child");
+    require(!script_run({script, f.c}, ids.revoke, {{"grant", "grant:" + std::to_string(lease)}})
+                    .reply["ok"] &&
+                grants.rows[lease].live,
+            "a foreign script revoked the institution's child grant");
+    require(script_run({script, f.a}, ids.revoke, {{"holder", "p:2"}, {"scope", {{"plot", 1}}}})
+                    .changed &&
+                !grants.rows[lease].live && grants.rows[institution].live,
+            "holder+scope revocation missed the exact child or revoked its parent");
+    require(!script_run({script, f.a}, ids.revoke, {{"holder", "p:2"}, {"scope", {{"plot", 1}}}})
+                 .changed,
+            "repeated exact-scope revocation invented a mutation");
+    require(
+        script_run({script, f.a}, ids.revoke, {{"grant", "grant:" + std::to_string(institution)}})
+            .changed,
+        "script could not relinquish its own held root grant");
+    f.objects.flags[f.b.slot()] |= Body;
+    const auto seat = f.add("return {kind='instance',on={}}", 3);
+    const std::array<ScriptId, 1> seats{seat};
+    install::set_instances(f.installed, f.c, seats, f.scripts);
+    const auto consent = grant_id(run(2, ids.grant, f.b,
+                                      {{"holder", script_holder},
+                                       {"scope", {{"avatar", to_string(f.b)}}},
+                                       {"rights", {"animate", "camera"}},
+                                       {"expires_s", 120}}));
+    const Json seat_holder = {{"script", "s:" + std::to_string(seat)}, {"on", to_string(f.c)}};
+    const auto seated = grant_id(script_run({script, f.b}, ids.grant,
+                                            {{"holder", seat_holder},
+                                             {"scope", {{"avatar", to_string(f.b)}}},
+                                             {"rights", {"animate", "camera"}},
+                                             {"expires_s", 60}}));
+    require(grants.rows[seated].parent == consent &&
+                perm::check_scope(perm::Holder::script(seat, f.c), perm::Scope::avatar(f.b), 3,
+                                  grants, 10),
+            "ordinary body script could not delegate its explicit consent to a foreign seat");
+    require(script_run({script, f.b}, ids.revoke,
+                       {{"holder", seat_holder}, {"scope", {{"avatar", to_string(f.b)}}}})
+                    .changed &&
+                !grants.rows[seated].live && grants.rows[consent].live,
+            "standing-style exact revocation removed unrelated avatar consent");
     const auto rule = f.add(R"(return {kind='rule',applies_to={flag='novel.ready'},
       tests={{given={subject='target',state={['novel.ready']=true}},
         when={action={term='novel.touch',target='target'}},

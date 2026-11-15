@@ -5,12 +5,18 @@
 
 namespace amber::bindings::structural_detail {
 perm::Holder permission_holder(Caller);
+InvocationInput native_input(const drive::NativeCall &);
+lifecycle::Binding instance_binding(const nlohmann::json &, const ConstructionCatalog &,
+                                    const react::Terms &);
+drive::NativeCompletion structural_denied(std::string need, std::string on, std::string why,
+                                          std::string fix);
+void created_objects(drive::NativeCompletion &, std::span<const Handle>);
 bool declared_descendant(const Relation &, IdentityRead, Handle root, Handle child);
-record::Event structural_record(const drive::StructuralCall &, record::Kind, std::string,
+record::Event structural_record(const drive::NativeCall &, record::Kind, std::string,
                                 std::vector<Handle>);
-void completed_effects(drive::StructuralCompletion &, react::DeferredEffects);
+void completed_effects(drive::NativeCompletion &, react::DeferredEffects);
 space::Pose relative_pose(TransformRead, Handle subject, Handle parent);
-record::Event birth_record(const drive::StructuralCall &, Handle, IdentityRead,
+record::Event birth_record(const drive::NativeCall &, Handle, IdentityRead,
                            const std::vector<PlayerId> &owners, const std::vector<PlotId> &plots,
                            const std::vector<std::uint32_t> &params, PlayerId maker,
                            CreditResolver);
@@ -27,9 +33,12 @@ struct PreparedReplacement {
   bool in_scene = false, promote = false;
   space::BodyPreflight capacity{};
 };
-PreparedReplacement prepare_replacement(const ReplacementEdit &, const drive::StructuralCall &,
+PreparedReplacement prepare_replacement(const ReplacementEdit &, const drive::NativeCall &,
                                         lifecycle::Replacement, ConstructionCatalog,
-                                        const react::ValueRead &);
-void commit_replacement(ReplacementEdit &, const drive::StructuralCall &, PreparedReplacement &,
-                        const space::AssemblyEdit &, PlayerId maker, drive::StructuralCompletion &);
+                                        const react::ValueRead &, bool preserve_defaults = false);
+void commit_replacements(ReplacementEdit &, const drive::NativeCall &,
+                         std::span<PreparedReplacement *>, const space::AssemblyEdit &,
+                         PlayerId maker, drive::NativeCompletion &);
+void commit_replacement(ReplacementEdit &, const drive::NativeCall &, PreparedReplacement &,
+                        const space::AssemblyEdit &, PlayerId maker, drive::NativeCompletion &);
 } // namespace amber::bindings::structural_detail

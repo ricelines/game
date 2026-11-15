@@ -297,8 +297,6 @@ std::vector<step::Timer> threshold_timers(const Subscriptions &subscriptions,
 void publish_effects(DeferredEffects &&effects, const record::Origin &origin, Step now,
                      step::WorkQueues &queues, step::TimerWheel &wheel, record::Journal &journal,
                      std::size_t event_limit) {
-  if (!effects.structural.empty())
-    throw std::logic_error("apply structural outputs before publishing effects");
   auto overflow = [&]() {
     record::Event event;
     event.step = now;
@@ -319,11 +317,6 @@ void publish_effects(DeferredEffects &&effects, const record::Origin &origin, St
             if (step::enqueue_event(queues, std::move(item), event_limit) ==
                 step::PushResult::Overflow)
               overflow();
-          } else if constexpr (std::is_same_v<T, step::ActionWork>) {
-            item.origin = origin;
-            if (step::enqueue_action(queues, std::move(item), event_limit) ==
-                step::PushResult::Overflow)
-              overflow();
           } else if constexpr (std::is_same_v<T, step::WatchWork>) {
             item.origin = origin;
             step::enqueue_watch(queues, std::move(item));
@@ -342,8 +335,6 @@ void publish_effects(DeferredEffects &&effects, const record::Origin &origin, St
             journal.append(std::move(item), origin);
           } else if constexpr (std::is_same_v<T, ContributionChange>) {
             throw std::logic_error("reconcile contribution changes before publishing effects");
-          } else if constexpr (std::is_same_v<T, CausalReceipt>) {
-            item.finalize(item.owner, item.receipt, origin);
           }
         },
         effect);

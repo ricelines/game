@@ -35,7 +35,6 @@ struct Fixture {
   elaborate::GapCounts gaps;
   elaborate::LastGaps last;
   elaborate::CaptureRefs captures;
-  elaborate::PendingFixtures pending;
   std::vector<space::MotionRow> motion;
   std::uint64_t next_record = 31;
   Handle part;
@@ -111,7 +110,7 @@ struct Fixture {
     parameters.rows.resize(3);
     parameters.rows[1] = {1, 1, std::string(64, 'd'), "{\"size\":2}", {{"piece", 3}}};
     parameters.rows[2] = {2, 2, std::string(64, 'e'), "{\"size\":4}", {}};
-    catalog::rebuild_parameter_index(parameters);
+
     f.objects.params[f.a.slot()] = 1;
     f.objects.params[f.c.slot()] = 2;
     model_text.rows[1].name = "selected model";
@@ -135,7 +134,11 @@ struct Fixture {
     groups.rows.resize(3);
     groups.rows[1] = {1, 2, "local group"};
     groups.rows[2] = {2, 3, "remote group"};
-    ledger.balance = {0, 100, 0, 900};
+    ledger.balance = {{perm::Account::player(1), 100},
+                      {perm::Account::player(3), 900},
+                      {perm::Account::object(f.a), 17},
+                      {perm::Account::object(f.c), 23},
+                      {perm::Account::group(1), 29}};
     grants.rows.resize(4);
     grants.rows[1] = {1,
                       2,
@@ -198,16 +201,8 @@ struct Fixture {
         "capture-local", "local.amb.zst", elaborate::CaptureStatus::Ready, {}};
     captures.rows["capture-remote"] = {
         "capture-remote", "remote.amb.zst", elaborate::CaptureStatus::Ready, {}};
-    elaborate::FixtureJob job;
-    job.id = 1;
-    job.request = 1;
-    job.capture = "capture-local";
-    job.candidate.tests = nlohmann::json::array();
-    pending.rows[1] = job;
-    pending.next_id = 2;
     motion = {{f.a, {1, 2, 3}, {.1f, .2f, .3f}, false}, {f.c, {9, 9, 9}, {}, true}};
-    const install::InvocationPlan cue{
-        {script, "novel.cue", 1, 1, true, false}, f.a, f.b, 6, {}, {}};
+    const install::InvocationPlan cue{{script, "novel.cue", 1, 1, true}, f.a, f.b, 6, {}, {}};
     f.run(std::span<const install::InvocationPlan>(&cue, 1), 12);
     for (std::size_t i = 0; i < extra; ++i) {
       ObjectInit object;
@@ -251,8 +246,9 @@ struct Fixture {
             [&t = timers, filter](snap::Output &out) { step::write_timers(out, t, filter); },
             [&q = queues, &i = intents, &in = inputs, next = next_record,
              filter](snap::Output &out) { cp::write_queues(out, q, i, next, in, filter); },
-            [&r = requests, &g = gaps, &l = last, &c = captures, &p = pending,
-             selected](snap::Output &out) { cp::write_reqs(out, r, g, l, c, p, selected); },
+            [&r = requests, &g = gaps, &l = last, &c = captures, selected](snap::Output &out) {
+              cp::write_reqs(out, r, g, l, c, selected);
+            },
             [&r = f.random, filter](snap::Output &out) { react::write_random(out, r, filter); },
             [&m = motion, filter](snap::Output &out) { space::write_motion(out, m, filter); }};
   }
@@ -286,8 +282,8 @@ struct Fixture {
             [&q = queues, &i = intents, &inputs = inputs, &next = next_record](snap::Input &in) {
               next = cp::read_queues(in, q, i, inputs);
             },
-            [&r = requests, &g = gaps, &l = last, &c = captures, &p = pending](snap::Input &in) {
-              cp::read_reqs(in, r, g, l, c, p);
+            [&r = requests, &g = gaps, &l = last, &c = captures](snap::Input &in) {
+              cp::read_reqs(in, r, g, l, c);
             },
             [&r = f.random](snap::Input &in) { react::read_random(in, r); },
             [&m = motion](snap::Input &in) { space::read_motion(in, m); }};

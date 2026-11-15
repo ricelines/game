@@ -75,7 +75,6 @@ struct ParameterBlock {
 };
 struct ParameterBlocks {
   std::vector<ParameterBlock> rows{ParameterBlock{}};
-  std::map<std::pair<ModelId, Hash>, std::uint32_t> by_model_asset;
 };
 struct PreparedScript {
   Hash hash, source_hash, bytecode_hash, registry_pin;
@@ -96,10 +95,6 @@ struct Script {
 };
 struct Scripts {
   std::vector<Script> rows{Script{}};
-};
-struct RegistryPins {
-  Hash current;
-  std::vector<Hash> history;
 };
 struct RegistryDocument {
   Hash hash;
@@ -172,5 +167,4 @@ nlohmann::json term_json(const react::Term &);
 react::Term term_from_json(const nlohmann::json &);
 nlohmann::json declaration_json(const react::ScriptDeclaration &);
 react::ScriptDeclaration declaration_from_json(const nlohmann::json &);
-void rebuild_parameter_index(ParameterBlocks &);
 } // namespace amber::catalog

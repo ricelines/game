@@ -33,7 +33,7 @@ struct ScriptRequest {
 };
 struct VariantRequest {
   ModelId model = 0;
-  catalog::Hash expected_source_hash, asset;
+  catalog::Hash asset;
   std::string canonical_params;
 };
 ModelRequest model_request(const Json &, const react::Terms &);
@@ -56,7 +56,6 @@ struct PreparedModel {
 };
 struct PreparedVariant {
   ModelId model = 0;
-  catalog::Hash expected_source_hash;
   std::vector<catalog::PreparedAsset> assets;
 };
 struct Failure {

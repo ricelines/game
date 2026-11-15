@@ -10,10 +10,28 @@
 #include <set>
 
 namespace amber::bindings::editing::detail {
+struct PolicyDenied : std::runtime_error {
+  Json details;
+  PolicyDenied(std::string_view need, Json on, std::string why, std::string fix)
+      : std::runtime_error(why), details{{"need", need},
+                                         {"on", std::move(on)},
+                                         {"why", std::move(why)},
+                                         {"fix", std::move(fix)}} {}
+};
+inline perm::Holder holder(const drive::NativeCall &call) {
+  if (const auto *id = std::get_if<PlayerId>(&call.request.caller))
+    return perm::Holder::player(*id);
+  const auto &script = std::get<ScriptHolder>(call.request.caller);
+  return perm::Holder::script(script.script, script.object);
+}
 inline PlayerId player(const drive::NativeCall &call) {
   if (const auto *id = std::get_if<PlayerId>(&call.request.caller); id && *id)
     return *id;
-  throw std::invalid_argument("this administration action requires a player caller");
+  throw PolicyDenied("player_caller",
+                     call.request.target ? Json(to_string(call.request.target))
+                                         : Json("administration"),
+                     "this action requires the actual player caller",
+                     "have the authorized player perform this action directly");
 }
 inline std::uint32_t identifier(const Json &value, std::string_view prefix) {
   return authority::identifier(value, prefix);
@@ -22,22 +40,27 @@ inline Handle handle(const Json &value, IdentityRead identity) {
   return authority::live_handle(value, identity);
 }
 inline void edit(const EditAccess &access, const drive::NativeCall &call) {
-  const auto who = player(call);
   if (!access.identity.valid(call.request.target))
     throw std::invalid_argument("stale edited object");
   const auto target =
       perm::target(access.identity, access.authority, access.limits, call.request.target);
-  const auto allowed = perm::check(perm::Holder::player(who), perm::Verb::Edit, target,
-                                   access.players, access.grants, call.step);
+  const auto allowed =
+      perm::check(holder(call), perm::Verb::Edit, target, access.players, access.grants, call.step);
   if (!allowed)
-    throw std::invalid_argument("edit denied: " + std::string(perm::reason_text(allowed.reason)));
+    throw PolicyDenied("edit", to_string(target.object),
+                       std::string(perm::reason_text(allowed.reason)),
+                       "obtain Edit on this object from p:" + std::to_string(target.owner));
 }
 inline ModelId model(const catalog::Models &models, const drive::NativeCall &call) {
   const auto id = identifier(call.arguments.at("model"), "m:");
   if (id >= models.rows.size() || models.rows[id].id != id)
     throw std::invalid_argument("unknown model");
-  if (models.rows[id].author != player(call))
-    throw std::invalid_argument("only the model author may edit its defaults");
+  const auto *author = std::get_if<PlayerId>(&call.request.caller);
+  if (!author || models.rows[id].author != *author)
+    throw PolicyDenied("model_author", "m:" + std::to_string(id),
+                       "only the model's actual author may edit its defaults",
+                       "ask p:" + std::to_string(models.rows[id].author) +
+                           " to edit these defaults");
   return id;
 }
 inline TermId term(const react::Terms &terms, const Json &value) {
@@ -74,7 +97,10 @@ inline drive::NativeCompletion result(bool changed, Json extra = Json::object())
 inline drive::NativeCompletion failed(const std::exception &error) {
   drive::NativeCompletion out;
   out.result = record::Result::Denied;
-  out.reply = {{"ok", false}, {"error", "edit_denied"}, {"problem", error.what()}};
+  if (const auto *denied = dynamic_cast<const PolicyDenied *>(&error))
+    out.reply = {{"ok", false}, {"denied", denied->details}};
+  else
+    out.reply = {{"ok", false}, {"error", "bad_input"}, {"problem", error.what()}};
   return out;
 }
 inline std::vector<Handle> instances(IdentityRead identity, ModelId model) {

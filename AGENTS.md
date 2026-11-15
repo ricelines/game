@@ -46,6 +46,10 @@ do not justify versions on ordinary mutable rows.
 - A handler changes its own object and parts. Foreign effects use a declared
   contribution, an event, or an ordinary action checked against the script's
   grants. A triggering player's authority is not inherited by the reaction.
+- The user approved bounded script delegation to other recipients for autonomous
+  leases and avatar consent. It requires an explicit parent grant, remains one
+  level deep, narrows scope and rights, shares spending caps, and cannot outlive
+  the parent. A script's installation owner does not confer grant authority.
 - Keep the script API to S4 and the body-neutral mechanics explicitly required
   by Technicals 16. Do not add a second permission system through host calls.
   Body verbs remain authored scripts; no native strike/push/pour/sit scenarios.

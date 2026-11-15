@@ -1,4 +1,4 @@
-"""Published per-world tool-call database, with a frozen explicit tool table."""
+"""Published tool calls with a source-audited class table; S11 formulas stay unchanged."""
 
 import json
 import zipfile
@@ -40,6 +40,7 @@ class Adapter:
             "classes": CLASSES,
             "source": str(self.path),
             "classification": CLASSIFICATION,
+            "adapter_revision": CLASSIFICATION["adapter_revision"],
             "source_schema": "name,timestamp,tool_name,target_agent,location",
             "limitations": [
                 (

@@ -140,6 +140,8 @@ struct Sound {
   EventPayload payload;
   PlayerId speaker;
   record::Origin origin;
+  std::string name{};
+  bool speech = false;
 };
 struct Listener {
   std::uint64_t session;
@@ -157,13 +159,8 @@ void emit_sound(Hearing &, const Sound &, std::span<const Listener>);
 nlohmann::json event_payload_json(const EventPayload &);
 std::vector<Heard> take_heard(Hearing &, std::uint64_t, std::size_t limit, std::size_t &omitted);
 void remove_listener(Hearing &, std::uint64_t);
-struct SessionCache {
-  std::unordered_map<std::uint64_t, nlohmann::json> known;
-  std::optional<std::vector<std::string>> body_actions, player_actions;
-};
-nlohmann::json observation(SessionCache &, Step, double hz, const SelfDescription &,
-                           std::span<const PreparedThing>, std::span<const PreparedThing>,
-                           std::span<const Heard>, std::span<const std::string> body_actions,
+nlohmann::json observation(Step, double hz, const SelfDescription &, std::span<const PreparedThing>,
+                           std::span<const PreparedThing>,
+                           std::span<const std::string> body_actions,
                            std::span<const std::string> player_actions);
-void forget(SessionCache &);
 } // namespace amber::observe

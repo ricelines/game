@@ -21,24 +21,25 @@ drive::NativeCompletion place_existing(void *local, const drive::NativeCall &cal
   const auto item = detail::goods(custody, b.authority, b.limits, call.request.target);
   const auto who = item.root.owner;
   if (who >= b.players.rows.size())
-    return detail::denied(perm::Reason::UnknownHolder);
+    return detail::denied(perm::Reason::UnknownHolder, "account", "p:" + std::to_string(who));
   const auto &player = b.players.rows[who];
   if (std::ranges::find(player.inventory, item.root.object) == player.inventory.end() &&
       std::ranges::find(player.mailbox, item.root.object) == player.mailbox.end())
-    return detail::denied(perm::Reason::NotController);
+    return detail::denied(perm::Reason::NotController, "inventory", to_string(item.root.object),
+                          who);
   if (item.root.flags & Escrow)
-    return detail::denied(perm::Reason::InEscrow);
+    return detail::denied(perm::Reason::InEscrow, "available", to_string(item.root.object), who);
   if (item.root.flags & Body)
-    return detail::denied(perm::Reason::NotGoods);
+    return detail::denied(perm::Reason::NotGoods, "goods", to_string(item.root.object), who);
   if (!(item.root.flags & Held))
     throw std::invalid_argument("item is not in hidden inventory custody");
   for (const auto &part : item.parts)
     if (part.owner != who || (part.flags & (Body | Escrow)))
-      return detail::denied(perm::Reason::StaleGoods);
+      return detail::denied(perm::Reason::StaleGoods, "goods", to_string(part.object), part.owner);
   const auto allowed =
       perm::check(holder, perm::Verb::Move, item.root, b.players, b.grants, call.step);
   if (!allowed)
-    return detail::denied(allowed.reason);
+    return detail::denied(allowed.reason, "move", to_string(item.root.object), who);
   const auto position = call.arguments.at("position").get<std::array<float, 3>>();
   const Vec3 destination{position[0], position[1], position[2]};
   auto rotation = b.transforms.rotation[item.root.object.slot()];
@@ -52,8 +53,8 @@ drive::NativeCompletion place_existing(void *local, const drive::NativeCall &cal
   const perm::Plot *plot = nullptr;
   for (const auto &candidate : b.plots.rows)
     if (candidate.id && destination.x >= candidate.bounds[0] &&
-        destination.y >= candidate.bounds[1] && destination.x <= candidate.bounds[2] &&
-        destination.y <= candidate.bounds[3]) {
+        destination.y >= candidate.bounds[1] && destination.x < candidate.bounds[2] &&
+        destination.y < candidate.bounds[3]) {
       plot = &candidate;
       break;
     }
@@ -62,7 +63,7 @@ drive::NativeCompletion place_existing(void *local, const drive::NativeCall &cal
   const auto build =
       perm::check_land(holder, perm::LandVerb::Build, *plot, b.players, b.grants, call.step);
   if (!build)
-    return detail::denied(build.reason);
+    return detail::denied(build.reason, "build", "plot:" + std::to_string(plot->id), plot->owner);
   const auto old = pose(b.transforms, item.root.object);
   const auto delta = compose(rotation, inverse(old.rotation));
   std::unordered_map<std::uint64_t, space::Pose> poses;
@@ -117,7 +118,6 @@ drive::NativeCompletion place_existing(void *local, const drive::NativeCall &cal
   for (auto h : item.closure) {
     b.transforms.position[h.slot()] = poses.at(h.bits).position;
     b.transforms.rotation[h.slot()] = poses.at(h.bits).rotation;
-    b.membership.plot[h.slot()] = plot->id;
   }
   custody.parents.parent[item.root.object.slot()] = {};
   std::vector<space::RelationChange> relations;
@@ -132,6 +132,7 @@ drive::NativeCompletion place_existing(void *local, const drive::NativeCall &cal
   auto out = detail::result(true, {{"goods", to_string(item.root.object)},
                                    {"plot", plot->id},
                                    {"position", {destination.x, destination.y, destination.z}}});
+  perm::update_plots(custody.identity, b.transforms, b.membership, b.plots, item.closure, true);
   for (auto h : item.closure)
     reconcile_object_priorities(b.values, b.allocation, h, out.effects, call.step, call.hz);
   for (const auto &[key, before] : settings)

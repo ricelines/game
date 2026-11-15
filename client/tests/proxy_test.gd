@@ -51,6 +51,8 @@ func run() -> void:
 	view._process(0.016)
 	check(not cache.cache[hash].manifest.is_empty(), "actual HTTP manifest received")
 	check(view.draws["o:1.1"].lod == -1, "delayed GLB still displays a loading proxy")
+	if arguments.size() > 2:
+		cache.ensure(arguments[2], 2)
 	var bounds = cache.bounds(hash)
 	var proxy = view.draws["o:1.1"].parts[0]
 	check(
@@ -76,6 +78,16 @@ func run() -> void:
 	)
 	await process_frame
 	check(not is_instance_valid(old_node), "temporary proxy is removed after replacement")
+	if arguments.size() > 2:
+		var peer = arguments[2]
+		cache.ensure(peer, 2)
+		while cache.available_lod(peer, 2) < 0 and Time.get_ticks_msec() < deadline:
+			await create_timer(0.02).timeout
+		check(cache.available_lod(peer, 2) == 2, "distinct authored peer receives shared geometry")
+		check(
+			cache.cache[peer].meshes[2][0].mesh == cache.cache[hash].meshes[2][0].mesh,
+			"same trusted geometry imports once across distinct immutable manifests"
+		)
 	print(
 		JSON.stringify(
 			{

@@ -79,123 +79,84 @@ struct Fixture {
                                proposal_variant,
                                assets.rows.at(proposal_variant).canonical_params,
                                {{"leaf", 8}, {"foot", 7}}});
-    rebuild_parameter_index(parameters);
   }
 };
 void preserved_defaults_and_variants() {
   Fixture f;
-  const std::array<std::uint32_t, 2> selected{1, 1};
-  const auto plan = plan_revision(f.models, f.parameters, f.assets, 1, 4, selected);
-  require(plan.changed && plan.variants.size() == 2 && plan.aliases.size() == 3,
-          "one plan deduplicates parameter sets and shared nested aliases");
-  const auto &root = revision_variant(plan, 0);
-  const auto &variant = revision_variant(plan, 1);
-  require(root.after_params == 0 && variant.proposal_params == 2 && variant.after_params == 3,
-          "default and explicit parameters retain their distinct semantics");
-  const auto retained = root.parts.at("leaf"), added = root.parts.at("foot");
-  require(retained >= plan.model_count && added == 7,
-          "retained geometry gets a fresh historical alias; new parts use proposal defaults");
+  const auto mappings = definition_parameters(f.models, f.parameters, f.assets, 1, 4);
+  require(mappings.size() == 2 && mappings[0].after == 0 && mappings[1].after == 2,
+          "default adopts new defaults and explicit values map to their actual baked variant");
   const auto old_model = f.models.rows[1];
-  const auto old_block = f.parameters.rows[1];
-  commit_revision(f.models, f.parameters, f.texts, f.settings, plan);
+  const auto old_count = f.parameters.rows.size();
+  const auto edited =
+      update_definition(f.models, f.parameters, f.texts, f.settings, f.assets, 1, 4);
+  require(edited.changed && edited.parameters.size() == 2 && edited.models.size() == 4,
+          "direct edit deduplicates shared nested child definitions");
   const auto &current = f.models.rows[1];
   require(current.id == 1 && current.author == old_model.author &&
               current.created_s == old_model.created_s && current.script == old_model.script &&
               current.material == old_model.material && current.source_hash == f.new_source,
-          "root identity and authored defaults survive a foreign proposal's geometry");
+          "model identity, author, text and authored defaults survive foreign proposal geometry");
+  const auto retained = current.parts.at("leaf");
   const auto &leaf = f.models.rows.at(retained);
   require(leaf.script == f.models.rows[2].script && leaf.author == f.models.rows[2].author &&
-              leaf.created_s == f.models.rows[2].created_s &&
               leaf.asset == f.models.rows[5].asset && f.texts.rows[retained] == f.texts.rows[2] &&
-              f.settings.rows[retained] == f.settings.rows[2],
-          "retained named-child text/settings/script/material lineage remains its own");
+              f.settings.rows[retained] == f.settings.rows[2] && current.parts.at("foot") == 7,
+          "retained named children keep their defaults while new parts use proposal defaults");
   const auto pin = leaf.parts.at("pin");
   require(f.models.rows[pin].script == f.models.rows[3].script &&
               f.models.rows[pin].asset == f.models.rows[6].asset,
-          "nested retained parts preserve defaults recursively");
-  require(f.parameters.rows[1].asset == old_block.asset &&
-              f.parameters.rows[1].parts == old_block.parts &&
-              f.models.rows[2].asset != leaf.asset && f.models.rows[4].parts.at("leaf") == 5,
-          "old blocks, old child rows and the proposal are immutable history");
-  require(f.parameters.rows[3].model == 1 &&
-              f.parameters.rows[3].canonical_params == R"({"added":5,"length":2})",
-          "explicit values survive a newly added default parameter");
+          "nested retained defaults survive recursively");
+  require(f.parameters.rows.size() == old_count &&
+              f.parameters.rows[1].canonical_params == R"({"added":5,"length":2})" &&
+              resolve_asset(f.models, f.parameters, 1, 1).hash == f.parameters.rows[2].asset &&
+              f.models.rows[4].parts.at("leaf") == 5,
+          "existing explicit block IDs select the new definition, without mutating proposal rows");
   react::AssetMeasurements measured;
-  project_revision_measurements(measured, plan, f.assets, {1, 2});
-  require(measured.rows.at(1).volume == 2 && measured.parameter_rows.at(3).volume == 4 &&
+  project_definition_measurements(measured, f.models, f.parameters, f.assets, edited, {1, 2});
+  require(measured.rows.at(1).volume == 2 && measured.parameter_rows.at(1).volume == 4 &&
               measured.rows.contains(retained) && measured.rows.contains(pin),
-          "prospective measurements cover aliases and every current parameter mapping");
-  rejects([&] { commit_revision(f.models, f.parameters, f.texts, f.settings, plan); },
-          "a prepared definition plan cannot silently replay");
+          "new measured facts cover current root, children and explicit parameter blocks");
+  const auto unchanged =
+      update_definition(f.models, f.parameters, f.texts, f.settings, f.assets, 1, 4);
+  require(!unchanged.changed && unchanged.models.empty(),
+          "repeating the current definition does not create extra child identities");
 }
-void reject_unprepared_changes() {
+void missing_parameter_rejects_before_writes() {
   Fixture f;
-  const std::array<std::uint32_t, 1> selected{1};
-  auto plan = plan_revision(f.models, f.parameters, f.assets, 1, 4, selected);
-  auto stale = f.models;
-  stale.rows[1].source_hash = sha256("interleaved source");
-  rejects([&] { commit_revision(stale, f.parameters, f.texts, f.settings, plan); },
-          "source changes invalidate a prepared definition edit");
-  require(f.parameters.rows.size() == 3 && stale.rows.size() == 9,
-          "stale rejection has no partial aliases or parameter writes");
-  f.assets.rows.at(f.parameters.rows[2].asset).canonical_params = R"({"added":7,"length":2})";
   f.parameters.rows[2].canonical_params = R"({"added":7,"length":2})";
-  rejects([&] { (void)plan_revision(f.models, f.parameters, f.assets, 1, 4, selected); },
-          "new parameter values cannot be guessed instead of their authored defaults");
-  f.assets.rows.at(f.parameters.rows[2].asset).canonical_params = R"({"added":5})";
-  f.parameters.rows[2].canonical_params = R"({"added":5})";
-  rejects([&] { (void)plan_revision(f.models, f.parameters, f.assets, 1, 4, selected); },
-          "removing a currently used parameter fails explicitly");
-  const auto unchanged = plan_revision(f.models, f.parameters, f.assets, 1, 1, selected);
-  require(!unchanged.changed && unchanged.aliases.empty() &&
-              revision_variant(unchanged, 1).after_params == 1,
-          "an unchanged definition does not manufacture child or variant identities");
+  f.assets.rows.at(f.parameters.rows[2].asset).canonical_params =
+      f.parameters.rows[2].canonical_params;
+  const auto old_hash = f.models.rows[1].asset;
+  rejects([&] { update_definition(f.models, f.parameters, f.texts, f.settings, f.assets, 1, 4); },
+          "a missing baked parameter set is not guessed");
+  require(f.models.rows[1].asset == old_hash && f.models.rows.size() == 9 &&
+              f.parameters.rows.size() == 3,
+          "incompatible parameters do not mutate the live definition");
 }
-void benchmark() {
+void dropped_keys_and_new_defaults() {
   Fixture f;
-  f.assets.rows.at(f.models.rows[4].asset).manifest["parameter_schema"]["length"][2] = 1000;
-  std::vector<std::uint32_t> selected{1};
-  for (unsigned value = 3; value <= 100; ++value) {
-    const auto old = std::string("{\"length\":") + std::to_string(value) + "}";
-    const auto next = std::string("{\"added\":5,\"length\":") + std::to_string(value) + "}";
-    const auto old_hash = f.asset("old" + std::to_string(value), false, old, value);
-    const auto next_hash = f.asset("next" + std::to_string(value), true, next, value * 2);
-    auto id = static_cast<std::uint32_t>(f.parameters.rows.size());
-    f.parameters.rows.push_back({id, 1, old_hash, old, {{"leaf", 2}}});
-    selected.push_back(id);
-    ++id;
-    f.parameters.rows.push_back({id, 4, next_hash, next, {{"leaf", 8}, {"foot", 7}}});
+  for (auto &[hash, asset] : f.assets.rows) {
+    (void)hash;
+    if (asset.source_hash != f.new_source)
+      continue;
+    asset.manifest["parameter_schema"].erase("length");
+    asset.canonical_params = R"({"added":5})";
   }
-  std::vector<double> elapsed;
-  for (unsigned sample = 0; sample < 200; ++sample) {
-    const auto begin = std::chrono::steady_clock::now();
-    const auto plan = plan_revision(f.models, f.parameters, f.assets, 1, 4, selected);
-    auto models = f.models;
-    auto parameters = f.parameters;
-    auto texts = f.texts;
-    auto settings = f.settings;
-    react::AssetMeasurements measurements;
-    commit_revision(models, parameters, texts, settings, plan);
-    project_revision_measurements(measurements, plan, f.assets, {1, 2});
-    require(plan.variants.size() == 100 && models.rows[1].source_hash == f.new_source &&
-                measurements.parameter_rows.size() == 99,
-            "benchmark must preserve complete variant and mutation semantics");
-    elapsed.push_back(
-        std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - begin)
-            .count());
-  }
-  std::sort(elapsed.begin(), elapsed.end());
-  std::cout << "100-set catalog revision plan + staged table copies/commit/measurements us: p50="
-            << elapsed[99] << " p95=" << elapsed[189] << " max=" << elapsed.back() << '\n';
+  f.models.rows[4].canonical_params = R"({"added":5})";
+  f.parameters.rows[2].canonical_params = R"({"added":5})";
+  const auto edited =
+      update_definition(f.models, f.parameters, f.texts, f.settings, f.assets, 1, 4);
+  require(edited.changed && f.parameters.rows[1].canonical_params == R"({"added":5})",
+          "removed keys are dropped and new keys use actual source defaults");
 }
 } // namespace
-int main(int argc, char **argv) {
+int main() {
   try {
     preserved_defaults_and_variants();
-    reject_unprepared_changes();
-    if (argc == 2 && std::string_view(argv[1]) == "--bench")
-      benchmark();
-    std::cout << "model revision checks passed\n";
+    missing_parameter_rejects_before_writes();
+    dropped_keys_and_new_defaults();
+    std::cout << "direct model definition checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return 1;

@@ -1,4 +1,4 @@
-add_library(amber_react values.cpp watches.cpp vm.cpp snapshot.cpp exchange.cpp allocation.cpp)
+add_library(amber_react values.cpp watches.cpp vm.cpp snapshot.cpp allocation.cpp)
 target_link_libraries(amber_react PUBLIC amber_step PUBLIC amber_snap PRIVATE Ambergris::Luau.Compiler Ambergris::Luau.Ast Ambergris::Luau.VM)
 target_link_libraries(amber_react PRIVATE Ambergris::TracyClient)
 target_compile_options(amber_react PRIVATE -Wall -Wextra -Wpedantic)

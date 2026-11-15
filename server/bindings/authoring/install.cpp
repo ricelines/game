@@ -127,8 +127,7 @@ Json install_variant(PreparedVariant prepared, CatalogInstall &binding) {
       throw std::invalid_argument("variant target or verified assets are missing");
     const auto &model = binding.models.rows[prepared.model];
     const auto &root = prepared.assets.front().asset;
-    if (model.source_hash != prepared.expected_source_hash ||
-        root.source_hash != prepared.expected_source_hash)
+    if (model.source_hash != root.source_hash)
       throw std::invalid_argument(
           "variant model source changed; rebake against the current source");
     const auto root_hash = root.hash;

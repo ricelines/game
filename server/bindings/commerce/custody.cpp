@@ -51,6 +51,8 @@ void apply(Custody &binding, std::span<const perm::CustodyChange> changes,
     }
     std::vector<Handle> closure{change.goods};
     closure.insert(closure.end(), parts.begin(), parts.end());
+    perm::update_plots(binding.identity, binding.transforms, binding.membership, binding.plots,
+                       closure, change.in_world);
     scene_visible(binding.scene, closure, change.in_world);
   }
 }
@@ -113,35 +115,11 @@ void retire_goods(RetirementBinding &binding, std::span<const Handle> dying,
   detail::apply(binding.custody, changes, effects);
   effects.changed |= !changes.empty();
 }
-bool preflight_rebound_offers(const void *local, std::span<const Handle> affected,
-                              std::span<const Handle> removed,
-                              std::vector<space::VisibleCustody> &forecast, std::string &error) {
-  const auto &binding = *static_cast<const RebindOffersBinding *>(local);
-  std::vector<space::VisibleCustody> pending;
-  try {
-    for (const auto &change : released(binding.offers, binding.trades, affected)) {
-      detail::preflight(binding.custody, change);
-      if (!change.in_world && change.parent &&
-          std::ranges::find(removed, change.parent) != removed.end())
-        throw std::invalid_argument("definition removes an inventory custodian");
-      if (change.in_world)
-        pending.push_back(detail::visible(binding.custody, change));
-    }
-    forecast = std::move(pending);
-    return true;
-  } catch (const std::exception &problem) {
-    error = problem.what();
-    return false;
-  }
-}
-void rebind_offers(void *local, std::span<const Handle> affected, const InvocationInput &invocation,
-                   react::DeferredEffects &effects) {
-  auto &binding = *static_cast<RebindOffersBinding *>(local);
+void rebind_offers(RebindOffersBinding &binding, std::span<const Handle> affected,
+                   const InvocationInput &invocation, react::DeferredEffects &effects) {
   const auto changes = released(binding.offers, binding.trades, affected);
   if (changes.empty())
     return;
-  // Run before native extraction. The structural forecast already checked new
-  // geometry and aggregate capacity for the restored physical grasps.
   for (const auto &change : changes)
     detail::preflight(binding.custody, change);
   auto offers = Json::array();
