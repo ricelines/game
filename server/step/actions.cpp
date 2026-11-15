@@ -91,6 +91,12 @@ ActionRun begin_action(const react::ValueRead &values, const catalog::Models &mo
     return run;
   }
   const auto &resolution = run.resolution;
+  if (resolution.route == react::Route::Native &&
+      (std::holds_alternative<react::RegistryAction>(resolution.native_operation) ||
+       (std::get_if<react::ElaborationAction>(&resolution.native_operation) &&
+        std::get<react::ElaborationAction>(resolution.native_operation) ==
+            react::ElaborationAction::RuleActivation)))
+    event.kind = record::Kind::Registry;
   if (std::holds_alternative<PlayerId>(request.caller) &&
       resolution.route == react::Route::Native &&
       std::holds_alternative<react::MechanicAction>(resolution.native_operation)) {

@@ -15,6 +15,13 @@ void physical_primitives_are_script_only() {
                 "engine.grasp, release, attach, impulse and transfer are called by a body script",
         "every physical primitive rejects player callers before permission or argument checks");
   }
+  const auto denials = f.journal.take();
+  require(denials.size() == 5 && std::ranges::all_of(denials,
+                                                     [](const auto &row) {
+                                                       return row["kind"] == "denial" &&
+                                                              row["result"] == "denied";
+                                                     }),
+          "each refused action is recorded as a denial");
   step::declare_commerce(f.f.terms, f.declarations);
   step::declare_admin(f.f.terms, f.declarations);
   const auto listed = net::player_action_ids(f.declarations, f.f.values());
@@ -24,6 +31,34 @@ void physical_primitives_are_script_only() {
   for (const auto *name : {"engine.give", "engine.offer", "engine.grant"})
     require(std::ranges::find(listed, f.f.terms.by_name.at(name)) != listed.end(),
             "ordinary native player actions remain discoverable");
+}
+void registry_actions_record_the_actual_player() {
+  test_physical::Fixture f;
+  const std::array operations{
+      std::pair{react::NativeOperation{react::RegistryAction::DefineTerm}, "engine.define_term"},
+      std::pair{react::NativeOperation{react::RegistryAction::DefineMaterial},
+                "engine.define_material"},
+      std::pair{react::NativeOperation{react::ElaborationAction::RuleActivation},
+                "engine.rule_activation"}};
+  for (const auto &[operation, name] : operations) {
+    react::declare_native(f.declarations, f.f.terms, name, "Registry record classification", "",
+                          false, {{"type", "object"}}, operation);
+    auto run = f.begin_as(PlayerId{1}, name, {}, nlohmann::json::object());
+    require(!run.outcome, "valid player registry action is admitted");
+    step::NativeCompletion completion;
+    completion.result = record::Result::Applied;
+    completion.changed = true;
+    completion.reply = {{"ok", true}};
+    f.finish(run, std::move(completion));
+  }
+  const auto records = f.journal.take();
+  require(records.size() == operations.size() &&
+              std::ranges::all_of(records,
+                                  [](const auto &row) {
+                                    return row["kind"] == "registry" && row["actor"] == "p:1" &&
+                                           row["changed"] == true;
+                                  }),
+          "native registry operations retain their player actor and registry kind");
 }
 void ordinary_transfer_and_live_processes() {
   test_physical::Fixture f;
@@ -302,6 +337,7 @@ int main(int argc, char **argv) {
       return 0;
     }
     physical_primitives_are_script_only();
+    registry_actions_record_the_actual_player();
     ordinary_transfer_and_live_processes();
     ordinary_grasp_release_seat_and_flight();
     own_motion_queries_and_speech();

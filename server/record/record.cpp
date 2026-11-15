@@ -97,6 +97,8 @@ Journal::Journal(std::size_t authors_max, std::vector<PlayerId> seed_actors)
 }
 
 Origin Journal::append(Event event, const Origin &inherited, std::span<const Credit> credits) {
+  if (event.result == Result::Denied)
+    event.kind = Kind::Denial;
   const auto id = next_id_++;
   Origin origin = inherited;
   origin.cause = id;
@@ -169,6 +171,8 @@ Origin Journal::finish(Origin origin, Result result, bool changed, nlohmann::jso
   assert(row.at("id") == origin.cause);
   include_credits(origin, credits);
   row["result"] = name(result);
+  if (result == Result::Denied)
+    row["kind"] = "denial";
   row["changed"] = changed;
   row["authors"] = nlohmann::json::array();
   for (auto author : origin.authors)

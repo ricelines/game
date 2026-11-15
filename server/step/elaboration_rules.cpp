@@ -99,13 +99,17 @@ complete_fixture(elaborate::Requests &requests, elaborate::PendingFixtures &pend
   }
   record::Event event;
   event.step = now;
-  event.kind = record::Kind::System;
+  event.kind = error.empty() ? record::Kind::Registry : record::Kind::Denial;
   event.actor = record::Actor::player(job.actor);
   event.name = error.empty() ? "rule_answer" : "fixture_rejected";
   event.changed = out.effects.changed;
   event.result = event.changed ? record::Result::Applied : record::Result::Denied;
   event.things = {elaboration_detail::request(requests, job.request).target};
-  event.detail = {{"request", job.request}, {"script", job.candidate.script}, {"response", reply}};
+  event.detail = {{"request", job.request},
+                  {"script", job.candidate.script},
+                  {"response", reply},
+                  {"maker", "p:" + std::to_string(scripts.rows.at(job.candidate.script).author)},
+                  {"created", scripts.rows.at(job.candidate.script).created_s}};
   out.effects.ordered.emplace_back(std::move(event));
   out.input = step::complete_input(inputs, input_id, std::move(reply));
   return out;

@@ -473,3 +473,46 @@ def test_validation_preregistration_and_world_cluster_bootstrap(tmp_path):
     assert result["defined_bootstrap_samples"] == 932
     assert "not_available" in validate_wikipedia(None, tmp_path)
     assert "not_available" in validate_wikipedia({"sampling_frame_complete": False}, tmp_path)
+
+
+def test_s7_registry_rules_are_chosen_changes_and_adopted_kinds(tmp_path):
+    source = tmp_path / "registry.jsonl"
+    records = [
+        {"step_hz": 1, "seed_actors": []},
+        {
+            "id": 1,
+            "step": 1,
+            "kind": "registry",
+            "actor": "maker",
+            "name": "rule_answer",
+            "script": 7,
+            "changed": True,
+        },
+        {
+            "id": 2,
+            "step": 2,
+            "kind": "registry",
+            "actor": "adopter",
+            "name": "engine.rule_activation",
+            "args": {"script": "s:7"},
+            "changed": True,
+        },
+        {
+            "id": 3,
+            "step": 3,
+            "kind": "denial",
+            "actor": "adopter",
+            "name": "engine.define_term",
+            "result": "denied",
+            "changed": False,
+        },
+    ]
+    source.write_text("\n".join(json.dumps(row) for row in records))
+    adapter = ours.Adapter(source, period_s=10)
+    rows = list(adapter.events())
+    assert all(row["agent"] and row["class"] == "change" for row in rows)
+    assert rows[0]["object"] == rows[1]["object"] == "s:7"
+    assert rows[1]["maker"] == "maker" and rows[1]["kind"] == "s:7"
+    report = compute(adapter.info(), rows)
+    assert report["counts"]["CA"] == 2
+    assert report["periods"][0]["measures"]["adopted_novelty"] == 1

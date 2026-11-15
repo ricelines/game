@@ -40,6 +40,19 @@ class Adapter:
             target = things[0] if things else None
             if kind == "create" and record.get("of") in ("model", "script"):
                 target = record.get(record["of"], record.get("object", target))
+            rule = None
+            if kind == "registry":
+                rule = record.get("script", record.get("args", {}).get("script"))
+                if rule is not None:
+                    target = f"s:{rule}" if isinstance(rule, int) else rule
+                    objects.setdefault(
+                        target,
+                        {
+                            "maker": record.get("maker", actor),
+                            "created": record.get("created", when),
+                            "kind": target,
+                        },
+                    )
             if kind == "create" and target is not None:
                 objects[target] = {
                     "maker": record.get("maker", actor),
@@ -53,7 +66,7 @@ class Adapter:
                 "object": target,
                 "agent": record.get(
                     "agent",
-                    kind in ("action", "speech", "observation", "denial", "gap")
+                    kind in ("action", "speech", "observation", "denial", "gap", "registry")
                     or kind == "create"
                     and record.get("of") in ("model", "script"),
                 ),

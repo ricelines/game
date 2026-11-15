@@ -54,14 +54,14 @@ void failed_submissions_have_authenticated_records_without_catalog_ids() {
   const auto &event = records.front();
   require(event.at("actor") == "p:7" && event.at("maker") == "p:7" && event.at("agent") == true &&
               event.at("changed") == false && event.at("result") == "denied" &&
-              event.at("kind") == "create" && event.at("of") == "model" &&
+              event.at("kind") == "denial" && event.at("of") == "model" &&
               !event.contains("model") && !event.contains("script") && event.at("things").empty(),
           "failed CAD fabricated an identity, lost authenticated attribution or became a change");
   input.fields["operation"] = "variant";
   input.fields["job"] = "failed-variant-job";
   (void)step::failed_authoring(journal, 91, input);
   const auto variant = journal.take().front();
-  require(variant.at("kind") == "action" && variant.at("of") == "model_variant" &&
+  require(variant.at("kind") == "denial" && variant.at("of") == "model_variant" &&
               variant.at("id") == 2,
           "failed variant lost its actual attempt type/sequence");
 }
