@@ -37,6 +37,7 @@ struct Fixture {
   catalog::Scripts scripts;
   react::InstanceScripts installations;
   react::Triggers triggers;
+  react::Subscriptions subscriptions;
   Fixture()
       : values{terms,        identity(objects),
                objects.plot, objects.params,
@@ -116,8 +117,8 @@ struct Fixture {
     input.action_caller = PlayerId{7};
     react::Invocation invocation;
     react::CompletedInvocation completed;
-    react::start_invocation(vm, states, random, values, triggers, parts, 971, attribution(objects),
-                            definitions, scripts, journal,
+    react::start_invocation(vm, states, random, subscriptions, values, triggers, parts, 971,
+                            attribution(objects), definitions, scripts, journal,
                             {script, terms.rows[term].name, script + 10, 1, true}, std::move(input),
                             invocation, completed);
     react::finish_invocation(identity(objects), attribution(objects), definitions, scripts, journal,

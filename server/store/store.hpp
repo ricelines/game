@@ -879,6 +879,12 @@ struct RunOutcome {
   std::optional<Action> action{};
 };
 
+struct WatchRun {
+  FactKey source;
+  std::uint32_t index;
+  WatchAnswer value;
+};
+
 struct InvocationInput {
   Handle receiver, sender;
   TermId trigger = 0;
@@ -890,6 +896,7 @@ struct InvocationInput {
   std::optional<Caller> action_caller;
   Handle action_body, action_target;
   std::chrono::steady_clock::time_point deadline{};
+  std::optional<WatchRun> watch;
 };
 
 struct CompletedInvocation {
@@ -948,6 +955,7 @@ struct InvocationPlan {
   TermId trigger = 0;
   EventPayload payload;
   std::vector<Handle> acquired;
+  std::optional<WatchRun> watch{};
 };
 
 using ObjectSelection = std::optional<std::span<const Handle>>;

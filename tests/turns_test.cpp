@@ -15,14 +15,52 @@ react::CompletedInvocation invoke(test_runtime::Fixture &f, const step::PlannedI
                                   const Relation &parts, record::Journal &journal) {
   react::Invocation invocation;
   react::CompletedInvocation completed;
-  react::start_invocation(f.vm, f.states, f.random, f.values(), f.triggers, parts, 7,
-                          attribution(f.objects), f.models, f.scripts, journal, plan.handler,
+  react::start_invocation(f.vm, f.states, f.random, f.subscriptions, f.values(), f.triggers, parts,
+                          7, attribution(f.objects), f.models, f.scripts, journal, plan.handler,
                           plan.input, invocation, completed);
   require(completed.outcome.status == react::RunOutcome::Status::Ok,
           "single-segment test must complete actual Lua without an action continuation");
   react::finish_invocation(identity(f.objects), attribution(f.objects), f.models, f.scripts,
                            journal, invocation, completed);
   return completed;
+}
+void a_watch_is_acknowledged_only_when_its_handler_starts() {
+  test_runtime::Fixture f(250);
+  const auto script = f.add(R"(return {kind='model',watches={'novel.heat'},on={
+    ['novel.heat']=function(self) self.state.runs=(self.state.runs or 0)+1 end}})");
+  f.models.rows[1].script = script;
+  react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
+  f.state(f.a, 1, 0);
+  f.bind(script, f.a);
+  f.state(f.a, 1, 1);
+  const auto plan = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
+                                     f.scripts, {{f.a, 1}, {}}, 0, 20);
+  require(plan.invocations.size() == 1, "changed watch plans one run");
+  f.scripts.rows[script].declaration.active = false;
+  react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
+  Relation parts;
+  record::Journal journal(8, {});
+  react::Invocation invocation;
+  react::CompletedInvocation completed;
+  const auto &candidate = plan.invocations.front();
+  require(!react::start_invocation(f.vm, f.states, f.random, f.subscriptions, f.values(),
+                                   f.triggers, parts, 7, attribution(f.objects), f.models,
+                                   f.scripts, journal, candidate.handler, candidate.input,
+                                   invocation, completed),
+          "disabled planned handler does not start");
+  require(!f.states.contains({f.a, script}) && journal.take().empty(),
+          "skipping a planned handler changes no script state or journal");
+  f.scripts.rows[script].declaration.active = true;
+  react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
+  const auto retried = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
+                                        f.scripts, {{f.a, 1}, {}}, 1, 20);
+  require(retried.invocations.size() == 1, "unstarted watch change remains pending");
+  invoke(f, retried.invocations.front(), parts, journal);
+  require(std::get<double>(f.states.at({f.a, script}).at(std::string("runs"))) == 1 &&
+              step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers, f.scripts,
+                               {{f.a, 1}, {}}, 1, 20)
+                  .invocations.empty(),
+          "the watch fires once and is consumed only by its actual run");
 }
 void chosen_actions_and_typed_inputs() {
   test_runtime::Fixture f(250);
@@ -492,6 +530,7 @@ int main(int argc, char **argv) {
   try {
     const bool benchmark = argc == 2 && std::string_view(argv[1]) == "--bench";
     require(argc == 1 || benchmark, "usage: turns_test [--bench]");
+    a_watch_is_acknowledged_only_when_its_handler_starts();
     chosen_actions_and_typed_inputs();
     canonical_results_and_actual_bounds();
     threshold_plans_use_current_subscriptions(benchmark);

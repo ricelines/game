@@ -203,6 +203,7 @@ void subscription_rebind_and_relations() {
               deliveries[0].relations[0].other == f.b && deliveries[0].relations[0].added &&
               deliveries[0].relations[0].incoming,
           "relation watch carries other endpoint and direction");
+  acknowledge_watch(subscriptions, {f.a, 8}, {{f.a, 2}, 0, deliveries[0].value});
   set_relation(relation, 2, f.b, f.a, false, effects);
   answers.values[{f.a, 2}] = read_relation(relation, f.a);
   deliveries = check_watch(subscriptions, {f.a, 2}, answers);
@@ -671,8 +672,8 @@ void candidate_start_uses_current_installation() {
     input.receiver = f.a;
     input.trigger = 6;
     input.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-    return start_invocation(f.vm, f.states, f.random, f.values(), f.triggers, parts, 7,
-                            attribution(f.objects), f.models, f.scripts, journal, handler,
+    return start_invocation(f.vm, f.states, f.random, f.subscriptions, f.values(), f.triggers,
+                            parts, 7, attribution(f.objects), f.models, f.scripts, journal, handler,
                             std::move(input), inv, done);
   };
   Invocation broad;
@@ -731,9 +732,9 @@ void suspended_handler_sees_replaced_parts() {
   CompletedInvocation completed;
   record::Journal journal(8, {});
   const auto handlers = dispatch(f.triggers, f.values(), root, 6, 0, 20);
-  require(start_invocation(f.vm, f.states, f.random, f.values(), f.triggers, declared, 7,
-                           attribution(f.objects), f.models, f.scripts, journal, handlers.front(),
-                           std::move(input), invocation, completed) &&
+  require(start_invocation(f.vm, f.states, f.random, f.subscriptions, f.values(), f.triggers,
+                           declared, 7, attribution(f.objects), f.models, f.scripts, journal,
+                           handlers.front(), std::move(input), invocation, completed) &&
               completed.outcome.status == RunOutcome::Status::Action,
           "actual script suspends while its assembly still has the old part");
   const auto plan =

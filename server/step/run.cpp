@@ -610,8 +610,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
           continue;
       }
       auto *selected =
-          advance_execution(execution, vm, states, random, values, triggers, declared_parts,
-                            attribution(objects), models, scripts, journal);
+          advance_execution(execution, vm, states, random, subscriptions, values, triggers,
+                            declared_parts, attribution(objects), models, scripts, journal);
       if (!selected)
         continue;
       if (auto *action = std::get_if<ActionRun>(selected)) {

@@ -2,6 +2,7 @@
 namespace amber::step {
 ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &execution, react::Vm &vm,
                                   react::ScriptStates &states, react::RandomStates &random,
+                                  react::Subscriptions &subscriptions,
                                   const react::ValueRead &values, const react::Triggers &triggers,
                                   const Relation &declared_parts, AttributionRead attribution,
                                   const catalog::Models &models, const catalog::Scripts &scripts,
@@ -18,10 +19,10 @@ ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &execution, react::
     auto &handler = std::get<HandlerRun>(execution.back());
     if (!handler.started) {
       handler.started = true;
-      if (!react::start_invocation(vm, states, random, values, triggers, declared_parts, 0,
-                                   attribution, models, scripts, journal, handler.plan.handler,
-                                   std::move(handler.plan.input), handler.invocation,
-                                   handler.completed)) {
+      if (!react::start_invocation(vm, states, random, subscriptions, values, triggers,
+                                   declared_parts, 0, attribution, models, scripts, journal,
+                                   handler.plan.handler, std::move(handler.plan.input),
+                                   handler.invocation, handler.completed)) {
         execution.pop_back();
         continue;
       }

@@ -140,11 +140,60 @@ std::vector<WatchDelivery> check_watch(Subscriptions &subscriptions, FactKey sou
         difference(old ? old->out : empty, relation->out, false);
         difference(old ? old->in : empty, relation->in, true);
       }
-    binding.last = answer;
     if (changed)
       out.push_back({binding.consumer, binding.index, answer, std::move(deltas)});
   }
   return out;
+}
+void acknowledge_watch(Subscriptions &subscriptions, ScriptKey consumer, const WatchRun &run) {
+  const auto found = subscriptions.rows.find(run.source);
+  if (found == subscriptions.rows.end())
+    return;
+  for (auto &binding : found->second)
+    if (binding.consumer == consumer && binding.index == run.index) {
+      binding.last = run.value;
+      return;
+    }
+}
+std::optional<std::pair<HandlerRef, std::size_t>> find_handler(const Triggers &triggers,
+                                                               const ValueRead &values,
+                                                               ScriptKey consumer, TermId trigger,
+                                                               Step now, double hz) {
+  if (!values.identity.valid(consumer.object))
+    return {};
+  const auto found = triggers.find(trigger);
+  if (found == triggers.end())
+    return {};
+  const auto &row = found->second;
+  const auto matches = [&](const HandlerRef &handler) {
+    return handler.enabled && handler.script == consumer.script;
+  };
+  if (const auto material = row.by_material.find(values.identity.material[consumer.object.slot()]);
+      material != row.by_material.end() && matches(material->second))
+    return std::pair{material->second, std::size_t{0}};
+  std::size_t rank = 1;
+  for (const auto &[flag, handler] : row.by_flag) {
+    if (matches(handler)) {
+      const auto value = read(values, consumer.object, flag, now, hz);
+      if (value.present && (value.value.kind == Value::Kind::Boolean
+                                ? value.value.boolean
+                                : value.value.is_numeric() && value.value.numeric() != 0))
+        return std::pair{handler, rank};
+    }
+    ++rank;
+  }
+  if (const auto model = row.by_model.find(values.identity.model[consumer.object.slot()]);
+      model != row.by_model.end() && matches(model->second))
+    return std::pair{model->second, rank};
+  ++rank;
+  if (const auto instances = row.by_instance.find(consumer.object.bits);
+      instances != row.by_instance.end())
+    for (const auto &handler : instances->second) {
+      if (matches(handler))
+        return std::pair{handler, rank};
+      ++rank;
+    }
+  return {};
 }
 bool valid_threshold(const step::ThresholdToken &token, IdentityRead identity,
                      const Processes &processes, const Subscriptions &subscriptions, Step now,

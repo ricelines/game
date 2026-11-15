@@ -204,9 +204,9 @@ struct Fixture {
     const auto handlers = react::dispatch(f.triggers, f.values(), f.a, 7, clock.step, 20);
     test_runtime::require(handlers.size() == 1 && handlers.front().script == script,
                           "actual current fixture handler is installed");
-    react::start_invocation(f.vm, f.states, f.random, f.values(), f.triggers, parts, 7,
-                            attribution(f.objects), f.models, f.scripts, journal, handlers.front(),
-                            std::move(input), invocation, completed);
+    react::start_invocation(f.vm, f.states, f.random, f.subscriptions, f.values(), f.triggers,
+                            parts, 7, attribution(f.objects), f.models, f.scripts, journal,
+                            handlers.front(), std::move(input), invocation, completed);
     test_runtime::require(completed.outcome.status != react::RunOutcome::Status::Action,
                           "nested checked actions belong in the actual server process tests");
     react::finish_invocation(identity(f.objects), attribution(f.objects), f.models, f.scripts,

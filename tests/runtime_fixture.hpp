@@ -116,6 +116,8 @@ struct Fixture {
     auto result = check_changed(subscriptions, values(), allocations, fact, now, 20, {});
     auto plans = plan_deliveries(result, triggers, scripts, values(), now, 20);
     for (const auto &dirty : changes.dirty) {
+      if (dirty.source == fact)
+        continue;
       auto followed =
           check_changed(subscriptions, values(), allocations, dirty.source, now, 20, {});
       auto more = plan_deliveries(followed, triggers, scripts, values(), now, 20);
@@ -137,6 +139,8 @@ struct Fixture {
       invocation.state = &states[invocation.self];
       invocation.random = &random[plan.receiver.bits];
       invocation.effects = &effects;
+      if (plan.watch)
+        acknowledge_watch(subscriptions, invocation.self, *plan.watch);
       const auto result = run_handler(vm, plan.handler, invocation);
       if (result.status != RunOutcome::Status::Ok)
         throw std::runtime_error(result.error);

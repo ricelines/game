@@ -107,6 +107,7 @@ WatchPlan plan_watch(react::Subscriptions &subscriptions, const react::ValueRead
     input.trigger = delivery.trigger;
     input.payload = std::move(delivery.payload);
     input.acquired = std::move(delivery.acquired);
+    input.watch = std::move(delivery.watch);
     input.step = now;
     input.hz = hz;
     input.origin = work.origin;
@@ -153,6 +154,7 @@ WatchPlan plan_background(react::Subscriptions &subscriptions, const react::Valu
     input.trigger = delivery.trigger;
     input.payload = std::move(delivery.payload);
     input.acquired = std::move(delivery.acquired);
+    input.watch = std::move(delivery.watch);
     input.step = now;
     input.hz = hz;
     input.origin = item.origin;

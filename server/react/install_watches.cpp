@@ -97,15 +97,6 @@ std::vector<WatchKey> consumer_keys(const react::Subscriptions &subscriptions, S
   }
   return keys;
 }
-std::optional<std::pair<react::HandlerRef, std::size_t>>
-applicable(ScriptKey consumer, TermId trigger, const react::Triggers &triggers,
-           const react::ValueRead &values, Step now, double hz) {
-  const auto handlers = react::dispatch(triggers, values, consumer.object, trigger, now, hz);
-  for (std::size_t i = 0; i < handlers.size(); ++i)
-    if (handlers[i].script == consumer.script)
-      return std::pair{handlers[i], i};
-  return {};
-}
 } // namespace
 void remove_watches(Subscriptions &subscriptions, ScriptKey consumer) {
   for (auto row = subscriptions.rows.begin(); row != subscriptions.rows.end();) {
@@ -320,13 +311,14 @@ std::vector<InvocationPlan> plan_deliveries(const WatchResult &result,
     if (delivery.index >= declaration.watches.size())
       continue;
     const auto trigger = declaration.watches[delivery.index].term;
-    auto found = applicable(delivery.consumer, trigger, triggers, values, now, hz);
+    auto found = find_handler(triggers, values, delivery.consumer, trigger, now, hz);
     if (!found)
       continue;
     const auto &[handler, rank] = *found;
     auto add = [&](EventPayload payload, Handle other = {}) {
       InvocationPlan plan{handler, delivery.consumer.object, result.source.subject,
                           trigger, std::move(payload),       {}};
+      plan.watch = WatchRun{result.source, delivery.index, delivery.value};
       if (result.source.subject.bits)
         unique(plan.acquired, result.source.subject);
       if (other.bits)
@@ -362,8 +354,8 @@ bool has_applicable_watch(const react::Subscriptions &subscriptions,
     return false;
   for (const auto &binding : row->second) {
     const auto &declaration = scripts.rows.at(binding.consumer.script).declaration;
-    if (applicable(binding.consumer, declaration.watches.at(binding.index).term, triggers, values,
-                   now, hz))
+    if (find_handler(triggers, values, binding.consumer, declaration.watches.at(binding.index).term,
+                     now, hz))
       return true;
   }
   return false;

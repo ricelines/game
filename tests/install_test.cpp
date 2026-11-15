@@ -137,7 +137,9 @@ void threshold_restore_and_selected_instance_codec() {
   auto result = check_changed(loaded_subs, f.values(), f.allocations, {f.a, 1}, 41, 20, {});
   auto plans = plan_deliveries(result, f.triggers, f.scripts, f.values(), 41, 20);
   require(plans.size() == 1, "restored crossing yields actual invocation");
+  std::swap(f.subscriptions, loaded_subs);
   f.run(plans, 41);
+  std::swap(f.subscriptions, loaded_subs);
   require(std::get<bool>(f.states.at({f.a, id}).at(StateKey{std::string("crossed")})),
           "threshold invokes real Luau after restore");
   check_changed(loaded_subs, f.values(), f.allocations, {f.a, 1}, 41, 20, {});

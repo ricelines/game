@@ -36,6 +36,10 @@ std::vector<HandlerRef> dispatch(const Triggers &, IdentityRead, std::span<const
 std::vector<HandlerRef> dispatch(const Triggers &, const ValueRead &, Handle receiver,
                                  TermId trigger, Step, double hz);
 
+std::optional<std::pair<HandlerRef, std::size_t>> find_handler(const Triggers &, const ValueRead &,
+                                                               ScriptKey, TermId, Step, double hz);
+void acknowledge_watch(Subscriptions &, ScriptKey, const WatchRun &);
+
 RelationAnswer read_relation(const Relation &, Handle);
 
 std::vector<WatchDelivery> check_watch(Subscriptions &, FactKey, const CurrentAnswers &,
@@ -90,10 +94,11 @@ void consult_object(const Invocation &, Handle);
 
 class Vm;
 // Direct VM execution.
-bool start_invocation(Vm &, ScriptStates &, RandomStates &, const ValueRead &, const Triggers &,
-                      const Relation &declared_parts, std::uint64_t initial_seed, AttributionRead,
-                      const catalog::Models &, const catalog::Scripts &, record::Journal &,
-                      const HandlerRef &, InvocationInput, Invocation &, CompletedInvocation &);
+bool start_invocation(Vm &, ScriptStates &, RandomStates &, Subscriptions &, const ValueRead &,
+                      const Triggers &, const Relation &declared_parts, std::uint64_t initial_seed,
+                      AttributionRead, const catalog::Models &, const catalog::Scripts &,
+                      record::Journal &, const HandlerRef &, InvocationInput, Invocation &,
+                      CompletedInvocation &);
 void finish_invocation(IdentityRead, AttributionRead, const catalog::Models &,
                        const catalog::Scripts &, record::Journal &, Invocation &,
                        CompletedInvocation &);

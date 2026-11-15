@@ -86,9 +86,9 @@ struct Fixture {
     const auto handlers =
         react::dispatch(f.triggers, f.values(), input.receiver, input.trigger, step, 20);
     require(handlers.size() == 1, "financial fixture uses its actual installed handler");
-    react::start_invocation(f.vm, f.states, f.random, f.values(), f.triggers, parts, 7,
-                            attribution(f.objects), f.models, f.scripts, journal, handlers.front(),
-                            std::move(input), invocation, completed);
+    react::start_invocation(f.vm, f.states, f.random, f.subscriptions, f.values(), f.triggers,
+                            parts, 7, attribution(f.objects), f.models, f.scripts, journal,
+                            handlers.front(), std::move(input), invocation, completed);
     return completed.outcome;
   }
   step::ActionRun emitted() {

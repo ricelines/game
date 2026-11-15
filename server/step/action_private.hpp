@@ -37,10 +37,11 @@ struct HandlerRun {
 };
 using ExecutionFrame = std::variant<ActionRun, HandlerRun>;
 ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &, react::Vm &, react::ScriptStates &,
-                                  react::RandomStates &, const react::ValueRead &,
-                                  const react::Triggers &, const Relation &declared_parts,
-                                  AttributionRead, const catalog::Models &,
-                                  const catalog::Scripts &, record::Journal &);
+                                  react::RandomStates &, react::Subscriptions &,
+                                  const react::ValueRead &, const react::Triggers &,
+                                  const Relation &declared_parts, AttributionRead,
+                                  const catalog::Models &, const catalog::Scripts &,
+                                  record::Journal &);
 std::optional<std::pair<InputOrder, ActionOutcome>> return_action(std::deque<ExecutionFrame> &,
                                                                   react::Vm &, IdentityRead,
                                                                   const Relation &declared_parts);

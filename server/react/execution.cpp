@@ -33,7 +33,8 @@ void refresh_parts(Invocation &invocation, IdentityRead identity, const Relation
   for (std::size_t i = 0; i < invocation.parts.size(); ++i)
     append(invocation.parts[i]);
 }
-bool start_invocation(Vm &vm, ScriptStates &states, RandomStates &random, const ValueRead &values,
+bool start_invocation(Vm &vm, ScriptStates &states, RandomStates &random,
+                      Subscriptions &subscriptions, const ValueRead &values,
                       const Triggers &triggers, const Relation &declared_parts,
                       std::uint64_t initial_seed, AttributionRead attribution,
                       const catalog::Models &models, const catalog::Scripts &scripts,
@@ -47,13 +48,14 @@ bool start_invocation(Vm &vm, ScriptStates &states, RandomStates &random, const 
   const auto identity = values.identity;
   // A prior handler may have changed this object's installation while this
   // candidate waited. Eligibility itself must not recreate retired state.
-  const auto current =
-      dispatch(triggers, values, input.receiver, input.trigger, input.step, input.hz);
-  if (std::none_of(current.begin(), current.end(), [&](const HandlerRef &candidate) {
-        return candidate.script == handler.script && candidate.function == handler.function &&
-               candidate.version == handler.version;
-      }))
+  const auto current = find_handler(triggers, values, {input.receiver, handler.script},
+                                    input.trigger, input.step, input.hz);
+  if (!current || current->first.function != handler.function ||
+      current->first.version != handler.version ||
+      !scripts.rows.at(handler.script).declaration.active)
     return false;
+  if (input.watch)
+    acknowledge_watch(subscriptions, {input.receiver, handler.script}, *input.watch);
   invocation.self = {input.receiver, handler.script};
   invocation.step = input.step;
   invocation.hz = input.hz;
