@@ -1,0 +1,7 @@
+add_library(amber_execution execution.cpp credits.cpp)
+target_link_libraries(amber_execution PUBLIC amber_react amber_catalog)
+if(BUILD_TESTING)
+  add_executable(execution_test ../../../tests/execution_test.cpp)
+  target_link_libraries(execution_test PRIVATE amber_execution)
+  add_test(NAME execution COMMAND execution_test)
+endif()

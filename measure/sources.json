@@ -1,0 +1,159 @@
+{
+  "emergence": {
+    "commit": "a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b",
+    "retrieved_at": "2026-11-14T16:37:30.283036+00:00",
+    "license": "CC-BY-NC-4.0; research only, not redistributed",
+    "worlds": [
+      {
+        "world": "s1-agentworld-claude-db",
+        "file": "s1-agentworld-claude-db.json",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%201/tool_call_dataset/agentworld-claude-db.json",
+        "sha256": "05e427e724d18d565724426e1c9b8682af1e04ddd25cfed4fce46416df3b4042",
+        "blob_sha1": "a4f3cc50308c46fa3483d4b982e5c9c41825b0e9"
+      },
+      {
+        "world": "s1-agentworld-db",
+        "file": "s1-agentworld-db.json",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%201/tool_call_dataset/agentworld-db.json",
+        "sha256": "076f4fc42a0903d7ff7efbd544b8a25c09d3076d0d594f3853b346e101a328ae",
+        "blob_sha1": "0b5ac6cdf8ee2828e9f0c17e29597e49270ea6f9"
+      },
+      {
+        "world": "s1-agentworld-gemini-db",
+        "file": "s1-agentworld-gemini-db.json",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%201/tool_call_dataset/agentworld-gemini-db.json",
+        "sha256": "d6a818678c7a0c13db6e2532f86cf88bb8289e0a3713f44e8aec322e77c68188",
+        "blob_sha1": "df70d484032d264de8122a2f8ba37294aa468b0c"
+      },
+      {
+        "world": "s1-agentworld-grok-db",
+        "file": "s1-agentworld-grok-db.json",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%201/tool_call_dataset/agentworld-grok-db.json",
+        "sha256": "ba13f93dc031c8f4de4dd6d3037ea90bed117668f68fa54a3b4b7110d12333fe",
+        "blob_sha1": "aba957c95db822b6b5afe43ac48ebc049907e74c"
+      },
+      {
+        "world": "s1-agentworld-openai-db",
+        "file": "s1-agentworld-openai-db.json",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%201/tool_call_dataset/agentworld-openai-db.json",
+        "sha256": "255f3e86aa8808922dac2aa1edf8290e86d1e018a754c79b10013a8b49343e7f",
+        "blob_sha1": "683a237ae9a82cfa7e0a1daa00f9e531b72d3052"
+      },
+      {
+        "world": "s2-claude",
+        "file": "s2-claude.zip",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%202/tool_call_dataset/claude.zip",
+        "sha256": "0f9f42343c876e001374ca929e71510852972c605a301f83f17376667f182069",
+        "blob_sha1": "3f598378605b0e367f076de55cbcbb144a757f7e"
+      },
+      {
+        "world": "s2-deepseek",
+        "file": "s2-deepseek.zip",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%202/tool_call_dataset/deepseek.zip",
+        "sha256": "ab4733fc740f7134ab9768a71f84cce7870a1ddb4ef8a139178d02aba64c73c3",
+        "blob_sha1": "4a6a9fbc6d5a0097166dd61cf3f0ddeb6033b2ed"
+      },
+      {
+        "world": "s2-gemini",
+        "file": "s2-gemini.zip",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%202/tool_call_dataset/gemini.zip",
+        "sha256": "eb98a4a92d6b1252faf58d337e5f9b307387994b538b96c959b6042c7ded3766",
+        "blob_sha1": "a67017bac3dbed9575da755a75eaf533abcd3245"
+      },
+      {
+        "world": "s2-grok",
+        "file": "s2-grok.zip",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%202/tool_call_dataset/grok.zip",
+        "sha256": "a51b921709136d7cca62339bc56469f8b34693e674f31a3b800258dded89580f",
+        "blob_sha1": "e48400ce3b8c3d1fb2caccbebaaa87d15ba0dc92"
+      },
+      {
+        "world": "s2-mistral",
+        "file": "s2-mistral.zip",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%202/tool_call_dataset/mistral.zip",
+        "sha256": "52fc98699729be0d0bce62a8738d7ed82cb8886248b839836b5d9178cccb3220",
+        "blob_sha1": "fe374f5bf310a090303840a4ce45eeb627b46e68"
+      },
+      {
+        "world": "s2-mixed",
+        "file": "s2-mixed.zip",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%202/tool_call_dataset/mixed.zip",
+        "sha256": "f338b5060a56dbe3062917bf10e8d35ec5e1e42ae3e8e935820c7851572dd1af",
+        "blob_sha1": "52247aec4a620383bee70b7222d9e86eb2c0a140"
+      },
+      {
+        "world": "s2-openai",
+        "file": "s2-openai.zip",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%202/tool_call_dataset/openai.zip",
+        "sha256": "d35ae7db319deb6c1b82c32be4aa045fc280fc1af9e67c8b22d23f6559ff0838",
+        "blob_sha1": "b1a68ef955d37b7ed476e2dd262bdfb961afadac"
+      },
+      {
+        "world": "s2-qwen",
+        "file": "s2-qwen.zip",
+        "source": "https://raw.githubusercontent.com/EmergenceAI/Emergence-World/a7aa4bb17cbb6f56db9a19af75fc57f39b2a3f4b/Season%202/tool_call_dataset/qwen.zip",
+        "sha256": "f2b78f0a0210ab647a9effd5baf9e6976c6f71e241087a8441d5dab3f9010001",
+        "blob_sha1": "74614f0fb644676271659dd025cdce468a58a073"
+      }
+    ]
+  },
+  "onefthree": {
+    "release": "city-snapshot-v4-20261114T150743Z",
+    "source": "https://github.com/onetapstudiogames/1f3d9",
+    "files": [
+      {
+        "file": "events.ndjson",
+        "source": "https://github.com/onetapstudiogames/1f3d9/releases/download/city-snapshot-v4-20261114T150743Z/events.ndjson",
+        "sha256": "e44ebd4c7605378f4a36aeb0cc9bd49544d0df203f88f4e9fb4d106302316575"
+      },
+      {
+        "file": "kinds.ndjson",
+        "source": "https://github.com/onetapstudiogames/1f3d9/releases/download/city-snapshot-v4-20261114T150743Z/kinds.ndjson",
+        "sha256": "56cd2c0fd7b44de1d9e6fa61ac8bf105c56f0615a0b17e6563d04cb7652005a4"
+      },
+      {
+        "file": "manifest.json",
+        "source": "https://github.com/onetapstudiogames/1f3d9/releases/download/city-snapshot-v4-20261114T150743Z/manifest.json",
+        "sha256": "da13a87dc0dce3bf9f1efcad9647339971898a8e209edb94fa99473bd0f71774"
+      },
+      {
+        "file": "things.ndjson",
+        "source": "https://github.com/onetapstudiogames/1f3d9/releases/download/city-snapshot-v4-20261114T150743Z/things.ndjson",
+        "sha256": "1cb3b92fd86990ad6bb26e7202930be862839ae7cd04bd73b1806b78f334ba27"
+      }
+    ]
+  },
+  "moltbook": {
+    "repository": "iNLP-Lab/Moltbook-MoltNet",
+    "commit": "fbb34f7eda1981b279361284aa2ba656b645765a",
+    "release": "v2026-02-28",
+    "license": "CC-BY-4.0",
+    "source": "https://huggingface.co/datasets/iNLP-Lab/Moltbook-MoltNet",
+    "files": [
+      {
+        "file": "agents.parquet",
+        "source": "https://huggingface.co/datasets/iNLP-Lab/Moltbook-MoltNet/resolve/fbb34f7eda1981b279361284aa2ba656b645765a/data/v2026-02-28/agents.parquet",
+        "sha256": "14769042517125741f1356d6ca5ced4f8f1bbeadaebe4b348233977c25197996",
+        "bytes": 19165479
+      },
+      {
+        "file": "comments.parquet",
+        "source": "https://huggingface.co/datasets/iNLP-Lab/Moltbook-MoltNet/resolve/fbb34f7eda1981b279361284aa2ba656b645765a/data/v2026-02-28/comments.parquet",
+        "sha256": "3fd76180339d6da5f3321d714531698c9bef04014ac94868803551699259d870",
+        "bytes": 591384313
+      },
+      {
+        "file": "posts.parquet",
+        "source": "https://huggingface.co/datasets/iNLP-Lab/Moltbook-MoltNet/resolve/fbb34f7eda1981b279361284aa2ba656b645765a/data/v2026-02-28/posts.parquet",
+        "sha256": "6a46bc580d07254f4544616d13663321df8c1cbc3ebc684558e39f2ab769e2d4",
+        "bytes": 430888945
+      },
+      {
+        "file": "submolts.parquet",
+        "source": "https://huggingface.co/datasets/iNLP-Lab/Moltbook-MoltNet/resolve/fbb34f7eda1981b279361284aa2ba656b645765a/data/v2026-02-28/submolts.parquet",
+        "sha256": "9cd2ecf844a8136411c347d1b2e51e38b2ee2c7fdec861a1694bb78780aa969e",
+        "bytes": 2469987
+      }
+    ]
+  }
+}

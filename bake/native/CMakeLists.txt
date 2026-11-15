@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.24)
+project(AmbergrisBake LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/Dependencies.cmake")
+add_executable(amb_bake_native mesh.cpp)
+add_library(amb_bake_geometry SHARED mesh.cpp)
+target_compile_definitions(amb_bake_geometry PRIVATE AMB_BAKE_LIBRARY)
+foreach(target amb_bake_native amb_bake_geometry)
+  target_link_libraries(${target} PRIVATE Ambergris::Jolt Ambergris::meshoptimizer
+    Ambergris::cgltf Ambergris::nlohmann_json)
+  target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+endforeach()

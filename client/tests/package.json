@@ -1,0 +1,13 @@
+{
+  "name": "ambergris-spectator-checks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "smoke": "node browser-smoke.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "prettier": "^3.10.1",
+    "ws": "^8.19.0"
+  }
+}

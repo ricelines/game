@@ -1,0 +1,7 @@
+add_library(amber_lifecycle lifecycle.cpp snapshot.cpp)
+target_link_libraries(amber_lifecycle PUBLIC amber_catalog amber_snap)
+if(BUILD_TESTING)
+  add_executable(lifecycle_test ../../tests/lifecycle_test.cpp)
+  target_link_libraries(lifecycle_test PRIVATE amber_lifecycle)
+  add_test(NAME lifecycle COMMAND lifecycle_test)
+endif()

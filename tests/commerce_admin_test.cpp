@@ -1,0 +1,329 @@
+#include "bindings/commerce/admin.hpp"
+#include "runtime_fixture.hpp"
+
+#include <chrono>
+#include <iostream>
+
+using namespace amber;
+using test_runtime::require;
+namespace ad = amber::bindings::commerce;
+using Json = nlohmann::json;
+namespace {
+drive::NativeCall call(PlayerId player, TermId action, Handle target, Json arguments) {
+  return {{player, action, target, {}}, std::move(arguments), {}, 10, 20, {}};
+}
+void changed(void *local) {
+  ++*static_cast<unsigned *>(local);
+}
+GrantId grant_id(const drive::NativeCompletion &result) {
+  require(result.reply.value("ok", false), result.reply.dump().c_str());
+  return bindings::authority::identifier(result.reply.at("grant"), "grant:");
+}
+} // namespace
+int main() {
+  try {
+    test_runtime::Fixture f;
+    perm::Players players;
+    players.rows.resize(5);
+    perm::Groups groups;
+    perm::Grants grants;
+    perm::OwnerLimits limits;
+    perm::Plots plots;
+    plots.rows.push_back({1, 1, 0, 0, {-10, -10, 10, 10}, {}});
+    control::Profiles profiles;
+    profiles.rows.resize(5);
+    for (PlayerId id = 1; id < profiles.rows.size(); ++id)
+      profiles.rows[id].id = id;
+    profiles.rows[4].roles = {"architect"};
+    f.objects.owner[f.a.slot()] = 1;
+    f.objects.owner[f.b.slot()] = 2;
+    f.objects.owner[f.c.slot()] = 3;
+    f.objects.plot[f.a.slot()] = 1;
+    f.objects.plot[f.b.slot()] = 1;
+    f.objects.plot[f.c.slot()] = 1;
+    unsigned invalidations = 0;
+    const ad::AdminInvalidation sink{&invalidations, changed};
+    const auto values = f.values();
+    const bindings::authority::ScopeRead scopes{
+        identity(f.objects), authority(f.objects), limits, players, plots, profiles};
+    ad::GrantBinding grant_binding{grants,      players, scopes, f.models, f.scripts,
+                                   f.installed, f.rules, values, sink};
+    ad::RevokeBinding revoke_binding{grants, players, profiles, sink};
+    ad::ListGrantsBinding list_binding{grants, players};
+    ad::PresetBinding preset_binding{{f.objects.group, f.objects.preset},
+                                     permission_flags(f.objects),
+                                     identity(f.objects),
+                                     authority(f.objects),
+                                     limits,
+                                     players,
+                                     groups,
+                                     sink};
+    ad::GroupCreateBinding create_binding{groups, players, sink};
+    ad::GroupMemberBinding member_binding{groups, players, sink};
+    ad::PlotPermissionsBinding plot_binding{plots, players, groups, sink};
+    command::NativeActions native;
+    const auto ids = ad::declare_admin(f.terms, native);
+    const auto count = f.terms.rows.size();
+    require(ad::declare_admin(f.terms, native).grant == ids.grant && f.terms.rows.size() == count &&
+                native.rows.size() == 7,
+            "administration declarations changed registry identities on restore");
+    drive::NativeOperations operations;
+    drive::register_native(operations, ids.grant, {ad::validate_grant, ad::grant, &grant_binding});
+    drive::register_native(operations, ids.revoke,
+                           {ad::validate_revoke, ad::revoke, &revoke_binding});
+    drive::register_native(operations, ids.list_grants,
+                           {ad::validate_list_grants, ad::list_grants, &list_binding});
+    drive::register_native(operations, ids.preset,
+                           {ad::validate_preset, ad::preset, &preset_binding});
+    drive::register_native(operations, ids.group_create,
+                           {ad::validate_group_create, ad::group_create, &create_binding});
+    drive::register_native(operations, ids.group_member,
+                           {ad::validate_group_member, ad::group_member, &member_binding});
+    drive::register_native(operations, ids.plot_permissions,
+                           {ad::validate_plot_permissions, ad::plot_permissions, &plot_binding});
+    auto run = [&](PlayerId player, TermId action, Handle object, Json input) {
+      return drive::invoke_native(operations, call(player, action, object, std::move(input)));
+    };
+    require(!ad::validate_grant({{"holder", "p:2"},
+                                 {"scope", {{"account", "p:1"}}},
+                                 {"rights", {"spend"}},
+                                 {"unexpected", 1}})
+                    .empty() &&
+                !ad::validate_revoke({{"grant", "grant:1"}, {"holder", "p:2"}}).empty() &&
+                !ad::validate_plot_permissions({{"plot", -1}}).empty() &&
+                !ad::validate_group_create({{"name", " \t"}}).empty() &&
+                native.rows.at(ids.grant).inputs_schema["properties"]["holder"].contains("oneOf"),
+            "structured administration schemas accepted malformed inputs or hid holder shape");
+    require(run(1, ids.group_create, f.a, {{"name", "Independent workshop"}}).changed &&
+                groups.rows[1].controller == 1 && players.rows[1].groups == std::vector<GroupId>{1},
+            "group creation failed to install actual controller/membership");
+    require(!run(2, ids.group_member, f.b, {{"group", "g:1"}, {"player", "p:2"}, {"member", true}})
+                 .reply["ok"],
+            "non-controller added themself to group");
+    require(
+        run(1, ids.group_member, f.a, {{"group", "g:1"}, {"player", "p:2"}, {"member", true}})
+                .changed &&
+            !run(1, ids.group_member, f.a, {{"group", "g:1"}, {"player", "p:2"}, {"member", true}})
+                 .changed &&
+            players.rows[2].groups == std::vector<GroupId>{1},
+        "controller membership mutation was not sorted/idempotent");
+    auto settings = run(1, ids.preset, f.a,
+                        {{"everyone", {"use"}},
+                         {"group_rights", {"edit"}},
+                         {"group", "g:1"},
+                         {"next_owner", {"use", "transfer"}},
+                         {"no_copy", true}});
+    require(settings.changed && f.objects.group[f.a.slot()] == 1 &&
+                (f.objects.flags[f.a.slot()] & NoCopy) &&
+                perm::check(perm::Holder::player(2), perm::Verb::Edit,
+                            perm::target(identity(f.objects), authority(f.objects), limits, f.a),
+                            players, grants, 10) &&
+                !perm::check(perm::Holder::player(2), perm::Verb::Copy,
+                             perm::target(identity(f.objects), authority(f.objects), limits, f.a),
+                             players, grants, 10),
+            "actual group preset/no-copy checks disagree with administration result");
+    require(!run(2, ids.preset, f.a, {{"everyone", {"destroy"}}}).reply["ok"],
+            "group Edit improperly authorized changing the owner's preset");
+    limits.set(f.c.slot(), perm::bit(perm::Verb::Transfer));
+    const auto restricted_before = f.objects.preset[f.c.slot()];
+    require(!run(3, ids.preset, f.c, {{"everyone", {"copy"}}}).reply["ok"] &&
+                !run(3, ids.preset, f.c, {{"no_copy", false}}).reply["ok"] &&
+                f.objects.preset[f.c.slot()] == restricted_before,
+            "owner widened an inherited restriction or denied preset partially mutated");
+    const auto before_flags = f.objects.flags[f.a.slot()] |= Escrow;
+    require(!run(1, ids.preset, f.a, {{"no_copy", false}}).reply["ok"] &&
+                f.objects.flags[f.a.slot()] == before_flags,
+            "escrow preset edit changed valuable flags");
+    f.objects.flags[f.a.slot()] &= ~Escrow;
+    const auto preset_before = f.objects.preset[f.b.slot()];
+    require(!run(2, ids.preset, f.b, {{"everyone", {"destroy"}}, {"group", "g:999"}}).reply["ok"] &&
+                f.objects.preset[f.b.slot()] == preset_before,
+            "invalid group assignment partially committed preset bits");
+    require(run(1, ids.plot_permissions, f.a,
+                {{"plot", 1},
+                 {"everyone", {"enter"}},
+                 {"group_rights", {"build"}},
+                 {"group", "g:1"},
+                 {"banned", {"p:3", "p:2", "p:3"}}})
+                    .changed &&
+                plots.rows[1].banned == std::vector<PlayerId>({2, 3}) &&
+                perm::check_land(perm::Holder::player(4), perm::LandVerb::Enter, plots.rows[1],
+                                 players, grants, 10) &&
+                perm::check_land(perm::Holder::player(2), perm::LandVerb::Build, plots.rows[1],
+                                 players, grants, 10)
+                        .reason == perm::Reason::Banned,
+            "plot permissions/bans failed their actual land checks");
+    require(
+        !run(2, ids.plot_permissions, f.b, {{"plot", 1}, {"banned", Json::array()}}).reply["ok"] &&
+            !run(1, ids.plot_permissions, f.a, {{"plot", 1}, {"everyone", {"transfer"}}})
+                 .reply["ok"],
+        "plot preset accepted non-owner edit or invented a public land-transfer bit");
+    require(run(2, ids.group_member, f.b, {{"group", "g:1"}, {"player", "p:2"}, {"member", false}})
+                    .changed &&
+                players.rows[2].groups.empty(),
+            "member could not leave their own group");
+    require(!run(2, ids.preset, f.b, {{"group", "g:1"}}).reply["ok"],
+            "former member assigned group they no longer belong to");
+    const auto script = f.add("return {kind='instance',on={}}", 2);
+    f.models.rows[1].script = script;
+    const Json script_holder = {{"script", "s:" + std::to_string(script)}, {"on", to_string(f.b)}};
+    const auto parent = grant_id(run(1, ids.grant, f.a,
+                                     {{"holder", "p:2"},
+                                      {"scope", {{"account", "p:1"}}},
+                                      {"rights", {"spend"}},
+                                      {"cap", 100},
+                                      {"period_s", 60},
+                                      {"expires_s", 120}}));
+    const auto child = grant_id(run(2, ids.grant, f.b,
+                                    {{"holder", script_holder},
+                                     {"scope", {{"account", "p:1"}}},
+                                     {"rights", {"spend"}},
+                                     {"cap", 70},
+                                     {"period_s", 30},
+                                     {"expires_s", 60}}));
+    require(grants.rows[child].parent == parent && grants.rows[child].expires_step == 1210,
+            "delegated grant lost actual parent or expiry");
+    const auto count_before = grants.rows.size();
+    require(!run(2, ids.grant, f.b,
+                 {{"holder", {{"script", "s:" + std::to_string(script)}, {"on", to_string(f.c)}}},
+                  {"scope", {{"account", "p:1"}}},
+                  {"rights", {"spend"}},
+                  {"cap", 60},
+                  {"period_s", 30},
+                  {"expires_s", 60}})
+                    .reply["ok"] &&
+                grants.rows.size() == count_before,
+            "delegation reached a script not controlled by the issuer");
+    const auto uninstalled = f.add("return {kind='instance',on={}}", 1);
+    require(
+        !run(1, ids.grant, f.a,
+             {{"holder", {{"script", "s:" + std::to_string(uninstalled)}, {"on", to_string(f.a)}}},
+              {"scope", {{"object", to_string(f.a)}}},
+              {"rights", {"edit"}},
+              {"expires_s", 60}})
+             .reply["ok"],
+        "transport claimed an uninstalled script holder");
+    require(
+        !run(1, ids.grant, f.a,
+             {{"holder", script_holder},
+              {"scope", {{"object", to_string(f.a)}}},
+              {"rights", {"edit"}}})
+                .reply["ok"] &&
+            !run(3, ids.grant, f.c,
+                 {{"holder", "p:2"}, {"scope", {{"object", to_string(f.c)}}}, {"rights", {"copy"}}})
+                 .reply["ok"],
+        "script grant omitted expiry or inherited ceiling was widened");
+    perm::Ledger ledger;
+    ledger.balance = {0, 200, 0, 0, 0};
+    require(bool(perm::pay(ledger, grants, perm::Holder::script(script, f.b), 1, 3, 30, 10)),
+            "actual delegated script could not spend its allowance");
+    auto listed = run(2, ids.list_grants, f.b, Json::object());
+    require(listed.reply["held"].size() == 1 && listed.reply["held"][0]["remaining"] == 70 &&
+                listed.reply["given"].size() == 1 && listed.reply["given"][0]["remaining"] == 40 &&
+                run(3, ids.list_grants, f.c, Json::object()).reply["held"].empty(),
+            "indexed grants leaked foreign rows or reported the wrong shared allowance");
+    auto after_expiry = call(2, ids.list_grants, f.b, Json::object());
+    after_expiry.step = grants.rows[parent].expires_step;
+    require(drive::invoke_native(operations, after_expiry).reply["held"].empty(),
+            "listing reported expired grant before cleanup");
+    require(!run(3, ids.revoke, f.c, {{"grant", "grant:" + std::to_string(parent)}}).reply["ok"] &&
+                grants.rows[parent].live,
+            "foreign caller revoked another issuer's grant");
+    const auto revoked = run(4, ids.revoke, f.c, {{"grant", "grant:" + std::to_string(parent)}});
+    require(revoked.changed && revoked.reply["revoked"].size() == 2 && !grants.rows[parent].live &&
+                !grants.rows[child].live && players.rows[2].grants_held.empty() &&
+                players.rows[2].grants_given.empty(),
+            "architect revocation did not remove delegated children/indexes");
+    const auto own = grant_id(
+        run(1, ids.grant, f.a,
+            {{"holder", "p:2"}, {"scope", {{"object", to_string(f.a)}}}, {"rights", {"use"}}}));
+    const auto other = grant_id(
+        run(3, ids.grant, f.c,
+            {{"holder", "p:2"}, {"scope", {{"object", to_string(f.c)}}}, {"rights", {"use"}}}));
+    require(run(1, ids.revoke, f.a, {{"holder", "p:2"}}).changed && !grants.rows[own].live &&
+                grants.rows[other].live,
+            "holder revocation removed a different issuer's grants");
+    auto script_call = call(1, ids.group_create, f.a, {{"name", "No borrowed controller"}});
+    script_call.request.caller = ScriptHolder{script, f.a};
+    require(!drive::invoke_native(operations, script_call).reply["ok"],
+            "script caller borrowed object-owner administration authority");
+    const auto rule = f.add(R"(return {kind='rule',applies_to={flag='novel.ready'},
+      tests={{given={subject='target',state={['novel.ready']=true}},
+        when={action={term='novel.touch',target='target'}},
+        expect={subject='target',term='novel.ready',equals=true}}},
+      on={['novel.cue']=function(self)end}})");
+    f.state(f.a, 5, 1);
+    install::add_rule(f.rules, f.scripts, f.terms, rule);
+    const auto rule_grant =
+        run(1, ids.grant, f.a,
+            {{"holder", {{"script", "s:" + std::to_string(rule)}, {"on", to_string(f.a)}}},
+             {"scope", {{"object", to_string(f.a)}}},
+             {"rights", {"destroy"}},
+             {"expires_s", 60}});
+    require(rule_grant.changed, "actual applicable approved rule could not receive ordinary grant");
+    f.state(f.a, 5, 0);
+    require(!run(1, ids.grant, f.a,
+                 {{"holder", {{"script", "s:" + std::to_string(rule)}, {"on", to_string(f.a)}}},
+                  {"scope", {{"plot", 1}}},
+                  {"rights", {"build"}},
+                  {"expires_s", 60}})
+                 .reply["ok"],
+            "inapplicable world rule received holder authority");
+    const auto stale = f.a;
+    destroy(f.objects, f.a);
+    require(!run(1, ids.preset, stale, {{"everyone", {"use"}}}).reply["ok"],
+            "preset edit accepted a stale generation");
+    require(invalidations >= 10, "permission-dependent view invalidation was omitted");
+    const auto begin = std::chrono::steady_clock::now();
+    std::size_t total_rows = 0;
+    for (unsigned iteration = 0; iteration < 1000; ++iteration)
+      total_rows += run(2, ids.list_grants, f.b, Json::object()).reply["held"].size();
+    const auto elapsed =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+    require(total_rows == 1000, "indexed listing benchmark lost its actual live row");
+    const auto expiring = grant_id(run(1, ids.grant, f.b,
+                                       {{"holder", "p:3"},
+                                        {"scope", {{"account", "p:1"}}},
+                                        {"rights", {"spend"}},
+                                        {"cap", 20},
+                                        {"period_s", 60},
+                                        {"expires_s", 5}}));
+    ad::GrantMaintenance maintenance{grants, players, sink};
+    auto reminders = ad::advance_grants(maintenance, 90, 20, 20, 16);
+    require(reminders.notices.size() == 1 && reminders.notices[0].recipient == 1 &&
+                reminders.notices[0].event["kind"] == "grant_expiring" &&
+                reminders.notices[0].event["id"] == "grant:" + std::to_string(expiring) &&
+                reminders.records.size() == 1 && !reminders.records[0].changed &&
+                reminders.records[0].detail["agent"] == false &&
+                reminders.records[0].detail["grant"] == "grant:" + std::to_string(expiring),
+            "real maintenance did not deliver the issuer's exact expiring grant");
+    require(ad::advance_grants(maintenance, 91, 20, 20, 16).notices.empty(),
+            "real maintenance repeated a grant reminder");
+    const auto before_expiry = invalidations;
+    auto expired = ad::advance_grants(maintenance, 110, 20, 20, 16);
+    require(expired.notices.size() == 1 && expired.notices[0].recipient == 1 &&
+                expired.notices[0].event["kind"] == "grant_expired" &&
+                expired.notices[0].event["expires_in_s"] == 0 && !grants.rows[expiring].live &&
+                invalidations == before_expiry + 1 && expired.records.size() == 1 &&
+                expired.records[0].changed && expired.records[0].detail["agent"] == false,
+            "real maintenance did not expire authority and invalidate permission views");
+    record::Journal journal(8, {});
+    for (auto &event : reminders.records)
+      journal.append(std::move(event));
+    for (auto &event : expired.records)
+      journal.append(std::move(event));
+    const auto written = journal.take();
+    require(written.size() == 2 && written[0]["id"] == 1 && written[0]["kind"] == "system" &&
+                written[0]["grant"] == "grant:" + std::to_string(expiring) &&
+                written[1]["id"] == 2 && written[1]["name"] == "grant_expired" &&
+                written[1]["agent"] == false,
+            "grant deadline producer overwrote reserved S7 metadata");
+    std::cout << "commerce administration passed: native discovery/validation, real installed and "
+                 "rule holders, shared caps, nested revocation, inherited presets, groups, land "
+                 "bans, stale/script denials; indexed listing mean "
+              << elapsed << " us\n";
+  } catch (const std::exception &error) {
+    std::cerr << error.what() << '\n';
+    return 1;
+  }
+}

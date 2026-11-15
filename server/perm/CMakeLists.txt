@@ -1,0 +1,10 @@
+add_library(amber_perm perm.cpp snapshot.cpp)
+target_link_libraries(amber_perm PUBLIC amber_store amber_snap)
+
+if(BUILD_TESTING)
+  add_executable(perm_test ../../tests/perm_test.cpp)
+  target_link_libraries(perm_test PRIVATE amber_perm)
+  add_test(NAME perm COMMAND perm_test)
+  add_executable(offer_deadlines_bench ../../tests/offer_deadlines_bench.cpp)
+  target_link_libraries(offer_deadlines_bench PRIVATE amber_perm)
+endif()

@@ -1,0 +1,7 @@
+add_library(amber_command command.cpp signature.cpp)
+target_link_libraries(amber_command PUBLIC amber_catalog)
+if(BUILD_TESTING)
+  add_executable(command_test ../../tests/command_test.cpp)
+  target_link_libraries(command_test PRIVATE amber_command)
+  add_test(NAME command COMMAND command_test)
+endif()

@@ -1,0 +1,35 @@
+{
+  "measurements": {
+    "density": "base.density",
+    "volume": "base.volume",
+    "mass": "base.mass",
+    "capacity": "base.capacity",
+    "assembly_mass": "base.assembly_mass",
+    "illuminance": "base.illuminance"
+  },
+  "appearance": {
+    "red": "base.red",
+    "green": "base.green",
+    "blue": "base.blue",
+    "alpha": "base.alpha",
+    "metallic": "base.metallic",
+    "roughness": "base.roughness"
+  },
+  "relations": {
+    "contains": "base.contains",
+    "supports": "base.supports",
+    "attached_to": "base.attached_to",
+    "in_zone": "base.in_zone"
+  },
+  "events": {
+    "start": "base.start",
+    "arrived": "base.arrived",
+    "blocked": "base.blocked",
+    "cancelled": "base.cancelled",
+    "contact": "base.contact"
+  },
+  "physics": {
+    "density": "base.density",
+    "transmission": "base.transparent"
+  }
+}

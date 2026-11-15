@@ -1,0 +1,2192 @@
+[
+  {
+    "name": "base.density",
+    "kind": "quantity",
+    "source": "intrinsic",
+    "dimensions": [
+      -3,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "density"
+  },
+  {
+    "name": "base.hardness",
+    "kind": "quantity",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "hardness"
+  },
+  {
+    "name": "base.conductivity",
+    "kind": "quantity",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "conductivity"
+  },
+  {
+    "name": "base.transparent",
+    "kind": "quantity",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "transparent"
+  },
+  {
+    "name": "base.embodied_energy",
+    "kind": "quantity",
+    "source": "intrinsic",
+    "dimensions": [
+      2,
+      0,
+      -2,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "embodied energy"
+  },
+  {
+    "name": "base.red",
+    "kind": "quantity",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "red"
+  },
+  {
+    "name": "base.green",
+    "kind": "quantity",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "green"
+  },
+  {
+    "name": "base.blue",
+    "kind": "quantity",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "blue"
+  },
+  {
+    "name": "base.alpha",
+    "kind": "quantity",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "alpha"
+  },
+  {
+    "name": "base.metallic",
+    "kind": "quantity",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "metallic"
+  },
+  {
+    "name": "base.roughness",
+    "kind": "quantity",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "roughness"
+  },
+  {
+    "name": "base.flammable",
+    "kind": "flag",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "flammable"
+  },
+  {
+    "name": "base.volume",
+    "kind": "quantity",
+    "source": "measured",
+    "dimensions": [
+      3,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "volume",
+    "measurement": "volume"
+  },
+  {
+    "name": "base.capacity",
+    "kind": "quantity",
+    "source": "measured",
+    "dimensions": [
+      3,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "capacity",
+    "measurement": "baked"
+  },
+  {
+    "name": "base.mass",
+    "kind": "quantity",
+    "source": "measured",
+    "dimensions": [
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "mass",
+    "measurement": "mass"
+  },
+  {
+    "name": "base.assembly_mass",
+    "kind": "quantity",
+    "source": "measured",
+    "dimensions": [
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "assembly mass",
+    "measurement": "runtime"
+  },
+  {
+    "name": "base.illuminance",
+    "kind": "quantity",
+    "source": "measured",
+    "dimensions": [
+      -2,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ],
+    "description": "illuminance",
+    "measurement": "runtime"
+  },
+  {
+    "name": "base.contains",
+    "kind": "relation",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "contains"
+  },
+  {
+    "name": "base.supports",
+    "kind": "relation",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "supports"
+  },
+  {
+    "name": "base.attached_to",
+    "kind": "relation",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "attached to"
+  },
+  {
+    "name": "base.in_zone",
+    "kind": "relation",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "in zone"
+  },
+  {
+    "name": "base.powered_by",
+    "kind": "relation",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "powered by"
+  },
+  {
+    "name": "base.feeds",
+    "kind": "relation",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "feeds"
+  },
+  {
+    "name": "base.sells_to",
+    "kind": "relation",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "sells to"
+  },
+  {
+    "name": "base.procures",
+    "kind": "relation",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "procures"
+  },
+  {
+    "name": "base.charging",
+    "kind": "relation",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "charging"
+  },
+  {
+    "name": "base.monitors",
+    "kind": "relation",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "monitors"
+  },
+  {
+    "name": "aq.reservoir",
+    "kind": "relation",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "reservoir"
+  },
+  {
+    "name": "aq.school",
+    "kind": "relation",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "school"
+  },
+  {
+    "name": "base.on",
+    "kind": "flag",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "on"
+  },
+  {
+    "name": "base.seated",
+    "kind": "flag",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "seated"
+  },
+  {
+    "name": "base.fabricator",
+    "kind": "flag",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "fabricator"
+  },
+  {
+    "name": "aq.alive",
+    "kind": "flag",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "alive"
+  },
+  {
+    "name": "base.charge",
+    "kind": "quantity",
+    "source": "state",
+    "dimensions": [
+      2,
+      1,
+      -2,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "charge",
+    "conserved": true
+  },
+  {
+    "name": "base.liquid",
+    "kind": "quantity",
+    "source": "state",
+    "dimensions": [
+      3,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "liquid",
+    "conserved": true
+  },
+  {
+    "name": "base.intensity",
+    "kind": "quantity",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ],
+    "description": "intensity",
+    "conserved": false
+  },
+  {
+    "name": "base.open_fraction",
+    "kind": "quantity",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "open fraction",
+    "conserved": false
+  },
+  {
+    "name": "base.indentation",
+    "kind": "quantity",
+    "source": "state",
+    "dimensions": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "indentation",
+    "conserved": false
+  },
+  {
+    "name": "base.ambient_lux",
+    "kind": "quantity",
+    "source": "state",
+    "dimensions": [
+      -2,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ],
+    "description": "ambient lux",
+    "conserved": false
+  },
+  {
+    "name": "aq.oxygen",
+    "kind": "quantity",
+    "source": "state",
+    "dimensions": [
+      -3,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "oxygen"
+  },
+  {
+    "name": "aq.health",
+    "kind": "quantity",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "health"
+  },
+  {
+    "name": "base.power_supply",
+    "kind": "quantity",
+    "source": "state",
+    "dimensions": [
+      2,
+      1,
+      -3,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "power supply",
+    "combine": "sum",
+    "along": "base.powered_by",
+    "paired": "base.power_demand"
+  },
+  {
+    "name": "base.power_demand",
+    "kind": "quantity",
+    "source": "state",
+    "dimensions": [
+      2,
+      1,
+      -3,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "power demand",
+    "combine": "share_equal",
+    "along": "base.powered_by",
+    "paired": "base.power_supply"
+  },
+  {
+    "name": "aq.aeration",
+    "kind": "quantity",
+    "source": "state",
+    "dimensions": [
+      0,
+      1,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "aeration",
+    "combine": "sum",
+    "along": "aq.reservoir"
+  },
+  {
+    "name": "aq.consumption",
+    "kind": "quantity",
+    "source": "state",
+    "dimensions": [
+      0,
+      1,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "consumption",
+    "combine": "sum",
+    "along": "aq.reservoir"
+  },
+  {
+    "name": "base.stakes",
+    "kind": "flag",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "stakes"
+  },
+  {
+    "name": "base.charge_capacity",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      2,
+      1,
+      -2,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "charge capacity"
+  },
+  {
+    "name": "base.rest_power",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      2,
+      1,
+      -3,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "rest power"
+  },
+  {
+    "name": "base.travel_j_kg_m",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      1,
+      0,
+      -2,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "travel j kg m"
+  },
+  {
+    "name": "base.walk_speed",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      1,
+      0,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "walk speed"
+  },
+  {
+    "name": "base.slow_speed",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      1,
+      0,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "slow speed"
+  },
+  {
+    "name": "base.dim_lux",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      -2,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ],
+    "description": "dim lux"
+  },
+  {
+    "name": "base.swing_speed",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      1,
+      0,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "swing speed"
+  },
+  {
+    "name": "base.hand_mass_fraction",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "hand mass fraction"
+  },
+  {
+    "name": "base.push_impulse",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      1,
+      1,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "push impulse"
+  },
+  {
+    "name": "base.throw_speed",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      1,
+      0,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "throw speed"
+  },
+  {
+    "name": "base.rated_power",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      2,
+      1,
+      -3,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "rated power"
+  },
+  {
+    "name": "base.candela_per_watt",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      -2,
+      -1,
+      3,
+      0,
+      0,
+      0,
+      1,
+      0
+    ],
+    "description": "candela per watt"
+  },
+  {
+    "name": "base.collector_yield",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      1,
+      -3,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "collector yield"
+  },
+  {
+    "name": "base.daylight",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "daylight"
+  },
+  {
+    "name": "base.energy_pace",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "energy pace"
+  },
+  {
+    "name": "base.hand_efficiency",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "hand efficiency"
+  },
+  {
+    "name": "base.buffer_capacity",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      2,
+      1,
+      -2,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "buffer capacity"
+  },
+  {
+    "name": "base.buffer_rate",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      2,
+      1,
+      -3,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "buffer rate"
+  },
+  {
+    "name": "base.purchase_per_joule",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      -2,
+      -1,
+      2,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "description": "purchase per joule"
+  },
+  {
+    "name": "base.issuance_rate",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "description": "issuance rate"
+  },
+  {
+    "name": "base.settlement_seconds",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "settlement seconds"
+  },
+  {
+    "name": "base.rent_baseline",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      -2,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "description": "rent baseline"
+  },
+  {
+    "name": "base.rent_frontage",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "description": "rent frontage"
+  },
+  {
+    "name": "base.rent_decay",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "rent decay"
+  },
+  {
+    "name": "base.rent_grace_days",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "rent grace days"
+  },
+  {
+    "name": "base.rent_hold_days",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "rent hold days"
+  },
+  {
+    "name": "base.day_seconds",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "day seconds"
+  },
+  {
+    "name": "base.impact_resistance",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      1,
+      1,
+      -2,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "impact resistance"
+  },
+  {
+    "name": "aq.rated_flow",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      1,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "rated flow"
+  },
+  {
+    "name": "aq.consumption_rate",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      1,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "consumption rate"
+  },
+  {
+    "name": "aq.oxygen_max",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      -3,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "oxygen max"
+  },
+  {
+    "name": "aq.stress_rate",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "stress rate"
+  },
+  {
+    "name": "aq.severe_rate",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "severe rate"
+  },
+  {
+    "name": "aq.recovery_rate",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "recovery rate"
+  },
+  {
+    "name": "base.start",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "start"
+  },
+  {
+    "name": "base.tick",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "tick"
+  },
+  {
+    "name": "base.arrived",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "arrived"
+  },
+  {
+    "name": "base.blocked",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "blocked"
+  },
+  {
+    "name": "base.cancelled",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "cancelled"
+  },
+  {
+    "name": "base.contact",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "contact"
+  },
+  {
+    "name": "base.impact",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "impact"
+  },
+  {
+    "name": "base.charge_tick",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "charge tick"
+  },
+  {
+    "name": "base.door_tick",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "door tick"
+  },
+  {
+    "name": "base.settle",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "settle"
+  },
+  {
+    "name": "base.rent_tick",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "rent tick"
+  },
+  {
+    "name": "aq.swim",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "swim"
+  },
+  {
+    "name": "aq.status",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "status"
+  },
+  {
+    "name": "aq.population",
+    "kind": "event",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "population"
+  },
+  {
+    "name": "base.move_to",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "move to",
+    "inputs": [
+      {
+        "name": "point",
+        "type": "vector",
+        "optional": true
+      }
+    ]
+  },
+  {
+    "name": "base.hold",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "hold",
+    "inputs": []
+  },
+  {
+    "name": "base.release",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "release",
+    "inputs": []
+  },
+  {
+    "name": "base.speak",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "speak",
+    "inputs": [
+      {
+        "name": "text",
+        "type": "string",
+        "optional": false
+      }
+    ]
+  },
+  {
+    "name": "base.strike",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "strike",
+    "inputs": []
+  },
+  {
+    "name": "base.push",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "push",
+    "inputs": [
+      {
+        "name": "direction",
+        "type": "vector",
+        "optional": true
+      }
+    ]
+  },
+  {
+    "name": "base.pour",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "pour",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "number",
+        "optional": true
+      }
+    ]
+  },
+  {
+    "name": "base.throw",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "throw",
+    "inputs": [
+      {
+        "name": "direction",
+        "type": "vector",
+        "optional": true
+      }
+    ]
+  },
+  {
+    "name": "base.sit",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "sit",
+    "inputs": []
+  },
+  {
+    "name": "base.stand",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "stand",
+    "inputs": []
+  },
+  {
+    "name": "base.recharge",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "charge",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "number",
+        "optional": true
+      }
+    ]
+  },
+  {
+    "name": "base.switch",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "switch",
+    "inputs": [
+      {
+        "name": "on",
+        "type": "boolean",
+        "optional": true
+      }
+    ]
+  },
+  {
+    "name": "base.open",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "open",
+    "inputs": []
+  },
+  {
+    "name": "base.close",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "close",
+    "inputs": []
+  },
+  {
+    "name": "base.make_material",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "make material",
+    "inputs": [
+      {
+        "name": "material",
+        "type": "term",
+        "optional": false
+      },
+      {
+        "name": "kg",
+        "type": "number",
+        "optional": false
+      }
+    ]
+  },
+  {
+    "name": "base.place",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "place",
+    "inputs": [
+      {
+        "name": "model",
+        "type": "string",
+        "optional": false
+      },
+      {
+        "name": "position",
+        "type": "vector",
+        "optional": false
+      },
+      {
+        "name": "params",
+        "type": "integer",
+        "optional": true
+      },
+      {
+        "name": "material",
+        "type": "term",
+        "optional": true
+      },
+      {
+        "name": "yaw",
+        "type": "number",
+        "optional": true
+      }
+    ]
+  },
+  {
+    "name": "base.dismantle",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "dismantle",
+    "inputs": []
+  },
+  {
+    "name": "base.reconfigure",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "reconfigure",
+    "inputs": [
+      {
+        "name": "model",
+        "type": "string",
+        "optional": false
+      },
+      {
+        "name": "params",
+        "type": "integer",
+        "optional": true
+      },
+      {
+        "name": "material",
+        "type": "term",
+        "optional": true
+      }
+    ]
+  },
+  {
+    "name": "base.feed",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "feed",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "number",
+        "optional": true
+      }
+    ]
+  },
+  {
+    "name": "base.generic",
+    "kind": "material",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "generic"
+  },
+  {
+    "name": "base.wood",
+    "kind": "material",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "wood"
+  },
+  {
+    "name": "base.steel",
+    "kind": "material",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "steel"
+  },
+  {
+    "name": "base.glass",
+    "kind": "material",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "glass"
+  },
+  {
+    "name": "base.ceramic",
+    "kind": "material",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "ceramic"
+  },
+  {
+    "name": "base.stone",
+    "kind": "material",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "stone"
+  },
+  {
+    "name": "base.water",
+    "kind": "material",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "water"
+  },
+  {
+    "name": "base.fabric",
+    "kind": "material",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "fabric"
+  },
+  {
+    "name": "base.plastic",
+    "kind": "material",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "plastic"
+  },
+  {
+    "name": "base.concrete",
+    "kind": "material",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "concrete"
+  },
+  {
+    "name": "base.aluminium",
+    "kind": "material",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "aluminium"
+  },
+  {
+    "name": "base.living",
+    "kind": "material",
+    "source": "intrinsic",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "living"
+  },
+  {
+    "name": "base.rent_controller",
+    "kind": "flag",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "Authored land-accounting institution selector"
+  },
+  {
+    "name": "base.revise_model",
+    "kind": "action",
+    "source": "state",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "Apply a baked geometry revision to every instance of your model, settling the total material change from your stock.",
+    "inputs": [
+      {
+        "name": "model",
+        "type": "string",
+        "optional": false
+      },
+      {
+        "name": "revision_model",
+        "type": "string",
+        "optional": false
+      },
+      {
+        "name": "expected_source_hash",
+        "type": "string",
+        "optional": false
+      }
+    ]
+  }
+]

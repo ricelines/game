@@ -1,0 +1,13 @@
+add_library(amber_store store.cpp)
+target_include_directories(amber_store PUBLIC ${PROJECT_SOURCE_DIR}/server)
+target_compile_features(amber_store PUBLIC cxx_std_20)
+target_compile_options(amber_store PRIVATE -Wall -Wextra -Wpedantic)
+
+if(BUILD_TESTING)
+  add_executable(store_test ../../tests/store_test.cpp)
+  target_link_libraries(store_test PRIVATE amber_store)
+  add_test(NAME store COMMAND store_test)
+  add_executable(projections_test ../../tests/projections_test.cpp)
+  target_link_libraries(projections_test PRIVATE amber_store)
+  add_test(NAME projections COMMAND projections_test)
+endif()

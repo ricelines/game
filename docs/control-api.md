@@ -1,0 +1,33 @@
+# Native JSON session boundary
+
+`server/control` owns persistent player profiles, authentication and ephemeral JSON sessions. It does not own gameplay tables, observe the world, authorize individual actions or interpret authored action names. Main binds each operation to a narrow module adapter with a function pointer and that adapter's `void *` context. No common gameplay host or dispatcher containing world state is introduced.
+
+`Profiles` stores rows `{id,name,body,roles,connection_modes,key_hashes}`. IDs and body handles are ordinary store types. Game roles are arbitrary launch/authored strings, including `architect` and `elaborator`. Independent `connection_modes` bits permit `play`, `watch`, or `debug`; game roles never confer a connection mode. SHA-256 hashes authenticate API keys; plaintext keys never enter snapshots, logs or public profile output. Profiles serialize into PLYR; connections, queues, counters and pending replies do not. A key-generation helper writes a random 256-bit key to a newly created mode-0600 file and returns only its hash. Existing key files are read only by launch/runtime code, never printed. Resident content stores `key_file` paths, not inline credentials. Main joins the same file's hash to its profile at launch; the gateway reads the file only to authenticate its ordinary native session.
+
+`Sessions` consumes connected/control/disconnected transport DTOs and emits send/close/view calls through a small transport callback table. It owns no net thread. Main calls it on the authoritative thread. Each authenticated session has a monotonically increasing accepted-request sequence and one mutation queue. An operation registration declares its name, response envelope type, allowed modes, read-only or mutation lane, a payload validator and a handler. The handler returns an immediate JSON result or `deferred`; later `complete(session,sequence,result)` finishes a deferred operation. Completion of a closed/replaced session is ignored. Only one mutation runs per session; later mutations wait until completion, while read-only calls continue. Main must queue off-step worker completions back onto this thread before calling complete.
+
+The supported request DTO parsers are exact for S5 and the two authoring controls. `hello` requires version 1, key, mode (`watch`, `debug`, `play`), and optional binary boolean. Other correlated requests require a positive integral `id`, a registered `t`, and operation fields. The camera-interest `view` update may omit id; it then produces no acknowledgement. Unknown operation names or malformed fields produce a result error with the request id where recoverable. No arbitrary JSON field can change the authenticated player. `id` must be unique among outstanding requests; a completed id may be reused. Operation validators receive only the request payload and return an error string; they do not access gameplay state.
+
+`hello` authenticates against Profiles and sends `{t:"welcome",version:1,player:"p:N",body:"o:slot.gen",mode,binary}` merged with caller-supplied public welcome fields. The native session id is included as `session`. Authenticated fields are assigned last and cannot be overridden by those extras. A new controlling play connection displaces the prior play connection for that player with `{t:"bye",reason:"replaced"}` followed by a normal close. Watch/debug connections do not displace a controlling connection. Invalid credentials use the original S6 `bad_key` reason; disallowed modes use an explicit bye reason. A disconnect clears all ephemeral state.
+
+The wire requests are:
+
+```json
+{"t":"look","id":1,"limit":40}
+{"t":"inspect","id":2,"target":"self"}
+{"t":"actions","id":3,"target":"o:17.1","name":"author.action","page":0}
+{"t":"do","id":4,"action":"author.action","target":"o:17.1","args":{}}
+{"t":"cancel","id":5}
+{"t":"register_model","id":6,"job":"J","asset":"SHA256","canonical_params":"{}","material":"base.material","text":{"name":"...","description":"..."},"manifest":{}}
+{"t":"register_script","id":7,"source":"..."}
+```
+
+Replies echo `id`; look uses `t:"obs"`, inspect `t:"inspection"`, actions `t:"actions"`, mutations `t:"result"`. Operation result fields remain top-level and unchanged. Failure is `{t:"result",id,ok:false,errors:["..."]}`. Authenticated S7 pushes are `{t:"event",...record}`. Events are delivered by the adapter's explicit session/player publication method; control does not infer perception or select recipients from world state. The gateway attaches pending events at tool-response time and owns observation compression.
+
+Model completion returns `{ok:true,model:"m:N",hash,measured}` only after native catalog verification/registration. The wire manifest is an untrusted copy; only the catalog-verified on-disk artifact is authoritative. It carries exact `canonical_params` bytes; Python/C++ number serialization is not interchangeable. Script upload carries source only; native validation derives declarations. Main registers authoring as mutation-lane operations and supplies its worker/catalog context. The control adapter never claims a model was registered or a script approved by itself.
+
+Spectator controls use separately registered read-only operations (`inspect`, `events`, `debug`) plus `view` interest position. Their metadata, catalog and diagnostic payloads are authored by native narrow adapters described in client-api.md. Binary publication remains net's responsibility. `view` accepts a three-number Z-up meter position and invokes only the transport view callback. Watch/debug never gain do/authoring rights from JSON. A duplicate outstanding id or unknown request is a protocol error, not an invented gameplay outcome.
+
+Two alternatives were considered: letting each module authenticate and write sockets duplicates session ordering and credential logic; a universal JSON dispatcher with world references couples every module. The selected operation registry centralizes only protocol/session mechanics, while typed gameplay parsing and effects remain in the registered adapters.
+
+Independent adapter benchmark: 500 authenticated watcher sessions, 500 JSON query requests per batch, 100 measured batches after warmup: median 1.629 ms and p95 2.964 ms per batch. This measures parsing, validation, session routing and JSON reply serialization with a tiny callback; it excludes sockets and gameplay observation. Reproduce with `control_bench`. The native test also verifies PLYR contains hashes rather than plaintext credentials, immutable authenticated welcome fields, exact canonical-parameter bytes and rejected catalog claims.

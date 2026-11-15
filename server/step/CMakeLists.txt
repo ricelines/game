@@ -1,0 +1,8 @@
+add_library(amber_step step.cpp snapshot.cpp)
+target_link_libraries(amber_step PUBLIC amber_record amber_snap)
+target_compile_options(amber_step PRIVATE -Wall -Wextra -Wpedantic)
+if(BUILD_TESTING)
+  add_executable(step_test ../../tests/step_test.cpp)
+  target_link_libraries(step_test PRIVATE amber_step)
+  add_test(NAME step COMMAND step_test)
+endif()

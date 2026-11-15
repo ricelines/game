@@ -1,0 +1,27 @@
+config_version=5
+
+[application]
+config/name="Ambergris"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[display]
+window/size/viewport_width=1440
+window/size/viewport_height=900
+window/stretch/mode="canvas_items"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+anti_aliasing/quality/msaa_3d=0
+environment/defaults/default_clear_color=Color(0.025,0.055,0.075,1)
+
+[gui]
+theme/default_font_multichannel_signed_distance_field=true
+
+[debug]
+gdscript/warnings/untyped_declaration=0
+gdscript/warnings/unsafe_method_access=0
+gdscript/warnings/unsafe_property_access=0
+gdscript/warnings/unsafe_call_argument=0

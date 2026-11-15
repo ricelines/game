@@ -1,0 +1,121 @@
+{
+  "sources": {
+    "jolt": {
+      "repository": "https://github.com/jrouwe/JoltPhysics",
+      "version": "v5.6.0",
+      "url": "https://codeload.github.com/jrouwe/JoltPhysics/tar.gz/refs/tags/v5.6.0",
+      "sha256": "6e069ee0172478cc78182047aac87e5310ba14a67a53348ae14cc37801fd3f8e",
+      "archive": "jolt-v5.6.0.tar.gz"
+    },
+    "recast": {
+      "repository": "https://github.com/recastnavigation/recastnavigation",
+      "version": "v1.6.0",
+      "url": "https://codeload.github.com/recastnavigation/recastnavigation/tar.gz/refs/tags/v1.6.0",
+      "sha256": "d48ca0121962fa0639502c0f56c4e3ae72f98e55d88727225444f500775c0074",
+      "archive": "recast-v1.6.0.tar.gz"
+    },
+    "luau": {
+      "repository": "https://github.com/luau-lang/luau",
+      "version": "0.747",
+      "url": "https://codeload.github.com/luau-lang/luau/tar.gz/refs/tags/0.747",
+      "sha256": "2c72471f91c42af7f2c07cc4cc602b27c215346d491d7ab3d80da63050ad43f2",
+      "archive": "luau-0.747.tar.gz"
+    },
+    "uwebsockets": {
+      "repository": "https://github.com/uNetworking/uWebSockets",
+      "version": "v20.81.0",
+      "url": "https://codeload.github.com/uNetworking/uWebSockets/tar.gz/refs/tags/v20.81.0",
+      "sha256": "1f33f5d633a912e8c819925ca949d78723c65c66bd82a1214a273bc721a2d7ba",
+      "archive": "uwebsockets-v20.81.0.tar.gz"
+    },
+    "usockets": {
+      "repository": "https://github.com/uNetworking/uSockets",
+      "version": "86097c490263ab662d62e8e7b541390bdec7d149",
+      "url": "https://codeload.github.com/uNetworking/uSockets/tar.gz/86097c490263ab662d62e8e7b541390bdec7d149",
+      "sha256": "0d341b94157720d9081d47348a8cba87ae350b6607c2f7d2ccf102353cbda553",
+      "archive": "usockets-86097c490263ab662d62e8e7b541390bdec7d149.tar.gz"
+    },
+    "bitsery": {
+      "repository": "https://github.com/fraillt/bitsery",
+      "version": "v5.2.5",
+      "url": "https://codeload.github.com/fraillt/bitsery/tar.gz/refs/tags/v5.2.5",
+      "sha256": "22a6d92ac030e999b53d57a0c9afe28723766595c6d00c91ab9c5637d4ed0eec",
+      "archive": "bitsery-v5.2.5.tar.gz"
+    },
+    "zstd": {
+      "repository": "https://github.com/facebook/zstd",
+      "version": "v1.5.7",
+      "url": "https://codeload.github.com/facebook/zstd/tar.gz/refs/tags/v1.5.7",
+      "sha256": "37d7284556b20954e56e1ca85b80226768902e2edabd3b649e9e72c0c9012ee3",
+      "archive": "zstd-v1.5.7.tar.gz"
+    },
+    "meshoptimizer": {
+      "repository": "https://github.com/zeux/meshoptimizer",
+      "version": "v1.3",
+      "url": "https://codeload.github.com/zeux/meshoptimizer/tar.gz/refs/tags/v1.3",
+      "sha256": "ca4f47d451201593904b9e3067fa54b65db94bc34ab5173864950862b748a145",
+      "archive": "meshoptimizer-v1.3.tar.gz"
+    },
+    "cgltf": {
+      "repository": "https://github.com/jkuhlmann/cgltf",
+      "version": "v1.15",
+      "url": "https://codeload.github.com/jkuhlmann/cgltf/tar.gz/refs/tags/v1.15",
+      "sha256": "84e352092e5cd6aab7f66de62ddb66beb5e6f18d412ca9d12950d7a55bfef25a",
+      "archive": "cgltf-v1.15.tar.gz"
+    },
+    "tracy": {
+      "repository": "https://github.com/wolfpld/tracy",
+      "version": "v0.15.0",
+      "url": "https://codeload.github.com/wolfpld/tracy/tar.gz/refs/tags/v0.15.0",
+      "sha256": "3d57da54aa67d7875da1e8fecd0bd5957675cef73c27dd52bffb6ab8d290a5e6",
+      "archive": "tracy-v0.15.0.tar.gz"
+    },
+    "json": {
+      "repository": "https://github.com/nlohmann/json",
+      "version": "v3.12.0",
+      "url": "https://codeload.github.com/nlohmann/json/tar.gz/refs/tags/v3.12.0",
+      "sha256": "4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187",
+      "archive": "json-v3.12.0.tar.gz"
+    },
+    "tomlplusplus": {
+      "repository": "https://github.com/marzer/tomlplusplus",
+      "version": "v3.4.0",
+      "url": "https://codeload.github.com/marzer/tomlplusplus/tar.gz/refs/tags/v3.4.0",
+      "sha256": "8517f65938a4faae9ccf8ebb36631a38c1cadfb5efa85d9a72e15b9e97d25155",
+      "archive": "tomlplusplus-v3.4.0.tar.gz"
+    },
+    "picosha2": {
+      "repository": "https://github.com/okdshin/PicoSHA2",
+      "version": "v1.0.1",
+      "url": "https://codeload.github.com/okdshin/PicoSHA2/tar.gz/refs/tags/v1.0.1",
+      "sha256": "9983136544234e573fe07cc1a22fdf978ad7979043e7be2e9082f6d4991ff8a8",
+      "archive": "picosha2-v1.0.1.tar.gz"
+    }
+  },
+  "tools": {
+    "cmake": {
+      "version": "4.5.0",
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.5.0/cmake-4.5.0-linux-x86_64.tar.gz",
+      "archive": "cmake-4.5.0-linux-x86_64.tar.gz",
+      "sha256": "81f0d5b0960fb6adc8197030ffc827fba937640d51e73e39e0e9e40d88c66f6f"
+    },
+    "godot": {
+      "version": "4.7.2-stable",
+      "url": "https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip",
+      "archive": "Godot_v4.7.2-stable_linux.x86_64.zip",
+      "sha256": "cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4"
+    },
+    "godot_web": {
+      "version": "4.7.2-stable",
+      "url": "https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz",
+      "archive": "Godot_v4.7.2-stable_export_templates.tpz",
+      "sha256": "f298490b8d44d934be425a5a65a51bf15f422428b229a06a6e11d9ffea248011"
+    },
+    "clang_format": {
+      "version": "23.1.5",
+      "url": "https://files.pythonhosted.org/packages/0e/cc/06adcfb7dfaea4d2c1929202021d4afcdc26915dc75fc0c72d63855da553/clang_format-23.1.5-py2.py3-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "archive": "clang_format-23.1.5-linux-x86_64.whl",
+      "sha256": "d97ce49911ba8c89ef3f3c0735a9c7818e4780ab4812c67d1c5fcd829d16ae52"
+    }
+  }
+}

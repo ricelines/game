@@ -1,0 +1,143 @@
+# Shared by the native server, gateway, bake workers and measurement tools.
+# These are prototype defaults, not claims about final game balance.
+
+[clock]
+STEP_HZ = 20
+STEP_MARGIN_MS = 5
+PHASE_AVERAGE_STEPS = 20
+
+[scripts]
+HANDLER_MS = 5
+SCRIPT_KB = 4096
+DECLARATION_MS = 50
+EVENT_FIELDS_MAX = 64 # protective flat event record field cap
+POSE_BATCH_MAX = 1024 # one checked native transform batch; ordinary handles and Move rights
+EVENT_QUEUE_MAX = 1000000
+AUTHORS_MAX = 8
+
+[network]
+# Allows authored script/control payloads while bounding one transport message.
+CONTROL_MAX = 1048576
+SEND_SOFT = 262144
+SEND_HARD = 4194304
+CELL_M = 32
+ENTER_CELLS = 2
+LEAVE_CELLS = 3
+REPL_EVERY = 2
+REPL_DELAY_MS = 150
+
+[perception]
+SIGHT_M = 30.0
+REACH_M = 1.5
+THINGS_MAX = 40
+FAR_MAX = 8
+EVENTS_PER_RESPONSE = 40
+
+# Far salience tuning uses geometry, motion and photometry, never object categories.
+FAR_M = 256.0
+FAR_ANGULAR_DEGREES = 1.0
+MOVING_M_S = 0.1
+FAR_SOURCE_LUX = 0.1
+# Candidate source/subscribed sample indexing; intensity itself is never cached.
+LIGHT_CELL_M = 8.0
+LIGHT_SOURCE_RADIUS_M = 0.05 # finite near-source photometric denominator; asset may override
+
+[bake]
+BAKE_VERSION = "ambergris-bake-2"
+BAKE_S = 20
+BAKE_MB = 2048
+MODEL_MAX_M = 256.0
+TRIS_MAX = 200000
+CAPACITY_GRID = 256
+LINEAR_TOLERANCE_M = 0.001
+RELATIVE_TOLERANCE = 0.002
+LOD_RATIOS = [1.0, 0.4, 0.1]
+LOD_RELATIVE_ERROR = 0.02
+CONVEX_POINTS_MAX = 64
+STAIR_RISE_MIN_M = 0.12
+STAIR_RISE_MAX_M = 0.20
+STAIR_RUN_MIN_M = 0.25
+STAIR_WIDTH_MIN_M = 0.8
+SUPPORT_AREA_MIN_M2 = 0.01
+SUPPORT_NORMAL_MAX_DEG = 10.0
+
+[permissions]
+MAILBOX_MAX = 100
+GRANT_REMINDER_SECONDS = 30 # tuning: notify issuers before expiring script/spending authority
+DEADLINES_PER_STEP = 256 # tuning: due grant/offer cleanup waits in its index beyond this batch
+
+[construction]
+EXCHANGE_MAX = 64
+
+[elaboration]
+GAP_CAPTURES = 3
+CAPTURE_M = 10.0
+# Protective subprocess/report bounds; ordinary fixtures complete well below these.
+FIXTURE_TIMEOUT_MS = 30000
+FIXTURE_DIAGNOSTIC_BYTES = 65536
+FIXTURE_RESULT_BYTES = 1048576
+FIXTURE_WORKERS = 2
+
+[snapshots]
+SNAP_EVERY_S = 60
+SNAP_KEEP = 10
+ZSTD_LEVEL = 3
+
+[record]
+# A bounded single-producer ring; a full queue waits rather than losing truth.
+QUEUE_BATCHES = 128
+ZSTD_LEVEL = 3
+
+[measure]
+DEFINITIONS_VERSION = 1
+MIN_ACTIONS = 20
+WIKI_WORLDS = 40
+WIKI_BOOTSTRAPS = 1000
+
+[space]
+# Physical world constants and engine capacity; authored body speed/strength stay in content.
+GRAVITY_M_S2 = [0.0, 0.0, -9.81]
+MAX_BODIES = 8192
+# Crowd capacity is independent of the number of static world colliders.
+MAX_CHARACTERS = 1024
+MAX_BODY_PAIRS = 65536
+MAX_CONTACTS = 32768
+TEMP_BYTES = 16777216
+CONTACT_SLOP_M = 0.015
+SWEEP_SKIN_M = 0.01
+CROWD_CORRECTION_M = 0.2
+BLOCKED_AFTER_S = 2.0
+DEFAULT_FRICTION = 0.5
+DEFAULT_RESTITUTION = 0.0
+GOAL_TOLERANCE_M = 0.15
+
+[navigation]
+# One clearance class for the prototype. Raster height resolves ordinary stair risers.
+CELL_M = 0.1
+CELL_HEIGHT_M = 0.03
+TILE_CELLS = 64
+RADIUS_M = 0.3
+HEIGHT_M = 1.8
+CLIMB_M = 0.24
+SLOPE_DEGREES = 45.0
+MAX_EDGE_M = 12.0
+CONTOUR_ERROR_M = 0.13
+DETAIL_SAMPLE_M = 0.6
+DETAIL_ERROR_M = 0.03
+MIN_REGION_CELLS = 4
+MERGE_REGION_CELLS = 64
+NODES_PER_QUERY = 8192
+POLYGONS_PER_PATH = 4096
+# Detour's 32-bit references require at least ten salt bits: 1024 tiles ×4096 polygons fits.
+MAX_TILES = 1024
+POLYGONS_PER_TILE = 4096
+# Two tile workers keep construction off the writer; installs get 2ms of a 50ms step.
+WORKERS = 2
+INSTALL_BUDGET_US = 2000
+# Connectivity reporting yields and resumes across steps; no construction waits on it.
+DIAGNOSTIC_BUDGET_US = 1000
+
+# Detour steering defaults in body-radius units; tune algorithm reach independently of authored speed.
+CROWD_QUERY_RADIUS_MULTIPLIER = 12.0
+CROWD_OPTIMIZE_RADIUS_MULTIPLIER = 30.0
+CROWD_SEPARATION_WEIGHT = 2.0

@@ -1,0 +1,591 @@
+#include "react/react.hpp"
+#include <cmath>
+#include <iostream>
+#include <stdexcept>
+using namespace amber;
+using namespace amber::react;
+namespace {
+void require(bool ok, const char *message) {
+  if (!ok)
+    throw std::runtime_error(message);
+}
+void near(double a, double b, const char *message) {
+  require(std::abs(a - b) < 1e-8, message);
+}
+Term term(TermId id, const char *name, Source source = Source::State,
+          Combine combine = Combine::None) {
+  Term t;
+  t.id = id;
+  t.name = name;
+  t.source = source;
+  t.combine = combine;
+  return t;
+}
+struct Fixture {
+  Objects objects;
+  Handle a, b, c;
+  Terms terms;
+  Materials materials;
+  AssetMeasurements assets;
+  Properties properties;
+  Processes processes;
+  InstanceSettings instance;
+  ModelSettings models;
+  PlotSettings plots;
+  WorldSettings world;
+  SharedColumns shared;
+  RelationsRead relations;
+  RuntimeMeasurements runtime;
+  Fixture() {
+    ObjectInit init;
+    init.model = 1;
+    init.material = 10;
+    init.plot = 1;
+    a = create(objects, init);
+    b = create(objects, init);
+    c = create(objects, init);
+    terms.rows.resize(10);
+    for (TermId i = 1; i < 10; ++i) {
+      terms.rows[i] = term(i, ("x." + std::to_string(i)).c_str());
+      terms.by_name[terms.rows[i].name] = i;
+    }
+  }
+  ValueRead values() {
+    return {terms,        identity(objects),
+            objects.plot, objects.params,
+            materials,    assets,
+            properties,   processes,
+            instance,     models,
+            plots,        world,
+            shared,       relations,
+            runtime,      1};
+  }
+};
+void source_resolution() {
+  Fixture f;
+  f.terms.rows[1].source = Source::Intrinsic;
+  f.materials.rows[10][1] = Value(2000.0);
+  f.terms.rows[2].source = Source::Measured;
+  f.terms.rows[2].measurement = MeasurementRole::Volume;
+  f.terms.rows[3].source = Source::Measured;
+  f.terms.rows[3].measurement = MeasurementRole::Mass;
+  f.terms.rows[4].source = Source::Setting;
+  f.world.values[4] = Value(1.0);
+  f.plots.rows[1][4] = Value(2.0);
+  f.models.rows[1][4] = Value(3.0);
+  f.assets.rows[1].volume = 0.5;
+  f.assets.parameter_rows[77].volume = 0.25;
+  f.objects.params[f.b.slot()] = 77;
+  near(read(f.values(), f.a, 3, 0, 20).value.numeric(), 1000,
+       "mass from measured volume/current material density");
+  near(read(f.values(), f.b, 3, 0, 20).value.numeric(), 500,
+       "parameter measurement overrides model");
+  near(read(f.values(), f.a, 4, 0, 20).value.numeric(), 3, "model setting overrides plot/world");
+  f.instance.columns.resize(5);
+  f.instance.columns[4].set(f.a.slot(), Value(0.0));
+  near(read(f.values(), f.a, 4, 0, 20).value.numeric(), 0, "explicit zero instance setting");
+  f.terms.rows[5].source = Source::Measured;
+  f.terms.rows[5].measurement = MeasurementRole::Runtime;
+  f.properties.resize(6);
+  f.properties[5].set(f.a.slot(), Value(999.0));
+  require(!read(f.values(), f.a, 5, 0, 20).present, "state cannot fake runtime measurement");
+  DeferredEffects effects;
+  apply_derived_fact(f.runtime, {{f.a, 5}, Value(25.0), 1, {}}, effects);
+  near(read(f.values(), f.a, 5, 0, 20).value.numeric(), 25, "derived runtime fact");
+}
+void process_thresholds_and_transfer() {
+  Fixture f;
+  DeferredEffects effects;
+  auto &t = f.terms.rows[1];
+  t.conserved = true;
+  set_state(f.properties, f.processes, t, f.a, Value(10.0), 0, 20, effects);
+  set_state(f.properties, f.processes, t, f.b, Value(1.0), 0, 20, effects);
+  set_rate(f.properties, f.processes, t, f.a, -2, 0, 10, 0, 20, effects);
+  require(!set_rate(f.properties, f.processes, t, f.a, -2, 0, 10, 0, 20, effects),
+          "same effective process rate/bounds is unchanged");
+
+  auto p = *f.processes[1].get(f.a.slot());
+  const auto effect_count = effects.ordered.size();
+  require(!set_rate(f.properties, f.processes, t, f.a, -2, 0, 10, 20, 20, effects) &&
+              f.processes[1].get(f.a.slot())->revision == p.revision &&
+              f.processes[1].get(f.a.slot())->step0 == p.step0 &&
+              effects.ordered.size() == effect_count,
+          "repeating an unchanged process later preserves its closed form and armed timers");
+  near(process_value(p, 50, 20), 5, "closed form process");
+  require(next_crossing(p, {Threshold::Predicate::Below, 5}, 0, 20) == 51,
+          "falling strict threshold");
+  require(next_crossing(p, {Threshold::Predicate::AtMost, 5}, 0, 20) == 50,
+          "falling inclusive threshold");
+  Process rising{0, 0, 2, 0, 10, 1};
+  require(next_crossing(rising, {Threshold::Predicate::Above, 5}, 0, 20) == 51,
+          "rising strict threshold");
+  require(next_crossing(rising, {Threshold::Predicate::AtLeast, 5}, 0, 20) == 50,
+          "rising inclusive threshold");
+  require(!next_crossing(rising, {Threshold::Predicate::Above, 10}, 0, 20),
+          "clamped unreachable threshold");
+  require(transfer_state(f.properties, f.processes, t, f.a, f.b, 2, 50, 20, effects),
+          "transfer succeeds");
+  near(read_state(f.properties, f.processes, f.a, 1, 50, 20).value.numeric(), 3,
+       "settled source debit");
+  near(read_state(f.properties, f.processes, f.b, 1, 50, 20).value.numeric(), 3,
+       "equal destination credit");
+  set_rate(f.properties, f.processes, t, f.c, -1, 0, 10, 50, 20, effects);
+  auto current = read_state(f.properties, f.processes, f.c, 1, 50, 20).value;
+  require(set_state(f.properties, f.processes, t, f.c, current, 50, 20, effects),
+          "stopping current nonzero process rate counts as change");
+  require(f.processes[1].get(f.a.slot())->revision > p.revision,
+          "transfer keeps monotonic process revision");
+  require(f.processes[1].get(f.a.slot())->rate == -2,
+          "transfer preserves ongoing source rate/bounds");
+  near(read_state(f.properties, f.processes, f.a, 1, 60, 20).value.numeric(), 2,
+       "source process continues after conserved transfer");
+  set_rate(f.properties, f.processes, t, f.b, 0.5, 0, 4, 50, 20, effects);
+  const auto source_before = *f.processes[1].get(f.a.slot());
+  const auto destination_before = *f.processes[1].get(f.b.slot());
+  bool bounded = false;
+  try {
+    transfer_state(f.properties, f.processes, t, f.a, f.b, 2, 50, 20, effects);
+  } catch (const std::invalid_argument &) {
+    bounded = true;
+  }
+  require(bounded, "destination process bound failure is explicit");
+  require(f.processes[1].get(f.a.slot())->revision == source_before.revision &&
+              f.processes[1].get(f.b.slot())->revision == destination_before.revision,
+          "failed process-bound preflight changes neither endpoint");
+  require(transfer_state(f.properties, f.processes, t, f.a, f.b, 0.5, 50, 20, effects),
+          "bounded transfer into running destination");
+  near(read_state(f.properties, f.processes, f.b, 1, 60, 20).value.numeric(), 3.75,
+       "destination process continues after transfer");
+
+  require(!transfer_state(f.properties, f.processes, t, f.a, f.b, 4, 50, 20, effects),
+          "insufficient transfer no mutation");
+  near(read_state(f.properties, f.processes, f.a, 1, 50, 20).value.numeric(), 2.5,
+       "failed transfer retains value");
+  Subscriptions subs;
+  bind_watch(subs, {f.a, 1},
+             {{f.b, 1}, 0, 2, Answer{true, Value(3.0)}, {{Threshold::Predicate::Below, 2}}});
+  auto revision = f.processes[1].get(f.a.slot())->revision;
+  require(
+      valid_threshold({{f.a, 1}, f.b, 1, 0, revision, 2}, identity(f.objects), f.processes, subs),
+      "current threshold token");
+  require(!valid_threshold({{f.a, 1}, f.b, 1, 0, p.revision, 2}, identity(f.objects), f.processes,
+                           subs),
+          "old process token invalidated");
+  CurrentAnswers answers;
+  answers.values[{f.a, 1}] = Answer{true, Value(3.0)};
+  require(check_watch(subs, {f.a, 1}, answers).empty(), "change back is silent");
+  answers.values[{f.a, 1}] = Answer{true, Value(1.0)};
+  require(check_watch(subs, {f.a, 1}, answers).size() == 1, "threshold delivery");
+}
+void subscription_rebind_and_relations() {
+  Fixture f;
+  Subscriptions subscriptions;
+  const ScriptKey consumer{f.b, 7};
+  const FactKey source{f.a, 1};
+  bind_watch(subscriptions, source, {consumer, 0, 1, Answer{}, {}});
+  const auto first = subscriptions.rows.at(source)[0].revision;
+  unbind_watch(subscriptions, consumer, 0);
+  bind_watch(subscriptions, source, {consumer, 0, 1, Answer{}, {}});
+  require(subscriptions.rows.at(source)[0].revision > first,
+          "removed/re-added watch cannot revive old timer");
+  bind_watch(subscriptions, {f.c, 1}, {consumer, 1, 1, Answer{}, {}});
+  rebuild_subscription_index(subscriptions);
+  unbind_watch(subscriptions, consumer, 0);
+  require(!subscriptions.rows.contains(source) && subscriptions.rows.contains({f.c, 1}),
+          "unbind touches selected watch only");
+  retire_subscriptions(subscriptions, f.b);
+  require(subscriptions.rows.empty() && subscriptions.by_consumer.empty() &&
+              subscriptions.by_subject.empty(),
+          "consumer lifecycle removes indexed incident subscriptions");
+  Relation relation;
+  DeferredEffects effects;
+  bind_watch(subscriptions, {f.a, 2}, {{f.a, 8}, 0, 1, RelationAnswer{}, {}});
+  set_relation(relation, 2, f.b, f.a, true, effects);
+  CurrentAnswers answers;
+  answers.values[{f.a, 2}] = read_relation(relation, f.a);
+  auto deliveries = check_watch(subscriptions, {f.a, 2}, answers);
+  require(deliveries.size() == 1 && deliveries[0].relations.size() == 1 &&
+              deliveries[0].relations[0].other == f.b && deliveries[0].relations[0].added &&
+              deliveries[0].relations[0].incoming,
+          "relation watch carries other endpoint and direction");
+  set_relation(relation, 2, f.b, f.a, false, effects);
+  answers.values[{f.a, 2}] = read_relation(relation, f.a);
+  deliveries = check_watch(subscriptions, {f.a, 2}, answers);
+  require(deliveries.size() == 1 && !deliveries[0].relations[0].added,
+          "empty relation is delivered after removal");
+  retire_subscriptions(subscriptions, f.a);
+  require(subscriptions.rows.empty(), "source retirement clears self subscription");
+}
+void contribution_and_metering() {
+  Fixture f;
+  DeferredEffects effects;
+  GivesTo reverse;
+  auto &t = f.terms.rows[1];
+  t.combine = Combine::Sum;
+  set_contribution(f.shared, reverse, t, f.b, f.a, 5, effects);
+  set_contribution(f.shared, reverse, t, f.c, f.a, 7, effects);
+  require(!set_contribution(f.shared, reverse, t, f.a, f.a, 0, effects),
+          "withdrawing absent contributor is a no-op while others contribute");
+
+  near(f.shared[1].get(f.a.slot())->total, 12, "sum contribution");
+  withdraw_contributor(f.shared, reverse, f.terms, f.b, effects);
+  near(f.shared[1].get(f.a.slot())->total, 7, "reverse-index withdrawal");
+  Relation relation;
+  set_relation(relation, 2, f.b, f.a, true, effects);
+  f.relations.columns[2] = &relation;
+  t.along = 2;
+  near(read_shared(f.shared, f.relations, f.b, t).value.numeric(), 7, "along relation fallback");
+  AllocationRows allocations;
+  MeterRows meters;
+  PriorityValues priorities;
+  Shared supply{100, {{f.a, 100}}}, demand{30, {{f.b, 10}, {f.c, 20}}};
+  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, allocations, meters, 0, 20);
+  near(get_share(allocations, f.a, 2, f.b), 10, "satisfied small demand");
+  near(get_share(allocations, f.a, 2, f.c), 20, "satisfied larger demand");
+  near(metered(meters.at({f.a, f.a, 1, true}), 20, 20), 30,
+       "supplier meters actual served rather than offered");
+  demand = {0, {}};
+  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, allocations, meters, 20, 20);
+  near(metered(meters.at({f.a, f.a, 1, true}), 40, 20), 30, "unused supply not metered");
+  supply = {12, {{f.a, 12}}};
+  demand = {25, {{f.b, 5}, {f.c, 20}}};
+  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, allocations, meters, 40, 20);
+  near(get_share(allocations, f.a, 2, f.b), 5, "waterfill caps small demand");
+  near(get_share(allocations, f.a, 2, f.c), 7, "waterfill redistributes surplus");
+}
+void dispatch_and_causality() {
+  Fixture f;
+  Triggers triggers;
+  auto &row = triggers[1];
+  row.by_material[10] = {1, "material"};
+  row.by_flag.push_back({2, {2, "flag"}});
+  row.by_model[1] = {3, "model"};
+  row.by_instance[f.a.bits] = {{4, "instance"}};
+  const std::array<TermId, 1> flags{2};
+  auto handlers = dispatch(triggers, identity(f.objects), flags, f.a, 1);
+  require(handlers.size() == 4 && handlers[0].script == 1 && handlers[3].script == 4,
+          "dispatch material flag model instance order");
+  record::Journal journal(8, {});
+  record::Event action;
+  action.kind = record::Kind::Action;
+  action.name = "build";
+  action.changed = true;
+  auto parent = journal.append(action);
+  record::Event handler;
+  handler.kind = record::Kind::Handler;
+  handler.name = "constructor";
+  handler.changed = true;
+  auto origin = journal.append(handler, parent);
+  DeferredEffects effects;
+  effects.ordered.push_back(step::EventWork{f.a, f.b, 1, Value(1.0), {}});
+  effects.ordered.push_back(step::ActionWork{{ScriptHolder{9, f.a}, 2, f.b, Value{}}, {}});
+  effects.ordered.push_back(step::Timer{3, {f.a, f.a, 3, Value{}, {}}, {}});
+  step::WorkQueues q;
+  step::TimerWheel wheel;
+  publish_effects(std::move(effects), origin, 0, q, wheel, journal, 10);
+  auto event = std::get<step::EventWork>(step::pop_foreground(q)->work);
+  require(event.origin.cause == origin.cause && event.origin.root == parent.root,
+          "child stamps completed handler origin");
+  auto script_action = std::get<step::ActionWork>(step::pop_foreground(q)->work);
+  require(std::get<ScriptHolder>(script_action.request.caller).object == f.a,
+          "script action retains installed holder");
+  require(step::timers(wheel)[0].event.origin == origin, "timer keeps complete origin");
+}
+RunOutcome execute(Vm &vm, ScriptState &state, DeferredEffects &effects, Handle object, ScriptId id,
+                   std::string function = "run", int ms = 50) {
+  std::uint64_t rng = 7;
+  Invocation inv;
+  inv.self = {object, id};
+  inv.state = &state;
+  inv.random = &rng;
+  inv.effects = &effects;
+  inv.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+  return run_handler(vm, {id, std::move(function)}, inv);
+}
+void structural_publication_order() {
+  DeferredEffects effects;
+  effects.structural.push_back(StructuralRequest{});
+  effects.ordered.push_back(step::EventWork{});
+  step::WorkQueues queues;
+  step::TimerWheel timers;
+  record::Journal journal(8, {});
+  bool denied = false;
+  try {
+    publish_effects(std::move(effects), {}, 0, queues, timers, journal, 100);
+  } catch (const std::logic_error &) {
+    denied = true;
+  }
+  require(denied && queues.causal.empty() && journal.take().empty(),
+          "unapplied structure cannot publish descendants or records first");
+}
+void luau_state_and_limits() {
+  const auto object = Handle::make(7, 9000001);
+  Vm vm({4096, 50, 5, 64});
+  ScriptDeclaration d;
+  d.id = 1;
+  auto compiled = compile_script(R"(
+    return {on={run=function(self)
+      self.state[1] = 12; self.state['1'] = 'separate'; self.state.owner=self.handle
+      self.state.keep=true; self.state.remove=8; self.state.remove=nil
+      local count=0; for k,v in self.state do count+=1 end; self.state.count=count
+      error('after writes')
+    end}}
+  )");
+  require(compiled.errors.empty(), "valid Luau compilation");
+  require(load_script(vm, compiled, d).status == RunOutcome::Status::Ok, "load sandboxed module");
+  ScriptState state;
+  DeferredEffects effects;
+  auto result = execute(vm, state, effects, object, 1);
+  require(result.status == RunOutcome::Status::Error, "handler error");
+  near(std::get<double>(state.at(StateKey{std::int64_t{1}})), 12, "integer state key retained");
+  require(std::get<std::string>(state.at(StateKey{std::string("1")})) == "separate",
+          "string key distinct");
+  require(std::get<Handle>(state.at(StateKey{std::string("owner")})) == object,
+          "handle exact bits");
+  require(!state.contains(StateKey{std::string("remove")}), "nil deletes state");
+  near(std::get<double>(state.at(StateKey{std::string("count")})), 4,
+       "real userdata generic iteration");
+  require(effects.changed, "state writes counted before error");
+  require(!compile_script("local n=0; return {on={run=function(self) n+=1 end}}").errors.empty(),
+          "captured scalar mutation rejected");
+  require(!compile_script("local n=0; return {on={run=function(self) n=1 end}}").errors.empty(),
+          "ordinary captured assignment rejected");
+  Vm frozen({4096, 50, 5, 64});
+  d.id = 2;
+  auto capture = compile_script(
+      "local hidden={n=0}; return {on={run=function(self) self.state.before=1; hidden.n+=1 end}}");
+  require(load_script(frozen, capture, d).status == RunOutcome::Status::Ok,
+          "captured table frozen at load");
+  ScriptState fs;
+  DeferredEffects fe;
+  require(execute(frozen, fs, fe, object, 2).status == RunOutcome::Status::Error,
+          "captured table mutation fails");
+  require(fs.contains(StateKey{std::string("before")}), "write before frozen-table failure stays");
+  Vm cutoff({4096, 50, 5, 64});
+  d.id = 3;
+  auto spin =
+      compile_script("return {on={run=function(self) self.state.before=1; while true do end end}}");
+  require(load_script(cutoff, spin, d).status == RunOutcome::Status::Ok, "load infinite handler");
+  ScriptState cs;
+  DeferredEffects ce;
+  require(execute(cutoff, cs, ce, object, 3, "run", 2).status == RunOutcome::Status::Cutoff,
+          "VM interrupt deadline");
+  require(cs.contains(StateKey{std::string("before")}), "write before cutoff stays");
+  Vm nested({4096, 50, 5, 64});
+  d.id = 4;
+  auto invalid =
+      compile_script("return {on={run=function(self) self.state.before=1; self.state.bad={} end}}");
+  require(load_script(nested, invalid, d).status == RunOutcome::Status::Ok,
+          "load bad state writer");
+  ScriptState ns;
+  DeferredEffects ne;
+  require(execute(nested, ns, ne, object, 4).status == RunOutcome::Status::Error,
+          "nested state rejected");
+  require(ns.size() == 1, "no rollback or hidden nested state");
+  Vm memory({256, 50, 5, 64});
+  d.id = 5;
+  auto large = compile_script("return {on={run=function(self) self.state.before=1; for i=1,10000 "
+                              "do self.state[i]=string.rep('x',100) end end}}");
+  require(load_script(memory, large, d).status == RunOutcome::Status::Ok, "load memory test");
+  ScriptState ms;
+  DeferredEffects me;
+  auto limited = execute(memory, ms, me, object, 5);
+  require(limited.status == RunOutcome::Status::Error && limited.memory_bytes <= 256 * 1024,
+          "combined Lua/state memory limit enforced");
+  require(ms.contains(StateKey{std::string("before")}) && ms.size() > 1,
+          "partial writes survive memory limit");
+  DeferredEffects repeat_effects;
+  require(execute(memory, ms, repeat_effects, object, 5).status == RunOutcome::Status::Error,
+          "repeated memory failure remains protected during VM call setup");
+
+  Vm iterators({256, 50, 5, 64});
+  d.id = 6;
+  auto nested_iteration = compile_script(R"(return {on={run=function(self)
+    for i=1,400 do self.state[i]=i end
+    local function nested(n)
+      for k,v in self.state do if n>0 then nested(n-1) end; break end
+    end
+    nested(100)
+  end}})");
+  require(load_script(iterators, nested_iteration, d).status == RunOutcome::Status::Ok,
+          "load retained iterator test");
+  ScriptState is;
+  DeferredEffects ie;
+  auto iter_result = execute(iterators, is, ie, object, 6);
+  require(iter_result.status == RunOutcome::Status::Error && iter_result.memory_bytes <= 256 * 1024,
+          "retained iterator snapshots count against script budget");
+}
+int construction_probe(lua_State *L) {
+  auto &inv = invocation(L);
+  StructuralRequest request;
+  if (!queue_structural(inv, request))
+    inv.effects->ordered.emplace_back(std::in_place_type<Diagnostic>,
+                                      Diagnostic{"denied", "construction authority absent"});
+  return 0;
+}
+void live_activation_and_dispatch_authority() {
+  Vm vm({4096, 50, 5, 64});
+  register_binding(vm, "build", construction_probe, nullptr);
+  auto compiled = compile_script("return {on={run=function(self) self:build() end}}");
+  ScriptDeclaration declaration;
+  declaration.id = 11;
+  declaration.kind = ScriptDeclaration::Kind::Rule;
+  declaration.approved = false;
+  declaration.active = false;
+  require(load_script(vm, compiled, declaration).status == RunOutcome::Status::Ok,
+          "load inactive rule closure");
+  ScriptState state;
+  DeferredEffects effects;
+  std::uint64_t rng = 1;
+  Invocation inv;
+  inv.self = {Handle::make(1, 1), 11};
+  inv.state = &state;
+  inv.random = &rng;
+  inv.effects = &effects;
+  HandlerRef handler{11, "run", 1, 1, true, true};
+  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Missing &&
+              effects.structural.empty(),
+          "unapproved inactive rule cannot instantiate");
+  set_activation(vm, 11, true, true);
+  effects.ordered.clear();
+  inv.deadline = {};
+  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Ok &&
+              effects.structural.size() == 1,
+          "authorized activation updates cached metadata");
+  effects.structural.clear();
+  effects.ordered.clear();
+  handler.world_rule = false;
+  inv.deadline = {};
+  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Ok &&
+              effects.structural.empty(),
+          "ordinary model dispatch of approved rule has no world-rule authority");
+  handler.world_rule = true;
+  set_activation(vm, 11, true, false);
+  effects.ordered.clear();
+  inv.deadline = {};
+  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Missing &&
+              effects.structural.empty(),
+          "deactivation takes effect without closure reload");
+}
+void luau_bound_values_and_events() {
+  Fixture f;
+  auto projection = f.values();
+  ReadBinding reads{projection};
+  StateBinding writes{f.properties, f.processes, f.terms};
+  Vm vm({4096, 50, 5, 64});
+  register_binding(vm, "get", get_binding, &reads);
+  register_binding(vm, "read", read_binding, &reads);
+  register_binding(vm, "set", set_binding, &writes);
+  register_binding(vm, "rate", rate_binding, &writes);
+  bind_events(vm, f.terms);
+  f.terms.rows[2].kind = Kind::Event;
+  f.terms.rows[3].kind = Kind::Action;
+  auto compiled = compile_script(R"(return {on={run=function(self)
+    self:set('x.1',3); self:rate('x.1',-1,0,3)
+    self:emit(self.handle,'x.2',{target=self.handle,amount=2})
+    self:after(0,'x.2',true); self:act('x.3',self.handle,{amount=1})
+    self.state.observed=self:get('x.1')
+    self.state.explicit=self:read(self.handle,'x.1')
+    self:after(0.1,'x.2')
+    self:emit(self.handle,'x.2')
+  end}})");
+  ScriptDeclaration d;
+  d.id = 1;
+  d.sets = {1};
+  require(load_script(vm, compiled, d).status == RunOutcome::Status::Ok, "load bindings script");
+  ScriptState state;
+  DeferredEffects effects;
+  auto result = execute(vm, state, effects, f.a, 1);
+  if (result.status != RunOutcome::Status::Ok)
+    throw std::runtime_error(result.error);
+  near(std::get<double>(state.at(StateKey{std::string("observed")})), 3,
+       "bindings read immediate changes");
+  near(std::get<double>(state.at(StateKey{std::string("explicit")})), 3,
+       "explicit handle read uses same source resolver");
+  require(effects.ordered.size() == 7,
+          "writes, event, timer, action and omitted payloads preserved");
+  auto &action = std::get<step::ActionWork>(effects.ordered[4]);
+  require(std::get<ScriptHolder>(action.request.caller) == ScriptHolder{1, f.a},
+          "self act cannot borrow player");
+  auto &timer = std::get<step::Timer>(effects.ordered[3]);
+  require(timer.due == 1, "after zero next step");
+  const auto &empty_timer = std::get<step::Timer>(effects.ordered[5]);
+  const auto &empty_event = std::get<step::EventWork>(effects.ordered[6]);
+  require(empty_timer.due == 2 && !std::get<Value>(empty_timer.event.payload).present() &&
+              !std::get<Value>(empty_event.payload).present(),
+          "omitted optional timer and event payloads are ordinary absent scalars");
+  Vm foreign({4096, 50, 5, 64});
+  register_binding(foreign, "read", read_binding, &reads);
+  ScriptDeclaration foreign_declaration;
+  foreign_declaration.id = 3;
+  auto foreign_code = compile_script(R"(return {on={run=function(self, sender, target)
+    self.state.foreign=self:read(target,'x.1')
+  end}})");
+  require(load_script(foreign, foreign_code, foreign_declaration).status == RunOutcome::Status::Ok,
+          "load foreign read script");
+  f.properties[1].set(f.b.slot(), Value(7.0));
+  ScriptState foreign_state;
+  DeferredEffects foreign_effects;
+  std::uint64_t foreign_rng = 0;
+  Invocation foreign_invocation;
+  foreign_invocation.self = {f.a, 3};
+  foreign_invocation.payload = Value(f.b);
+  foreign_invocation.state = &foreign_state;
+  foreign_invocation.random = &foreign_rng;
+  foreign_invocation.effects = &foreign_effects;
+  require(run_handler(foreign, {3, "run"}, foreign_invocation).status == RunOutcome::Status::Error,
+          "foreign handle alone grants no acquired-read access");
+  foreign_invocation.acquired = {f.b};
+  foreign_invocation.deadline = {};
+  require(run_handler(foreign, {3, "run"}, foreign_invocation).status == RunOutcome::Status::Ok,
+          "explicitly acquired handle permits read");
+  near(std::get<double>(foreign_state.at(StateKey{std::string("foreign")})), 7,
+       "foreign read resolves selected object's own value");
+  Vm cyclic({4096, 50, 5, 64});
+  bind_events(cyclic, f.terms);
+  ScriptDeclaration bad;
+  bad.id = 2;
+  auto cycle = compile_script(
+      "return {on={run=function(self) local p={}; p.loop=p; self:emit(self.handle,'x.2',p) end}}");
+  require(load_script(cyclic, cycle, bad).status == RunOutcome::Status::Ok,
+          "load scratch event cycle");
+  ScriptState cycle_state;
+  DeferredEffects cycle_effects;
+  require(execute(cyclic, cycle_state, cycle_effects, f.a, 2).status == RunOutcome::Status::Error,
+          "cyclic event table rejected before recursion");
+
+  auto armed = threshold_timers(Subscriptions{}, f.processes, {f.a, 1}, 0, 20, {});
+  require(armed.empty(), "unsubscribed process schedules nothing");
+  ScriptDeclaration law;
+  law.kind = ScriptDeclaration::Kind::Rule;
+  law.approved = true;
+  law.active = true;
+  Invocation invocation;
+  invocation.declaration = &law;
+  invocation.world_rule = true;
+  invocation.approved = true;
+  invocation.active = true;
+  invocation.effects = &effects;
+  StructuralRequest request;
+  request.binding = {1, 10, 0};
+  require(queue_structural(invocation, request),
+          "active approved rule can queue geometry creation");
+  law.kind = ScriptDeclaration::Kind::Instance;
+  require(!queue_structural(invocation, request),
+          "installed script cannot bypass authored construction law");
+  request.kind = StructuralRequest::Kind::ReplaceBinding;
+  require(!queue_structural(invocation, request), "mass-changing binding edit uses same law gate");
+}
+} // namespace
+int main() {
+  source_resolution();
+  process_thresholds_and_transfer();
+  subscription_rebind_and_relations();
+  contribution_and_metering();
+  dispatch_and_causality();
+  structural_publication_order();
+  luau_state_and_limits();
+  live_activation_and_dispatch_authority();
+  luau_bound_values_and_events();
+  std::cout << "reaction and real Luau checks passed\n";
+}
