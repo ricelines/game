@@ -53,7 +53,7 @@ A rule also needs `applies_to={material='example.material'}` or `{flag='example.
 
 Values use SI units. Term kinds are `quantity`, `flag`, `event`, `relation`, `action`, `material`; scalar sources are `intrinsic`, `measured`, `state`, `setting`. Shared combiners are `sum`, `max`, `any`, `share_equal`, `share_priority`. A demand term names its paired supply and optional priority setting. Contributions belong to their contributors: withdraw on disconnection; destroying a contributor removes its contributions.
 
-`self.state` persists a flat mapping of integer/string keys to numbers, booleans, strings and handles. Nil deletes an entry. Tables/functions cannot be stored there. Generic iteration and `#self.state` work; use ordinary local tables for scratch work. State changes are immediate and survive errors/cutoffs.
+`self.state` persists a flat mapping of integer/string keys to numbers, booleans, strings and handles. Nil deletes an entry. Tables/functions cannot be stored there. Generic iteration and `#self.state` work; use ordinary local tables for scratch work. State changes are immediate and survive errors/cutoffs. Reading a handle from state does not acquire it for the current run.
 
 Events accept a scalar, handle, string, vector or flat record of at most 64 named fields. Actions use their registered inputs, including structured native records. Luau vectors and handles are converted at that boundary; returned `created` entries are actual typed handles. Quantity reads address this object. Related objects communicate their state through authored events or contributions; physical queries return their documented measurements. Knowing a printed name grants nothing.
 
@@ -108,7 +108,7 @@ Body actions are authored Lua like other behavior. These primitives operate on o
 
 The VM interrupt limits handler execution. Path and perception queries retain their configured count limits; native queries do not create a separate wall-clock budget.
 
-Readonly helpers are `self:object(handle?)` (model/material/params/owner/parent, position, quaternion array, installed scripts), `self:asset(handle?)` (actual immutable manifest), `self:material(material, term)`, `self:measure_model(model, params?, material?)`, `self:measure_instance(handle?)`. Measurements include disjoint material masses; instance measurements include declared parts and return nil for a retired handle. `self:meter(subject, demand_term, contributor, supplier?)`, `self:plot(plot_id?)`, `self:plot_objects(plot_id)` supply settlement facts. These reads grant no rights. Poses are available as `self:object(handle).position` and `.rotation`.
+Readonly helpers are `self:object(handle?)` (model/material/params/owner/parent, position, quaternion array, installed scripts), `self:asset(handle?)` (actual immutable manifest), `self:material(material, term)`, `self:measure_model(model, params?, material?)`, `self:measure_instance(handle?)`. Measurements include disjoint material masses; instance measurements include declared parts and require a live handle acquired in the current run. `self:meter(subject, demand_term, contributor, supplier?)`, `self:plot(plot_id?)`, `self:plot_objects(plot_id)` supply settlement facts. These reads grant no rights. Poses are available as `self:object(handle).position` and `.rotation`.
 
 ## Assets, definition edits and limits
 

@@ -180,12 +180,8 @@ void push_atom(lua_State *L, const StateAtom &atom) {
           lua_pushboolean(L, value);
         else if constexpr (std::is_same_v<T, std::string>)
           lua_pushlstring(L, value.data(), value.size());
-        else {
-          auto &acquired = context(L).invocation->acquired;
-          if (value && std::find(acquired.begin(), acquired.end(), value) == acquired.end())
-            acquired.push_back(value);
+        else
           push_handle(L, value);
-        }
       },
       atom);
 }

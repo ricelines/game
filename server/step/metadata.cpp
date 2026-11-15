@@ -338,12 +338,7 @@ int measure_model_binding(lua_State *L) {
 }
 int measure_instance_binding(lua_State *L) {
   const auto &b = *static_cast<InstanceMeasureBinding *>(react::binding_data(L));
-  const auto object =
-      lua_isnoneornil(L, 2) ? react::invocation(L).self.object : react::check_handle(L, 2);
-  if (!b.identity.valid(object)) {
-    lua_pushnil(L);
-    return 1;
-  }
+  const auto object = object_arg(L, 2, b.identity);
   try {
     std::vector<Handle> rows{object};
     std::map<TermId, double> masses;

@@ -158,13 +158,19 @@ void single_solid_measurement_has_no_assembly_metadata() {
     assert(m.mass_kg==40 and m.bounds.min.X==0 and m.bounds.max.Z==2)
     assert(#m.materials==1 and m.materials[1].material==4))");
 }
-void retained_handles_reacquire_reads() {
+void retained_handles_grant_no_reads() {
   Fixture f;
   f.state[std::string("saved")] = f.unrelated;
-  f.ok("assert(self:object(self.state.saved).model==3)");
-  f.ok(R"(for key,value in self.state do
-    if key=='saved' then assert(self:object(value).model==3) end
-  end)");
+  require(f.run("self:object(self.state.saved)").status == react::RunOutcome::Status::Error,
+          "a retained handle does not authorize object metadata reads");
+  require(f.run("self:measure_instance(self.state.saved)").status ==
+              react::RunOutcome::Status::Error,
+          "a retained handle does not authorize measured instance reads");
+  require(f.run(R"(for key,value in self.state do
+    if key=='saved' then self:measure_instance(value) end
+  end)")
+                  .status == react::RunOutcome::Status::Error,
+          "iterating state does not acquire retained handles");
   f.state[std::string("saved")] = to_string(f.unrelated);
   require(f.run("self:object(self.state.saved)").status == react::RunOutcome::Status::Error,
           "a stored string is not promoted into a typed object reference");
@@ -175,7 +181,7 @@ int main() {
     effective_metadata_and_mass();
     single_solid_measurement_has_no_assembly_metadata();
     installed_script_identity_is_readonly();
-    retained_handles_reacquire_reads();
+    retained_handles_grant_no_reads();
     std::cout << "Actual readonly Luau metadata and variant mass checks passed.\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
