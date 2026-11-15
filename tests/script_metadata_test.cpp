@@ -168,6 +168,8 @@ void effective_metadata_and_mass() {
     assert(self:material('custom.4','custom.1')==20)
     local m=self:measure_model('m:1',1,4)
     assert(m.mass_kg==100 and m.bounds.min.X==-1 and m.bounds.max.X==4)
+    assert(m.volume_m3==7)
+    assert(not pcall(function()m.volume_m3=99 end))
     assert(m.supports[1].height==1 and m.supports[1].area==4)
     assert(not pcall(function()m.supports[1].area=99 end))
     assert(m.capacity==nil and m.capacity_m3==nil)
@@ -175,7 +177,8 @@ void effective_metadata_and_mass() {
     assert(m.materials[2].material==4 and m.materials[2].mass_kg==60)
     local live=self:measure_instance()
     assert(live.mass_kg==100 and live.bounds.min.X==9 and live.bounds.max.X==22)
-    assert(live.capacity_m3==0.25)
+    assert(live.volume_m3==7 and live.capacity_m3==0.25)
+    assert(not pcall(function()live.volume_m3=99 end))
     assert(self:meter(self.handle,'custom.2',from)==5)
     local p=self:plot()
     assert(p.id==1 and p.owner=='p:2' and p.bounds.min[1]==-5 and p.bounds.max[2]==40)
@@ -198,6 +201,7 @@ void single_solid_measurement_has_no_assembly_metadata() {
   Fixture f;
   f.ok(R"(local m=self:measure_model(2)
     assert(m.mass_kg==40 and m.bounds.min.X==0 and m.bounds.max.Z==2)
+    assert(m.volume_m3==2)
     assert(#m.materials==1 and m.materials[1].material==4))");
 }
 void retained_handles_grant_no_reads() {
