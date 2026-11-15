@@ -741,6 +741,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                     appearance, completed);
             publish_object_changes(sessions, session_views, ids, auth, parent, model_text,
                                    instance_text, completed.changed_objects);
+            for (const auto &[recipient, notice] : completed.notices)
+              sessions.event_for_player(recipient, notice);
             for (auto ancestor = execution.rbegin(); ancestor != execution.rend(); ++ancestor)
               if (const auto *initiator = std::get_if<ActionRun>(&*ancestor))
                 if (const auto *player = std::get_if<PlayerId>(&initiator->call.request.caller)) {

@@ -159,6 +159,28 @@ inline Json grants(std::span<const GrantId> ids) {
     rows.push_back("g:" + std::to_string(id));
   return rows;
 }
+inline void cleared_notice(step::NativeCompletion &out, const perm::Grants &rows,
+                           std::span<const GrantId> revoked, PlayerId owner, Handle root,
+                           std::span<const Handle> objects) {
+  const auto belongs = [&](const perm::Grant &grant) {
+    const bool scope = grant.scope.kind == perm::ScopeKind::Object ||
+                       grant.scope.kind == perm::ScopeKind::Avatar ||
+                       (grant.scope.kind == perm::ScopeKind::Account &&
+                        grant.scope.account_kind == perm::AccountKind::Object);
+    return (scope && std::ranges::find(objects, Handle{grant.scope.subject}) != objects.end()) ||
+           (grant.holder.kind == perm::HolderKind::Script &&
+            std::ranges::find(objects, grant.holder.installed_on) != objects.end());
+  };
+  std::vector<GrantId> cleared;
+  for (const auto id : revoked) {
+    const auto &grant = rows.rows[id];
+    if (belongs(grant) || (grant.parent && belongs(rows.rows[grant.parent])))
+      cleared.push_back(id);
+  }
+  if (!cleared.empty())
+    out.notices.emplace_back(
+        owner, Json{{"kind", "changed"}, {"cleared", grants(cleared)}, {"on", to_string(root)}});
+}
 inline const perm::Offer &offer_row(const perm::Offers &offers, perm::OfferId id) {
   if (!id || id >= offers.rows.size() || !offers.rows[id].live || offers.rows[id].trade)
     throw std::invalid_argument("ordinary offer is gone");

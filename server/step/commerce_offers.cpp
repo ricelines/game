@@ -136,16 +136,18 @@ step::NativeCompletion accept(perm::Offers &offers, perm::Ledger &ledger, perm::
   }
   auto out = commerce_detail::result(true, {{"goods", to_string(item.root.object)},
                                             {"recipient", "p:" + std::to_string(beneficiary)},
-                                            {"location", body ? "inventory" : "mailbox"},
-                                            {"revoked", commerce_detail::grants(bought.revoked)}});
+                                            {"location", body ? "inventory" : "mailbox"}});
   out.custody = bought.custody;
   out.changed_objects = item.closure;
   commerce_detail::record(out, call, "accept", item.closure,
                           {{"offer", id},
                            {"price", row.price},
                            {"payer", perm::account_name(payer.account)},
-                           {"seller", row.seller}});
-  out.permissions_changed = !out.reply.value("revoked", Json::array()).empty();
+                           {"seller", row.seller},
+                           {"cleared", commerce_detail::grants(bought.revoked)}});
+  commerce_detail::cleared_notice(out, grants, bought.revoked, item.root.owner, item.root.object,
+                                  item.closure);
+  out.permissions_changed = !bought.revoked.empty();
   return out;
 }
 step::NativeCompletion cancel_offer(perm::Offers &offers, PermissionFlags flags,

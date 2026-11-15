@@ -260,6 +260,14 @@ void actual_assembly_sale_and_inventory_reveal_preserve_identity() {
               !f.visible(item.root) && !f.visible(child) &&
               f.players.rows[2].inventory == std::vector<Handle>{item.root},
           "native sale failed complete physical/financial/grant transfer");
+  require(!accepted.reply.contains("revoked") && accepted.notices.size() == 1 &&
+              accepted.notices[0].first == 1 &&
+              accepted.notices[0].second ==
+                  nlohmann::json{{"kind", "changed"},
+                                 {"on", to_string(item.root)},
+                                 {"cleared", {"g:" + std::to_string(granted.grant)}}} &&
+              accepted.records.back().detail["cleared"] == accepted.notices[0].second["cleared"],
+          "sale sends cleared grant ids to the prior owner and journal, not the buyer");
   const auto blocker_a = f.single(1, {-10, -10, 0}), blocker_b = f.single(1, {-8, -10, 0});
   const auto before = f.f.objects.position[item.root.slot()];
   rejects([&] { f.place(PlayerId{2}, {{"position", {4, 5, 0}}}, item.root); },
@@ -367,6 +375,13 @@ void trade_changes_cancel_and_complete_one_swap() {
   require(!f.call(f.ids.trade_confirm, PlayerId{2}, {{"trade", next}}).changed &&
               f.f.objects.owner[a.root.slot()] == 1 && f.visible(a.root),
           "failed second confirmation changed valuable side");
+  const auto old_grant =
+      perm::create_grant(f.grants, f.players, perm::Holder::player(1),
+                         {1, perm::Holder::player(3), perm::Scope::object(a.root),
+                          perm::bit(perm::Verb::Use), 0, 0, 0},
+                         {perm::Scope::object(a.root), 1, perm::all_rights, 0, false},
+                         {perm::Holder::player(3), 3, true}, 20);
+  require(bool(old_grant), "trade goods have a grant to clear");
   f.ledger.balance[perm::Account::player(2)] = 100;
   const auto completed = f.call(f.ids.trade_confirm, PlayerId{2}, {{"trade", next}});
   require(completed.changed && completed.reply.at("completed") &&
@@ -375,6 +390,12 @@ void trade_changes_cancel_and_complete_one_swap() {
               f.f.objects.owner[a.root.slot()] == 2 && f.f.objects.owner[b.root.slot()] == 1 &&
               !f.visible(a.root) && !f.visible(b.root),
           "native trade did not atomically exchange player money and real custody");
+  require(!completed.reply.contains("revoked") && completed.notices.size() == 1 &&
+              completed.notices[0].first == 1 &&
+              completed.notices[0].second["on"] == to_string(a.root) &&
+              completed.notices[0].second["cleared"] ==
+                  nlohmann::json::array({"g:" + std::to_string(old_grant.grant)}),
+          "trade reports only the former owner's cleared goods grants");
 }
 void gifts_bounce_and_keep_unrelated_seated_bodies_alive() {
   Fixture f;

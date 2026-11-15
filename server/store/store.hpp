@@ -1611,6 +1611,7 @@ struct NativeCompletion {
   nlohmann::json reply = nlohmann::json::object();
   react::DeferredEffects effects;
   std::vector<record::Event> records;
+  std::vector<std::pair<PlayerId, nlohmann::json>> notices;
   bool deferred = false;
   std::vector<Handle> changed_objects;
   std::vector<ModelId> changed_models;

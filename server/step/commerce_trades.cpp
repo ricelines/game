@@ -101,15 +101,24 @@ trade_confirm(perm::Trades &trades, perm::Offers &offers, perm::Ledger &ledger,
                           who, targets, bodies, call.step, spans);
   if (!confirmed)
     return commerce_detail::denied(confirmed.reason, "confirm", "trade:" + std::to_string(id), who);
-  auto out = commerce_detail::result(confirmed.completed || !previously,
-                                     {{"trade", "trade:" + std::to_string(id)},
-                                      {"completed", confirmed.completed},
-                                      {"revoked", commerce_detail::grants(confirmed.revoked)}});
+  auto out = commerce_detail::result(
+      confirmed.completed || !previously,
+      {{"trade", "trade:" + std::to_string(id)}, {"completed", confirmed.completed}});
   out.custody = confirmed.custody;
   out.changed_objects = affected;
   commerce_detail::record(out, call, confirmed.completed ? "trade_complete" : "trade_confirm",
-                          std::move(affected), out.reply);
-  out.permissions_changed = !out.reply.value("revoked", Json::array()).empty();
+                          std::move(affected),
+                          {{"trade", id},
+                           {"completed", confirmed.completed},
+                           {"cleared", commerce_detail::grants(confirmed.revoked)}});
+  if (confirmed.completed)
+    for (const auto &target : targets)
+      if (target.object) {
+        const auto objects = lifecycle::collect(parts, identity, target.object);
+        commerce_detail::cleared_notice(out, grants, confirmed.revoked, target.owner, target.object,
+                                        objects);
+      }
+  out.permissions_changed = !confirmed.revoked.empty();
   return out;
 }
 step::NativeCompletion trade_cancel(perm::Trades &trades, perm::Offers &offers,
