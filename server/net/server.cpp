@@ -118,6 +118,10 @@ struct Server::Data {
     if (loop)
       loop->defer(std::move(function));
   }
+  void close_slow_viewer(Socket *socket) {
+    input(SendOverflow{socket->getUserData()->session, socket->getBufferedAmount(), true});
+    socket->end(1008, "slow_viewer");
+  }
   bool check_send(Socket *socket) {
     const auto buffered = socket->getBufferedAmount();
     auto &data = *socket->getUserData();
@@ -127,8 +131,7 @@ struct Server::Data {
     data.stale = stale;
     replication.set_writable(data.session, !stale);
     if (buffered > options.replication.send_hard) {
-      input(SendOverflow{data.session, buffered, true});
-      socket->end(1008, "slow_viewer");
+      close_slow_viewer(socket);
       return false;
     }
     return true;
@@ -162,7 +165,7 @@ struct Server::Data {
           continue;
         auto status = socket->send(bytes, uWS::BINARY);
         if (status == Socket::DROPPED) {
-          socket->end(1008, "slow_viewer");
+          close_slow_viewer(socket);
         } else {
           // BACKPRESSURE means uWS retained the unsent suffix. Throttle only
           // above SEND_SOFT, not merely because a write needed buffering.
@@ -264,7 +267,7 @@ void Server::send(SessionId session, std::string text) {
     if (!n->check_send(socket))
       return;
     if (socket->send(text, uWS::TEXT) == Socket::DROPPED)
-      socket->end(1008, "slow_viewer");
+      n->close_slow_viewer(socket);
     else
       n->check_send(socket);
   });
