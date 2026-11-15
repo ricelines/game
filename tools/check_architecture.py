@@ -52,6 +52,134 @@ def reference_structs(source: str) -> list[str]:
     return found
 
 
+def cpp_tokens(source: str) -> list[tuple[str, int]]:
+    """Keep C++ punctuation, excluding comments and string/character contents."""
+    pattern = re.compile(
+        r'//[^\n]*|/\*.*?\*/|R"([^\s()\\]*)\(.*?\)\1"|'
+        r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|'
+        r"[A-Za-z_]\w*|::|\.\.\.|[^\s]",
+        re.DOTALL,
+    )
+    return [
+        (match.group(), match.start())
+        for match in pattern.finditer(source)
+        if not match.group().startswith(("//", "/*", '"', "'", 'R"'))
+    ]
+
+
+def matching_token(tokens: list[tuple[str, int]], start: int) -> int:
+    opening = tokens[start][0]
+    closing = {"(": ")", "{": "}", "[": "]"}[opening]
+    depth = 1
+    for index in range(start + 1, len(tokens)):
+        token = tokens[index][0]
+        depth += (token == opening) - (token == closing)
+        if depth == 0:
+            return index
+    return len(tokens) - 1
+
+
+def header_parameter_counts(source: str) -> list[tuple[str, int, int]]:
+    """Count declaration parameters, including nested template/function types."""
+    tokens = cpp_tokens(source)
+    found = []
+    skip_until = -1
+    excluded = {
+        "if",
+        "for",
+        "while",
+        "switch",
+        "catch",
+        "sizeof",
+        "alignof",
+        "decltype",
+        "static_assert",
+        "noexcept",
+        "requires",
+        "return",
+    }
+    for index, (token, _) in enumerate(tokens):
+        if index <= skip_until or token != "(" or index == 0:
+            continue
+        name, offset = tokens[index - 1]
+        if not re.fullmatch(r"[A-Za-z_]\w*", name) or name in excluded:
+            continue
+        end = matching_token(tokens, index)
+        after = end + 1
+        while after < len(tokens) and tokens[after][0] in {"const", "override", "final", "&"}:
+            after += 1
+        if after < len(tokens) and tokens[after][0] == "noexcept":
+            after += 1
+            if after < len(tokens) and tokens[after][0] == "(":
+                after = matching_token(tokens, after) + 1
+        if after >= len(tokens) or tokens[after][0] not in {";", "{", "=", ":"}:
+            continue
+        # Calls in default arguments and member initializers are not declarations.
+        before = index - 2
+        if before >= 0 and tokens[before][0] in {"=", ".", "return", ",", "("}:
+            continue
+        count = int(end > index + 1 and not (end == index + 2 and tokens[index + 1][0] == "void"))
+        depths = {"(": 0, "[": 0, "{": 0, "<": 0}
+        closes = {")": "(", "]": "[", "}": "{", ">": "<"}
+        for part, _ in tokens[index + 1 : end]:
+            if part in depths:
+                depths[part] += 1
+            elif part in closes:
+                opening = closes[part]
+                depths[opening] = max(0, depths[opening] - 1)
+            elif part == "," and not any(depths.values()):
+                count += 1
+        found.append((name, count, source.count("\n", 0, offset) + 1))
+        if tokens[after][0] == "{":
+            skip_until = matching_token(tokens, after)
+    return found
+
+
+def mixed_state_structs(source: str) -> list[str]:
+    """Reject direct fields holding states from multiple owners, including pointers."""
+    tokens = cpp_tokens(source)
+    found = []
+    for index, (token, _) in enumerate(tokens):
+        if token != "struct" or index + 2 >= len(tokens):
+            continue
+        name = tokens[index + 1][0]
+        opening = index + 2
+        while opening < len(tokens) and tokens[opening][0] not in {"{", ";"}:
+            opening += 1
+        if opening == len(tokens) or tokens[opening][0] != "{":
+            continue
+        end = matching_token(tokens, opening)
+        owners = set()
+        position = opening + 1
+        statement = []
+        while position < end:
+            part = tokens[position][0]
+            if part == "{":
+                position = matching_token(tokens, position) + 1
+                if "(" in statement or "struct" in statement:
+                    statement = []
+                continue
+            if part == ";":
+                # A method's arguments do not make its class an owner bundle.
+                if "(" not in statement and "struct" not in statement:
+                    for field in range(len(statement)):
+                        if statement[field] == "ObjectState":
+                            owners.add("store")
+                        elif (
+                            field >= 2
+                            and statement[field] == "State"
+                            and statement[field - 1] == "::"
+                        ):
+                            owners.add(statement[field - 2])
+                statement = []
+            else:
+                statement.append(part)
+            position += 1
+        if len(owners) >= 2:
+            found.append(name)
+    return found
+
+
 def check() -> list[str]:
     errors = []
     libraries = set()
@@ -74,6 +202,14 @@ def check() -> list[str]:
             errors.append(f"{relative}: source is outside the nine native owners")
             continue
         source = path.read_text()
+        if path.suffix == ".hpp":
+            for name, count, line in header_parameter_counts(source):
+                if count > 10:
+                    errors.append(
+                        f"{relative}:{line}: {name} declares {count} parameters (maximum 10)"
+                    )
+            for name in mixed_state_structs(source):
+                errors.append(f"{relative}: {name} holds states from multiple owners")
         public = owner is not None and path.name == f"{owner}.hpp"
         if owner and path.suffix == ".hpp" and not public and not path.name.endswith("private.hpp"):
             errors.append(f"{relative}: merge public API into {owner}/{owner}.hpp")
