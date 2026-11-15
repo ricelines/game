@@ -117,3 +117,10 @@ CAD programs export `build(params)` and optional `PARAMS`, `MATERIAL`, `SCRIPT`,
 A variant registers baked parameters without changing placed objects. Apply it through an ordinary reconfiguration action. A model author can submit a baked proposal and call `base.revise_model` with `{model,proposal}`; its instances switch while keeping ownership, poses, matching part handles and instance state. This is an author operation, without a stock exchange or player authority forwarded through a rule.
 
 A handler has a 5 ms protection deadline and a 4 MiB script memory limit. Nested actions keep the caller's running deadline. Earlier changes survive an error/cutoff, which is recorded. Only exchanges of valuables are all or nothing. Globals and captured tables are readonly; captured scalar mutation is rejected. There are no files, network, dynamic source loading or outside clocks. Scripts cannot create/resume coroutines; ordinary `act` suspension stays on the active handler call stack and is never saved in the world.
+
+The physical primitives `engine.grasp`, `engine.release`, `engine.attach`,
+`engine.impulse` and `engine.transfer` are called only by body scripts. Players
+use their body's authored verbs, such as `base.hold`, `base.push` and `base.pour`.
+Other native actions, including `engine.give`, `engine.offer` and `engine.grant`,
+remain available to players. Physical primitives still check the script's own
+grants; they do not inherit the triggering player's authority.

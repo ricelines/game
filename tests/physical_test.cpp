@@ -3,6 +3,28 @@
 using namespace amber;
 using test_runtime::require;
 namespace {
+void physical_primitives_are_script_only() {
+  test_physical::Fixture f;
+  for (const auto *name :
+       {"engine.grasp", "engine.release", "engine.attach", "engine.impulse", "engine.transfer"}) {
+    const auto run = f.begin_as(PlayerId{1}, name, f.f.b, nlohmann::json::object());
+    require(
+        run.outcome && run.outcome->reply["ok"] == false &&
+            run.outcome->reply["error"] == "bad_input" &&
+            run.outcome->reply["problem"] ==
+                "engine.grasp, release, attach, impulse and transfer are called by a body script",
+        "every physical primitive rejects player callers before permission or argument checks");
+  }
+  step::declare_commerce(f.f.terms, f.declarations);
+  step::declare_admin(f.f.terms, f.declarations);
+  const auto listed = net::player_action_ids(f.declarations, f.f.values());
+  for (const auto id : listed)
+    require(!std::holds_alternative<react::MechanicAction>(f.declarations.rows.at(id).operation),
+            "player discovery includes no physical primitives");
+  for (const auto *name : {"engine.give", "engine.offer", "engine.grant"})
+    require(std::ranges::find(listed, f.f.terms.by_name.at(name)) != listed.end(),
+            "ordinary native player actions remain discoverable");
+}
 void ordinary_transfer_and_live_processes() {
   test_physical::Fixture f;
   f.load("return {kind='model',on={['novel.touch']=function(self)end}}");
@@ -279,6 +301,7 @@ int main(int argc, char **argv) {
       declared_part_batch_and_foreign_rejection(true);
       return 0;
     }
+    physical_primitives_are_script_only();
     ordinary_transfer_and_live_processes();
     ordinary_grasp_release_seat_and_flight();
     own_motion_queries_and_speech();

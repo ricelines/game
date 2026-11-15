@@ -183,3 +183,10 @@ world action. Purpose edits live in the running harness, not in the authored
 resident file. The spectator can select the gateway with the nonsecret
 `?gateway=http://127.0.0.1:8081` URL parameter. `/health` reports whether bake and
 resident services are configured.
+
+The physical primitives `engine.grasp`, `engine.release`, `engine.attach`,
+`engine.impulse` and `engine.transfer` are called only by body scripts. Players
+use their body's authored verbs, such as `base.hold`, `base.push` and `base.pour`.
+Other native actions, including `engine.give`, `engine.offer` and `engine.grant`,
+remain available to players. Physical primitives still check the script's own
+grants; they do not inherit the triggering player's authority.

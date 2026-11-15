@@ -91,6 +91,15 @@ ActionRun begin_action(const react::ValueRead &values, const catalog::Models &mo
     return run;
   }
   const auto &resolution = run.resolution;
+  if (std::holds_alternative<PlayerId>(request.caller) &&
+      resolution.route == react::Route::Native &&
+      std::holds_alternative<react::MechanicAction>(resolution.native_operation)) {
+    deny({{"ok", false},
+          {"error", "bad_input"},
+          {"problem",
+           "engine.grasp, release, attach, impulse and transfer are called by a body script"}});
+    return run;
+  }
   try {
     if (!run.call.arguments.is_object())
       throw std::invalid_argument("action args must be an input record");

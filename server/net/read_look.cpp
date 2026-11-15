@@ -74,8 +74,8 @@ std::vector<TermId> player_action_ids(const react::NativeActions &native,
                                       const react::ValueRead &values) {
   std::vector<TermId> result;
   for (const auto &[id, decl] : native.rows) {
-    (void)decl;
-    result.push_back(id);
+    if (!std::holds_alternative<react::MechanicAction>(decl.operation))
+      result.push_back(id);
   }
   std::sort(result.begin(), result.end(), [&](TermId a, TermId b) {
     return values.terms.rows[a].name < values.terms.rows[b].name;

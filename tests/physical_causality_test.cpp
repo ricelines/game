@@ -110,9 +110,21 @@ void impulse_ambiguity_and_partial_lua_failure() {
   auto config = settings();
   config.gravity_m_s2 = {};
   Fixture f(config);
-  auto admitted = f.begin_as(PlayerId{1}, "engine.impulse", f.object,
+  const auto refused = f.begin_as(PlayerId{1}, "engine.impulse", f.object,
+                                  {{"momentum", {60, 0, 0}}, {"point", {0, 0, 1}}});
+  require(refused.outcome && refused.outcome->reply["error"] == "bad_input" &&
+              refused.outcome->reply["problem"] ==
+                  "engine.grasp, release, attach, impulse and transfer are called by a body script",
+          "player impulse is refused before applying motion");
+  const auto first_script =
+      f.f.add("return {kind='instance',on={['novel.touch']=function(self)end}}", 1);
+  const std::array installed{first_script};
+  re::set_instances(f.f.installed, f.f.a, installed, f.f.scripts);
+  re::project_instance(f.f.triggers, f.f.installed, f.f.scripts, f.f.terms, f.f.a);
+  f.f.objects.preset[f.object.slot()] |= pe::bit(pe::Verb::Move);
+  auto admitted = f.begin_as(ScriptHolder{first_script, f.f.a}, "engine.impulse", f.object,
                              {{"momentum", {60, 0, 0}}, {"point", {0, 0, 1}}});
-  require(!admitted.outcome, "actual player-owned impulse is admitted");
+  require(!admitted.outcome, "actual installed-script impulse is admitted");
   const auto first = f.finish(
       admitted, bi::impulse_action(f.space, identity(f.f.objects), f.causes, admitted.call));
   const auto second = f.push({}, 1);
