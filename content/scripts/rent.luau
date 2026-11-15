@@ -53,6 +53,9 @@ local function hold_contents(self, plot_id, held_grants)
                 self.state.held_count = count
                 self.state['held:'..tostring(count)] = object
                 self.state['held_until:'..tostring(count)] = now+duration
+                for _, row in self:measure_instance(object).materials do
+                    self.state['held_kg:'..tostring(count)..':'..tostring(row.material)] = row.mass_kg
+                end
             end
         end
     end
@@ -65,17 +68,19 @@ local function salvage(self)
         if object and self:now() >= self.state[until_key] then
             -- Its owner may already have destroyed held goods. There is then
             -- nothing left to salvage or credit; a live refusal retains it.
-            local measured = self:measure_instance(object)
-            if not measured then
-                self.state[key],self.state[until_key] = nil,nil
-            else
-                local result = self:act('engine.destroy',object,{})
-                if result.ok then
-                    for _, row in measured.materials do
-                        self.state[row.material] = (self.state[row.material] or 0)+row.mass_kg
+            local result = self:act('engine.destroy',object,{})
+            if result.ok or result.problem=='stale_target' then
+                local prefix = 'held_kg:'..tostring(index)..':'
+                for mass_key, amount in self.state do
+                    if type(mass_key)=='string' and string.sub(mass_key,1,#prefix)==prefix then
+                        if result.ok then
+                            local material = tonumber(string.sub(mass_key,#prefix+1))
+                            self.state[material] = (self.state[material] or 0)+amount
+                        end
+                        self.state[mass_key] = nil
                     end
-                    self.state[key],self.state[until_key] = nil,nil
                 end
+                self.state[key],self.state[until_key] = nil,nil
             end
         end
     end
@@ -92,7 +97,7 @@ local function tick(self)
     local day = self:setting('base.day_seconds')
     local treasury = self:related('base.procures','out')[1]
     for key, plot_id in self.state do
-        if type(key)=='number' then
+        if type(key)=='string' and string.sub(key,1,6)=='lease:' then
             local prefix = 'plot:'..tostring(plot_id)..':'
             local tenant = self.state['tenant:'..tostring(plot_id)]
             if tenant and not self.state[prefix..'ended'] then

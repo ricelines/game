@@ -331,3 +331,105 @@ def test_residents_supply_intentions_without_prepared_solutions():
         assert row["key_file"].endswith(".key") and "key" not in row
         assert row["persona"] and row["purpose"] and row["model"]
         assert "route" not in row and "source" not in row and "actions" not in row
+
+
+def test_rent_holds_and_salvages_measured_materials_without_reacquiring(tmp_path, baked_plan):
+    plan = json.loads(json.dumps(baked_plan))
+    for profile in plan["profiles"]:
+        profile["key_file"] = str(tmp_path / "keys" / f"{profile['id']}.key")
+    rent_state = next(row for row in plan["script_state"] if row["script"] == "rent")
+    rent_state["entries"] = [
+        {"key": "lease:6", "value": 6},
+        {"key": "tenant:6", "value": "p:6"},
+        {"key": "street_y", "value": 0},
+        {"key": "port:0", "value": 0},
+    ]
+    next(row for row in plan["balances"] if row["holder"] == "p:6")["amount"] = 0
+    plan["world_settings"].update(
+        {
+            "base.day_seconds": 1,
+            "base.settlement_seconds": 0.1,
+            "base.rent_grace_days": 0,
+            "base.rent_hold_days": 0.2,
+            "base.rent_baseline": 1,
+        }
+    )
+    cup = next(row for row in plan["objects"] if row["model"] == "cup")
+    plan["objects"].append(
+        {
+            **cup,
+            "key": "test.salvage",
+            "owner": 6,
+            "maker": 6,
+            "plot": 6,
+            "at": [45, 5, 0],
+            "flags": ["static"],
+        }
+    )
+    registry_data = registry(ROOT / "content/registry")
+    ceramic = next(row["id"] for row in registry_data["terms"] if row["name"] == "base.ceramic")
+    density = next(row["id"] for row in registry_data["terms"] if row["name"] == "base.density")
+    material = next(row for row in registry_data["materials"] if row["id"] == ceramic)
+    density_value = next(
+        row["value"]["value"] for row in material["values"] if row["term"] == density
+    )
+    model = next(row for row in plan["models"] if row["key"] == "cup")
+    manifest = json.loads((ROOT / "assets" / model["asset"] / "manifest.json").read_text())
+    expected = manifest["volume"] * density_value
+    source = (ROOT / "content/scripts/rent.luau").read_text()
+    # Run the actual authored policy, checking its stock and bookkeeping after
+    # enough subsequent ticks to catch plot-list/material-key collisions too.
+    source = (
+        "local rule=(function()\n"
+        + source
+        + "\nend)()\n"
+        + f"""
+local tick=rule.on['base.rent_tick']
+rule.on['base.rent_tick']=function(self,...)
+    tick(self,...)
+    if self:now()>=0.8 then
+        assert(self.state.held_count==1,'one actual item must have been held')
+        assert(math.abs((self.state[{ceramic}] or 0)-{expected!r})<1e-9,'credited material mass')
+        assert(self.state['held:1']==nil and self.state['held_until:1']==nil,'cleared hold')
+        for key in self.state do
+            assert(type(key)~='string' or string.sub(key,1,8)~='held_kg:','cleared mass rows')
+        end
+        self:set('base.charge',self.state[{ceramic}])
+    end
+end
+return rule
+"""
+    )
+    next(row for row in plan["scripts"] if row["key"] == "rent")["source"] = source
+    plan_path, report = tmp_path / "plan.json", tmp_path / "report.json"
+    plan_path.write_text(json.dumps(plan))
+    result = subprocess.run(
+        [
+            str(ROOT / ".build/release/amb-server"),
+            "--plan",
+            str(plan_path),
+            "--config",
+            str(ROOT / "config.toml"),
+            "--assets",
+            str(ROOT / "assets"),
+            "--data",
+            str(tmp_path / "world"),
+            "--no-network",
+            "--unpaced",
+            "--steps",
+            "22",
+            "--report",
+            str(report),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    state = json.loads(report.read_text())
+    assert state["script_errors"] == 0
+    rent_position = next(row["at"] for row in plan["objects"] if row["key"] == "public.rent")
+    rent = next(row for row in state["objects"] if row["position"] == rent_position)
+    assert rent["values"]["base.charge"] == pytest.approx(expected)
