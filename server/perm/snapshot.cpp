@@ -183,13 +183,7 @@ void write_players(snap::Output &out, const Players &players, const Ledger &ledg
       std::erase_if(row.grants_held, [&](GrantId g) { return !selected->grants.contains(g); });
     }
   out.container(selected ? player_rows : players.rows, snap::max_collection());
-  auto included = [&](Account account) {
-    return !selected ||
-           (account.kind == AccountKind::Player && selected->players.contains(account.subject)) ||
-           (account.kind == AccountKind::Object &&
-            selected->objects.contains(Handle{account.subject})) ||
-           (account.kind == AccountKind::Group && selected->groups.contains(account.subject));
-  };
+  auto included = [&](Account) { return !selected; };
   auto count = static_cast<std::uint32_t>(
       std::count_if(ledger.balance.begin(), ledger.balance.end(),
                     [&](const auto &row) { return included(row.first); }));

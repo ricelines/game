@@ -114,19 +114,15 @@ void local_capture_filters_authority_and_runtime_rows() {
               captured.parameters.rows[1].parts.at("piece") == 3,
           "catalog capture keeps original ID high water and parameter topology without unrelated "
           "submissions");
-  require(captured.ledger.balance.size() == 3 &&
-              captured.ledger.balance[perm::Account::player(1)] == 100 &&
-              !captured.ledger.balance.contains(perm::Account::player(3)) &&
-              perm::balance(captured.ledger, perm::Account::object(original.f.a)) == 17 &&
-              !captured.ledger.balance.contains(perm::Account::object(original.f.c)) &&
-              perm::balance(captured.ledger, perm::Account::group(1)) == 29 &&
-              captured.grants.rows[3].id == 0 && captured.grants.rows[2].parent == 1 &&
-              captured.grants.by_key.size() == 2 && captured.profiles.rows[3].id == 0 &&
+  require(captured.ledger.balance.empty() && captured.profiles.rows.empty() &&
+              captured.profiles.by_key.empty(),
+          "captures contain no balances, profiles, key hashes or connection modes");
+  require(captured.grants.rows[3].id == 0 && captured.grants.rows[2].parent == 1 &&
+              captured.grants.by_key.size() == 2 &&
               captured.players.rows[1].inventory == std::vector<Handle>{original.f.b} &&
               captured.offers.rows[1].live && captured.offers.rows[2].id == 0 &&
               captured.trades.rows[1].live,
-          "captured authority preserves delegation and complete local valuables while excluding "
-          "remote wallets and goods");
+          "captured local permission and goods rows remain scoped to selected objects");
   require(captured.queues.causal.size() == 1 && captured.queues.turns.empty() &&
               captured.inputs.rows.empty() && captured.intents.moving.size() == 1 &&
               captured.motion.size() == 1 && captured.requests.rows[2].id == 0 &&

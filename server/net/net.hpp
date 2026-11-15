@@ -335,8 +335,7 @@ private:
   void reject(SessionId, std::string);
   void error(SessionId, std::uint64_t, std::string);
 };
-void write_profiles(snap::Output &, const Profiles &,
-                    std::optional<std::span<const PlayerId>> selected = std::nullopt);
+void write_profiles(snap::Output &, const Profiles &, bool capture = false);
 void read_profiles(snap::Input &, Profiles &);
 struct PendingView {
   Step step = 0;

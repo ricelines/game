@@ -1,7 +1,5 @@
 #include "net.hpp"
 
-#include <algorithm>
-
 namespace amber::net {
 namespace {
 template <class S> void profile(S &s, Profile &v) {
@@ -13,15 +11,14 @@ template <class S> void profile(S &s, Profile &v) {
   snap::field(s, v.key_hashes);
 }
 } // namespace
-void write_profiles(snap::Output &out, const Profiles &profiles,
-                    std::optional<std::span<const PlayerId>> selected) {
-  auto size = static_cast<std::uint32_t>(profiles.rows.size());
+void write_profiles(snap::Output &out, const Profiles &profiles, bool capture) {
+  auto size = capture ? std::uint32_t{0} : static_cast<std::uint32_t>(profiles.rows.size());
   out.value4b(size);
   std::vector<Profile> included;
-  for (const auto &row : profiles.rows)
-    if (row.id &&
-        (!selected || std::find(selected->begin(), selected->end(), row.id) != selected->end()))
-      included.push_back(row);
+  if (!capture)
+    for (const auto &row : profiles.rows)
+      if (row.id)
+        included.push_back(row);
   out.container(included, snap::max_collection(), profile<snap::Output>);
 }
 void read_profiles(snap::Input &in, Profiles &profiles) {
