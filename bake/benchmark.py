@@ -59,6 +59,7 @@ def build(p):
         require_cgroup=not args.restricted_host,
     ) as pool:
         report = {
+            "scope": "Coarse wall times; this command does not isolate other host activity.",
             "platform": platform.platform(),
             "python": platform.python_version(),
             "config": config,
@@ -78,13 +79,10 @@ def build(p):
                     "elapsed_s": time.perf_counter() - began,
                     "status": result["status"],
                     "cache_hit": result.get("cache_hit", False),
-                    "timings": result.get("timings", {}),
                     "errors": result.get("errors", []),
-                    "resources": result.get("resources", {}),
                 }
                 if result["status"] == "done":
                     manifest = result["measured"]
-                    sample["geometry_timings"] = manifest.get("geometry_timings", {})
                     sample["lod_triangles"] = [lod["triangles"] for lod in manifest["lods"]]
                     sample["capacity"] = manifest["capacity"]
                     sample["asset_bytes"] = sum(

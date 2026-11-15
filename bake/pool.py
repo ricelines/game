@@ -13,7 +13,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 import uuid
 from pathlib import Path
 
@@ -224,7 +223,8 @@ class BakePool:
         return manifest
 
     def _publish(self, request, result):
-        directory = self.jobs_root / request["job"]
+        job_directory = self.jobs_root / request["job"]
+        directory = job_directory / "asset"
         self._asset_directory(directory)
         manifest = json.loads(self._regular(directory / "manifest.json").read_text())
         expected = asset_hash(request["source"], manifest["params"], self.config["BAKE_VERSION"])
@@ -242,14 +242,12 @@ class BakePool:
         for filename in ("result.json", "job.log"):
             (directory / filename).unlink(missing_ok=True)
         self._install(directory, expected, request["source"])
-        shutil.rmtree(directory)
+        shutil.rmtree(job_directory)
         return {
             "job": request["job"],
             "status": "done",
             "hash": expected,
             "measured": manifest,
-            "timings": result["timings"],
-            "resources": result.get("resources", {}),
             "cache_hit": False,
             "sandbox": self.sandbox,
         }
@@ -282,7 +280,6 @@ class BakePool:
     def _serve(self):
         while (request := self._queue.get()) is not None:
             identity = request["job"]
-            started = time.perf_counter()
             try:
                 key = asset_hash(request["source"], request["params"], self.config["BAKE_VERSION"])
                 if key not in self._cache:
@@ -308,7 +305,6 @@ class BakePool:
                         **cached,
                         "job": identity,
                         "cache_hit": True,
-                        "timings": {"total_s": time.perf_counter() - started},
                     }
                     continue
                 self._jobs[identity] = {"job": identity, "status": "baking"}

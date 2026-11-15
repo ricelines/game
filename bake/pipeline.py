@@ -7,7 +7,7 @@ import hashlib
 import json
 import math
 import re
-import time
+from dataclasses import asdict
 from pathlib import Path
 
 import build123d as bd
@@ -15,7 +15,7 @@ from OCP.BRep import BRep_Tool
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SOLID, TopAbs_VERTEX
 from OCP.TopExp import TopExp_Explorer
 
-from amb.shapes import configure_stairs, provenance
+from amb import shapes
 from bake.gltf import write_glb
 from bake.parameters import asset_hash, resolve_declaration
 
@@ -114,15 +114,13 @@ def load_native(path: Path):
     return library
 
 
-def _geometry(shape, output, metadata, config, library, exact=None):
+def _geometry(shape, output, metadata, config, library, exact_capacity=None):
     output.mkdir(parents=True, exist_ok=True)
     measured = _measure(shape, config)
-    started = time.perf_counter()
     tolerance = max(
         config["LINEAR_TOLERANCE_M"], max(measured["size"]) * config["RELATIVE_TOLERANCE"]
     )
     vertices, triangles = shape.tessellate(tolerance)
-    tessellated = time.perf_counter()
     if len(triangles) > config["TRIS_MAX"]:
         raise BakeError("tessellation", "Model exceeds configured triangle limit")
     points = [list(vertex) for vertex in vertices]
@@ -132,19 +130,21 @@ def _geometry(shape, output, metadata, config, library, exact=None):
         {
             "vertices": points,
             "indices": indices,
-            "capacity_grid": 0 if exact else config["CAPACITY_GRID"],
+            "capacity_grid": 0 if exact_capacity is not None else config["CAPACITY_GRID"],
             "lod_ratios": config["LOD_RATIOS"],
             "lod_relative_error": config["LOD_RELATIVE_ERROR"],
         },
         output,
         config,
     )
-    measured["capacity"] = exact.capacity if exact else native["capacity"]
-    measured["capacity_method"] = "standard_exact" if exact else "voxel_flood"
-    measured["geometry_timings"] = {"tessellation_s": tessellated - started, **native["timings"]}
+    measured["capacity"] = exact_capacity if exact_capacity is not None else native["capacity"]
+    measured["capacity_method"] = "standard_exact" if exact_capacity is not None else "voxel_flood"
     geometry_lods = [indices, lods["lod1"], lods["lod2"]]
     measured["lods"] = [
-        {"file": f"lod{i}.glb", "triangles": write_glb(output / f"lod{i}.glb", points, values)}
+        {
+            "file": f"lod{i}.glb",
+            "triangles": write_glb(output / f"lod{i}.glb", points, values, flat=i > 0),
+        }
         for i, values in enumerate(geometry_lods)
     ]
     measured["collision"] = {
@@ -157,10 +157,9 @@ def _geometry(shape, output, metadata, config, library, exact=None):
     return measured
 
 
-def bake(source: str, supplied: dict, output: Path, config: dict, library) -> dict:
-    """Execute author source. Public callers must use BakePool's sandbox."""
-    start = time.perf_counter()
-    configure_stairs(config)
+def author(source: str, supplied: dict, output: Path, config: dict) -> dict:
+    """Untrusted stage: export only geometry and authored declarations."""
+    shapes.configure_stairs(config)
     namespace = {"__name__": "ambergris_model", "__file__": "source.py"}
     try:
         exec(compile(source, "source.py", "exec"), namespace)
@@ -170,9 +169,75 @@ def bake(source: str, supplied: dict, output: Path, config: dict, library) -> di
         raise BakeError("build", f"{type(error).__name__}: {error}") from error
     if not isinstance(shape, bd.Shape):
         raise BakeError("geometry", "build must return a build123d Shape")
-    built = time.perf_counter()
+    output.mkdir(parents=True, exist_ok=True)
+    if not bd.export_brep(shape, output / "shape.brep"):
+        raise BakeError("build", "Cannot export authored geometry")
+    standard = shapes.standard_shape(shape)
+    declaration = {
+        "parameter_schema": schema,
+        "default_material": namespace.get("MATERIAL", "base.generic"),
+        "default_script": namespace.get("SCRIPT"),
+        "sites": namespace.get("SITES", {}),
+        "parts": namespace.get("PARTS", {}),
+        "replicated": namespace.get("REPLICATED", []),
+        "bindings": namespace.get("BINDINGS", {}),
+        "standard": asdict(standard) if standard else None,
+    }
+    (output / "declaration.json").write_text(json.dumps(declaration, allow_nan=False))
+    return {"status": "done"}
+
+
+def _standard_capacity(shape, declaration, config):
+    if declaration is None:
+        return None
+    constructors = {
+        "box": shapes.box,
+        "cylinder": shapes.cylinder,
+        "sphere": shapes.sphere,
+        "hollow_box": shapes.hollow_box,
+        "hollow_cylinder": shapes.hollow_cylinder,
+        "stair": shapes.stair,
+    }
+    shapes.configure_stairs(config)
+    kind, params = declaration["kind"], declaration["parameters"]
+    if kind not in constructors:
+        raise BakeError("geometry", "Unknown standard shape")
+    expected = constructors[kind](**params)
+    # The recipe is a claim, not a measurement. Both cuts must be empty to
+    # accept its analytic capacity; Python identity and authored tags prove nothing.
+    tolerance = max(shape.volume, expected.volume) * 1e-9
+    if shape.cut(expected).volume > tolerance or expected.cut(shape).volume > tolerance:
+        raise BakeError("geometry", "Standard shape recipe does not match exported geometry")
+    if kind == "hollow_box":
+        return (
+            (params["width"] - 2 * params["wall"])
+            * (params["depth"] - 2 * params["wall"])
+            * (params["height"] - params["floor"])
+        )
+    if kind == "hollow_cylinder":
+        return (
+            math.pi
+            * (params["radius"] - params["wall"]) ** 2
+            * (params["height"] - params["floor"])
+        )
+    return 0.0
+
+
+def measure(
+    source: str, supplied: dict, authored: Path, output: Path, config: dict, library
+) -> dict:
+    """Trusted stage: runs in a clean process which has never executed author code."""
+    for filename in ("shape.brep", "declaration.json"):
+        path = authored / filename
+        if path.is_symlink() or not path.is_file():
+            raise BakeError("geometry", "Expected regular authored geometry/declaration files")
+        if path.stat().st_size > config["BAKE_MB"] * 1024 * 1024:
+            raise BakeError("geometry", "Authored geometry exceeds bake memory limit")
+    declaration = json.loads((authored / "declaration.json").read_text())
+    params, schema = resolve_declaration(declaration["parameter_schema"], supplied)
+    shape = bd.import_brep(authored / "shape.brep")
     full_measurements = _measure(shape, config)
-    exact = provenance(shape)
+    exact_capacity = _standard_capacity(shape, declaration.get("standard"), config)
     identity = asset_hash(source, params, config["BAKE_VERSION"])
     metadata = {
         "version": 1,
@@ -181,15 +246,15 @@ def bake(source: str, supplied: dict, output: Path, config: dict, library) -> di
         "coordinates": "z_up_meters",
         "params": params,
         "parameter_schema": schema,
-        "default_material": namespace.get("MATERIAL", "base.generic"),
-        "default_script": namespace.get("SCRIPT"),
-        "sites": namespace.get("SITES", {}),
+        "default_material": declaration["default_material"],
+        "default_script": declaration["default_script"],
+        "sites": declaration["sites"],
         "parts": {},
-        "replicated": namespace.get("REPLICATED", []),
-        "bindings": namespace.get("BINDINGS", {}),
+        "replicated": declaration["replicated"],
+        "bindings": declaration["bindings"],
     }
     metadata = _json_data(metadata)
-    parts = namespace.get("PARTS", {})
+    parts = declaration["parts"]
     solids = list(shape.solids())
     selected = set()
     children = {}
@@ -239,7 +304,7 @@ def bake(source: str, supplied: dict, output: Path, config: dict, library) -> di
     if remaining:
         root = shape if not selected else bd.Compound(remaining)
         manifest = _geometry(
-            root, output, metadata, config, library, exact if not selected else None
+            root, output, metadata, config, library, exact_capacity if not selected else None
         )
     else:
         output.mkdir(parents=True, exist_ok=True)
@@ -259,16 +324,11 @@ def bake(source: str, supplied: dict, output: Path, config: dict, library) -> di
         }
     if selected:
         manifest["assembly"] = full_measurements
-    manifest["timings"] = {
-        "build_s": built - start,
-        "geometry_s": time.perf_counter() - built,
-        "total_s": time.perf_counter() - start,
-    }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2, allow_nan=False))
     (output / "source.py").write_text(source)
     return {
         "manifest": manifest,
         "children": children,
         "hash": identity,
-        "timings": manifest["timings"],
+        "status": "done",
     }

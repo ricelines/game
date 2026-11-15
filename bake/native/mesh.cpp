@@ -15,7 +15,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -93,10 +92,10 @@ static std::vector<unsigned> simplify(const std::vector<Point> &vertices,
                                       const std::vector<unsigned> &indices, float ratio,
                                       float error) {
   std::vector<unsigned> result(indices.size());
-  auto target = std::max(size_t(12), (size_t(indices.size() * ratio) / 3) * 3);
+  auto target =
+      std::min(indices.size(), std::max(size_t(36), (size_t(indices.size() * ratio) / 3) * 3));
   auto count = meshopt_simplify(result.data(), indices.data(), indices.size(), vertices[0].data(),
-                                vertices.size(), sizeof(Point), target, error,
-                                meshopt_SimplifyLockBorder, nullptr);
+                                vertices.size(), sizeof(Point), target, error, 0, nullptr);
   result.resize(count);
   meshopt_optimizeVertexCache(result.data(), result.data(), result.size(), vertices.size());
   return result;
@@ -233,17 +232,34 @@ static void compile_mesh(const Json &request, const std::filesystem::path &out,
   const unsigned grid = request.value("capacity_grid", 0u);
   if (grid > 512)
     throw std::runtime_error("Capacity grid too large");
-  using Clock = std::chrono::steady_clock;
-  auto start = Clock::now();
   const double measured_capacity = grid ? capacity(vertices, indices, grid) : 0.0;
-  auto after_capacity = Clock::now();
 
   std::filesystem::create_directories(out);
   const auto ratios = request.at("lod_ratios").get<std::array<float, 3>>();
   const float relative_error = request.at("lod_relative_error").get<float>();
-  auto lod1 = simplify(vertices, indices, ratios[1], relative_error);
-  auto lod2 = simplify(vertices, indices, ratios[2], relative_error);
-  auto after_lods = Clock::now();
+  // OCCT duplicates positions at face boundaries. Weld and compact them;
+  // leaving unused duplicates in the buffer still makes them attribute seams.
+  std::vector<unsigned> remap(vertices.size()), welded(indices.size());
+  meshopt_generatePositionRemap(remap.data(), vertices[0].data(), vertices.size(), sizeof(Point));
+  std::transform(indices.begin(), indices.end(), welded.begin(),
+                 [&](unsigned index) { return remap[index]; });
+  const auto vertex_count =
+      meshopt_optimizeVertexFetchRemap(remap.data(), welded.data(), welded.size(), vertices.size());
+  std::vector<Point> compact(vertex_count);
+  std::vector<unsigned> original(vertex_count);
+  meshopt_remapVertexBuffer(compact.data(), vertices.data(), vertices.size(), sizeof(Point),
+                            remap.data());
+  meshopt_remapIndexBuffer(welded.data(), welded.data(), welded.size(), remap.data());
+  for (unsigned i = 0; i < vertices.size(); ++i)
+    if (remap[i] != ~0u)
+      original[remap[i]] = i;
+  auto lod1 = simplify(compact, welded, ratios[1], relative_error);
+  // LOD2 is distant rendering only. Aim for its specified triangle budget
+  // instead of retaining tiny details because of the collider's error ceiling.
+  auto lod2 = simplify(compact, welded, ratios[2], std::numeric_limits<float>::max());
+  for (auto *lod : {&lod1, &lod2})
+    for (auto &index : *lod)
+      index = original[index];
   std::ofstream(out / "lod-indices.json") << Json{{"lod1", lod1}, {"lod2", lod2}};
 
   JPH::VertexList points;
@@ -299,12 +315,7 @@ static void compile_mesh(const Json &request, const std::filesystem::path &out,
             std::streamsize(vertices.size() * sizeof(Point)));
   nav.write(reinterpret_cast<const char *>(lod1.data()),
             std::streamsize(lod1.size() * sizeof(unsigned)));
-  std::ofstream(out / "native-measured.json") << Json{
-      {"capacity", measured_capacity},
-      {"timings",
-       {{"capacity_s", std::chrono::duration<double>(after_capacity - start).count()},
-        {"lod_s", std::chrono::duration<double>(after_lods - after_capacity).count()},
-        {"collision_s", std::chrono::duration<double>(Clock::now() - after_lods).count()}}}};
+  std::ofstream(out / "native-measured.json") << Json{{"capacity", measured_capacity}};
 }
 
 #ifdef AMB_BAKE_LIBRARY

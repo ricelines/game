@@ -7,14 +7,18 @@ from pathlib import Path
 import numpy as np
 
 
-def write_glb(path: Path, vertices: list, indices: list, name: str = "geometry") -> int:
+def write_glb(path: Path, vertices: list, indices: list, *, flat: bool = False) -> int:
     if not indices:
         document = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": []}]}
         binary = b""
     else:
         raw = np.asarray(vertices, dtype=np.float32)
-        used, compact = np.unique(np.asarray(indices, dtype=np.uint32), return_inverse=True)
-        points = raw[used][:, [0, 2, 1]].copy()
+        if flat:
+            points = raw[indices][:, [0, 2, 1]].copy()
+            compact = np.arange(len(indices), dtype=np.uint32)
+        else:
+            used, compact = np.unique(np.asarray(indices, dtype=np.uint32), return_inverse=True)
+            points = raw[used][:, [0, 2, 1]].copy()
         points[:, 2] *= -1
         triangles = compact.reshape(-1, 3)
         normals = np.zeros_like(points)
@@ -34,7 +38,7 @@ def write_glb(path: Path, vertices: list, indices: list, name: str = "geometry")
             "asset": {"version": "2.0", "generator": "Ambergris bake"},
             "scene": 0,
             "scenes": [{"nodes": [0]}],
-            "nodes": [{"name": name, "mesh": 0}],
+            "nodes": [{"name": "geometry", "mesh": 0}],
             "meshes": [
                 {
                     "primitives": [

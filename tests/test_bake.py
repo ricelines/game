@@ -13,7 +13,7 @@ import pytest
 
 from bake.config import ROOT, load_config
 from bake.parameters import asset_hash, resolve
-from bake.pipeline import BakeError, bake, load_native
+from bake.pipeline import BakeError, author, load_native, measure
 from bake.pool import BakePool
 from bake.sandbox import SandboxUnavailable, cgroup_probe
 
@@ -31,7 +31,11 @@ def config():
 
 
 def build(source, directory, config, native):
-    return bake(source, {}, directory, config, native)["manifest"]
+    # Fixed trusted test programs only. Arbitrary-source regressions below use
+    # the actual two-process restricted BakePool boundary.
+    authored = directory / "authored"
+    author(source, {}, authored, config)
+    return measure(source, {}, authored, directory, config, native)["manifest"]
 
 
 @pytest.mark.parametrize(
@@ -319,6 +323,101 @@ def test_warm_sandbox_real_bake_and_cache(restricted_pool):
     second = wait(restricted_pool, restricted_pool.submit(source))
     assert second["hash"] == first["hash"]
     assert second["cache_hit"]
+
+
+def test_author_cannot_modify_trusted_measurement(restricted_pool):
+    source = """
+from pathlib import Path
+import build123d as bd
+import bake.pipeline as pipeline
+original_export = bd.export_brep
+def export(shape, path):
+    (Path(path).parent/'manifest.json').write_text('{"volume":99999,"capacity":99999}')
+    return original_export(shape,path)
+bd.export_brep = export
+pipeline._measure = lambda *args: {'volume':99999,'capacity':99999}
+pipeline._geometry = lambda *args: {'volume':99999,'capacity':99999}
+pipeline.measure = lambda *args: {'status':'done','manifest':{'volume':99999}}
+def build(p):return bd.Box(1,2,3)
+"""
+    result = wait(restricted_pool, restricted_pool.submit(source))
+    assert result["status"] == "done", result
+    assert result["measured"]["volume"] == pytest.approx(6)
+    assert result["measured"]["capacity"] == 0
+    assert "99999" not in (restricted_pool.assets / result["hash"] / "manifest.json").read_text()
+
+
+def test_forged_standard_recipe_is_rejected(restricted_pool):
+    source = """
+from amb import shapes
+def build(p):
+    return shapes._mark(shapes.box(1,1,1),'hollow_box',
+        width=1,depth=1,height=1,wall=.05,floor=.05)
+"""
+    result = wait(restricted_pool, restricted_pool.submit(source))
+    assert result["status"] == "failed", result
+    assert "does not match exported geometry" in result["errors"][0]["message"]
+    assert not (
+        restricted_pool.assets / asset_hash(source, {}, restricted_pool.config["BAKE_VERSION"])
+    ).exists()
+
+
+@pytest.mark.parametrize("version", ["ambergris-bake-1", "ambergris-bake-2"])
+def test_both_previous_bake_versions_use_trusted_geometry(tmp_path, config, native, version):
+    config["BAKE_VERSION"] = version
+    source = "from amb.shapes import hollow_box\ndef build(p):return hollow_box(1,1,1,.05,.05)\n"
+    manifest = build(source, tmp_path, config, native)
+    assert manifest["hash"] == asset_hash(source, {}, version)
+    assert manifest["volume"] == pytest.approx(1 - 0.9 * 0.9 * 0.95)
+    assert manifest["capacity"] == pytest.approx(0.9 * 0.9 * 0.95)
+
+
+def test_curved_lods_reduce_and_small_box_stays_closed(tmp_path, config, native):
+    sphere = build(
+        "from amb.shapes import sphere\ndef build(p):return sphere(1)\n",
+        tmp_path / "sphere",
+        config,
+        native,
+    )
+    triangles = [lod["triangles"] for lod in sphere["lods"]]
+    assert triangles[1] <= triangles[0] * 0.41, triangles
+    assert triangles[2] <= triangles[0] * 0.11, triangles
+    box_dir = tmp_path / "box"
+    box = build(
+        "from amb.shapes import box\ndef build(p):return box(.14,.12,.16)\n",
+        box_dir,
+        config,
+        native,
+    )
+    assert [lod["triangles"] for lod in box["lods"]] == [12, 12, 12]
+    mesh = (box_dir / "mesh.bin").read_bytes()
+    vertex_count, index_count = struct.unpack_from("<II", mesh, 8)
+    points = [struct.unpack_from("<fff", mesh, 16 + i * 12) for i in range(vertex_count)]
+    indices = struct.unpack_from(f"<{index_count}I", mesh, 16 + vertex_count * 12)
+    edges = {}
+    for a, b, c in zip(indices[::3], indices[1::3], indices[2::3], strict=True):
+        for edge in ((a, b), (b, c), (c, a)):
+            edge = tuple(sorted(edge))
+            edges[edge] = edges.get(edge, 0) + 1
+    assert set(edges.values()) == {2}
+    assert [
+        max(p[i] for p in points) - min(p[i] for p in points) for i in range(3)
+    ] == pytest.approx([0.14, 0.12, 0.16])
+
+
+def test_faceted_face_seams_do_not_lock_every_vertex(tmp_path, config, native):
+    source = """
+from build123d import Box,Align
+def build(p):
+    beam=Box(4,.07,.07).translate((0,0,.965))
+    posts=[Box(.05,.05,1,align=(Align.CENTER,Align.CENTER,Align.MIN))
+           .translate((-2+i*4/6,0,0)) for i in range(7)]
+    return beam.fuse(*posts)
+"""
+    manifest = build(source, tmp_path, config, native)
+    counts = [lod["triangles"] for lod in manifest["lods"]]
+    assert counts[1] <= counts[0] * 0.41, counts
+    assert 0 < counts[2] <= max(12, counts[0] * 0.11), counts
 
 
 @pytest.mark.parametrize(
