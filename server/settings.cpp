@@ -56,6 +56,7 @@ Settings read_settings(const std::filesystem::path &path) {
                   size("perception", "THINGS_MAX"),
                   size("perception", "FAR_MAX"),
                   size("perception", "EVENTS_PER_RESPONSE")};
+  s.actions_page = size("perception", "ACTIONS_PAGE");
   s.light_cell_m = f("perception", "LIGHT_CELL_M");
   s.light_source_radius_m = f("perception", "LIGHT_SOURCE_RADIUS_M");
   s.pins.bake = get.operator()<std::string>("bake", "BAKE_VERSION");

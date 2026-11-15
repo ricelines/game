@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 from scipy.stats import spearmanr
 
+from measure.config import WIKI_BOOTSTRAPS, WIKI_WORLDS
 from measure.output import digest, load_adapter, run, write_report
 
 SEED = 20261115
@@ -43,12 +44,12 @@ def preregister(output):
         "seed": SEED,
         "expectations": EXPECTATIONS,
         "wikipedia": {
-            "worlds": 40,
+            "worlds": WIKI_WORLDS,
             "article_count": [500, 5000],
             "category_depth": 2,
             "year": 2024,
             "statistic": "Spearman(delta measure, delta log pageviews), pooled worlds",
-            "bootstrap": "1000 resamples of worlds",
+            "bootstrap": f"{WIKI_BOOTSTRAPS} resamples of worlds",
             "interval": 0.95,
         },
         "emergence": {
@@ -130,7 +131,7 @@ def pooled_statistic(worlds):
     return value if math.isfinite(value) else None
 
 
-def correlate_worlds(series, *, seed=SEED, resamples=1000):
+def correlate_worlds(series, *, seed=SEED, resamples=WIKI_BOOTSTRAPS):
     point = pooled_statistic(series)
     if point is None:
         return {
@@ -168,8 +169,8 @@ def choose_wikipedia_worlds(specification):
             raise ValueError("Study sampling proof differs from current verified acquisition")
         categories = {world["id"]: world for world in specification["categories"]}
         expected = selection["selected"]
-        if len(categories) != 40:
-            raise ValueError("Study does not contain exactly the40 selected worlds")
+        if len(categories) != WIKI_WORLDS:
+            raise ValueError(f"Study does not contain exactly the {WIKI_WORLDS} selected worlds")
         chosen = []
         for row in expected:
             world = categories[row["ordinal"]]
@@ -197,12 +198,12 @@ def choose_wikipedia_worlds(specification):
         if 500 <= len(set(world["articles"])) <= 5000 and world["depth"] == 2
     ]
     eligible.sort(key=lambda row: row["category"])
-    if len(eligible) < 40:
+    if len(eligible) < WIKI_WORLDS:
         return None, {
-            "not_available": "Fewer than40 eligible category worlds",
+            "not_available": f"Fewer than {WIKI_WORLDS} eligible category worlds",
             "eligible": len(eligible),
         }
-    return random.Random(SEED).sample(eligible, 40), {
+    return random.Random(SEED).sample(eligible, WIKI_WORLDS), {
         "sampling_mode": "enumerated-complete-eligible-frame",
         "eligible_sampling_frame": len(eligible),
         "complete_eligible_frame_enumerated": True,
@@ -251,7 +252,7 @@ def wikipedia_histories(specification, output):
         )
     return {
         "stage": "history_only",
-        "selected_worlds": 40,
+        "selected_worlds": WIKI_WORLDS,
         **sampling,
         "worlds": worlds,
         "correlations": "Not computed: this stage has no readership input",
@@ -319,7 +320,7 @@ def wikipedia(specification, output):
             }
         )
     return {
-        "selected_worlds": 40,
+        "selected_worlds": WIKI_WORLDS,
         **sampling,
         "period_alignment": "2024-01-01 +7-day periods; final partial period included",
         "missing_policy": "Any unknown article-day makes its summed world-day/week unavailable; "

@@ -146,8 +146,8 @@ void answer_query(net::Sessions &sessions, net::Server &server, net::Replication
                   const perm::OwnerLimits &owner_limits, const perm::Players &players,
                   const perm::Grants &grants, const perm::Plots &plots, const perm::Ledger &ledger,
                   const react::ScriptStates &states, const react::RuleVersions &rules,
-                  const net::RecordFeed &feed, observe::Settings settings, Step now, double hz,
-                  const net::Invocation &request) {
+                  const net::RecordFeed &feed, observe::Settings settings, std::size_t actions_page,
+                  Step now, double hz, const net::Invocation &request) {
   net::Reply reply;
   switch (request.request.kind) {
   case net::ControlKind::Look: {
@@ -177,9 +177,9 @@ void answer_query(net::Sessions &sessions, net::Server &server, net::Replication
                               settings.events_per_response, states, rules, request);
     break;
   case net::ControlKind::Actions:
-    reply = net::read_actions(models, scripts, installations, native, values, views, hearing, 100,
-                              settings.events_per_response, authority, owner_limits, players,
-                              grants, now, request);
+    reply = net::read_actions(models, scripts, installations, native, values, views, hearing,
+                              actions_page, settings.events_per_response, authority, owner_limits,
+                              players, grants, now, request);
     break;
   case net::ControlKind::Events:
     reply = net::read_events(feed, views, settings.sight_m, settings.events_per_response, request);

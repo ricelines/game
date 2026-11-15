@@ -464,7 +464,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                        space, poses, auth, parent, attribution(objects), declared_parts,
                        physical_relations.attached_to, lights, zones, motion, intents, owner_limits,
                        players, grants, plots, ledger, states, rules, feed, settings.perception,
-                       clock.step, hz, request);
+                       settings.actions_page, clock.step, hz, request);
       send_connection_outputs(outputs, server, replication, session_views, ids, auth, parent,
                               model_text, instance_text);
     }

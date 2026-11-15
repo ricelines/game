@@ -6,8 +6,9 @@ import math
 from collections import Counter, defaultdict, deque
 from statistics import mean
 
+from measure.config import MIN_ACTIONS
+
 VERSION = 1
-MIN_ACTIONS = 20
 
 
 def quantile(values, fraction):

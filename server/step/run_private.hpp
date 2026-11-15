@@ -103,8 +103,8 @@ void answer_query(net::Sessions &sessions, net::Server &server, net::Replication
                   const perm::OwnerLimits &owner_limits, const perm::Players &players,
                   const perm::Grants &grants, const perm::Plots &plots, const perm::Ledger &ledger,
                   const react::ScriptStates &states, const react::RuleVersions &rules,
-                  const net::RecordFeed &feed, observe::Settings settings, Step now, double hz,
-                  const net::Invocation &request);
+                  const net::RecordFeed &feed, observe::Settings settings, std::size_t actions_page,
+                  Step now, double hz, const net::Invocation &request);
 
 void send_connection_outputs(std::span<net::SessionOutput> outputs, net::Server &server,
                              net::ReplicationIndex &replication, net::SessionViews &views,

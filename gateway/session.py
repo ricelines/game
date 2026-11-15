@@ -3,11 +3,16 @@
 import asyncio
 import contextlib
 import json
+import tomllib
 from collections import deque
+from pathlib import Path
 
 from websockets.asyncio.client import connect
 
 from gateway.schema import validate
+
+with (Path(__file__).resolve().parents[1] / "config.toml").open("rb") as _stream:
+    EVENTS_PER_RESPONSE = tomllib.load(_stream)["perception"]["EVENTS_PER_RESPONSE"]
 
 
 class SessionError(RuntimeError):
@@ -121,7 +126,7 @@ class Session:
     async def tool(self, name, arguments):
         validate(name, arguments)
         arguments = dict(arguments)
-        event_limit = arguments.pop("events_limit", 40)
+        event_limit = arguments.pop("events_limit", EVENTS_PER_RESPONSE)
         # Native mutations serialize; pending CAD execution stays outside this lane.
         if name in ("do", "cancel"):
             async with self.mutations:
