@@ -106,11 +106,15 @@ struct Box {
   sp::GeometrySource source() const { return {mesh, hull, triangles, bounds}; }
 };
 struct Scene {
+  amber::ObjectState objects_state;
+
   sp::Settings config;
   sp::Space space;
   explicit Scene(sp::Settings value = settings()) : config(value), space(config) {}
-  Objects objects;
-  sp::PhysicalRelations relations;
+  Objects &objects = objects_state.objects;
+  sp::State space_state{float(
+      toml::parse_file(AMBER_CONFIG_PATH)["perception"]["LIGHT_CELL_M"].value<double>().value())};
+  sp::PhysicalRelations &relations = space_state.physical_relations;
   sp::StepResult result;
   Step clock = 0;
   float dt =
@@ -153,8 +157,7 @@ struct Scene {
     return h;
   }
   void tick(std::span<const sp::MoveRequest> moves = {}) {
-    sp::step(space, identity(objects), transforms(objects), parents(objects), space_flags(objects),
-             relations, ++clock, dt, moves, result);
+    sp::step(space, objects_state, relations, ++clock, dt, moves, result);
   }
   void wait_navigation() {
     auto start = std::chrono::steady_clock::now();

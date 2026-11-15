@@ -60,12 +60,13 @@ int main() {
     f.models.rows[2].id = 2;
     f.models.rows[2].author = 2;
     f.objects.model[f.c.slot()] = 2;
-    perm::Players players;
+    amber::perm::State perm_state;
+    perm::Players &players = perm_state.players;
     players.rows.resize(4);
-    perm::Grants grants;
-    perm::Groups groups;
-    perm::OwnerLimits limits;
-    perm::Plots plots;
+    perm::Grants &grants = perm_state.grants;
+
+    perm::OwnerLimits &limits = perm_state.owner_limits;
+
     const std::vector<std::string> no_roles, elaborator{"elaborator"};
     const auto values = f.values();
     {
@@ -86,10 +87,8 @@ int main() {
              {"expires_s", 20}});
       const auto install_call =
           call(1, f.b, {{"script", "s:" + std::to_string(body_controls)}, {"choices", choices}});
-      const auto grouped = ed::install_script(
-          install_call, f.installed, f.triggers, f.subscriptions, f.states, f.shared, f.gives_to,
-          f.allocations, values, f.models, f.scripts, authority(f.objects), limits, players, grants,
-          plots, groups, no_roles, 6);
+      const auto grouped = ed::install_script(install_call, f.react_state, values, f.catalog_state,
+                                              f.objects_state, perm_state, no_roles, 6);
       require(grouped.reply.at("ok") && grouped.reply.at("grants").size() == 5 &&
                   grouped.reply.at("unfilled_slots").empty(),
               "body slots sharing a scope must all fill one ordinary grant");
@@ -112,9 +111,7 @@ int main() {
       const auto rejected = ed::install_script(
           call(1, f.b,
                {{"script", "s:" + std::to_string(body_controls)}, {"choices", conflicting}}),
-          f.installed, f.triggers, f.subscriptions, f.states, f.shared, f.gives_to, f.allocations,
-          values, f.models, f.scripts, authority(f.objects), limits, players, grants, plots, groups,
-          no_roles, 6);
+          f.react_state, values, f.catalog_state, f.objects_state, perm_state, no_roles, 6);
       require(!rejected.reply.at("ok").get<bool>() && grants.rows.size() == before,
               "conflicting limits on one grant scope were silently changed");
       perm::revoke(grants, players, object_grant);
@@ -133,15 +130,12 @@ int main() {
       ['novel.touch']=function(self) self:set('novel.result',77) end}})");
     const auto sid = "s:" + std::to_string(script);
     auto install = [&](step::NativeCall input) {
-      return ed::install_script(input, f.installed, f.triggers, f.subscriptions, f.states, f.shared,
-                                f.gives_to, f.allocations, values, f.models, f.scripts,
-                                authority(f.objects), limits, players, grants, plots, groups,
-                                no_roles, 6);
+      return ed::install_script(input, f.react_state, values, f.catalog_state, f.objects_state,
+                                perm_state, no_roles, 6);
     };
     auto default_script = [&](Json selected) {
-      return ed::model_script(call(1, {}, {{"model", "m:1"}, {"script", selected}}), f.installed,
-                              f.triggers, f.subscriptions, f.states, f.shared, f.gives_to,
-                              f.allocations, values, f.models, f.scripts, players, grants, 6);
+      return ed::model_script(call(1, {}, {{"model", "m:1"}, {"script", selected}}), f.react_state,
+                              values, f.catalog_state, perm_state, 6);
     };
     const auto preview = install(call(1, f.a, {{"script", sid}}));
     require(!preview.changed && preview.reply.at("requires_commit") && !f.installed.get(f.a.slot()),
@@ -168,9 +162,8 @@ int main() {
                     1,
             "default plus instance installation duplicated actual behavior");
     f.states[{f.a, script}][std::string("kept")] = true;
-    const auto uninstalled = ed::uninstall_script(
-        call(1, f.a, {{"script", sid}}), f.installed, f.triggers, f.subscriptions, f.states,
-        f.shared, f.gives_to, f.allocations, values, f.models, f.scripts, players, grants, 6);
+    const auto uninstalled = ed::uninstall_script(call(1, f.a, {{"script", sid}}), f.react_state,
+                                                  values, f.catalog_state, perm_state, 6);
     require(uninstalled.changed && f.states.contains({f.a, script}) && grants.rows[grant].live,
             "removing duplicate installation erased surviving default state or rights");
     require(default_script(nullptr).changed && !f.states.contains({f.a, script}) &&
@@ -234,8 +227,8 @@ int main() {
             "script inherited a player's elaborator role");
     space::Space physics(testspace::settings());
     step::GeometryAssets geometry;
-    catalog::Assets baked;
-    catalog::ParameterBlocks parameters;
+    auto &baked = f.catalog_state.assets;
+
     testspace::Box box({1, 1, 1});
     catalog::Asset asset;
     asset.hash = std::string(64, 'a');
@@ -252,8 +245,8 @@ int main() {
       step::install_physics(physics, identity(f.objects), transforms(f.objects),
                             space_flags(f.objects), object, definition);
     }
-    catalog::MechanicalBindings mechanical_roles;
-    catalog::RegistryDocument registry;
+    auto &mechanical_roles = f.catalog_state.mechanical;
+    auto &registry = f.catalog_state.registry;
     auto directory = std::filesystem::current_path() / ".cache/editing-registry-test";
     std::filesystem::remove_all(directory);
     const Json proposal = {{"name", "separate_heat"}, {"kind", "quantity"}, {"source", "state"}};
@@ -266,21 +259,21 @@ int main() {
                 "p3.separate_heat",
         "term edit lost actual registry pin or author namespace");
     const auto previous = registry.hash;
-    auto material = ed::define_material(
-        call(3, {},
-             {{"material", "novel.mat"},
-              {"values", {{"novel.density", -1}, {"novel.transmission", 0}}}}),
-        elaborator, f.materials, values, f.models, parameters, baked, geometry, physics,
-        {density, transmission}, {.6f, 0}, f.rules, mechanical_roles, registry, directory);
+    auto material =
+        ed::define_material(call(3, {},
+                                 {{"material", "novel.mat"},
+                                  {"values", {{"novel.density", -1}, {"novel.transmission", 0}}}}),
+                            elaborator, f.react_state, values, f.catalog_state, geometry, physics,
+                            {density, transmission}, {.6f, 0}, directory);
     require(!material.reply.at("ok").get<bool>() && material.changed && registry.hash != previous &&
                 f.materials.rows.at(8).at(density).numeric() == -1 && dirty(material, f.a, density),
             "failed native refresh must retain and report the applied material edit");
-    material = ed::define_material(
-        call(3, {},
-             {{"material", "novel.mat"},
-              {"values", {{"novel.density", 4}, {"novel.transmission", 0}}}}),
-        elaborator, f.materials, values, f.models, parameters, baked, geometry, physics,
-        {density, transmission}, {.6f, 0}, f.rules, mechanical_roles, registry, directory);
+    material =
+        ed::define_material(call(3, {},
+                                 {{"material", "novel.mat"},
+                                  {"values", {{"novel.density", 4}, {"novel.transmission", 0}}}}),
+                            elaborator, f.react_state, values, f.catalog_state, geometry, physics,
+                            {density, transmission}, {.6f, 0}, directory);
     require(material.changed && dirty(material, f.a, density) &&
                 material.changed_materials == std::vector<TermId>{8},
             "material update did not return actual facts and material delta");

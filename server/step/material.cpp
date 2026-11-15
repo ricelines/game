@@ -6,10 +6,13 @@
 
 namespace amber::step {
 void refresh_material(space::Space &space, const GeometryAssets &geometry,
-                      const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                      const catalog::Assets &assets, const react::ValueRead &values,
+                      const amber::catalog::State &catalog_state, const react::ValueRead &values,
                       PhysicsRoles roles, PhysicsDefaults defaults,
                       std::span<const TermId> materials, Step now, double hz) {
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+
   const auto identity = values.identity;
   for (std::uint32_t slot = 1; slot < identity.model.size(); ++slot) {
     if (!identity.model[slot] ||

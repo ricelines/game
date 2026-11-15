@@ -1,4 +1,7 @@
 #pragma once
+namespace amber::perm {
+struct State;
+}
 
 #include "snap/snap.hpp"
 #include "store/store.hpp"
@@ -60,11 +63,11 @@ std::vector<AccountRefund> refund_object_accounts(Ledger &, AuthorityRead, std::
 std::vector<GrantId> transfer_owner(AuthorityWrite, OwnerLimits &, PermissionFlags, Grants &,
                                     Players &, const Target &, PlayerId recipient);
 
-OfferResult offer(Offers &, PermissionFlags, Holder, const Target &, const Players &,
-                  const Grants &, std::int64_t price, PlayerId buyer, Step expiry, bool placed,
-                  Step now, std::span<const Target> parts = {});
-OfferResult cancel_offer(Offers &, PermissionFlags, Holder, const Target &, const Players &,
-                         const Grants &, OfferId, Step, std::span<const Target> parts = {});
+OfferResult offer(amber::perm::State &perm_state, PermissionFlags, Holder, const Target &,
+                  std::int64_t price, PlayerId buyer, Step expiry, bool placed, Step now,
+                  std::span<const Target> parts = {});
+OfferResult cancel_offer(amber::perm::State &perm_state, PermissionFlags, Holder, const Target &,
+                         OfferId, Step, std::span<const Target> parts = {});
 // Deadline lookup is derived, rebuilt once from authoritative rows on restore.
 void rebuild_offer_deadlines(Offers &);
 std::vector<OfferId> advance_offers(Offers &, IdentityRead, PermissionFlags, Step now,
@@ -72,26 +75,26 @@ std::vector<OfferId> advance_offers(Offers &, IdentityRead, PermissionFlags, Ste
 
 // Authenticated adapters supply explicit financial and delivery descriptors.
 
-SwapResult accept(Offers &, Ledger &, Grants &, Players &, AuthorityWrite, PermissionFlags,
-                  OwnerLimits &, const Buyer &, const Target &goods, OfferId,
-                  std::size_t mailbox_max, Step, std::span<const Target> parts = {});
-SwapResult give(Players &, Grants &, AuthorityWrite, PermissionFlags, OwnerLimits &, Holder sender,
+SwapResult accept(amber::perm::State &perm_state, amber::ObjectState &objects_state, const Buyer &,
+                  const Target &goods, OfferId, std::size_t mailbox_max, Step,
+                  std::span<const Target> parts = {});
+SwapResult give(amber::perm::State &perm_state, amber::ObjectState &objects_state, Holder sender,
                 const Target &, PlayerId recipient, Handle recipient_body, bool present,
                 std::size_t mailbox_max, Step, std::span<const Target> parts = {});
-SwapResult store_goods(Players &, const Grants &, Holder, const Target &,
+SwapResult store_goods(amber::perm::State &perm_state, Holder, const Target &,
                        std::span<const Target> parts, PlayerId recipient, Handle recipient_body,
                        bool present, std::size_t mailbox_max, Step);
 std::vector<CustodyChange> deliver_mailbox(Players &, PlayerId, Handle body);
 
 TradeResult open_trade(Trades &, const Players &, PlayerId, PlayerId);
 // current_goods is null for a money-only side; escrow preserves current visibility.
-TradeResult change_trade(Trades &, Offers &, PermissionFlags, const Players &, const Grants &,
-                         TradeId, PlayerId, const Target *current_goods, std::int64_t money,
-                         bool in_world, Step, std::span<const Target> parts = {});
+TradeResult change_trade(amber::perm::State &perm_state, PermissionFlags, TradeId, PlayerId,
+                         const Target *current_goods, std::int64_t money, bool in_world, Step,
+                         std::span<const Target> parts = {});
 // The adapter resolves both current goods and both present bodies before each confirmation.
-TradeResult confirm_trade(Trades &, Offers &, Ledger &, Grants &, Players &, AuthorityWrite,
-                          PermissionFlags, OwnerLimits &, TradeId, PlayerId,
-                          const std::array<Target, 2> &, const std::array<Handle, 2> &bodies, Step,
+TradeResult confirm_trade(amber::perm::State &perm_state, amber::ObjectState &objects_state,
+                          TradeId, PlayerId, const std::array<Target, 2> &,
+                          const std::array<Handle, 2> &bodies, Step,
                           const std::array<std::span<const Target>, 2> &parts = {});
 TradeResult cancel_trade(Trades &, Offers &, PermissionFlags, TradeId, PlayerId);
 // Invalidates quotations touching a full goods/part handle; goods stay where they are.
@@ -104,9 +107,8 @@ std::vector<Handle> invalidate_goods_offers(Offers &, Trades &, IdentityRead, Pe
 namespace amber::perm {
 
 SnapshotSelection capture_authority(AuthorityRead, std::span<const Handle>,
-                                    std::span<const PlayerId> actors, const Players &,
-                                    const Plots &, const Groups &, const Grants &, const Offers &,
-                                    const Trades &);
+                                    std::span<const PlayerId> actors,
+                                    const amber::perm::State &perm_state);
 void write_players(snap::Output &, const Players &, const Ledger &, const Plots &, const Groups &,
                    const SnapshotSelection * = nullptr);
 void read_players(snap::Input &, Players &, Ledger &, Plots &, Groups &);

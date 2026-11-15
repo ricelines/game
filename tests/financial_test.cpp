@@ -9,20 +9,28 @@ using namespace amber;
 using test_runtime::require;
 namespace {
 struct Fixture {
+  amber::perm::State perm_state;
+  amber::net::State net_state{{}};
+  amber::step::State step_state{8};
+
   test_runtime::Fixture f{1000};
+  amber::ObjectState &objects_state = f.objects_state;
+
+  amber::react::State &react_state = f.react_state;
+
   space::Space space{testspace::settings()};
-  perm::Players players;
-  perm::Grants grants;
-  perm::OwnerLimits limits;
-  perm::Ledger ledger;
-  perm::Groups groups;
-  net::Profiles profiles;
-  react::NativeActions declarations;
-  step::Intents intents;
-  Relation parts;
+  perm::Players &players = perm_state.players;
+  perm::Grants &grants = perm_state.grants;
+  perm::OwnerLimits &limits = perm_state.owner_limits;
+  perm::Ledger &ledger = perm_state.ledger;
+  perm::Groups &groups = perm_state.groups;
+  net::Profiles &profiles = net_state.profiles;
+  react::NativeActions &declarations = react_state.native_declarations;
+  step::Intents &intents = step_state.intents;
+  Relation &parts = objects_state.declared_parts;
   record::Journal journal{8, {}};
-  step::WorkQueues queues;
-  step::TimerWheel timers;
+  step::WorkQueues &queues = step_state.queues;
+  step::TimerWheel &timers = step_state.timers;
   std::array<TermId, 4> triggers{};
   ScriptId script = 0;
   react::Invocation invocation;
@@ -86,9 +94,8 @@ struct Fixture {
     const auto handlers =
         react::dispatch(f.triggers, f.values(), input.receiver, input.trigger, step, 20);
     require(handlers.size() == 1, "financial fixture uses its actual installed handler");
-    react::start_invocation(f.vm, f.states, f.random, f.subscriptions, f.values(), f.triggers,
-                            parts, 7, attribution(f.objects), f.models, f.scripts, journal,
-                            handlers.front(), std::move(input), invocation, completed);
+    react::start_invocation(f.vm, f.react_state, f.values(), objects_state, 7, f.catalog_state,
+                            journal, handlers.front(), std::move(input), invocation, completed);
     return completed.outcome;
   }
   step::ActionRun emitted() {
@@ -100,11 +107,9 @@ struct Fixture {
     call.arguments = completed.outcome.action->arguments;
     call.step = now;
     call.hz = 20;
-    auto run =
-        step::begin_action(f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers,
-                           declarations, profiles, players, grants, limits, authority(f.objects),
-                           attribution(f.objects), transforms(f.objects), space, intents, journal,
-                           2, std::move(call), invocation.origin, invocation.deadline);
+    auto run = step::begin_action(f.values(), f.catalog_state, f.react_state, profiles, perm_state,
+                                  f.objects_state, space, intents, journal, 2, std::move(call),
+                                  invocation.origin, invocation.deadline);
     require(!run.outcome, "the actual installed script's finance action is admitted");
     return run;
   }

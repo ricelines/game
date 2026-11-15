@@ -1,11 +1,15 @@
 #include "elaboration_private.hpp"
 
 namespace amber::step {
-step::NativeCompletion
-answer_rule(const elaborate::Requests &requests, elaborate::PendingFixtures &pending,
-            const elaborate::CaptureRefs &captures, const catalog::Scripts &scripts,
-            elaborate::FixtureWorker &worker, std::string runtime, elaborate::FixtureLimits limits,
-            bool is_elaborator, Handle requester_body, const step::NativeCall &call) {
+step::NativeCompletion answer_rule(amber::elaborate::State &elaborate_state,
+                                   const catalog::Scripts &scripts,
+                                   elaborate::FixtureWorker &worker, std::string runtime,
+                                   elaborate::FixtureLimits limits, bool is_elaborator,
+                                   Handle requester_body, const step::NativeCall &call) {
+  auto &requests = elaborate_state.requests;
+  auto &pending = elaborate_state.fixtures;
+  auto &captures = elaborate_state.captures;
+
   if (!call.order || !call.order->input || !call.order->session)
     throw std::invalid_argument("rule answer requires a direct ordered input");
   const auto role = elaboration_detail::access(is_elaborator, call);
@@ -40,13 +44,18 @@ answer_rule(const elaborate::Requests &requests, elaborate::PendingFixtures &pen
   out.deferred = true;
   return out;
 }
-FixtureCompletion
-complete_fixture(elaborate::Requests &requests, elaborate::PendingFixtures &pending,
-                 step::Inputs &inputs, catalog::Scripts &scripts, react::RuleVersions &rules,
-                 react::Triggers &triggers, react::Subscriptions &subscriptions,
-                 step::WorkQueues &queues, react::Vm &vm, const react::ValueRead &values,
-                 const react::AllocationRows &allocations, elaborate::RoleAccess current_role,
-                 const elaborate::FixtureResult &result, Step now, double hz) {
+FixtureCompletion complete_fixture(amber::elaborate::State &elaborate_state,
+                                   amber::step::State &step_state, catalog::Scripts &scripts,
+                                   amber::react::State &react_state, react::Vm &vm,
+                                   const react::ValueRead &values,
+                                   elaborate::RoleAccess current_role,
+                                   const elaborate::FixtureResult &result, Step now, double hz) {
+  auto &requests = elaborate_state.requests;
+  auto &pending = elaborate_state.fixtures;
+  auto &inputs = step_state.inputs;
+
+  auto &queues = step_state.queues;
+
   FixtureCompletion out;
   const auto found = pending.rows.find(result.job);
   if (found == pending.rows.end())
@@ -78,9 +87,8 @@ complete_fixture(elaborate::Requests &requests, elaborate::PendingFixtures &pend
       throw std::invalid_argument("immutable candidate identity or tests changed");
     if (error.empty()) {
       const auto before = elaboration_detail::activation_state(scripts);
-      if (react::update_rule(scripts, rules, triggers, subscriptions, queues, vm, values,
-                             allocations, script.id, react::RuleMode::Validated, now, hz,
-                             out.origin, out.effects))
+      if (react::update_rule(scripts, react_state, queues, vm, values, script.id,
+                             react::RuleMode::Validated, now, hz, out.origin, out.effects))
         out.changed_scripts = elaboration_detail::changed_activations(scripts, before);
       out.notification = elaborate::close_rule_answer(requests, pending, check, now);
       out.effects.changed = true;

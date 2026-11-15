@@ -14,9 +14,11 @@ void require(bool condition, const char *message) {
 }
 
 struct Fixture {
-  Players players;
-  Grants grants;
-  Ledger ledger;
+  amber::perm::State perm_state;
+
+  Players &players = perm_state.players;
+  Grants &grants = perm_state.grants;
+  Ledger &ledger = perm_state.ledger;
   Fixture() { players.rows.resize(8); }
   GrantId grant(PlayerId issuer, Holder holder, Scope scope, PlayerId controller, Rights rights,
                 std::int64_t cap = 0, Step period = 0, Step expiry = 1000,
@@ -420,9 +422,11 @@ void next_owner_limits_preserve_fair_use_and_clear_old_script_grants() {
 }
 
 struct GoodsFixture : Fixture {
-  Objects objects;
-  OwnerLimits limits;
-  Offers offers;
+  amber::ObjectState objects_state;
+
+  Objects &objects = objects_state.objects;
+  OwnerLimits &limits = perm_state.owner_limits;
+  Offers &offers = perm_state.offers;
   Handle goods;
   GoodsFixture() {
     ObjectInit init;
@@ -433,12 +437,11 @@ struct GoodsFixture : Fixture {
   }
   Target current() { return target(identity(objects), authority(objects), limits, goods); }
   OfferResult sell(std::int64_t price = 50, PlayerId buyer = 0) {
-    return offer(offers, permission_flags(objects), Holder::player(1), current(), players, grants,
-                 price, buyer, 100, true, 2);
+    return offer(perm_state, permission_flags(objects), Holder::player(1), current(), price, buyer,
+                 100, true, 2);
   }
   SwapResult buy(OfferId id, Buyer buyer, std::size_t mailbox_max = 100) {
-    return accept(offers, ledger, grants, players, authority(objects), permission_flags(objects),
-                  limits, buyer, current(), id, mailbox_max, 3);
+    return accept(perm_state, objects_state, buyer, current(), id, mailbox_max, 3);
   }
 };
 
@@ -501,8 +504,8 @@ void vendors_need_explicit_rights_and_buyers_need_explicit_wallet_authority() {
   GoodsFixture f;
   const auto vendor = Holder::script(12, Handle::make(40, 1));
   auto make_offer = [&] {
-    return offer(f.offers, permission_flags(f.objects), vendor, f.current(), f.players, f.grants, 5,
-                 0, 100, true, 2);
+    return offer(f.perm_state, permission_flags(f.objects), vendor, f.current(), 5, 0, 100, true,
+                 2);
   };
   require(!make_offer(), "vendor inherited its owner's transfer right");
   f.grant(1, vendor, Scope::object(f.goods), 1, bit(Verb::Transfer));
@@ -539,8 +542,8 @@ void gift_and_zero_price_offers_preserve_offline_custody_and_no_copy() {
           "mailbox delivery lost or duplicated goods");
   require(deliver_mailbox(f.players, 2, Handle::make(80, 1)).empty(), "mail delivered twice");
   auto send = [&](std::size_t maximum) {
-    return give(f.players, f.grants, authority(f.objects), permission_flags(f.objects), f.limits,
-                Holder::player(2), f.current(), 3, {}, false, maximum, 4);
+    return give(f.perm_state, f.objects_state, Holder::player(2), f.current(), 3, {}, false,
+                maximum, 4);
   };
   require(send(0).reason == Reason::MailboxFull && f.current().owner == 2 &&
               f.players.rows[2].inventory.size() == 1,
@@ -561,8 +564,8 @@ void transferred_mailbox_goods_cannot_be_delivered_by_the_previous_owner() {
               f.players.rows[2].mailbox == std::vector<Handle>{f.goods},
           "sale left a stale mailbox entry belonging to its previous owner");
   auto give = [&](std::size_t maximum) {
-    return amber::perm::give(f.players, f.grants, authority(f.objects), permission_flags(f.objects),
-                             f.limits, Holder::player(2), f.current(), 3, {}, false, maximum, 4);
+    return amber::perm::give(f.perm_state, f.objects_state, Holder::player(2), f.current(), 3, {},
+                             false, maximum, 4);
   };
   require(give(0).reason == Reason::MailboxFull &&
               f.players.rows[2].mailbox == std::vector<Handle>{f.goods},
@@ -577,8 +580,8 @@ void transferred_mailbox_goods_cannot_be_delivered_by_the_previous_owner() {
 void cancelling_and_expiry_clear_only_owned_escrow() {
   GoodsFixture f;
   const auto offered = f.sell();
-  require(!cancel_offer(f.offers, permission_flags(f.objects), Holder::player(2), f.current(),
-                        f.players, f.grants, offered.offer, 3),
+  require(!cancel_offer(f.perm_state, permission_flags(f.objects), Holder::player(2), f.current(),
+                        offered.offer, 3),
           "stranger cancelled escrow");
   require(
       advance_offers(f.offers, identity(f.objects), permission_flags(f.objects), 99, 256).empty() &&
@@ -611,8 +614,8 @@ void offer_deadlines_skip_completed_quotes_and_rebuild_on_restore() {
   {
     GoodsFixture f;
     const auto offered = f.sell();
-    require(bool(cancel_offer(f.offers, permission_flags(f.objects), Holder::player(1), f.current(),
-                              f.players, f.grants, offered.offer, 3)),
+    require(bool(cancel_offer(f.perm_state, permission_flags(f.objects), Holder::player(1),
+                              f.current(), offered.offer, 3)),
             "cancelled deadline fixture");
     require(f.offers.expiring.empty() && advance(f, 100).empty() && !(f.current().flags & Escrow),
             "cancelled offer retains no future deadline");
@@ -649,9 +652,9 @@ void offer_deadlines_skip_completed_quotes_and_rebuild_on_restore() {
     init.model = 1;
     init.owner = 1;
     const auto other = create(f.objects, init);
-    const auto second = offer(f.offers, permission_flags(f.objects), Holder::player(1),
-                              target(identity(f.objects), authority(f.objects), f.limits, other),
-                              f.players, f.grants, 1, 0, 100, true, 2);
+    const auto second = offer(f.perm_state, permission_flags(f.objects), Holder::player(1),
+                              target(identity(f.objects), authority(f.objects), f.limits, other), 1,
+                              0, 100, true, 2);
     require(first && second &&
                 advance_offers(f.offers, identity(f.objects), permission_flags(f.objects), 100, 0)
                     .empty() &&
@@ -682,7 +685,8 @@ void offer_deadlines_skip_completed_quotes_and_rebuild_on_restore() {
 
 void direct_trade_rechecks_both_sides_resets_confirmation_and_cannot_be_bought_piecemeal() {
   GoodsFixture f;
-  Trades trades;
+  auto &perm_state = f.perm_state;
+  Trades &trades = perm_state.trades;
   ObjectInit init;
   init.model = 2;
   init.owner = 2;
@@ -696,12 +700,11 @@ void direct_trade_rechecks_both_sides_resets_confirmation_and_cannot_be_bought_p
   const auto id = open_trade(trades, f.players, 1, 2).trade;
   const auto first_target = f.current();
   auto second_target = target(identity(f.objects), authority(f.objects), f.limits, second);
-  require(
-      static_cast<bool>(change_trade(trades, f.offers, permission_flags(f.objects), f.players,
-                                     f.grants, id, 1, &first_target, 10, false, 2)) &&
-          static_cast<bool>(change_trade(trades, f.offers, permission_flags(f.objects), f.players,
-                                         f.grants, id, 2, &second_target, 5, false, 2)),
-      "direct trade sides were not offered");
+  require(static_cast<bool>(change_trade(perm_state, permission_flags(f.objects), id, 1,
+                                         &first_target, 10, false, 2)) &&
+              static_cast<bool>(change_trade(perm_state, permission_flags(f.objects), id, 2,
+                                             &second_target, 5, false, 2)),
+          "direct trade sides were not offered");
   const auto offered = trades.rows[id].sides[0].offer;
   const Buyer buyer{Holder::player(2), 2, AccountTarget::player(2), bodies[1], true};
   require(f.buy(offered, buyer).reason == Reason::OfferGone,
@@ -711,8 +714,7 @@ void direct_trade_rechecks_both_sides_resets_confirmation_and_cannot_be_bought_p
         f.current(), target(identity(f.objects), authority(f.objects), f.limits, second)};
   };
   auto confirm = [&](PlayerId player, const std::array<Handle, 2> &present) {
-    return confirm_trade(trades, f.offers, f.ledger, f.grants, f.players, authority(f.objects),
-                         permission_flags(f.objects), f.limits, id, player, targets(), present, 3);
+    return confirm_trade(perm_state, f.objects_state, id, player, targets(), present, 3);
   };
   require(confirm(3, bodies).reason == Reason::NotParticipant, "stranger confirmed trade");
   require(confirm(1, {bodies[0], {}}).reason == Reason::NotPresent, "absent body confirmed trade");
@@ -720,8 +722,8 @@ void direct_trade_rechecks_both_sides_resets_confirmation_and_cannot_be_bought_p
               f.current().owner == 1,
           "first confirmation changed valuables");
   second_target = targets()[1];
-  require(static_cast<bool>(change_trade(trades, f.offers, permission_flags(f.objects), f.players,
-                                         f.grants, id, 2, &second_target, 6, false, 3)) &&
+  require(static_cast<bool>(change_trade(perm_state, permission_flags(f.objects), id, 2,
+                                         &second_target, 6, false, 3)) &&
               !trades.rows[id].sides[0].confirmed && !trades.rows[id].sides[1].confirmed,
           "editing trade did not reset both confirmations");
   require(!confirm(2, bodies).completed && f.current().owner == 1,
@@ -742,8 +744,8 @@ void direct_trade_rechecks_both_sides_resets_confirmation_and_cannot_be_bought_p
   require(confirm(1, bodies).reason == Reason::OfferGone, "completed trade applied twice");
   const auto cancel_id = open_trade(trades, f.players, 1, 2).trade;
   const auto returned_target = targets()[1];
-  const auto changed = change_trade(trades, f.offers, permission_flags(f.objects), f.players,
-                                    f.grants, cancel_id, 1, &returned_target, 0, false, 4);
+  const auto changed = change_trade(perm_state, permission_flags(f.objects), cancel_id, 1,
+                                    &returned_target, 0, false, 4);
   require(static_cast<bool>(changed), "second trade could not offer goods");
   const auto cancelled = cancel_trade(trades, f.offers, permission_flags(f.objects), cancel_id, 2);
   require(static_cast<bool>(cancelled) && cancelled.custody.empty() &&
@@ -754,11 +756,12 @@ void direct_trade_rechecks_both_sides_resets_confirmation_and_cannot_be_bought_p
 void retired_trade_goods_cannot_change_a_reused_slot() {
   for (bool replace_side : {false, true}) {
     GoodsFixture f;
-    Trades trades;
+    auto &perm_state = f.perm_state;
+    Trades &trades = perm_state.trades;
     const auto id = open_trade(trades, f.players, 1, 2).trade;
     const auto current = f.current();
-    const auto offered_trade = change_trade(trades, f.offers, permission_flags(f.objects),
-                                            f.players, f.grants, id, 1, &current, 0, true, 2);
+    const auto offered_trade =
+        change_trade(perm_state, permission_flags(f.objects), id, 1, &current, 0, true, 2);
     require(static_cast<bool>(offered_trade), "could not offer retiring trade");
     const auto retired = invalidate_goods_offers(f.offers, trades, identity(f.objects),
                                                  permission_flags(f.objects), f.goods);
@@ -771,10 +774,10 @@ void retired_trade_goods_cannot_change_a_reused_slot() {
     init.flags = Static | Escrow;
     const auto replacement = create(f.objects, init);
     require(replacement.slot() == f.goods.slot(), "fixture did not reuse slot");
-    const auto result = replace_side
-                            ? change_trade(trades, f.offers, permission_flags(f.objects), f.players,
-                                           f.grants, id, 1, nullptr, 1, false, 3)
-                            : cancel_trade(trades, f.offers, permission_flags(f.objects), id, 2);
+    const auto result =
+        replace_side
+            ? change_trade(perm_state, permission_flags(f.objects), id, 1, nullptr, 1, false, 3)
+            : cancel_trade(trades, f.offers, permission_flags(f.objects), id, 2);
     require(result.reason == Reason::OfferGone && result.custody.empty() &&
                 (identity(f.objects).flags[replacement.slot()] & Escrow),
             "retired trade modified replacement custody/flags");
@@ -796,8 +799,8 @@ void assembly_offers_preflight_and_transfer_every_declared_part() {
       f.grant(1, Holder::script(20, part), Scope::account(Account::player(1)), 1, 1, 100, 100);
   const auto vendor = Holder::script(25, Handle::make(90, 1));
   f.grant(1, vendor, Scope::object(f.goods), 1, bit(Verb::Transfer));
-  const auto offered = offer(f.offers, permission_flags(f.objects), vendor, f.current(), f.players,
-                             f.grants, 25, 0, 100, true, 2, components());
+  const auto offered = offer(f.perm_state, permission_flags(f.objects), vendor, f.current(), 25, 0,
+                             100, true, 2, components());
   require(static_cast<bool>(offered) && (components()[0].flags & Escrow),
           "assembly offer left component outside escrow");
   f.ledger.balance[Account::player(2)] = 50;
@@ -806,8 +809,7 @@ void assembly_offers_preflight_and_transfer_every_declared_part() {
           "assembly accepted with missing component descriptor");
   f.limits.set(part.slot(), inherited_rights & ~bit(Verb::Transfer));
   auto buy_assembly = [&] {
-    return accept(f.offers, f.ledger, f.grants, f.players, authority(f.objects),
-                  permission_flags(f.objects), f.limits, buyer, f.current(), offered.offer, 100, 3,
+    return accept(f.perm_state, f.objects_state, buyer, f.current(), offered.offer, 100, 3,
                   components());
   };
   require(buy_assembly().reason == Reason::InheritedLimit && f.current().owner == 1 &&
@@ -820,9 +822,8 @@ void assembly_offers_preflight_and_transfer_every_declared_part() {
               (components()[0].flags & NoCopy) && !f.grants.rows[component_grant].live &&
               f.players.rows[2].inventory == std::vector<Handle>{f.goods},
           "assembly sale left old component owner/grants or made separate inventory goods");
-  const auto given =
-      give(f.players, f.grants, authority(f.objects), permission_flags(f.objects), f.limits,
-           Holder::player(2), f.current(), 3, {}, false, 100, 4, components());
+  const auto given = give(f.perm_state, f.objects_state, Holder::player(2), f.current(), 3, {},
+                          false, 100, 4, components());
   require(static_cast<bool>(given) && f.current().owner == 3 && components()[0].owner == 3 &&
               f.players.rows[3].mailbox == std::vector<Handle>{f.goods},
           "assembly gift separated component ownership or delivery");
@@ -832,8 +833,7 @@ void storing_existing_goods_checks_then_changes_custody_directly() {
   GoodsFixture f;
   const auto script = Holder::script(50, Handle::make(50, 1));
   const auto store = [&](PlayerId recipient, Handle body, bool present, std::size_t maximum) {
-    return store_goods(f.players, f.grants, script, f.current(), {}, recipient, body, present,
-                       maximum, 2);
+    return store_goods(f.perm_state, script, f.current(), {}, recipient, body, present, maximum, 2);
   };
   require(store(1, {}, false, 1).reason == Reason::MissingRight &&
               f.players.rows[1].mailbox.empty(),
@@ -915,9 +915,9 @@ void typed_accounts_preserve_custody_identity_and_bound_refunds() {
 
 void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
   GoodsFixture f;
-  Trades trades;
-  Plots plots;
-  Groups groups;
+  auto &trades = f.perm_state.trades;
+  auto &plots = f.perm_state.plots;
+  auto &groups = f.perm_state.groups;
   plots.rows.push_back({1, 1, 4, Rights{2}, {-1, -2, 3, 4}, {3}});
   groups.rows.push_back({1, 1, "Authored group"});
   const PlayerId wallet = 1;
@@ -934,10 +934,8 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
   f.limits.set(f.goods.slot(), inherited_rights & ~bit(Verb::Edit));
   const auto trade = open_trade(trades, f.players, 1, 2).trade;
   const auto goods = f.current();
-  change_trade(trades, f.offers, permission_flags(f.objects), f.players, f.grants, trade, 1, &goods,
-               0, true, 3);
-  change_trade(trades, f.offers, permission_flags(f.objects), f.players, f.grants, trade, 2,
-               nullptr, 10, false, 3);
+  change_trade(f.perm_state, permission_flags(f.objects), trade, 1, &goods, 0, true, 3);
+  change_trade(f.perm_state, permission_flags(f.objects), trade, 2, nullptr, 10, false, 3);
   const auto object_account = Account::object(f.goods);
   const auto group_account = Account::group(1);
   f.ledger.balance[object_account] = 17;
@@ -946,9 +944,7 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
   const auto object_grant =
       f.grant(1, object_script, Scope::account(object_account), 1, 1, 25, 100);
   const std::array<Handle, 2> bodies{Handle::make(60, 1), Handle::make(61, 1)};
-  confirm_trade(trades, f.offers, f.ledger, f.grants, f.players, authority(f.objects),
-                permission_flags(f.objects), f.limits, trade, 1, {f.current(), Target{}}, bodies,
-                4);
+  confirm_trade(f.perm_state, f.objects_state, trade, 1, {f.current(), Target{}}, bodies, 4);
   snap::Buffer bytes;
   snap::Output out{bytes};
   write_players(out, f.players, f.ledger, plots, groups);
@@ -956,7 +952,7 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
   bytes.resize(out.adapter().writtenBytesCount());
   GoodsFixture restored;
   restored.objects = f.objects;
-  Trades restored_trades;
+  auto &restored_trades = restored.perm_state.trades;
   Plots restored_plots;
   Groups restored_groups;
   snap::Input in{bytes.data(), bytes.size()};
@@ -981,9 +977,7 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
               Account::player(4), 11, 5)
                   .reason == Reason::Allowance,
           "restored child enlarged shared allowance");
-  const auto result = confirm_trade(restored_trades, restored.offers, restored.ledger,
-                                    restored.grants, restored.players, authority(restored.objects),
-                                    permission_flags(restored.objects), restored.limits, trade, 2,
+  const auto result = confirm_trade(restored.perm_state, restored.objects_state, trade, 2,
                                     {restored.current(), Target{}}, bodies, 5);
   require(result.completed && restored.current().owner == 2 &&
               balance(restored.ledger, Account::player(2)) == 15 &&

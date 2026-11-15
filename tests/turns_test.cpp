@@ -12,12 +12,11 @@ namespace {
 // One real invocation segment. Nested actions are exercised by game_actions.py's
 // native process, rather than a second implementation of the execution stack.
 react::CompletedInvocation invoke(test_runtime::Fixture &f, const step::PlannedInvocation &plan,
-                                  const Relation &parts, record::Journal &journal) {
+                                  record::Journal &journal) {
   react::Invocation invocation;
   react::CompletedInvocation completed;
-  react::start_invocation(f.vm, f.states, f.random, f.subscriptions, f.values(), f.triggers, parts,
-                          7, attribution(f.objects), f.models, f.scripts, journal, plan.handler,
-                          plan.input, invocation, completed);
+  react::start_invocation(f.vm, f.react_state, f.values(), f.objects_state, 7, f.catalog_state,
+                          journal, plan.handler, plan.input, invocation, completed);
   require(completed.outcome.status == react::RunOutcome::Status::Ok,
           "single-segment test must complete actual Lua without an action continuation");
   react::finish_invocation(identity(f.objects), attribution(f.objects), f.models, f.scripts,
@@ -38,14 +37,14 @@ void a_watch_is_acknowledged_only_when_its_handler_starts() {
   require(plan.invocations.size() == 1, "changed watch plans one run");
   f.scripts.rows[script].declaration.active = false;
   react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
-  Relation parts;
+  auto &objects_state = f.objects_state;
+
   record::Journal journal(8, {});
   react::Invocation invocation;
   react::CompletedInvocation completed;
   const auto &candidate = plan.invocations.front();
-  require(!react::start_invocation(f.vm, f.states, f.random, f.subscriptions, f.values(),
-                                   f.triggers, parts, 7, attribution(f.objects), f.models,
-                                   f.scripts, journal, candidate.handler, candidate.input,
+  require(!react::start_invocation(f.vm, f.react_state, f.values(), objects_state, 7,
+                                   f.catalog_state, journal, candidate.handler, candidate.input,
                                    invocation, completed),
           "disabled planned handler does not start");
   require(!f.states.contains({f.a, script}) && journal.take().empty(),
@@ -55,7 +54,7 @@ void a_watch_is_acknowledged_only_when_its_handler_starts() {
   const auto retried = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
                                         f.scripts, {{f.a, 1}, {}}, 1, 20);
   require(retried.invocations.size() == 1, "unstarted watch change remains pending");
-  invoke(f, retried.invocations.front(), parts, journal);
+  invoke(f, retried.invocations.front(), journal);
   require(std::get<double>(f.states.at({f.a, script}).at(std::string("runs"))) == 1 &&
               step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers, f.scripts,
                                {{f.a, 1}, {}}, 1, 20)
@@ -82,9 +81,10 @@ void chosen_actions_and_typed_inputs() {
                             3);
   f.models.rows[1].script = script;
   react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
-  perm::Players players;
+  amber::perm::State perm_state;
+  perm::Players &players = perm_state.players;
   players.rows.resize(3);
-  perm::Grants grants;
+  perm::Grants &grants = perm_state.grants;
   const auto holder = perm::Holder::script(script, f.a);
   const auto scope = perm::Scope::object(f.a);
   const auto grant =
@@ -98,9 +98,7 @@ void chosen_actions_and_typed_inputs() {
   profiles.rows[1].body = f.b;
   profiles.rows[2].id = 2;
   profiles.rows[2].body = f.c;
-  Relation parts;
-  perm::OwnerLimits limits;
-  react::NativeActions native;
+
   step::Intents intents;
   step::WorkQueues queues;
   step::TimerWheel timers;
@@ -108,13 +106,12 @@ void chosen_actions_and_typed_inputs() {
   space::Space space{testspace::settings()};
   const auto deadline = step::Monotonic::now() + std::chrono::seconds(2);
   auto root = step::begin_action(
-      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
-      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
       intents, journal, 2, {{PlayerId{1}, 7, f.a, Value{}}, {{"amount", 2.5}}, {}, 12, 20, {}}, {},
       deadline);
   require(!root.outcome && root.handlers.size() == 1 && root.call.body == f.b,
           "current player body and actual installed receiver determine the action plan");
-  auto completed = invoke(f, root.handlers.front(), parts, journal);
+  auto completed = invoke(f, root.handlers.front(), journal);
   step::accept_handler(root, completed);
   const auto handler_origin = completed.origin;
   step::publish_invocation(journal, queues, timers, std::move(completed), root.call.origin, 1000);
@@ -135,15 +132,14 @@ void chosen_actions_and_typed_inputs() {
           "raw typed inputs reach actual Lua with optional inputs absent");
 
   auto child = step::begin_action(
-      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
-      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
       intents, journal, 2,
       {{ScriptHolder{script, f.a}, 7, f.a, Value{}}, {{"amount", 3}}, {}, 12, 20, {}},
       handler_origin, deadline);
   require(!child.outcome && child.call.body == Handle{} && child.handlers.size() == 1 &&
               !child.handlers.front().input.action_body,
           "ScriptHolder calls have no inherited player body or authority");
-  completed = invoke(f, child.handlers.front(), parts, journal);
+  completed = invoke(f, child.handlers.front(), journal);
   step::accept_handler(child, completed);
   step::publish_invocation(journal, queues, timers, std::move(completed), child.call.origin, 1000);
   step::finish_action(child, intents, space, identity(f.objects), transforms(f.objects), journal,
@@ -157,14 +153,12 @@ void chosen_actions_and_typed_inputs() {
           "script action retains actual actor/cause/root while remaining nonchosen");
   perm::revoke(grants, players, grant.grant);
   auto denied = step::begin_action(
-      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
-      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
       intents, journal, 2,
       {{ScriptHolder{script, f.a}, 7, f.a, Value{}}, {{"amount", 4}}, {}, 12, 20, {}},
       handler_origin, deadline);
   auto foreign = step::begin_action(
-      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
-      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
       intents, journal, 2, {{PlayerId{2}, 7, f.a, Value{}}, {{"amount", 4}}, {}, 12, 20, {}}, {},
       deadline);
   require(denied.outcome && foreign.outcome && denied.handlers.empty() && foreign.handlers.empty(),
@@ -179,6 +173,7 @@ void chosen_actions_and_typed_inputs() {
               std::get<double>(f.states.at({f.a, script}).at(std::string("calls"))) == 2,
           "real denial retains chosen classification and leaves script state unchanged");
 
+  auto &native = f.react_state.native_declarations;
   const std::string signature = "novel.touch(amount: number [kg], note?: string)";
   step::Input input;
   input.caller = PlayerId{1};
@@ -221,10 +216,9 @@ void chosen_actions_and_typed_inputs() {
   const auto parsed = step::parse_action_input(input, f.terms, native, journal, 12, 20);
   require(std::holds_alternative<step::NativeCall>(parsed),
           "an absent required field reaches action declaration validation");
-  const auto malformed = step::begin_action(
-      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
-      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
-      intents, journal, 2, std::get<step::NativeCall>(parsed), {}, deadline);
+  const auto malformed = step::begin_action(f.values(), f.catalog_state, f.react_state, profiles,
+                                            perm_state, f.objects_state, space, intents, journal, 2,
+                                            std::get<step::NativeCall>(parsed), {}, deadline);
   require(malformed.outcome && malformed.outcome->reply["error"] == "bad_input" &&
               malformed.outcome->reply["signature"] == signature && malformed.handlers.empty(),
           "missing required input fails before Lua and includes the actual signature");
@@ -273,18 +267,16 @@ void canonical_results_and_actual_bounds() {
   profiles.rows[1].body = f.a;
   profiles.rows[2].id = 2;
   profiles.rows[2].body = f.c;
-  perm::Players players;
+  amber::perm::State perm_state;
+  perm::Players &players = perm_state.players;
   players.rows.resize(3);
-  perm::Grants grants;
-  perm::OwnerLimits limits;
-  react::NativeActions native;
+
   step::Intents intents;
   record::Journal journal(8, {});
   std::vector<step::GapDraft> gaps;
   const auto deadline = step::Monotonic::now() + std::chrono::seconds(2);
   auto declared = step::begin_action(
-      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
-      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
       intents, journal, 2, {{PlayerId{1}, 7, {}, Value{}}, nlohmann::json::object(), {}, 0, 20, {}},
       {}, deadline);
   require(!declared.outcome && declared.handlers.empty(),
@@ -297,8 +289,7 @@ void canonical_results_and_actual_bounds() {
   f.models.rows[1].script = 0;
   react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
   auto fallback = step::begin_action(
-      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
-      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
       intents, journal, 2,
       {{PlayerId{1}, 7, f.b, Value{}}, nlohmann::json::object(), {}, 0, 20, {}}, {}, deadline);
   require(!fallback.outcome && fallback.resolution.route == react::Route::Fallback,
@@ -311,8 +302,7 @@ void canonical_results_and_actual_bounds() {
                   .status == space::Status::Ok,
           "move actual Jolt target beyond reach");
   auto remote = step::begin_action(
-      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
-      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
       intents, journal, 2,
       {{PlayerId{1}, 7, f.b, Value{}}, nlohmann::json::object(), {}, 0, 20, {}}, {}, deadline);
   require(remote.outcome && remote.outcome->reply["denied"]["need"] == "reach" && gaps.size() == 1,
@@ -324,8 +314,7 @@ void canonical_results_and_actual_bounds() {
   f.models.rows[1].script = script;
   react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
   auto moving = step::begin_action(
-      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
-      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
       intents, journal, 2, {{PlayerId{1}, 7, {}, Value{}}, nlohmann::json::object(), {}, 0, 20, {}},
       {}, deadline);
   step::start_move(intents, f.a, Vec3{9, 0, 0}, moving.call.origin, 9);
@@ -335,8 +324,7 @@ void canonical_results_and_actual_bounds() {
               std::abs(result.reply["eta_s"].get<double>() - 5) < 1e-5,
           "movement estimate clamps requested speed to the actual character configuration");
   auto slower = step::begin_action(
-      f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers, native, profiles, players,
-      grants, limits, authority(f.objects), attribution(f.objects), transforms(f.objects), space,
+      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
       intents, journal, 2, {{PlayerId{1}, 7, {}, Value{}}, nlohmann::json::object(), {}, 0, 20, {}},
       {}, deadline);
   step::start_move(intents, f.a, Vec3{9, 0, 0}, slower.call.origin, .3f);
@@ -349,7 +337,7 @@ void canonical_results_and_actual_bounds() {
 void threshold_plans_use_current_subscriptions(bool benchmark) {
   test_runtime::Fixture f(250);
   f.state(f.a, 1, 0);
-  react::set_rate(f.properties, f.processes, f.terms.rows[1], f.a, 1, 0, 20, 0, 20, f.effects);
+  react::set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 20, 0, 20, f.effects);
   const auto direct = f.add(R"(return {kind='instance',watches={{term='novel.heat',thresholds={
     {predicate='above',value=1},{predicate='above',value=2},{predicate='above',value=3}}}},on={
     ['novel.heat']=function(self,source,value)
@@ -373,7 +361,7 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
   f.bind(sibling, f.a);
   step::WorkQueues queues;
   step::TimerWheel timers;
-  Relation parts;
+
   record::Journal journal(8, {});
   journal.restore_next_id(10);
   const record::Origin origin{9, 3, {1, 2}, 1.5, false};
@@ -403,7 +391,7 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
           step::schedule(timers, std::move(timer));
         for (auto &plan : planned.invocations) {
           plan.input.deadline = step::Monotonic::now() + std::chrono::seconds(2);
-          auto completed = invoke(f, plan, parts, journal);
+          auto completed = invoke(f, plan, journal);
           step::publish_invocation(journal, queues, timers, std::move(completed), watch.origin,
                                    1000);
         }
@@ -455,7 +443,7 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
                                   {f.a, {}, 6, Value(i % 2 ? .000001 : .000002), origin}, 41, 20);
     require(plans.size() == 1, "only the installed rate handler receives its event");
     plans.front().input.deadline = step::Monotonic::now() + std::chrono::seconds(2);
-    auto completed = invoke(f, plans.front(), parts, journal);
+    auto completed = invoke(f, plans.front(), journal);
     step::cancel_source_thresholds(timers, f.subscriptions, {f.a, 1});
     const auto changed = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
                                           f.scripts, {{f.a, 1}, completed.origin}, 41, 20);
@@ -479,7 +467,7 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
           "far-future replacements retain latest real origin without invented threshold callbacks");
   auto plans = step::plan_event(f.triggers, f.values(), {f.a, {}, 6, Value(-.5), origin}, 41, 20);
   plans.front().input.deadline = step::Monotonic::now() + std::chrono::seconds(2);
-  auto completed = invoke(f, plans.front(), parts, journal);
+  auto completed = invoke(f, plans.front(), journal);
   step::cancel_source_thresholds(timers, f.subscriptions, {f.a, 1});
   const auto changed = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
                                         f.scripts, {{f.a, 1}, completed.origin}, 41, 20);
@@ -500,7 +488,7 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
   const auto stopped_at = timers.now;
   plans = step::plan_event(f.triggers, f.values(), {f.a, {}, 6, Value(0.), origin}, stopped_at, 20);
   plans.front().input.deadline = step::Monotonic::now() + std::chrono::seconds(2);
-  completed = invoke(f, plans.front(), parts, journal);
+  completed = invoke(f, plans.front(), journal);
   require(f.processes[1].get(f.a.slot())->rate == 0 && timers.thresholds.size() == 2,
           "actual Lua stopping a process exposes the two pending old crossings");
   step::cancel_source_thresholds(timers, f.subscriptions, {f.a, 1});

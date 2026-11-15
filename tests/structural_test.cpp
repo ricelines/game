@@ -77,9 +77,8 @@ void hidden_reconfiguration_stays_hidden_and_destroy_needs_no_reach() {
   x.variants();
   for (auto h : objects)
     x.grant(h, perm::bit(perm::Verb::Edit));
-  std::vector<space::RelationChange> changes;
-  require(space::custody(x.world, identity(x.f.objects), root, x.f.a, parents(x.f.objects),
-                         space_flags(x.f.objects), x.physical, changes,
+
+  require(space::custody(x.world, x.f.objects_state, root, x.f.a, x.space_state,
                          std::span(objects).subspan(1))
                   .status == space::Status::Ok,
           "fixture stores assembly in hidden inventory");

@@ -11,11 +11,11 @@ int main() {
   using Clock = std::chrono::steady_clock;
   constexpr std::size_t count = 100000, batch = 256, idle_checks = 100000;
   Objects objects;
-  perm::Players players;
+  amber::perm::State perm_state;
+  perm::Players &players = perm_state.players;
   players.rows.resize(2);
-  perm::Grants grants;
-  perm::Offers offers;
-  perm::OwnerLimits limits;
+  perm::Offers &offers = perm_state.offers;
+  perm::OwnerLimits &limits = perm_state.owner_limits;
   std::vector<Handle> goods;
   goods.reserve(count);
   for (std::size_t i = 0; i < count; ++i) {
@@ -28,9 +28,8 @@ int main() {
   const auto owners = authority(objects);
   const auto flags = permission_flags(objects);
   for (auto object : goods)
-    if (!perm::offer(offers, flags, perm::Holder::player(1),
-                     perm::target(ids, owners, limits, object), players, grants, 1, 0, 100, true,
-                     1))
+    if (!perm::offer(perm_state, flags, perm::Holder::player(1),
+                     perm::target(ids, owners, limits, object), 1, 0, 100, true, 1))
       throw std::runtime_error("benchmark actual offer registration failed");
   const auto idle_start = Clock::now();
   for (std::size_t i = 0; i < idle_checks; ++i)

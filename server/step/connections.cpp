@@ -25,10 +25,16 @@ Json initial_catalog(const catalog::Models &models, const catalog::ModelTexts &m
           {"terms", net::term_metadata(terms, term_ids)},
           {"materials", net::material_metadata(terms, materials, appearance, material_ids)}};
 }
-void transport_view(net::Server &server, net::ReplicationIndex &replication, IdentityRead ids,
-                    AuthorityRead auth, ParentRead parent, const catalog::ModelTexts &model_text,
-                    const catalog::InstanceTexts &instance_text, net::SessionId session,
+void transport_view(net::Server &server, net::ReplicationIndex &replication,
+                    const amber::ObjectState &objects_state,
+                    const amber::catalog::State &catalog_state, net::SessionId session,
                     Vec3 position) {
+  auto ids = amber::identity(std::as_const(objects_state.objects));
+  auto auth = amber::authority(std::as_const(objects_state.objects));
+  auto parent = amber::parents(std::as_const(objects_state.objects));
+  auto &model_text = catalog_state.model_text;
+  auto &instance_text = catalog_state.instance_text;
+
   const auto found = replication.interests.find(session);
   const auto previous =
       found == replication.interests.end() ? std::set<net::Cell>{} : found->second;
@@ -54,14 +60,25 @@ void transport_view(net::Server &server, net::ReplicationIndex &replication, Ide
 } // namespace
 
 std::optional<net::Authenticated>
-connection_notice(const net::SessionNotice &notice, net::Sessions &sessions,
-                  net::SessionViews &views, observe::ActiveViews &active, observe::Hearing &hearing,
-                  net::ReplicationIndex &replication, std::vector<observe::Listener> &listeners,
-                  DeliveryTargets &delivery, const catalog::Models &models,
-                  const catalog::ModelTexts &model_text, const react::Terms &terms,
-                  const react::Materials &materials, net::MaterialAppearanceRoles appearance,
-                  IdentityRead identity, TransformRead poses, Step now, double hz, float cell_m,
+connection_notice(const net::SessionNotice &notice, amber::net::State &net_state,
+                  amber::space::State &space_state, DeliveryTargets &delivery,
+                  const amber::catalog::State &catalog_state,
+                  const amber::react::State &react_state, net::MaterialAppearanceRoles appearance,
+                  const amber::ObjectState &objects_state, Step now, double hz, float cell_m,
                   std::uint32_t repl_delay_ms) {
+  auto &sessions = net_state.sessions;
+  auto &views = net_state.session_views;
+  auto &active = space_state.active_views;
+  auto &hearing = space_state.hearing;
+  auto &replication = net_state.replication;
+  auto &listeners = space_state.listeners;
+  auto &models = catalog_state.models;
+  auto &model_text = catalog_state.model_text;
+  auto &terms = react_state.terms;
+  auto &materials = react_state.materials;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto poses = amber::transforms(std::as_const(objects_state.objects));
+
   return std::visit(
       [&](const auto &value) -> std::optional<net::Authenticated> {
         using T = std::decay_t<decltype(value)>;
@@ -129,32 +146,33 @@ bool queue_connection_mutation(Inputs &inputs, WorkQueues &queues, net::Invocati
   return true;
 }
 
-void answer_query(net::Sessions &sessions, net::Server &server, net::ReplicationIndex &replication,
-                  net::SessionViews &views, observe::ActiveViews &active, observe::Hearing &hearing,
-                  record::Journal &journal, const catalog::Models &models,
-                  const catalog::ParameterBlocks &parameters, const catalog::Assets &assets,
-                  const catalog::Scripts &scripts, const catalog::ModelTexts &model_text,
-                  const catalog::InstanceTexts &instance_text,
-                  const react::InstanceScripts &installations, const react::NativeActions &native,
-                  const react::ValueRead &values, const std::vector<TermId> &inspection_terms,
-                  const catalog::AuthoredTexts &authored_text, const space::Space &space,
-                  TransformRead poses, AuthorityRead authority, ParentRead parents,
-                  AttributionRead attribution, const Relation &declared_parts,
-                  const Relation &attached_to, const observe::Lights &lights,
-                  const observe::ZoneAmbients &zones,
-                  const std::vector<observe::MotionSample> &motion, const Intents &intents,
-                  const perm::OwnerLimits &owner_limits, const perm::Players &players,
-                  const perm::Grants &grants, const perm::Plots &plots, const perm::Ledger &ledger,
-                  const react::ScriptStates &states, const react::RuleVersions &rules,
-                  const net::RecordFeed &feed, observe::Settings settings, std::size_t actions_page,
-                  Step now, double hz, const net::Invocation &request) {
+void answer_query(amber::net::State &net_state, net::Server &server,
+                  amber::space::State &space_state, record::Journal &journal,
+                  const amber::catalog::State &catalog_state,
+                  const amber::react::State &react_state, const react::ValueRead &values,
+                  const space::Space &space, const amber::ObjectState &objects_state,
+                  const Intents &intents, const amber::perm::State &perm_state,
+                  observe::Settings settings, std::size_t actions_page, Step now, double hz,
+                  const net::Invocation &request) {
+  auto &sessions = net_state.sessions;
+  auto &replication = net_state.replication;
+  auto &views = net_state.session_views;
+
+  auto &hearing = space_state.hearing;
+  auto &models = catalog_state.models;
+
+  auto &scripts = catalog_state.scripts;
+
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto attribution = amber::attribution(std::as_const(objects_state.objects));
+
+  auto &feed = net_state.feed;
+
   net::Reply reply;
   switch (request.request.kind) {
   case net::ControlKind::Look: {
-    reply = net::read_look(models, parameters, assets, scripts, model_text, instance_text,
-                           installations, native, values, inspection_terms, authored_text, views,
-                           active, hearing, space, poses, declared_parts, attached_to, lights,
-                           zones, motion, intents, settings, now, hz, 0, request);
+    reply = net::read_look(catalog_state, react_state, values, views, space_state, space,
+                           objects_state, intents, settings, now, hz, 0, request);
     if (reply.fields.contains("step")) {
       record::Event event;
       event.step = now;
@@ -170,16 +188,12 @@ void answer_query(net::Sessions &sessions, net::Server &server, net::Replication
     break;
   }
   case net::ControlKind::Inspect:
-    reply = net::read_inspect(models, parameters, assets, scripts, model_text, instance_text,
-                              installations, native, values, inspection_terms, authored_text, views,
-                              hearing, poses, authority, parents, attribution, values.relations,
-                              owner_limits, players, grants, plots, ledger, now, hz,
-                              settings.events_per_response, states, rules, request);
+    reply = net::read_inspect(catalog_state, react_state, values, views, hearing, objects_state,
+                              perm_state, now, hz, settings.events_per_response, request);
     break;
   case net::ControlKind::Actions:
-    reply = net::read_actions(models, scripts, installations, native, values, views, hearing,
-                              actions_page, settings.events_per_response, authority, owner_limits,
-                              players, grants, now, request);
+    reply = net::read_actions(catalog_state, react_state, values, views, hearing, actions_page,
+                              settings.events_per_response, authority, perm_state, now, request);
     break;
   case net::ControlKind::Events:
     reply = net::read_events(feed, views, settings.sight_m, settings.events_per_response, request);
@@ -192,15 +206,16 @@ void answer_query(net::Sessions &sessions, net::Server &server, net::Replication
   }
   sessions.complete(request.session, request.sequence, reply.fields);
   if (request.request.kind == net::ControlKind::Look && request.principal.binary)
-    transport_view(server, replication, values.identity, authority, parents, model_text,
-                   instance_text, request.session, views.rows.at(request.session).eye);
+    transport_view(server, replication, objects_state, catalog_state, request.session,
+                   views.rows.at(request.session).eye);
 }
 
 void send_connection_outputs(std::span<net::SessionOutput> outputs, net::Server &server,
-                             net::ReplicationIndex &replication, net::SessionViews &views,
-                             IdentityRead identity, AuthorityRead authority, ParentRead parents,
-                             const catalog::ModelTexts &model_text,
-                             const catalog::InstanceTexts &instance_text) {
+                             amber::net::State &net_state, const amber::ObjectState &objects_state,
+                             const amber::catalog::State &catalog_state) {
+  auto &replication = net_state.replication;
+  auto &views = net_state.session_views;
+
   for (auto &output : outputs)
     std::visit(
         [&](auto &value) {
@@ -211,18 +226,21 @@ void send_connection_outputs(std::span<net::SessionOutput> outputs, net::Server 
             server.close(value.session, value.code, std::move(value.reason));
           else {
             net::view_changed(views, value.session, value.position);
-            transport_view(server, replication, identity, authority, parents, model_text,
-                           instance_text, value.session, value.position);
+            transport_view(server, replication, objects_state, catalog_state, value.session,
+                           value.position);
           }
         },
         output);
 }
 
-void flush_connections(net::Sessions &sessions, net::Server &server,
-                       net::ReplicationIndex &replication, net::SessionViews &views, Inputs &inputs,
-                       WorkQueues &queues, IdentityRead identity, AuthorityRead authority,
-                       ParentRead parents, const catalog::ModelTexts &model_text,
-                       const catalog::InstanceTexts &instance_text) {
+void flush_connections(amber::net::State &net_state, net::Server &server,
+                       amber::step::State &step_state, const amber::ObjectState &objects_state,
+                       const amber::catalog::State &catalog_state) {
+  auto &sessions = net_state.sessions;
+
+  auto &inputs = step_state.inputs;
+  auto &queues = step_state.queues;
+
   std::vector<net::Invocation> ready;
   std::vector<net::SessionNotice> notices;
   std::vector<net::SessionOutput> outputs;
@@ -230,22 +248,27 @@ void flush_connections(net::Sessions &sessions, net::Server &server,
   // Completion releases queued mutations; their work enters the next frame.
   for (auto &request : ready)
     queue_connection_mutation(inputs, queues, request);
-  send_connection_outputs(outputs, server, replication, views, identity, authority, parents,
-                          model_text, instance_text);
+  send_connection_outputs(outputs, server, net_state, objects_state, catalog_state);
 }
 
-void refresh_connections(
-    const net::Sessions &sessions, net::SessionViews &views, observe::ActiveViews &active,
-    std::vector<observe::Listener> &listeners, DeliveryTargets &delivery,
-    const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-    const catalog::Assets &assets, const catalog::Scripts &scripts,
-    const catalog::ModelTexts &model_text, const catalog::InstanceTexts &instance_text,
-    const react::InstanceScripts &installations, const react::NativeActions &native,
-    const react::ValueRead &values, const std::vector<TermId> &inspection_terms,
-    const catalog::AuthoredTexts &authored_text, const space::Space &space, TransformRead poses,
-    const Relation &declared_parts, const Relation &attached_to, const observe::Lights &lights,
-    const observe::ZoneAmbients &zones, const std::vector<observe::MotionSample> &motion,
-    const Intents &intents, observe::Settings settings, Step now, double hz) {
+void refresh_connections(amber::net::State &net_state, amber::space::State &space_state,
+                         amber::step::State &step_state, const amber::catalog::State &catalog_state,
+                         const amber::react::State &react_state, const react::ValueRead &values,
+                         const space::Space &space, const amber::ObjectState &objects_state,
+                         observe::Settings settings, Step now, double hz) {
+  auto &sessions = net_state.sessions;
+  auto &views = net_state.session_views;
+  auto &active = space_state.active_views;
+  auto &listeners = space_state.listeners;
+  auto &delivery = step_state.delivery;
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+
+  auto poses = amber::transforms(std::as_const(objects_state.objects));
+
+  auto &intents = step_state.intents;
+
   listeners.clear();
   delivery.present_bodies.clear();
   const auto identity = values.identity;
@@ -262,9 +285,8 @@ void refresh_connections(
     }
   for (auto session : observe::take_dirty_views(active))
     if (const auto principal = sessions.principal(session))
-      net::refresh_view(models, parameters, assets, scripts, model_text, instance_text,
-                        installations, native, values, inspection_terms, authored_text, views,
-                        active, space, poses, declared_parts, attached_to, lights, zones, motion,
-                        intents, settings, now, hz, 0, session, *principal, settings.things_max);
+      net::refresh_view(catalog_state, react_state, values, views, space_state, space,
+                        objects_state, intents, settings, now, hz, 0, session, *principal,
+                        settings.things_max);
 }
 } // namespace amber::step

@@ -28,13 +28,19 @@ std::string edit_rights(IdentityRead identity, AuthorityRead authority,
 
 namespace structural_detail {
 ReplacementGeometry
-replacement_geometry(const space::Space &space, const lifecycle::Parts &parts,
-                     IdentityRead identity, TransformRead transforms, ParentRead parents,
+replacement_geometry(const space::Space &space, const amber::ObjectState &objects_state,
                      const std::vector<PlotId> &plots, const GeometryAssets &geometry,
-                     const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                     const catalog::Assets &assets, const react::ValueRead &values,
+                     const amber::catalog::State &catalog_state, const react::ValueRead &values,
                      PhysicsRoles roles, PhysicsDefaults defaults, const step::NativeCall &call,
                      lifecycle::Replacement plan, bool preserve_defaults) {
+  auto &parts = objects_state.parts;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(std::as_const(objects_state.objects));
+  auto parents = amber::parents(std::as_const(objects_state.objects));
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+
   ReplacementGeometry prepared;
   prepared.rows = std::move(plan);
   const auto &plan_ref = prepared.rows;
@@ -110,16 +116,24 @@ replacement_geometry(const space::Space &space, const lifecycle::Parts &parts,
   }
   return prepared;
 }
-void rebuild_instances(Objects &objects, lifecycle::Parts &parts, Relation &declared_parts,
-                       space::Space &space, TransformWrite transforms, ParentWrite parents,
-                       SpaceFlags flags, space::PhysicalRelations &physical,
-                       std::vector<space::RelationChange> &changes, PlotWrite membership,
-                       const perm::Plots &land, AuthorityRead authority,
-                       AttributionRead attribution, const catalog::Models &models,
-                       const catalog::Scripts &scripts, const react::ValueRead &values,
+void rebuild_instances(amber::ObjectState &objects_state, space::Space &space,
+                       amber::space::State &space_state, const perm::Plots &land,
+                       const amber::catalog::State &catalog_state,
                        std::span<ReplacementGeometry *> replacements,
                        const space::AssemblyEdit &edit, PlayerId maker, const NativeCall &call,
                        NativeCompletion &out) {
+  auto &objects = objects_state.objects;
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+  auto transforms = amber::transforms(objects_state.objects);
+  auto parents = amber::parents(objects_state.objects);
+
+  auto membership = amber::plot_membership(objects_state.objects);
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto attribution = amber::attribution(std::as_const(objects_state.objects));
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+
   const auto mechanical_root = edit.root;
   auto definitions = replacements.front()->retained;
   auto old_internal = replacements.front()->old_internal;
@@ -163,9 +177,8 @@ void rebuild_instances(Objects &objects, lifecycle::Parts &parts, Relation &decl
               : space::Attachment{h, parent, relative_pose(transforms, h, parent), false});
     }
   }
-  const auto rebuilt =
-      space::rebuild_assembly(space, identity(objects), transforms, parents, flags, physical, edit,
-                              bodies, logical, volumes, attachments, changes);
+  const auto rebuilt = space::rebuild_assembly(space, objects_state, space_state, edit, bodies,
+                                               logical, volumes, attachments);
   if (rebuilt.status != space::Status::Ok)
     throw std::invalid_argument(space::status_text(rebuilt.status));
   perm::update_plots(identity(objects), transforms, membership, land, after, edit.in_scene);
@@ -210,24 +223,33 @@ void rebuild_instances(Objects &objects, lifecycle::Parts &parts, Relation &decl
       out.records.push_back(std::move(destroyed));
     }
     for (auto h : made.objects)
-      out.records.push_back(birth_record(call, h, identity(objects), authority.owner,
-                                         authority.plot, values.params, maker, attribution, models,
-                                         scripts));
+      out.records.push_back(birth_record(call, h, objects_state, authority.owner, authority.plot,
+                                         maker, catalog_state));
   }
 }
 } // namespace structural_detail
 
-NativeCompletion
-replace_instance(Objects &objects, lifecycle::Parts &parts, Relation &declared_parts,
-                 const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                 const catalog::Assets &assets, const GeometryAssets &geometry,
-                 const react::ValueRead &values, space::Space &space, TransformWrite transforms,
-                 ParentWrite parents, SpaceFlags flags, space::PhysicalRelations &physical,
-                 std::vector<space::RelationChange> &changes, AuthorityRead authority,
-                 AttributionRead attribution, const perm::OwnerLimits &limits,
-                 const perm::Players &players, const perm::Grants &grants, const perm::Plots &plots,
-                 const perm::Ledger &ledger, const catalog::Scripts &scripts, PlotWrite membership,
-                 PhysicsRoles roles, PhysicsDefaults defaults, const NativeCall &call) {
+NativeCompletion replace_instance(amber::ObjectState &objects_state,
+                                  const amber::catalog::State &catalog_state,
+                                  const GeometryAssets &geometry, const react::ValueRead &values,
+                                  space::Space &space, amber::space::State &space_state,
+                                  const amber::perm::State &perm_state, PhysicsRoles roles,
+                                  PhysicsDefaults defaults, const NativeCall &call) {
+
+  auto &parts = objects_state.parts;
+
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+  auto transforms = amber::transforms(objects_state.objects);
+
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &limits = perm_state.owner_limits;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+  auto &plots = perm_state.plots;
+  auto &ledger = perm_state.ledger;
+
   using namespace structural_detail;
   const auto identity = values.identity;
   const auto selected = lifecycle::collect(parts, identity, call.request.target);
@@ -250,9 +272,9 @@ replace_instance(Objects &objects, lifecycle::Parts &parts, Relation &declared_p
   out.reply = {{"ok", true}, {"effect", "none"}};
   if (rows.retained.front().before == rows.retained.front().after)
     return out;
-  auto replacement = replacement_geometry(space, parts, identity, transforms, parents,
-                                          authority.plot, geometry, models, parameters, assets,
-                                          values, roles, defaults, call, std::move(rows));
+  auto replacement =
+      replacement_geometry(space, objects_state, authority.plot, geometry, catalog_state, values,
+                           roles, defaults, call, std::move(rows));
   const auto capacity = space::can_rebuild_assembly(space, replacement.bodies, replacement.sensors,
                                                     replacement.before, replacement.promote);
   if (capacity.status != space::Status::Ok &&
@@ -271,9 +293,8 @@ replace_instance(Objects &objects, lifecycle::Parts &parts, Relation &declared_p
   auto edit = space::extract_assembly(space, identity, replacement.mechanical_root,
                                       std::span(replacement.before).subspan(1));
   ReplacementGeometry *row = &replacement;
-  rebuild_instances(objects, parts, declared_parts, space, transforms, parents, flags, physical,
-                    changes, membership, plots, authority, attribution, models, scripts, values,
-                    std::span(&row, 1), edit, maker, call, out);
+  rebuild_instances(objects_state, space, space_state, plots, catalog_state, std::span(&row, 1),
+                    edit, maker, call, out);
   return out;
 }
 } // namespace amber::step

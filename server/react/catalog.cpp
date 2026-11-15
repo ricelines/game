@@ -204,10 +204,15 @@ ModelRegistration submit_model(Models &models, ModelTexts &texts, react::ModelSe
   project_settings(settings, terms, result.root, submission.settings);
   return result;
 }
-std::uint32_t add_variant(ParameterBlocks &blocks, Models &models, ModelTexts &texts,
-                          react::ModelSettings &settings, const Assets &assets,
-                          const Scripts &scripts, const react::Terms &terms, ModelId model,
-                          Hash hash, std::string canonical) {
+std::uint32_t add_variant(State &family, const State &catalog_state, react::ModelSettings &settings,
+                          const react::Terms &terms, ModelId model, Hash hash,
+                          std::string canonical) {
+  auto &blocks = family.parameters;
+  auto &models = family.models;
+  auto &texts = family.model_text;
+  auto &assets = catalog_state.assets;
+  auto &scripts = catalog_state.scripts;
+
   const auto source = models.rows.at(model);
   const auto &asset = assets.rows.at(hash);
   if (!model || source.id != model || source.source_hash != asset.source_hash ||

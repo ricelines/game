@@ -78,11 +78,15 @@ void extend_vocabulary(react::Terms &terms, react::Materials &materials,
     if (id >= previous_size)
       materials.rows.emplace(id, std::move(data));
 }
-react::RuleChange install_candidate(
-    catalog::Scripts &scripts, react::Vm &vm, react::RuleVersions &rules, const react::Terms &terms,
-    const catalog::RuntimePins &pins, const std::filesystem::path &source_root,
-    const std::filesystem::path &destination_root, const catalog::Hash &artifact,
-    const catalog::Hash &registry_pin, PlayerId author, bool active, Step now, double hz) {
+react::RuleChange
+install_candidate(catalog::Scripts &scripts, react::Vm &vm, amber::react::State &react_state,
+                  const catalog::RuntimePins &pins, const std::filesystem::path &source_root,
+                  const std::filesystem::path &destination_root, const catalog::Hash &artifact,
+                  const catalog::Hash &registry_pin, PlayerId author, bool active, Step now,
+                  double hz) {
+  auto &rules = react_state.rules;
+  auto &terms = react_state.terms;
+
   ScriptId candidate = 0;
   for (const auto &script : scripts.rows)
     if (script.id && script.artifact == artifact)
@@ -107,10 +111,13 @@ react::RuleChange install_candidate(
   react::set_activation(vm, candidate, active, active);
   return active ? react::add_rule(rules, scripts, terms, candidate) : react::RuleChange{};
 }
-void apply_given(react::Properties &properties, react::Processes &processes,
-                 react::SharedColumns &shared, react::GivesTo &gives,
-                 const react::ValueRead &values, const Case &test, Step now, double hz,
-                 react::DeferredEffects &effects) {
+void apply_given(amber::react::State &react_state, const react::ValueRead &values, const Case &test,
+                 Step now, double hz, react::DeferredEffects &effects) {
+  auto &properties = react_state.properties;
+  auto &processes = react_state.processes;
+  auto &shared = react_state.shared;
+  auto &gives = react_state.gives_to;
+
   if (!test.test.contains("given"))
     return;
   const auto apply = [&](const Json &entry) {
@@ -135,14 +142,15 @@ void apply_given(react::Properties &properties, react::Processes &processes,
   else
     apply(given);
 }
-void initialize_case(const Case &test, react::Properties &properties, react::Processes &processes,
-                     react::SharedColumns &shared, react::GivesTo &gives,
-                     react::AllocationRows &allocations, react::MeterRows &meters,
+void initialize_case(const Case &test, amber::react::State &react_state,
                      const react::ValueRead &values, const catalog::Scripts &scripts,
                      const react::RuleChange &activated, WorkQueues &queues, Step now, double hz,
                      react::DeferredEffects &effects) {
-  apply_given(properties, processes, shared, gives, values, test, now, hz, effects);
-  react::reconcile_allocations(values, allocations, meters, effects, now, hz);
+
+  auto &shared = react_state.shared;
+
+  apply_given(react_state, values, test, now, hz, effects);
+  react::reconcile_allocations(values, react_state, effects, now, hz);
   for (const auto &rule : activated.active)
     for (auto &item : react::catch_up(shared, values.identity, scripts, values.terms, rule, {}))
       enqueue_background(queues, std::move(item));

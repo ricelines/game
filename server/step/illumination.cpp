@@ -35,10 +35,13 @@ double sampled(const react::ValueRead &values, Handle object, TermId term, Step 
   const auto answer = react::read(values, object, term, now, hz);
   return answer.present && answer.value.is_numeric() ? answer.value.numeric() : 0;
 }
-void light_changed(IlluminationSources &sources, observe::Lights &lights,
-                   observe::LightSubscriptions &points, observe::ActiveViews &views,
+void light_changed(IlluminationSources &sources, amber::space::State &space_state,
                    const react::ValueRead &values, Handle object, TermId term, Step now,
                    double hz) {
+  auto &lights = space_state.lights;
+  auto &points = space_state.light_subscriptions;
+  auto &views = space_state.active_views;
+
   auto found = lights.rows.find(object.bits);
   if (found == lights.rows.end()) {
     sources.running_lights.erase(object.bits);
@@ -54,10 +57,13 @@ void light_changed(IlluminationSources &sources, observe::Lights &lights,
   else
     sources.running_lights.erase(object.bits);
 }
-void zone_changed(IlluminationSources &sources, observe::ZoneAmbients &zones,
-                  observe::LightSubscriptions &points, observe::ActiveViews &views,
+void zone_changed(IlluminationSources &sources, amber::space::State &space_state,
                   const space::Space &world, const react::ValueRead &values, Handle object,
                   TermId term, Step now, double hz) {
+  auto &zones = space_state.zones;
+  auto &points = space_state.light_subscriptions;
+  auto &views = space_state.active_views;
+
   auto *zone = zones.rows.get(object.slot());
   if (!zone || zone->zone != object) {
     sources.running_zones.erase(object.bits);
@@ -74,14 +80,19 @@ void zone_changed(IlluminationSources &sources, observe::ZoneAmbients &zones,
     sources.running_zones.erase(object.bits);
 }
 } // namespace
-void register_illumination(IlluminationSources &sources, observe::Lights &lights,
-                           observe::ZoneAmbients &zones, observe::LightSubscriptions &points,
-                           observe::ActiveViews &views, const space::Space &world,
-                           TransformRead transforms, const catalog::Models &models,
-                           const catalog::ParameterBlocks &parameters,
-                           const catalog::Assets &assets, const react::ValueRead &values,
-                           std::span<const Handle> objects, float source_radius, Step now,
-                           double hz) {
+void register_illumination(IlluminationSources &sources, amber::space::State &space_state,
+                           const space::Space &world, TransformRead transforms,
+                           const amber::catalog::State &catalog_state,
+                           const react::ValueRead &values, std::span<const Handle> objects,
+                           float source_radius, Step now, double hz) {
+  auto &lights = space_state.lights;
+  auto &zones = space_state.zones;
+  auto &points = space_state.light_subscriptions;
+  auto &views = space_state.active_views;
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+
   for (const auto object : objects) {
     const auto &asset = assets.rows.at(catalog::resolve_asset(models, parameters,
                                                               values.identity.model[object.slot()],
@@ -142,24 +153,27 @@ void retire_illumination(IlluminationSources &sources, observe::Lights &lights,
     sources.running_zones.erase(object.bits);
   }
 }
-void illumination_values_changed(IlluminationSources &sources, observe::Lights &lights,
-                                 observe::ZoneAmbients &zones, observe::LightSubscriptions &points,
-                                 observe::ActiveViews &views, const space::Space &world,
-                                 const react::ValueRead &values, std::span<const FactKey> facts,
-                                 Step now, double hz) {
+void illumination_values_changed(IlluminationSources &sources, amber::space::State &space_state,
+                                 const space::Space &world, const react::ValueRead &values,
+                                 std::span<const FactKey> facts, Step now, double hz) {
+
   for (const auto fact : facts) {
     if (const auto found = sources.lights.find(fact.subject.bits);
         found != sources.lights.end() && found->second == fact.term)
-      light_changed(sources, lights, points, views, values, fact.subject, fact.term, now, hz);
+      light_changed(sources, space_state, values, fact.subject, fact.term, now, hz);
     if (const auto found = sources.zones.find(fact.subject.bits);
         found != sources.zones.end() && found->second == fact.term)
-      zone_changed(sources, zones, points, views, world, values, fact.subject, fact.term, now, hz);
+      zone_changed(sources, space_state, world, values, fact.subject, fact.term, now, hz);
   }
 }
-void advance_illumination(IlluminationSources &sources, observe::Lights &lights,
-                          observe::ZoneAmbients &zones, observe::LightSubscriptions &points,
-                          observe::ActiveViews &views, const space::Space &world,
-                          const react::ValueRead &values, Step now, double hz) {
+void advance_illumination(IlluminationSources &sources, amber::space::State &space_state,
+                          const space::Space &world, const react::ValueRead &values, Step now,
+                          double hz) {
+  auto &lights = space_state.lights;
+  auto &zones = space_state.zones;
+  auto &points = space_state.light_subscriptions;
+  auto &views = space_state.active_views;
+
   // Update only sources with a running process; dormant geometry costs no work.
   std::erase_if(sources.running_lights, [&](std::uint64_t bits) {
     const auto term = sources.lights.find(bits);
@@ -241,16 +255,20 @@ void sample_illuminance(observe::LightSubscriptions &points, const space::Space 
                               {{point.subject, point.measured_term}, Value(answer), {}}, effects);
   }
 }
-void update_frame_illumination(IlluminationSources &sources, observe::Lights &lights,
-                               observe::ZoneAmbients &zones, observe::LightSubscriptions &points,
-                               observe::ActiveViews &views, const space::Space &world,
-                               TransformRead transforms, const react::ValueRead &values,
-                               const react::Subscriptions &subscriptions,
-                               react::RuntimeMeasurements &measurements,
+void update_frame_illumination(IlluminationSources &sources, amber::space::State &space_state,
+                               const space::Space &world, TransformRead transforms,
+                               const react::ValueRead &values, amber::react::State &react_state,
                                std::span<const Handle> moved,
                                std::span<const space::Bounds> dirty_bounds,
                                std::span<const FactKey> changed, TermId illuminance, Step now,
                                double hz, react::DeferredEffects &effects) {
+  auto &lights = space_state.lights;
+  auto &zones = space_state.zones;
+  auto &points = space_state.light_subscriptions;
+  auto &views = space_state.active_views;
+  auto &subscriptions = react_state.subscriptions;
+  auto &measurements = react_state.runtime_measurements;
+
   move_illumination(lights, points, views, transforms, moved);
   move_illuminance_reads(points, transforms, illuminance, moved);
   observe::dirty_views(views, dirty_bounds);
@@ -261,9 +279,8 @@ void update_frame_illumination(IlluminationSources &sources, observe::Lights &li
     changed_sources.push_back(fact.subject);
   sync_illuminance_reads(points, subscriptions, values.identity, transforms, illuminance,
                          changed_sources);
-  illumination_values_changed(sources, lights, zones, points, views, world, values, changed, now,
-                              hz);
-  advance_illumination(sources, lights, zones, points, views, world, values, now, hz);
+  illumination_values_changed(sources, space_state, world, values, changed, now, hz);
+  advance_illumination(sources, space_state, world, values, now, hz);
   sample_illuminance(points, world, values.identity, lights, zones, measurements, 0, effects);
 }
 } // namespace amber::step

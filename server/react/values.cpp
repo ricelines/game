@@ -162,8 +162,11 @@ bool set_state(Properties &props, Processes &processes, const Term &term, Handle
     dirty(effects, self, term.id);
   return changed;
 }
-bool set_rate(Properties &props, Processes &processes, const Term &term, Handle self, double rate,
+bool set_rate(amber::react::State &react_state, const Term &term, Handle self, double rate,
               double lo, double hi, Step now, double hz, DeferredEffects &effects) {
+  auto &props = react_state.properties;
+  auto &processes = react_state.processes;
+
   state_term(term);
   if (lo > hi || !std::isfinite(rate) || !std::isfinite(lo) || !std::isfinite(hi))
     throw std::invalid_argument("invalid process bounds/rate");
@@ -183,8 +186,11 @@ bool set_rate(Properties &props, Processes &processes, const Term &term, Handle 
   effects.changed |= changed;
   return changed;
 }
-bool transfer_state(Properties &props, Processes &processes, const Term &term, Handle from,
-                    Handle to, double amount, Step now, double hz, DeferredEffects &effects) {
+bool transfer_state(amber::react::State &react_state, const Term &term, Handle from, Handle to,
+                    double amount, Step now, double hz, DeferredEffects &effects) {
+  auto &props = react_state.properties;
+  auto &processes = react_state.processes;
+
   state_term(term);
   if (!term.conserved || term.kind != Kind::Quantity || amount < 0 || !std::isfinite(amount))
     throw std::invalid_argument("invalid conserved transfer");
@@ -379,8 +385,10 @@ std::vector<Demand> divide(const Shared &supply, const Shared &demand, Combine c
 std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, Combine combine,
                                     const PriorityValues &priority, Handle subject,
                                     TermId supply_term, TermId demand_term,
-                                    AllocationRows &allocations, MeterRows &meters, Step now,
-                                    double hz) {
+                                    amber::react::State &react_state, Step now, double hz) {
+  auto &allocations = react_state.allocations;
+  auto &meters = react_state.meters;
+
   std::vector<AllocationKey> changed;
   auto rows = divide(supply, demand, combine, priority);
   std::unordered_map<AllocationKey, double, AllocationKeyHash> next;

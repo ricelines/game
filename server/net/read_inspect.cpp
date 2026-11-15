@@ -124,22 +124,32 @@ Json state_record(const react::ScriptState &state) {
   }
   return result;
 }
-Json object_record(const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                   const catalog::Assets &assets, const catalog::Scripts &scripts,
-                   const catalog::ModelTexts &model_text,
-                   const catalog::InstanceTexts &instance_text,
-                   const react::InstanceScripts &instances, const react::NativeActions &native,
-                   const react::ValueRead &values, const std::vector<TermId> &inspection_terms,
-                   const catalog::AuthoredTexts &authored_texts, SessionViews &sessions,
-                   TransformRead transforms, AuthorityRead authority, ParentRead parents,
-                   AttributionRead attribution, const react::RelationsRead &relations,
-                   const perm::OwnerLimits &limits, const perm::Players &players,
-                   const perm::Grants &grants, Step now, double hz,
-                   const react::ScriptStates &states, const react::RuleVersions &rules,
-                   Handle object, const net::Invocation &call) {
-  auto result = view_detail::description(view_detail::describe(
-      models, parameters, assets, scripts, model_text, instance_text, instances, native, values,
-      authored_texts, object, now, hz, inspection_terms));
+Json object_record(const amber::catalog::State &catalog_state,
+                   const amber::react::State &react_state, const react::ValueRead &values,
+                   SessionViews &sessions, const amber::ObjectState &objects_state,
+                   const amber::perm::State &perm_state, Step now, double hz, Handle object,
+                   const net::Invocation &call) {
+  auto &models = catalog_state.models;
+
+  auto &scripts = catalog_state.scripts;
+
+  auto &instances = react_state.installations;
+
+  auto &inspection_terms = react_state.inspection_terms;
+
+  auto transforms = amber::transforms(std::as_const(objects_state.objects));
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto parents = amber::parents(std::as_const(objects_state.objects));
+  auto attribution = amber::attribution(std::as_const(objects_state.objects));
+  auto &relations = react_state.relations;
+  auto &limits = perm_state.owner_limits;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+  auto &states = react_state.states;
+  auto &rules = react_state.rules;
+
+  auto result = view_detail::description(
+      view_detail::describe(catalog_state, react_state, values, object, now, hz, inspection_terms));
   const auto identity = values.identity;
   result["owner"] = "p:" + std::to_string(authority.owner[object.slot()]);
   result["maker"] = "p:" + std::to_string(attribution.maker[object.slot()]);
@@ -206,20 +216,25 @@ Json object_record(const catalog::Models &models, const catalog::ParameterBlocks
   return result;
 }
 } // namespace
-net::Reply read_inspect(const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                        const catalog::Assets &assets, const catalog::Scripts &scripts,
-                        const catalog::ModelTexts &model_text,
-                        const catalog::InstanceTexts &instance_text,
-                        const react::InstanceScripts &instances, const react::NativeActions &native,
-                        const react::ValueRead &values, const std::vector<TermId> &inspection_terms,
-                        const catalog::AuthoredTexts &authored_texts, SessionViews &sessions,
-                        observe::Hearing &hearing, TransformRead transforms,
-                        AuthorityRead authority, ParentRead parents, AttributionRead attribution,
-                        const react::RelationsRead &relations, const perm::OwnerLimits &limits,
-                        const perm::Players &players, const perm::Grants &grants,
-                        const perm::Plots &plots, const perm::Ledger &ledger, Step now, double hz,
-                        std::size_t events_per_response, const react::ScriptStates &states,
-                        const react::RuleVersions &rules, const net::Invocation &call) {
+net::Reply read_inspect(const amber::catalog::State &catalog_state,
+                        const amber::react::State &react_state, const react::ValueRead &values,
+                        SessionViews &sessions, observe::Hearing &hearing,
+                        const amber::ObjectState &objects_state,
+                        const amber::perm::State &perm_state, Step now, double hz,
+                        std::size_t events_per_response, const net::Invocation &call) {
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+  auto &scripts = catalog_state.scripts;
+  auto &model_text = catalog_state.model_text;
+
+  auto transforms = amber::transforms(std::as_const(objects_state.objects));
+
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+  auto &plots = perm_state.plots;
+  auto &ledger = perm_state.ledger;
+
   try {
     const auto name = call.request.fields.at("target").get<std::string>();
     Json result;
@@ -233,16 +248,12 @@ net::Reply read_inspect(const catalog::Models &models, const catalog::ParameterB
       const auto &player = players.rows.at(call.principal.player);
       for (const auto h : player.inventory)
         if (values.identity.valid(h))
-          result["inventory"].push_back(object_record(
-              models, parameters, assets, scripts, model_text, instance_text, instances, native,
-              values, inspection_terms, authored_texts, sessions, transforms, authority, parents,
-              attribution, relations, limits, players, grants, now, hz, states, rules, h, call));
+          result["inventory"].push_back(object_record(catalog_state, react_state, values, sessions,
+                                                      objects_state, perm_state, now, hz, h, call));
       for (const auto h : player.mailbox)
         if (values.identity.valid(h))
-          result["mailbox"].push_back(object_record(
-              models, parameters, assets, scripts, model_text, instance_text, instances, native,
-              values, inspection_terms, authored_texts, sessions, transforms, authority, parents,
-              attribution, relations, limits, players, grants, now, hz, states, rules, h, call));
+          result["mailbox"].push_back(object_record(catalog_state, react_state, values, sessions,
+                                                    objects_state, perm_state, now, hz, h, call));
       result["balance"] = perm::balance(ledger, perm::Account::player(call.principal.player));
     } else if (name == "grants") {
       result = {{"held", Json::array()}, {"given", Json::array()}};
@@ -280,10 +291,8 @@ net::Reply read_inspect(const catalog::Models &models, const catalog::ParameterB
         result = {{"plot", plot_record(*found)}};
     } else {
       const auto object = view_detail::target(values.identity, call);
-      result = object_record(models, parameters, assets, scripts, model_text, instance_text,
-                             instances, native, values, inspection_terms, authored_texts, sessions,
-                             transforms, authority, parents, attribution, relations, limits,
-                             players, grants, now, hz, states, rules, object, call);
+      result = object_record(catalog_state, react_state, values, sessions, objects_state,
+                             perm_state, now, hz, object, call);
       if (name == "self")
         result["balance"] = perm::balance(ledger, perm::Account::player(call.principal.player));
     }

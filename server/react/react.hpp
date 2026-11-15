@@ -1,4 +1,10 @@
 #pragma once
+namespace amber::catalog {
+struct State;
+}
+namespace amber::react {
+struct State;
+}
 
 #include "record/record.hpp"
 #include "snap/snap.hpp"
@@ -59,13 +65,13 @@ std::vector<step::Timer> threshold_timers(const Subscriptions &, const Processes
 void validate_shared_terms(const Terms &);
 std::vector<FactKey> allocation_inputs(const Terms &, FactKey);
 std::vector<FactKey> priority_inputs(const ValueRead &, SettingKey);
-bool reconcile_allocation(const ValueRead &, AllocationRows &, MeterRows &, FactKey demand, Step,
+bool reconcile_allocation(const ValueRead &, amber::react::State &react_state, FactKey demand, Step,
                           double hz);
 
 double metered(const Meter &, Step now, double hz);
 std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, Combine,
                                     const PriorityValues &, Handle subject, TermId supply_term,
-                                    TermId demand_term, AllocationRows &, MeterRows &, Step now,
+                                    TermId demand_term, amber::react::State &react_state, Step now,
                                     double hz);
 double get_share(const AllocationRows &, Handle subject, TermId demand_term, Handle contributor);
 double live_share(const ValueRead &, Handle subject, TermId demand_term, Handle contributor,
@@ -74,10 +80,10 @@ void retire_allocations(AllocationRows &, MeterRows &, Handle);
 
 bool set_state(Properties &, Processes &, const Term &, Handle, Value, Step, double hz,
                DeferredEffects &);
-bool set_rate(Properties &, Processes &, const Term &, Handle, double rate, double lo, double hi,
-              Step, double hz, DeferredEffects &);
-bool transfer_state(Properties &, Processes &, const Term &, Handle from, Handle to, double amount,
-                    Step, double hz, DeferredEffects &);
+bool set_rate(amber::react::State &react_state, const Term &, Handle, double rate, double lo,
+              double hi, Step, double hz, DeferredEffects &);
+bool transfer_state(amber::react::State &react_state, const Term &, Handle from, Handle to,
+                    double amount, Step, double hz, DeferredEffects &);
 bool set_contribution(SharedColumns &, GivesTo &, const Term &, Handle from, Handle subject,
                       double amount, DeferredEffects &);
 void withdraw_contributor(SharedColumns &, GivesTo &, const Terms &, Handle, DeferredEffects &);
@@ -94,11 +100,10 @@ void consult_object(const Invocation &, Handle);
 
 class Vm;
 // Direct VM execution.
-bool start_invocation(Vm &, ScriptStates &, RandomStates &, Subscriptions &, const ValueRead &,
-                      const Triggers &, const Relation &declared_parts, std::uint64_t initial_seed,
-                      AttributionRead, const catalog::Models &, const catalog::Scripts &,
-                      record::Journal &, const HandlerRef &, InvocationInput, Invocation &,
-                      CompletedInvocation &);
+bool start_invocation(Vm &, amber::react::State &react_state, const ValueRead &,
+                      const amber::ObjectState &objects_state, std::uint64_t initial_seed,
+                      const amber::catalog::State &catalog_state, record::Journal &,
+                      const HandlerRef &, InvocationInput, Invocation &, CompletedInvocation &);
 void finish_invocation(IdentityRead, AttributionRead, const catalog::Models &,
                        const catalog::Scripts &, record::Journal &, Invocation &,
                        CompletedInvocation &);
@@ -115,8 +120,7 @@ private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
   friend void register_binding(Vm &, std::string_view, int (*)(lua_State *), std::shared_ptr<void>);
-  friend void bind_values(Vm &, const ValueRead &, Properties &, Processes &, SharedColumns &,
-                          GivesTo &);
+  friend void bind_values(Vm &, const ValueRead &, State &);
   friend RunOutcome load_script(Vm &, const CompiledScript &, const ScriptDeclaration &);
   friend RunOutcome run_handler(Vm &, const HandlerRef &, Invocation &);
   friend RunOutcome resume_handler(Vm &, Invocation &, const nlohmann::json &);
@@ -141,7 +145,7 @@ void push_handle(lua_State *, Handle);
 Handle check_handle(lua_State *, int index);
 EventPayload check_event_payload(lua_State *, int index);
 // Core value methods keep their required C-callback data private to the VM.
-void bind_values(Vm &, const ValueRead &, Properties &, Processes &, SharedColumns &, GivesTo &);
+void bind_values(Vm &, const ValueRead &, State &);
 
 void set_instances(InstanceScripts &, Handle, std::span<const ScriptId>, const catalog::Scripts &);
 std::vector<ScriptId> installed_scripts(const catalog::Models &, const InstanceScripts &,
@@ -159,15 +163,15 @@ std::vector<ScriptId> rule_scripts(const RuleVersions &, const ValueRead &, Hand
 std::vector<TermId> rule_watch_terms(const RuleVersions &, const ValueRead &, Handle, ScriptId,
                                      Step, double hz);
 
-WatchChanges sync_watches(Subscriptions &, const ValueRead &, const AllocationRows &, ScriptKey,
+WatchChanges sync_watches(amber::react::State &react_state, const ValueRead &, ScriptKey,
                           const ScriptDeclaration &, Step, double hz, const record::Origin &,
                           SyncMode, std::optional<std::span<const TermId>> allowed_terms = {});
 void remove_watches(Subscriptions &, ScriptKey);
 WatchChanges refresh_dependencies(Subscriptions &, const ValueRead &, FactKey changed, Step,
                                   double hz, const record::Origin &);
-WatchChanges sync_rule_watches(Subscriptions &, const ValueRead &, const AllocationRows &,
-                               const catalog::Scripts &, const RuleVersions &,
-                               std::span<const Effect>, Step, double hz, const record::Origin &);
+WatchChanges sync_rule_watches(amber::react::State &react_state, const ValueRead &,
+                               const catalog::Scripts &, std::span<const Effect>, Step, double hz,
+                               const record::Origin &);
 std::vector<Handle> source_consumers(const ValueRead &, FactKey, const WatchDeclaration &);
 WatchResult check_changed(Subscriptions &, const ValueRead &, const AllocationRows &, FactKey, Step,
                           double hz, const record::Origin &, ScriptId recipient = 0);
@@ -188,44 +192,33 @@ void write_instances(snap::Output &, const InstanceScripts &, IdentityRead, Obje
 void read_instances(snap::Input &, InstanceScripts &, std::size_t slots);
 
 // Direct reactive installation and cleanup. No lifecycle-owned references are retained.
-void install_reactions(const catalog::Models &, const catalog::Scripts &,
-                       const SparseColumn<std::vector<ScriptId>> &instances, const RuleVersions &,
-                       const ValueRead &, Triggers &, Subscriptions &, const AllocationRows &,
-                       std::span<const Handle>, Step, double hz, const record::Origin &,
-                       DeferredEffects &);
-void restore_reactions(const catalog::Models &, const catalog::Scripts &,
-                       const SparseColumn<std::vector<ScriptId>> &instances, const RuleVersions &,
-                       const ValueRead &, Triggers &, Subscriptions &, const AllocationRows &,
-                       std::span<const Handle>, Step, double hz, const record::Origin &,
-                       DeferredEffects &);
-void initialize_reactions(const catalog::Models &models, const catalog::Scripts &scripts,
-                          const InstanceScripts &installations, const RuleVersions &rules,
-                          const ValueRead &values, Triggers &triggers, Subscriptions &subscriptions,
-                          AllocationRows &allocations, MeterRows &meters,
+void install_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
+                       const ValueRead &, std::span<const Handle>, Step, double hz,
+                       const record::Origin &, DeferredEffects &);
+void restore_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
+                       const ValueRead &, std::span<const Handle>, Step, double hz,
+                       const record::Origin &, DeferredEffects &);
+void initialize_reactions(const amber::catalog::State &catalog_state,
+                          amber::react::State &react_state, const ValueRead &values,
                           std::span<const Handle> initial, Step now, double hz, bool restored,
                           DeferredEffects &effects);
 
-void rebind_reactions(const catalog::Models &, const catalog::Scripts &,
-                      const SparseColumn<std::vector<ScriptId>> &instances, const RuleVersions &,
-                      const ValueRead &, Triggers &, Subscriptions &, const AllocationRows &,
+void rebind_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
+                      const ValueRead &, std::span<const Handle>, Step, double hz,
+                      const record::Origin &, DeferredEffects &);
+void retire_reactions(const catalog::Models &, const ValueRead &, amber::react::State &react_state,
                       std::span<const Handle>, Step, double hz, const record::Origin &,
-                      DeferredEffects &);
-void retire_reactions(const catalog::Models &, const ValueRead &,
-                      SparseColumn<std::vector<ScriptId>> &instances, Triggers &, Subscriptions &,
-                      Properties &, Processes &, InstanceSettings &, ScriptStates &, RandomStates &,
-                      SharedColumns &, GivesTo &, AuthoredRelations &, AllocationRows &,
-                      MeterRows &, std::span<const Handle>, Step, double hz, const record::Origin &,
                       DeferredEffects &);
 
 // True means cached rule state changed and the caller must persist its registry pin.
-bool update_rule(catalog::Scripts &, RuleVersions &, Triggers &, Subscriptions &,
-                 step::WorkQueues &, Vm &, const ValueRead &, const AllocationRows &, ScriptId,
-                 RuleMode, Step, double hz, const record::Origin &, DeferredEffects &);
-void reconcile_allocations(const ValueRead &, AllocationRows &, MeterRows &, DeferredEffects &,
+bool update_rule(catalog::Scripts &, amber::react::State &react_state, step::WorkQueues &, Vm &,
+                 const ValueRead &, ScriptId, RuleMode, Step, double hz, const record::Origin &,
+                 DeferredEffects &);
+void reconcile_allocations(const ValueRead &, amber::react::State &react_state, DeferredEffects &,
                            Step, double hz);
-void reconcile_priority(const ValueRead &, AllocationRows &, MeterRows &, SettingKey,
+void reconcile_priority(const ValueRead &, amber::react::State &react_state, SettingKey,
                         DeferredEffects &, Step, double hz);
-void reconcile_object_priorities(const ValueRead &, AllocationRows &, MeterRows &, Handle,
+void reconcile_object_priorities(const ValueRead &, amber::react::State &react_state, Handle,
                                  DeferredEffects &, Step, double hz);
 
 using SnapshotSelection = snap::ObjectSelection;
@@ -270,9 +263,8 @@ void restore_assets(Assets &, const Models &, const ParameterBlocks &, const rea
                     const RuntimePins &, const std::filesystem::path &asset_root);
 ModelRegistration submit_model(Models &, ModelTexts &, react::ModelSettings &, const Assets &,
                                const Scripts &, const react::Terms &, const ModelSubmission &);
-std::uint32_t add_variant(ParameterBlocks &, Models &, ModelTexts &, react::ModelSettings &,
-                          const Assets &, const Scripts &, const react::Terms &, ModelId,
-                          Hash asset, std::string canonical_params);
+std::uint32_t add_variant(State &family, const State &catalog_state, react::ModelSettings &,
+                          const react::Terms &, ModelId, Hash asset, std::string canonical_params);
 void project_measurements(react::AssetMeasurements &, ModelId, std::uint32_t, const Asset &,
                           const MeasurementBindings &);
 void project_settings(react::ModelSettings &, const react::Terms &, ModelId, const react::Values &);
@@ -366,15 +358,11 @@ private:
 // These writer functions install only validated immutable submissions. Geometry
 // preparation and record/publication policy belong to step's direct caller.
 step::NativeCompletion install_model(PreparedModel, PlayerId author, double created_s,
-                                     catalog::Assets &, catalog::Models &,
-                                     catalog::ParameterBlocks &, catalog::ModelTexts &,
-                                     react::ModelSettings &, react::AssetMeasurements &,
-                                     const catalog::Scripts &, const react::Terms &,
+                                     amber::catalog::State &catalog_state,
+                                     amber::react::State &react_state,
                                      catalog::MeasurementBindings);
-step::NativeCompletion install_variant(PreparedVariant, catalog::Assets &, catalog::Models &,
-                                       catalog::ParameterBlocks &, catalog::ModelTexts &,
-                                       react::ModelSettings &, react::AssetMeasurements &,
-                                       const catalog::Scripts &, const react::Terms &,
+step::NativeCompletion install_variant(PreparedVariant, amber::catalog::State &catalog_state,
+                                       amber::react::State &react_state,
                                        catalog::MeasurementBindings);
 step::NativeCompletion install_script(catalog::PreparedScript, PlayerId author, double created_s,
                                       catalog::Scripts &, react::Vm &, const react::NativeActions &,
@@ -437,5 +425,6 @@ struct State {
   Subscriptions subscriptions;
   InstanceScripts installations;
   NativeActions native_declarations;
+  std::vector<TermId> inspection_terms;
 };
 } // namespace amber::react

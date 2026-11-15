@@ -23,15 +23,19 @@ Json tests() {
         {"expect", {{"subject", "target"}, {"term", "novel.heat"}, {"equals", 7}}}}});
 }
 struct Fixture {
+  amber::elaborate::State elaborate_state;
+  amber::catalog::State catalog_state;
+  amber::step::State step_state{8};
+
   test_runtime::Fixture reactive;
-  elaborate::Requests requests;
-  elaborate::GapCounts gaps;
-  elaborate::LastGaps last;
-  elaborate::CaptureRefs captures;
-  elaborate::PendingFixtures pending;
-  catalog::AuthoredTexts texts;
-  step::Inputs inputs;
-  step::WorkQueues queues;
+  elaborate::Requests &requests = elaborate_state.requests;
+  elaborate::GapCounts &gaps = elaborate_state.gap_counts;
+  elaborate::LastGaps &last = elaborate_state.last_gaps;
+  elaborate::CaptureRefs &captures = elaborate_state.captures;
+  elaborate::PendingFixtures &pending = elaborate_state.fixtures;
+  catalog::AuthoredTexts &texts = catalog_state.authored_text;
+  step::Inputs &inputs = step_state.inputs;
+  step::WorkQueues &queues = step_state.queues;
   ScriptId candidate;
   Handle target = reactive.a, body = reactive.b;
   Fixture() {
@@ -93,10 +97,9 @@ struct Fixture {
   }
   step::FixtureCompletion complete(const elaborate::FixtureResult &result, Step now,
                                    bool has_role = true) {
-    return step::complete_fixture(requests, pending, inputs, reactive.scripts, reactive.rules,
-                                  reactive.triggers, reactive.subscriptions, queues, reactive.vm,
-                                  reactive.values(), reactive.allocations, {2, has_role}, result,
-                                  now, 20);
+    return step::complete_fixture(elaborate_state, step_state, reactive.scripts,
+                                  reactive.react_state, reactive.vm, reactive.values(),
+                                  {2, has_role}, result, now, 20);
   }
 };
 void synchronous_workflow() {
@@ -171,8 +174,8 @@ void async_submission(const std::filesystem::path &executable, const std::filesy
   elaborate::FixtureWorker worker(executable, dir, 1);
   auto call = f.call(2, {{"request", "request:1"}, {"kind", "rule"}, {"script", "s:1"}});
   const auto answer = [&] {
-    return step::answer_rule(f.requests, f.pending, f.captures, f.reactive.scripts, worker,
-                             "transport-probe", {1000, 64, 65536}, true, f.body, call);
+    return step::answer_rule(f.elaborate_state, f.reactive.scripts, worker, "transport-probe",
+                             {1000, 64, 65536}, true, f.body, call);
   };
   rejects(answer, "rule answer requires explicit ordered input");
   call.order = step::InputOrder{9, 30, 4, 98};
@@ -189,9 +192,8 @@ void async_submission(const std::filesystem::path &executable, const std::filesy
           "copied fixture subprocess protocol failed (transport probe only)");
   auto change = f.call(2, {{"script", "s:1"}, {"active", true}});
   const auto activate = [&] {
-    return step::rule_activation(f.reactive.scripts, f.reactive.rules, f.reactive.triggers,
-                                 f.reactive.subscriptions, f.queues, f.reactive.vm,
-                                 f.reactive.values(), f.reactive.allocations, true, change);
+    return step::rule_activation(f.reactive.scripts, f.reactive.react_state, f.queues,
+                                 f.reactive.vm, f.reactive.values(), true, change);
   };
   rejects(activate, "manual enable approved untested code");
   f.reactive.scripts.rows[f.candidate].declaration.approved = true;

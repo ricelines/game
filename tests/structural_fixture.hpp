@@ -1,3 +1,4 @@
+#include <toml++/toml.hpp>
 #pragma once
 #include "runtime_fixture.hpp"
 #include "space_fixture.hpp"
@@ -8,26 +9,35 @@ using namespace react;
 using test_runtime::require;
 // Actual input tables for direct construction/replacement tests, without an execution stack.
 struct Fixture {
+  amber::step::State step_state{8};
+  amber::space::State space_state{float(
+      toml::parse_file(AMBER_CONFIG_PATH)["perception"]["LIGHT_CELL_M"].value<double>().value())};
+  amber::perm::State perm_state;
+
   test_runtime::Fixture f;
-  lifecycle::Parts parts;
-  Relation declared;
-  catalog::Assets assets;
-  catalog::ParameterBlocks parameters;
-  catalog::ModelTexts texts;
-  catalog::InstanceTexts instance_texts;
-  step::GeometryAssets geometry;
-  space::PhysicalRelations physical;
-  std::vector<space::RelationChange> physical_changes;
+  amber::ObjectState &objects_state = f.objects_state;
+  amber::catalog::State &catalog_state = f.catalog_state;
+  amber::react::State &react_state = f.react_state;
+
+  lifecycle::Parts &parts = objects_state.parts;
+  Relation &declared = objects_state.declared_parts;
+  catalog::Assets &assets = catalog_state.assets;
+  catalog::ParameterBlocks &parameters = catalog_state.parameters;
+  catalog::ModelTexts &texts = catalog_state.model_text;
+  catalog::InstanceTexts &instance_texts = catalog_state.instance_text;
+  step::GeometryAssets &geometry = step_state.geometry;
+  space::PhysicalRelations &physical = space_state.physical_relations;
+  std::vector<space::RelationChange> &physical_changes = space_state.relation_changes;
   space::Space world;
-  perm::OwnerLimits limits;
-  perm::Players players;
-  perm::Grants grants;
-  perm::Plots plots;
-  perm::Ledger ledger;
-  perm::Offers offers;
-  perm::Trades trades;
-  react::MeterRows meters;
-  react::NativeActions declarations;
+  perm::OwnerLimits &limits = perm_state.owner_limits;
+  perm::Players &players = perm_state.players;
+  perm::Grants &grants = perm_state.grants;
+  perm::Plots &plots = perm_state.plots;
+  perm::Ledger &ledger = perm_state.ledger;
+  perm::Offers &offers = perm_state.offers;
+  perm::Trades &trades = perm_state.trades;
+  react::MeterRows &meters = react_state.meters;
+  react::NativeActions &declarations = react_state.native_declarations;
   ScriptId script = 0;
   space::GeometryId solid = 0;
   explicit Fixture(std::uint32_t capacity = 64)
@@ -93,9 +103,7 @@ struct Fixture {
     f.assets.rows[1].volume = 1;
     f.assets.rows[2].volume = .016;
     step::declare_construction_actions(f.terms, declarations);
-    step::bind_metadata(f.vm, f.values(), transforms(f.objects), authority(f.objects),
-                        parents(f.objects), f.models, f.installed, parameters, assets, declared,
-                        meters, plots);
+    step::bind_metadata(f.vm, f.values(), f.objects_state, f.catalog_state, f.react_state, plots);
     f.objects.position[f.a.slot()] = {0, -2, 0};
     f.state(f.a, 1, 10);
   }
@@ -113,19 +121,14 @@ struct Fixture {
     return {{caller, 0, target, {}}, std::move(arguments), f.a, 0, 20, {}};
   }
   step::NativeCompletion create(nlohmann::json arguments) {
-    return step::create_instance(
-        f.objects, parts, declared, f.models, parameters, assets, geometry, *f.projection, world,
-        transforms(f.objects), parents(f.objects), space_flags(f.objects), physical,
-        physical_changes, authority(f.objects), players, grants, plots, plot_membership(f.objects),
-        {10, 11}, {.6f, 0}, call({}, std::move(arguments)));
+    return step::create_instance(f.objects_state, f.catalog_state, geometry, *f.projection, world,
+                                 space_state, perm_state, {10, 11}, {.6f, 0},
+                                 call({}, std::move(arguments)));
   }
   step::NativeCompletion replace(Handle target, nlohmann::json arguments) {
-    return step::replace_instance(
-        f.objects, parts, declared, f.models, parameters, assets, geometry, *f.projection, world,
-        transforms(f.objects), parents(f.objects), space_flags(f.objects), physical,
-        physical_changes, authority(f.objects), attribution(f.objects), limits, players, grants,
-        plots, ledger, f.scripts, plot_membership(f.objects), {10, 11}, {.6f, 0},
-        call(target, std::move(arguments)));
+    return step::replace_instance(f.objects_state, f.catalog_state, geometry, *f.projection, world,
+                                  space_state, perm_state, {10, 11}, {.6f, 0},
+                                  call(target, std::move(arguments)));
   }
   GrantId grant(Handle object, perm::Rights rights) {
     const auto holder = perm::Holder::script(script, f.a);

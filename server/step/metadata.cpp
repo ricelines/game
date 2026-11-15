@@ -436,12 +436,20 @@ int plot_binding(lua_State *L) {
   return 1;
 }
 } // namespace
-void bind_metadata(react::Vm &vm, const react::ValueRead &values, TransformRead transforms,
-                   AuthorityRead authority, ParentRead parents, const catalog::Models &models,
-                   const react::InstanceScripts &instances,
-                   const catalog::ParameterBlocks &parameters, const catalog::Assets &assets,
-                   const Relation &declared_parts, const react::MeterRows &meters,
-                   const perm::Plots &plots) {
+void bind_metadata(react::Vm &vm, const react::ValueRead &values,
+                   const amber::ObjectState &objects_state,
+                   const amber::catalog::State &catalog_state,
+                   const amber::react::State &react_state, const perm::Plots &plots) {
+  auto transforms = amber::transforms(std::as_const(objects_state.objects));
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto parents = amber::parents(std::as_const(objects_state.objects));
+  auto &models = catalog_state.models;
+  auto &instances = react_state.installations;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+  auto &declared_parts = objects_state.declared_parts;
+  auto &meters = react_state.meters;
+
   const auto identity = values.identity;
   const auto &params = values.params;
   const auto &terms = values.terms;

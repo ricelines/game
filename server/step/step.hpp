@@ -1,4 +1,7 @@
 #pragma once
+namespace amber::step {
+struct State;
+}
 
 #include "elaborate/elaborate.hpp"
 #include "net/net.hpp"
@@ -107,10 +110,8 @@ std::vector<PlannedInvocation> plan_action(const react::Triggers &, const react:
 WatchPlan plan_watch(react::Subscriptions &, const react::ValueRead &,
                      const react::AllocationRows &, const react::Triggers &,
                      const catalog::Scripts &, const step::WatchWork &, Step, double hz);
-WatchPlan plan_background(react::Subscriptions &, const react::ValueRead &,
-                          const react::AllocationRows &, const react::Triggers &,
-                          const catalog::Scripts &, const react::RuleVersions &,
-                          const step::BackgroundItem &, Step, double hz);
+WatchPlan plan_background(amber::react::State &react_state, const react::ValueRead &,
+                          const catalog::Scripts &, const step::BackgroundItem &, Step, double hz);
 
 struct VolumeGeometry {
   space::GeometryId geometry;
@@ -154,10 +155,9 @@ PhysicalDefinition describe_physics(const GeometryAssets &, const catalog::Asset
 void install_physics(space::Space &, IdentityRead, TransformRead, SpaceFlags, Handle,
                      const PhysicalDefinition &);
 // Refresh actual bindings after an ordinary material edit; earlier writes are retained on error.
-void refresh_material(space::Space &, const GeometryAssets &, const catalog::Models &,
-                      const catalog::ParameterBlocks &, const catalog::Assets &,
-                      const react::ValueRead &, PhysicsRoles, PhysicsDefaults,
-                      std::span<const TermId>, Step, double hz);
+void refresh_material(space::Space &, const GeometryAssets &,
+                      const amber::catalog::State &catalog_state, const react::ValueRead &,
+                      PhysicsRoles, PhysicsDefaults, std::span<const TermId>, Step, double hz);
 
 struct CauseSummary {
   record::Origin origin;
@@ -188,10 +188,9 @@ struct PhysicalEventTerms {
   TermId contact;
   PhysicalRelationTerms relations;
 };
-void publish_physical(MechanicalCauses &, step::WorkQueues &, record::Journal &,
-                      const PhysicalEventTerms &, std::size_t event_limit, double hz, IdentityRead,
-                      AttributionRead, const catalog::Models &, const catalog::Scripts &,
-                      const space::StepResult &, Step);
+void publish_physical(amber::step::State &step_state, record::Journal &, const PhysicalEventTerms &,
+                      std::size_t event_limit, double hz, const amber::ObjectState &objects_state,
+                      const amber::catalog::State &catalog_state, const space::StepResult &, Step);
 void collect_physical_causes(MechanicalCauses &, const space::Space &);
 
 struct BodyCauseRow {
@@ -206,48 +205,36 @@ void write_motion_causes(snap::Output &, const std::vector<BodyCauseRow> &,
                          const snap::ObjectSelection & = {});
 void read_motion_causes(snap::Input &, std::vector<BodyCauseRow> &);
 
-step::NativeCompletion grasp_action(space::Space &world, IdentityRead identity,
-                                    TransformWrite transforms, ParentWrite parents,
-                                    SpaceFlags flags, space::PhysicalRelations &relations,
-                                    const Relation &declared_parts,
+step::NativeCompletion grasp_action(space::Space &world, amber::ObjectState &objects_state,
+                                    amber::space::State &space_state,
                                     const PhysicalRelationTerms &relation_terms, float reach_m,
-                                    MechanicalCauses &causes, PlotWrite plot_write,
-                                    const perm::Plots &plots, const step::NativeCall &call);
-step::NativeCompletion attach_action(space::Space &world, IdentityRead identity,
-                                     TransformWrite transforms, ParentWrite parents,
-                                     SpaceFlags flags, space::PhysicalRelations &relations,
-                                     const Relation &declared_parts,
+                                    MechanicalCauses &causes, const perm::Plots &plots,
+                                    const step::NativeCall &call);
+step::NativeCompletion attach_action(space::Space &world, amber::ObjectState &objects_state,
+                                     amber::space::State &space_state,
                                      const PhysicalRelationTerms &relation_terms,
-                                     AuthorityRead authority, const perm::OwnerLimits &limits,
-                                     const perm::Players &players, const perm::Grants &grants,
-                                     float reach_m, MechanicalCauses &causes, PlotWrite plot_write,
-                                     const perm::Plots &plots, const step::NativeCall &call);
-step::NativeCompletion
-release_action(space::Space &world, IdentityRead identity, TransformWrite transforms,
-               ParentWrite parents, SpaceFlags flags, space::PhysicalRelations &relations,
-               const Relation &declared_parts, const PhysicalRelationTerms &relation_terms,
-               AuthorityRead authority, const perm::OwnerLimits &limits,
-               const perm::Players &players, const perm::Grants &grants, MechanicalCauses &causes,
-               PlotWrite plot_write, const perm::Plots &plots, const step::NativeCall &call);
+                                     const amber::perm::State &perm_state, float reach_m,
+                                     MechanicalCauses &causes, const step::NativeCall &call);
+step::NativeCompletion release_action(space::Space &world, amber::ObjectState &objects_state,
+                                      amber::space::State &space_state,
+                                      const PhysicalRelationTerms &relation_terms,
+                                      const amber::perm::State &perm_state,
+                                      MechanicalCauses &causes, const step::NativeCall &call);
 step::NativeCompletion impulse_action(space::Space &world, IdentityRead identity,
                                       MechanicalCauses &causes, const step::NativeCall &call);
-step::NativeCompletion transfer_action(react::Properties &properties, react::Processes &processes,
-                                       const react::Terms &terms, IdentityRead identity,
-                                       AuthorityRead authority, const perm::OwnerLimits &limits,
-                                       const perm::Players &players, const perm::Grants &grants,
+step::NativeCompletion transfer_action(amber::react::State &react_state,
+                                       const amber::ObjectState &objects_state,
+                                       const amber::perm::State &perm_state,
                                        const step::NativeCall &call);
-void bind_physical(react::Vm &, space::Space &, IdentityRead, TransformWrite,
-                   const Relation &declared_parts, MechanicalCauses &, PlotWrite,
-                   const perm::Plots &, step::Intents &, std::vector<step::IntentEnding> &,
-                   const perm::Players &, const perm::Grants &, std::size_t part_batch_max,
-                   observe::Hearing &, const std::vector<observe::Listener> &,
-                   const catalog::InstanceTexts &, const catalog::ModelTexts &);
+void bind_physical(react::Vm &, space::Space &, amber::ObjectState &objects_state,
+                   amber::step::State &step_state, const amber::perm::State &perm_state,
+                   std::size_t part_batch_max, amber::space::State &space_state,
+                   const amber::catalog::State &catalog_state);
 void declare_physical_actions(react::Terms &, react::NativeActions &);
 
-void bind_metadata(react::Vm &, const react::ValueRead &, TransformRead, AuthorityRead, ParentRead,
-                   const catalog::Models &, const react::InstanceScripts &,
-                   const catalog::ParameterBlocks &, const catalog::Assets &,
-                   const Relation &declared_parts, const react::MeterRows &, const perm::Plots &);
+void bind_metadata(react::Vm &, const react::ValueRead &, const amber::ObjectState &objects_state,
+                   const amber::catalog::State &catalog_state,
+                   const amber::react::State &react_state, const perm::Plots &);
 
 using Json = nlohmann::json;
 struct CommerceDeclarations {
@@ -268,9 +255,9 @@ step::NativeCompletion retire_goods(perm::Offers &, perm::Trades &, IdentityRead
                                     std::span<const Handle>);
 step::NativeCompletion rebind_offers(perm::Offers &, perm::Trades &, PermissionFlags, IdentityRead,
                                      const lifecycle::Parts &, std::span<const Handle>, Step);
-step::NativeCompletion deliver_mailbox(perm::Players &, AuthorityRead, const space::Space &,
-                                       IdentityRead, ParentRead, const lifecycle::Parts &, PlayerId,
-                                       Handle authenticated_body, Step);
+step::NativeCompletion deliver_mailbox(perm::Players &, const amber::ObjectState &objects_state,
+                                       const space::Space &, PlayerId, Handle authenticated_body,
+                                       Step);
 std::string validate_pay(const Json &);
 std::string validate_balance(const Json &);
 std::string validate_inventory(const Json &);
@@ -291,65 +278,39 @@ step::NativeCompletion balance(const perm::Ledger &ledger, const perm::Players &
                                IdentityRead identity, AuthorityRead authority,
                                const perm::Groups &groups, const step::NativeCall &call);
 step::NativeCompletion inventory(const perm::Players &players, const step::NativeCall &call);
-step::NativeCompletion give(perm::Players &players, perm::Grants &grants, AuthorityWrite authority,
-                            PermissionFlags flags, perm::OwnerLimits &limits,
-                            const space::Space &space, IdentityRead identity, ParentRead parents,
-                            const lifecycle::Parts &parts, const Relation &declared_parts,
-                            const DeliveryTargets &delivery, std::size_t mailbox_max,
-                            const step::NativeCall &call);
-step::NativeCompletion offer(perm::Offers &offers, PermissionFlags flags,
-                             const perm::Players &players, const perm::Grants &grants,
-                             AuthorityRead authority, const perm::OwnerLimits &limits,
-                             const space::Space &space, IdentityRead identity, ParentRead parents,
-                             const lifecycle::Parts &parts, const Relation &declared_parts,
-                             const step::NativeCall &call);
+step::NativeCompletion give(amber::perm::State &perm_state, amber::ObjectState &objects_state,
+                            const space::Space &space, const DeliveryTargets &delivery,
+                            std::size_t mailbox_max, const step::NativeCall &call);
+step::NativeCompletion offer(amber::perm::State &perm_state, amber::ObjectState &objects_state,
+                             const space::Space &space, const step::NativeCall &call);
 step::NativeCompletion offers(const perm::Offers &offers, const perm::Players &players,
                               IdentityRead identity, AuthorityRead authority,
                               const step::NativeCall &call);
-step::NativeCompletion accept(perm::Offers &offers, perm::Ledger &ledger, perm::Grants &grants,
-                              perm::Players &players, AuthorityWrite authority,
-                              PermissionFlags flags, perm::OwnerLimits &limits,
-                              const space::Space &space, IdentityRead identity, ParentRead parents,
-                              const lifecycle::Parts &parts, const Relation &declared_parts,
-                              const DeliveryTargets &delivery, std::size_t mailbox_max,
-                              const perm::Groups &groups, const step::NativeCall &call);
-step::NativeCompletion cancel_offer(perm::Offers &offers, PermissionFlags flags,
-                                    const perm::Players &players, const perm::Grants &grants,
-                                    AuthorityRead authority, const perm::OwnerLimits &limits,
-                                    IdentityRead identity, const lifecycle::Parts &parts,
-                                    const Relation &declared_parts, const step::NativeCall &call);
+step::NativeCompletion accept(amber::perm::State &perm_state, amber::ObjectState &objects_state,
+                              const space::Space &space, const DeliveryTargets &delivery,
+                              std::size_t mailbox_max, const step::NativeCall &call);
+step::NativeCompletion cancel_offer(amber::perm::State &perm_state,
+                                    amber::ObjectState &objects_state,
+                                    const step::NativeCall &call);
 step::NativeCompletion trade_open(perm::Trades &trades, const perm::Players &players,
                                   IdentityRead identity, const DeliveryTargets &delivery,
                                   const step::NativeCall &call);
-step::NativeCompletion trade_change(perm::Trades &trades, perm::Offers &offers,
-                                    PermissionFlags flags, const perm::Players &players,
-                                    const perm::Grants &grants, AuthorityRead authority,
-                                    const perm::OwnerLimits &limits, const space::Space &space,
-                                    IdentityRead identity, ParentRead parents,
-                                    const lifecycle::Parts &parts, const Relation &declared_parts,
+step::NativeCompletion trade_change(amber::perm::State &perm_state,
+                                    amber::ObjectState &objects_state, const space::Space &space,
                                     const step::NativeCall &call);
-step::NativeCompletion trade_confirm(perm::Trades &trades, perm::Offers &offers,
-                                     perm::Ledger &ledger, perm::Grants &grants,
-                                     perm::Players &players, AuthorityWrite authority,
-                                     PermissionFlags flags, perm::OwnerLimits &limits,
-                                     const space::Space &space, IdentityRead identity,
-                                     ParentRead parents, const lifecycle::Parts &parts,
-                                     const Relation &declared_parts,
+step::NativeCompletion trade_confirm(amber::perm::State &perm_state,
+                                     amber::ObjectState &objects_state, const space::Space &space,
                                      const DeliveryTargets &delivery, const step::NativeCall &call);
 step::NativeCompletion trade_cancel(perm::Trades &trades, perm::Offers &offers,
                                     PermissionFlags flags, IdentityRead identity,
                                     const lifecycle::Parts &parts, const step::NativeCall &call);
 step::NativeCompletion
-place_existing(space::Space &space, IdentityRead identity, TransformWrite transforms,
-               ParentWrite parents, SpaceFlags space_flags, space::PhysicalRelations &physical,
-               const lifecycle::Parts &parts, const Relation &declared_parts,
-               std::array<TermId, 4> relation_terms, PlotWrite membership, const perm::Plots &plots,
-               perm::Players &players, const perm::Grants &grants, AuthorityRead authority,
-               const perm::OwnerLimits &limits, const GeometryAssets &geometry,
-               const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-               const catalog::Assets &assets, const react::ValueRead &values, PhysicsRoles roles,
-               PhysicsDefaults defaults, react::AllocationRows &allocations,
-               react::MeterRows &meters, const step::NativeCall &call);
+place_existing(space::Space &space, amber::ObjectState &objects_state,
+               amber::space::State &space_state, std::array<TermId, 4> relation_terms,
+               amber::perm::State &perm_state, const GeometryAssets &geometry,
+               const amber::catalog::State &catalog_state, const react::ValueRead &values,
+               PhysicsRoles roles, PhysicsDefaults defaults, amber::react::State &react_state,
+               const step::NativeCall &call);
 
 using Json = nlohmann::json;
 struct AdminDeclarations {
@@ -374,24 +335,19 @@ std::string validate_preset(const Json &);
 std::string validate_group_create(const Json &);
 std::string validate_group_member(const Json &);
 std::string validate_plot_permissions(const Json &);
-step::NativeCompletion grant(perm::Grants &grants, perm::Players &players, IdentityRead identity,
-                             AuthorityRead authority, const perm::OwnerLimits &limits,
-                             const perm::Plots &plots, const perm::Groups &groups,
-                             const catalog::Models &models, const catalog::Scripts &scripts,
-                             const react::InstanceScripts &instances,
-                             const react::RuleVersions &rules, const react::ValueRead &values,
+step::NativeCompletion grant(amber::perm::State &perm_state,
+                             const amber::ObjectState &objects_state,
+                             const amber::catalog::State &catalog_state,
+                             const amber::react::State &react_state, const react::ValueRead &values,
                              bool issuer_is_architect, const step::NativeCall &call);
-step::NativeCompletion revoke(perm::Grants &grants, perm::Players &players, IdentityRead identity,
-                              AuthorityRead authority, const perm::OwnerLimits &limits,
-                              const perm::Plots &plots, const perm::Groups &groups,
-                              bool issuer_is_architect, const step::NativeCall &call);
+step::NativeCompletion revoke(amber::perm::State &perm_state,
+                              const amber::ObjectState &objects_state, bool issuer_is_architect,
+                              const step::NativeCall &call);
 step::NativeCompletion list_grants(const perm::Grants &grants, const perm::Players &players,
                                    const step::NativeCall &call);
-step::NativeCompletion preset(std::vector<GroupId> &object_groups,
-                              std::vector<std::uint32_t> &presets, PermissionFlags flags,
-                              IdentityRead identity, AuthorityRead authority,
-                              const perm::OwnerLimits &limits, const perm::Players &players,
-                              const perm::Groups &groups, const step::NativeCall &call);
+step::NativeCompletion preset(amber::ObjectState &objects_state,
+                              std::vector<std::uint32_t> &presets,
+                              const amber::perm::State &perm_state, const step::NativeCall &call);
 step::NativeCompletion group_create(perm::Groups &groups, perm::Players &players,
                                     const step::NativeCall &call);
 step::NativeCompletion group_member(const perm::Groups &groups, perm::Players &players,
@@ -415,13 +371,12 @@ struct FixtureCompletion {
   react::DeferredEffects effects;
   std::vector<ScriptId> changed_scripts;
 };
-FixtureCompletion
-complete_fixture(elaborate::Requests &requests, elaborate::PendingFixtures &pending,
-                 step::Inputs &inputs, catalog::Scripts &scripts, react::RuleVersions &rules,
-                 react::Triggers &triggers, react::Subscriptions &subscriptions,
-                 step::WorkQueues &queues, react::Vm &vm, const react::ValueRead &values,
-                 const react::AllocationRows &allocations, elaborate::RoleAccess current_role,
-                 const elaborate::FixtureResult &result, Step now, double hz);
+FixtureCompletion complete_fixture(amber::elaborate::State &elaborate_state,
+                                   amber::step::State &step_state, catalog::Scripts &scripts,
+                                   amber::react::State &react_state, react::Vm &vm,
+                                   const react::ValueRead &values,
+                                   elaborate::RoleAccess current_role,
+                                   const elaborate::FixtureResult &result, Step now, double hz);
 std::string validate_request_model(const Json &);
 std::string validate_requests(const Json &);
 std::string validate_claim(const Json &);
@@ -438,22 +393,21 @@ step::NativeCompletion requests(const elaborate::Requests &requests,
                                 std::uint32_t page_size, const step::NativeCall &call);
 step::NativeCompletion claim(elaborate::Requests &requests, bool is_elaborator,
                              const step::NativeCall &call);
-step::NativeCompletion
-answer_rule(const elaborate::Requests &requests, elaborate::PendingFixtures &pending,
-            const elaborate::CaptureRefs &captures, const catalog::Scripts &scripts,
-            elaborate::FixtureWorker &worker, std::string runtime, elaborate::FixtureLimits limits,
-            bool is_elaborator, Handle requester_body, const step::NativeCall &call);
+step::NativeCompletion answer_rule(amber::elaborate::State &elaborate_state,
+                                   const catalog::Scripts &scripts,
+                                   elaborate::FixtureWorker &worker, std::string runtime,
+                                   elaborate::FixtureLimits limits, bool is_elaborator,
+                                   Handle requester_body, const step::NativeCall &call);
 AnswerCompletion answer_patch(elaborate::Requests &requests, bool is_elaborator,
                               const step::NativeCall &call);
 AnswerCompletion answer_detail(elaborate::Requests &requests, catalog::AuthoredTexts &texts,
                                bool is_elaborator, const step::NativeCall &call);
 AnswerCompletion refuse(elaborate::Requests &requests, catalog::AuthoredTexts &texts,
                         bool is_elaborator, const step::NativeCall &call);
-step::NativeCompletion
-rule_activation(catalog::Scripts &scripts, react::RuleVersions &rules, react::Triggers &triggers,
-                react::Subscriptions &subscriptions, step::WorkQueues &queues, react::Vm &vm,
-                const react::ValueRead &values, const react::AllocationRows &allocations,
-                bool may_edit_rules, const step::NativeCall &call);
+step::NativeCompletion rule_activation(catalog::Scripts &scripts, amber::react::State &react_state,
+                                       step::WorkQueues &queues, react::Vm &vm,
+                                       const react::ValueRead &values, bool may_edit_rules,
+                                       const step::NativeCall &call);
 
 using Json = nlohmann::json;
 std::uint32_t identifier(const Json &, std::string_view prefix);
@@ -517,41 +471,27 @@ step::NativeCompletion define_term(const step::NativeCall &call, std::span<const
                                    const std::filesystem::path &directory);
 step::NativeCompletion
 define_material(const step::NativeCall &call, std::span<const std::string> roles,
-                react::Materials &materials, const react::ValueRead &values,
-                const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                const catalog::Assets &assets, const GeometryAssets &geometry, space::Space &space,
-                PhysicsRoles physical_roles, PhysicsDefaults defaults,
-                const react::RuleVersions &rules, const catalog::MechanicalBindings &mechanical,
-                catalog::RegistryDocument &document, const std::filesystem::path &directory);
+                amber::react::State &react_state, const react::ValueRead &values,
+                amber::catalog::State &catalog_state, const GeometryAssets &geometry,
+                space::Space &space, PhysicsRoles physical_roles, PhysicsDefaults defaults,
+                const std::filesystem::path &directory);
 step::NativeCompletion
-install_script(const step::NativeCall &call, react::InstanceScripts &instances,
-               react::Triggers &triggers, react::Subscriptions &subscriptions,
-               react::ScriptStates &states, react::SharedColumns &shared, react::GivesTo &gives,
-               const react::AllocationRows &allocations, const react::ValueRead &values,
-               const catalog::Models &models, const catalog::Scripts &scripts,
-               AuthorityRead authority, const perm::OwnerLimits &limits, perm::Players &players,
-               perm::Grants &grants, const perm::Plots &plots, const perm::Groups &groups,
+install_script(const step::NativeCall &call, amber::react::State &react_state,
+               const react::ValueRead &values, const amber::catalog::State &catalog_state,
+               const amber::ObjectState &objects_state, amber::perm::State &perm_state,
                std::span<const std::string> roles, TermId start_event);
-step::NativeCompletion
-uninstall_script(const step::NativeCall &call, react::InstanceScripts &instances,
-                 react::Triggers &triggers, react::Subscriptions &subscriptions,
-                 react::ScriptStates &states, react::SharedColumns &shared, react::GivesTo &gives,
-                 const react::AllocationRows &allocations, const react::ValueRead &values,
-                 const catalog::Models &models, const catalog::Scripts &scripts,
-                 perm::Players &players, perm::Grants &grants, TermId start_event);
-step::NativeCompletion model_script(const step::NativeCall &call, react::InstanceScripts &instances,
-                                    react::Triggers &triggers, react::Subscriptions &subscriptions,
-                                    react::ScriptStates &states, react::SharedColumns &shared,
-                                    react::GivesTo &gives, const react::AllocationRows &allocations,
-                                    const react::ValueRead &values, catalog::Models &models,
-                                    const catalog::Scripts &scripts, perm::Players &players,
-                                    perm::Grants &grants, TermId start_event);
-void rebind_scripts(const catalog::Models &, const catalog::Scripts &,
-                    const react::InstanceScripts &, const react::RuleVersions &,
-                    const react::ValueRead &, react::Triggers &, react::Subscriptions &,
-                    const react::AllocationRows &, react::ScriptStates &, react::SharedColumns &,
-                    react::GivesTo &, perm::Grants &, perm::Players &, TermId start_event, Step,
-                    double hz, const record::Origin &, NativeCompletion &);
+step::NativeCompletion uninstall_script(const step::NativeCall &call,
+                                        amber::react::State &react_state,
+                                        const react::ValueRead &values,
+                                        const amber::catalog::State &catalog_state,
+                                        amber::perm::State &perm_state, TermId start_event);
+step::NativeCompletion model_script(const step::NativeCall &call, amber::react::State &react_state,
+                                    const react::ValueRead &values,
+                                    amber::catalog::State &catalog_state,
+                                    amber::perm::State &perm_state, TermId start_event);
+void rebind_scripts(const amber::catalog::State &catalog_state, amber::react::State &react_state,
+                    const react::ValueRead &, amber::perm::State &perm_state, TermId start_event,
+                    Step, double hz, const record::Origin &, NativeCompletion &);
 
 } // namespace amber::step::editing
 
@@ -590,98 +530,41 @@ CatalogSelection catalog_selection(const catalog::Models &, const catalog::Param
                                    const std::vector<std::uint32_t> &, const react::RuleVersions &,
                                    std::span<const Handle>);
 void encode_checkpoint(
-    snap::Buffer &bytes, const snap::Header &header, const Objects &objects,
-    const react::Properties &properties, const react::Processes &processes,
-    const react::InstanceSettings &instance_settings, const react::ModelSettings &model_settings,
-    const react::PlotSettings &plot_settings, const react::WorldSettings &world_settings,
-    const react::AuthoredRelations &authored_relations,
-    const space::PhysicalRelations &physical_relations, const lifecycle::Parts &parts,
-    const react::SharedColumns &shared, const react::GivesTo &gives,
-    const react::AllocationRows &allocations, const react::MeterRows &meters,
-    const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-    const catalog::Scripts &scripts, const catalog::ModelTexts &model_text,
-    const catalog::InstanceTexts &instance_text, const catalog::AuthoredTexts &authored_text,
-    const perm::Players &players, const perm::Ledger &ledger, const perm::Plots &plots,
-    const perm::Groups &groups, const net::Profiles &profiles, const perm::Grants &grants,
-    const perm::Offers &offers, const perm::Trades &trades, const perm::OwnerLimits &limits,
-    const react::ScriptStates &states, const react::Subscriptions &subscriptions,
-    const react::InstanceScripts &installations, const TimerWheel &timers, const WorkQueues &queues,
-    const Intents &intents, const Inputs &inputs, const elaborate::Requests &requests,
-    const elaborate::GapCounts &gap_counts, const elaborate::LastGaps &last_gaps,
-    const elaborate::CaptureRefs &captures, const react::RandomStates &random,
-    const std::vector<space::MotionRow> &motion, const std::vector<BodyCauseRow> &causes,
-    std::uint64_t next_record, const CaptureSelection *selection);
-Decoded decode_checkpoint(
-    const snap::View &view, Objects &objects, react::Properties &properties,
-    react::Processes &processes, react::InstanceSettings &instance_settings,
-    react::ModelSettings &model_settings, react::PlotSettings &plot_settings,
-    react::WorldSettings &world_settings, react::AuthoredRelations &authored_relations,
-    space::PhysicalRelations &physical_relations, lifecycle::Parts &parts,
-    react::SharedColumns &shared, react::GivesTo &gives, react::AllocationRows &allocations,
-    react::MeterRows &meters, catalog::Models &models, catalog::ParameterBlocks &parameters,
-    catalog::Scripts &scripts, catalog::ModelTexts &model_text,
-    catalog::InstanceTexts &instance_text, catalog::AuthoredTexts &authored_text,
-    perm::Players &players, perm::Ledger &ledger, perm::Plots &plots, perm::Groups &groups,
-    net::Profiles &profiles, perm::Grants &grants, perm::Offers &offers, perm::Trades &trades,
-    perm::OwnerLimits &limits, react::ScriptStates &states, react::Subscriptions &subscriptions,
-    react::InstanceScripts &installations, TimerWheel &timers, WorkQueues &queues, Intents &intents,
-    Inputs &inputs, elaborate::Requests &requests, elaborate::GapCounts &gap_counts,
-    elaborate::LastGaps &last_gaps, elaborate::CaptureRefs &captures, react::RandomStates &random,
-    Relation &declared_parts);
-bool save_snapshot(
-    snap::Writer &writer, SnapshotProgress &progress, const snap::Header &header,
-    const Objects &objects, const react::Properties &properties, const react::Processes &processes,
-    const react::InstanceSettings &instance_settings, const react::ModelSettings &model_settings,
-    const react::PlotSettings &plot_settings, const react::WorldSettings &world_settings,
-    const react::AuthoredRelations &authored_relations,
-    const space::PhysicalRelations &physical_relations, const lifecycle::Parts &parts,
-    const react::SharedColumns &shared, const react::GivesTo &gives,
-    const react::AllocationRows &allocations, const react::MeterRows &meters,
-    const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-    const catalog::Scripts &scripts, const catalog::ModelTexts &model_text,
-    const catalog::InstanceTexts &instance_text, const catalog::AuthoredTexts &authored_text,
-    const perm::Players &players, const perm::Ledger &ledger, const perm::Plots &plots,
-    const perm::Groups &groups, const net::Profiles &profiles, const perm::Grants &grants,
-    const perm::Offers &offers, const perm::Trades &trades, const perm::OwnerLimits &limits,
-    const react::ScriptStates &states, const react::Subscriptions &subscriptions,
-    const react::InstanceScripts &installations, const TimerWheel &timers, const WorkQueues &queues,
-    const Intents &intents, const Inputs &inputs, const elaborate::Requests &requests,
-    const elaborate::GapCounts &gap_counts, const elaborate::LastGaps &last_gaps,
-    const elaborate::CaptureRefs &captures, const react::RandomStates &random,
-    const space::Space &space, const MechanicalCauses &mechanical_causes,
-    std::uint64_t next_record);
-void flush_gaps(
-    std::vector<GapDraft> &pending, record::Journal &journal, elaborate::CaptureWriter &writer,
-    const snap::Header &header, std::size_t capture_limit, float radius_m,
-    const react::ValueRead &values, const net::SessionViews &views,
-    const react::RuleVersions &rules, const space::Space &space,
-    const MechanicalCauses &mechanical_causes, const Objects &objects,
-    const react::Properties &properties, const react::Processes &processes,
-    const react::InstanceSettings &instance_settings, const react::ModelSettings &model_settings,
-    const react::PlotSettings &plot_settings, const react::WorldSettings &world_settings,
-    const react::AuthoredRelations &authored_relations,
-    const space::PhysicalRelations &physical_relations, const lifecycle::Parts &parts,
-    const react::SharedColumns &shared, const react::GivesTo &gives,
-    const react::AllocationRows &allocations, const react::MeterRows &meters,
-    const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-    const catalog::Scripts &scripts, const catalog::ModelTexts &model_text,
-    const catalog::InstanceTexts &instance_text, const catalog::AuthoredTexts &authored_text,
-    const perm::Players &players, const perm::Ledger &ledger, const perm::Plots &plots,
-    const perm::Groups &groups, const net::Profiles &profiles, const perm::Grants &grants,
-    const perm::Offers &offers, const perm::Trades &trades, const perm::OwnerLimits &limits,
-    const react::ScriptStates &states, const react::Subscriptions &subscriptions,
-    const react::InstanceScripts &installations, const TimerWheel &timers, const WorkQueues &queues,
-    const Intents &intents, const Inputs &inputs, elaborate::Requests &requests,
-    elaborate::GapCounts &gap_counts, elaborate::LastGaps &last_gaps,
-    elaborate::CaptureRefs &captures, const react::RandomStates &random);
-CaptureSelection capture_selection(
-    const GapDraft &gap, const react::ValueRead &values, const Objects &objects,
-    const lifecycle::Parts &parts, const catalog::Models &models,
-    const catalog::ParameterBlocks &parameters, const react::InstanceScripts &installations,
-    const react::RuleVersions &rules, const perm::Players &players, const perm::Plots &plots,
-    const perm::Groups &groups, const perm::Grants &grants, const perm::Offers &offers,
-    const perm::Trades &trades, const net::SessionViews &views, const net::Profiles &profiles,
-    const space::Space &space, float radius_m);
+    snap::Buffer &bytes, const snap::Header &header, const amber::ObjectState &objects_state,
+    const amber::react::State &react_state, const space::PhysicalRelations &physical_relations,
+    const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
+    const net::Profiles &profiles, const amber::step::State &step_state,
+    const amber::elaborate::State &elaborate_state, const std::vector<space::MotionRow> &motion,
+    const std::vector<BodyCauseRow> &causes, std::uint64_t next_record,
+    const CaptureSelection *selection);
+Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_state,
+                          amber::react::State &react_state,
+                          space::PhysicalRelations &physical_relations,
+                          amber::catalog::State &catalog_state, amber::perm::State &perm_state,
+                          net::Profiles &profiles, amber::step::State &step_state,
+                          amber::elaborate::State &elaborate_state);
+bool save_snapshot(snap::Writer &writer, SnapshotProgress &progress, const snap::Header &header,
+                   const amber::ObjectState &objects_state, const amber::react::State &react_state,
+                   const space::PhysicalRelations &physical_relations,
+                   const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
+                   const net::Profiles &profiles, const amber::step::State &step_state,
+                   const amber::elaborate::State &elaborate_state, const space::Space &space,
+                   std::uint64_t next_record);
+void flush_gaps(amber::step::State &step_state, record::Journal &journal,
+                elaborate::CaptureWriter &writer, const snap::Header &header,
+                std::size_t capture_limit, float radius_m, const react::ValueRead &values,
+                const amber::net::State &net_state, const amber::react::State &react_state,
+                const space::Space &space, const amber::ObjectState &objects_state,
+                const space::PhysicalRelations &physical_relations,
+                const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
+                amber::elaborate::State &elaborate_state);
+CaptureSelection capture_selection(const GapDraft &gap, const react::ValueRead &values,
+                                   const amber::ObjectState &objects_state,
+                                   const amber::catalog::State &catalog_state,
+                                   const amber::react::State &react_state,
+                                   const amber::perm::State &perm_state,
+                                   const amber::net::State &net_state, const space::Space &space,
+                                   float radius_m);
 
 } // namespace amber::step::checkpoint
 
@@ -691,23 +574,19 @@ struct IlluminationSources {
   std::unordered_map<std::uint64_t, TermId> lights, zones;
   std::unordered_set<std::uint64_t> running_lights, running_zones;
 };
-void register_illumination(IlluminationSources &, observe::Lights &, observe::ZoneAmbients &,
-                           observe::LightSubscriptions &, observe::ActiveViews &,
-                           const space::Space &, TransformRead, const catalog::Models &,
-                           const catalog::ParameterBlocks &, const catalog::Assets &,
-                           const react::ValueRead &, std::span<const Handle>,
-                           float default_source_radius_m, Step, double hz);
+void register_illumination(IlluminationSources &, amber::space::State &space_state,
+                           const space::Space &, TransformRead,
+                           const amber::catalog::State &catalog_state, const react::ValueRead &,
+                           std::span<const Handle>, float default_source_radius_m, Step, double hz);
 void move_illumination(observe::Lights &, observe::LightSubscriptions &, observe::ActiveViews &,
                        TransformRead, std::span<const Handle>);
 void retire_illumination(IlluminationSources &, observe::Lights &, observe::ZoneAmbients &,
                          observe::LightSubscriptions &, observe::ActiveViews &,
                          const space::Space &, std::span<const Handle>);
-void illumination_values_changed(IlluminationSources &, observe::Lights &, observe::ZoneAmbients &,
-                                 observe::LightSubscriptions &, observe::ActiveViews &,
+void illumination_values_changed(IlluminationSources &, amber::space::State &space_state,
                                  const space::Space &, const react::ValueRead &,
                                  std::span<const FactKey>, Step, double hz);
-void advance_illumination(IlluminationSources &, observe::Lights &, observe::ZoneAmbients &,
-                          observe::LightSubscriptions &, observe::ActiveViews &,
+void advance_illumination(IlluminationSources &, amber::space::State &space_state,
                           const space::Space &, const react::ValueRead &, Step, double hz);
 void sync_illuminance_reads(observe::LightSubscriptions &, const react::Subscriptions &,
                             IdentityRead, TransformRead, TermId illuminance,
@@ -750,62 +629,44 @@ void write_queues(snap::Output &, const WorkQueues &, const Intents &, std::uint
                   std::span<const std::uint64_t> selected_inputs = {});
 std::uint64_t read_queues(snap::Input &, WorkQueues &, Intents &);
 
-NativeCompletion
-replace_instance(Objects &objects, lifecycle::Parts &parts, Relation &declared_parts,
-                 const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                 const catalog::Assets &assets, const GeometryAssets &geometry,
-                 const react::ValueRead &values, space::Space &space, TransformWrite transforms,
-                 ParentWrite parents, SpaceFlags flags, space::PhysicalRelations &physical,
-                 std::vector<space::RelationChange> &changes, AuthorityRead authority,
-                 AttributionRead attribution, const perm::OwnerLimits &limits,
-                 const perm::Players &players, const perm::Grants &grants, const perm::Plots &plots,
-                 const perm::Ledger &ledger, const catalog::Scripts &scripts, PlotWrite membership,
-                 PhysicsRoles roles, PhysicsDefaults defaults, const NativeCall &call);
+NativeCompletion replace_instance(amber::ObjectState &objects_state,
+                                  const amber::catalog::State &catalog_state,
+                                  const GeometryAssets &geometry, const react::ValueRead &values,
+                                  space::Space &space, amber::space::State &space_state,
+                                  const amber::perm::State &perm_state, PhysicsRoles roles,
+                                  PhysicsDefaults defaults, const NativeCall &call);
 
-void apply_custody(space::Space &, IdentityRead, TransformWrite, ParentWrite, SpaceFlags,
-                   space::PhysicalRelations &, const lifecycle::Parts &,
-                   std::array<TermId, 4> relation_terms, PlotWrite, const perm::Plots &,
-                   std::span<const perm::CustodyChange>, NativeCompletion &);
-void change_custody(space::Space &, IdentityRead, TransformWrite, ParentWrite, SpaceFlags,
-                    space::PhysicalRelations &, const lifecycle::Parts &, std::array<TermId, 4>,
-                    PlotWrite, const perm::Plots &, IlluminationSources &, observe::Lights &,
-                    observe::ZoneAmbients &, observe::LightSubscriptions &, observe::ActiveViews &,
-                    NativeCompletion &);
-void project_visibility(IlluminationSources &, observe::Lights &, observe::ZoneAmbients &,
-                        observe::LightSubscriptions &, observe::ActiveViews &,
+void apply_custody(space::Space &, amber::ObjectState &objects_state,
+                   amber::space::State &space_state, std::array<TermId, 4> relation_terms,
+                   const perm::Plots &, std::span<const perm::CustodyChange>, NativeCompletion &);
+void change_custody(space::Space &, amber::ObjectState &objects_state,
+                    amber::space::State &space_state, std::array<TermId, 4>, const perm::Plots &,
+                    IlluminationSources &, NativeCompletion &);
+void project_visibility(IlluminationSources &, amber::space::State &space_state,
                         net::ReplicationIndex &, const space::Space &, TransformRead,
-                        const catalog::Models &, const catalog::ParameterBlocks &,
-                        const catalog::Assets &, const react::ValueRead &, const NativeCompletion &,
-                        float source_radius_m, Step, double hz);
+                        const amber::catalog::State &catalog_state, const react::ValueRead &,
+                        const NativeCompletion &, float source_radius_m, Step, double hz);
 
-NativeCompletion revise_model(Objects &objects, lifecycle::Parts &parts, Relation &declared_parts,
-                              catalog::Models &models, catalog::ParameterBlocks &parameters,
-                              catalog::ModelTexts &texts, react::ModelSettings &settings,
-                              const catalog::Assets &assets, react::AssetMeasurements &measurements,
+NativeCompletion revise_model(amber::ObjectState &objects_state,
+                              amber::catalog::State &catalog_state, react::ModelSettings &settings,
                               catalog::MeasurementBindings measurement_roles,
                               const GeometryAssets &geometry, const react::ValueRead &values,
-                              space::Space &space, TransformWrite transforms, ParentWrite parents,
-                              SpaceFlags flags, PermissionFlags permissions,
-                              space::PhysicalRelations &physical,
-                              std::vector<space::RelationChange> &changes, AuthorityRead authority,
-                              AttributionRead attribution, const perm::Ledger &ledger,
-                              perm::Offers &offers, perm::Trades &trades, const perm::Plots &plots,
-                              const catalog::Scripts &scripts, PlotWrite membership,
-                              PhysicsRoles roles, PhysicsDefaults defaults, const NativeCall &call);
+                              space::Space &space, amber::space::State &space_state,
+                              amber::perm::State &perm_state, PhysicsRoles roles,
+                              PhysicsDefaults defaults, const NativeCall &call);
 std::string validate_model_edit(const nlohmann::json &);
 TermId declare_model_edit(react::Terms &, react::NativeActions &);
 // Direct lifecycle domain operations; callers compose existing owner functions in order.
-void retire_commerce(perm::Ledger &, perm::Offers &, perm::Trades &, perm::Grants &,
-                     perm::Players &, perm::OwnerLimits &, IdentityRead, AuthorityRead,
-                     PermissionFlags, std::span<const Handle> removed, Step, NativeCompletion &);
-void retire_physics(space::Space &, IdentityRead, ParentWrite, SpaceFlags,
-                    space::PhysicalRelations &, Intents &, std::vector<IntentEnding> &,
-                    std::span<const Handle> removed, std::array<TermId, 4> relation_terms,
-                    const record::Origin &, NativeCompletion &);
+void retire_commerce(amber::perm::State &perm_state, amber::ObjectState &objects_state,
+                     std::span<const Handle> removed, Step, NativeCompletion &);
+void retire_physics(space::Space &, amber::ObjectState &objects_state, space::PhysicalRelations &,
+                    amber::step::State &step_state, std::span<const Handle> removed,
+                    std::array<TermId, 4> relation_terms, const record::Origin &,
+                    NativeCompletion &);
 void retire_publication(net::ReplicationIndex &, net::SessionViews &, catalog::InstanceTexts &,
                         std::span<const Handle> removed);
-void refresh_object_plots(const space::Space &, IdentityRead, TransformRead, PlotWrite,
-                          const perm::Plots &, const react::Terms &, const react::Subscriptions &,
+void refresh_object_plots(const space::Space &, amber::ObjectState &objects_state,
+                          const perm::Plots &, const amber::react::State &react_state,
                           const record::Origin &, NativeCompletion &);
 void publish_catalog_changes(net::Sessions &, net::SessionViews &, const catalog::Models &,
                              const catalog::ModelTexts &, const react::Terms &,
@@ -815,12 +676,9 @@ void publish_object_changes(net::Sessions &, net::SessionViews &, IdentityRead, 
                             ParentRead, const catalog::ModelTexts &, const catalog::InstanceTexts &,
                             std::span<const Handle> changed);
 
-void reconcile_effects(const react::ValueRead &values, react::AllocationRows &allocations,
-                       react::MeterRows &meters, AssemblyMasses &masses,
-                       react::RuntimeMeasurements &runtime_measurements,
-                       const Relation &declared_parts, react::Subscriptions &subscriptions,
-                       const catalog::Scripts &scripts, const react::RuleVersions &rules,
-                       std::vector<FactKey> &mutated, Step now, double hz,
+void reconcile_effects(const react::ValueRead &values, amber::react::State &react_state,
+                       amber::step::State &step_state, const Relation &declared_parts,
+                       const catalog::Scripts &scripts, Step now, double hz,
                        react::DeferredEffects &effects, const record::Origin &origin);
 void record_send_overflow(record::Journal &, const net::SendOverflow &, Step);
 void publish_effects(react::DeferredEffects &&, const record::Origin &, Step, WorkQueues &,
@@ -867,13 +725,11 @@ void import_assets(std::vector<catalog::Asset>, catalog::Assets &);
 void install_models(const Json &, const catalog::Assets &, const catalog::Scripts &,
                     const react::Terms &, catalog::Models &, catalog::ModelTexts &,
                     react::ModelSettings &, Symbols &);
-std::vector<Handle> install_objects(const Json &, Symbols &, const catalog::Models &,
-                                    const catalog::ParameterBlocks &, const catalog::Assets &,
-                                    const react::Terms &, Objects &, lifecycle::Parts &,
-                                    Relation &declared_parts, Step);
-void install_properties(const Json &, const Symbols &, const react::Terms &, react::Properties &,
-                        react::Processes &, react::InstanceSettings &, react::WorldSettings &,
-                        react::PlotSettings &, Step, double hz);
+std::vector<Handle> install_objects(const Json &, Symbols &,
+                                    const amber::catalog::State &catalog_state,
+                                    const react::Terms &, amber::ObjectState &objects_state, Step);
+void install_properties(const Json &, const Symbols &, amber::react::State &react_state, Step,
+                        double hz);
 void install_relations(const Json &, const Symbols &, const react::Terms &,
                        react::AuthoredRelations &, react::DeferredEffects &);
 void install_profiles(const Json &, const Symbols &, net::Profiles &, perm::Players &,
@@ -882,10 +738,8 @@ void install_land(const Json &, perm::Plots &, perm::Groups &, perm::Players &);
 void install_money(const Json &, const Symbols &, IdentityRead, AuthorityRead,
                    const perm::Players &, const perm::Groups &, perm::Ledger &);
 void install_grants(const Json &, const Symbols &, const react::ValueRead &, AuthorityRead,
-                    const perm::OwnerLimits &, const catalog::Models &, const catalog::Scripts &,
-                    const react::InstanceScripts &, const react::RuleVersions &,
-                    const perm::Plots &, const net::Profiles &, perm::Grants &, perm::Players &,
-                    Step, double hz, const perm::Groups &);
+                    amber::perm::State &perm_state, const amber::catalog::State &catalog_state,
+                    const amber::react::State &react_state, const net::Profiles &, Step, double hz);
 void install_script_state(const Json &, const Symbols &, react::ScriptStates &);
 void queue_bootstrap(const Json &, const Symbols &, const react::Terms &, step::WorkQueues &,
                      std::size_t event_limit);
@@ -897,8 +751,8 @@ struct Case {
   nlohmann::json test;
 };
 Case read_case(const std::filesystem::path &);
-void apply_given(react::Properties &, react::Processes &, react::SharedColumns &, react::GivesTo &,
-                 const react::ValueRead &, const Case &, Step, double, react::DeferredEffects &);
+void apply_given(amber::react::State &react_state, const react::ValueRead &, const Case &, Step,
+                 double, react::DeferredEffects &);
 std::uint64_t steps(const Case &);
 elaborate::TestRun observe(const react::ValueRead &, const Case &, Step, double);
 } // namespace amber::step::fixture
@@ -930,34 +784,23 @@ InputReply submit_authoring(react::authoring::Worker &, const react::Terms &,
 void deliver_input(Inputs &, net::Sessions &, observe::Hearing &, std::uint32_t event_limit,
                    std::uint64_t input, ActionOutcome);
 std::pair<NativeCompletion, record::Origin> complete_authoring(
-    catalog::Assets &assets, catalog::Models &models, catalog::Scripts &scripts,
-    catalog::ParameterBlocks &parameters, catalog::ModelTexts &model_text,
-    react::ModelSettings &model_settings, react::AssetMeasurements &baked_measurements,
-    const react::Terms &terms, const catalog::MechanicalBindings &mechanical, react::Vm &vm,
-    const react::NativeActions &native_declarations, GeometryAssets &geometry, space::Space &space,
-    record::Journal &journal, const Input &input, react::authoring::Completion completion,
-    bool session_live, Step now, double hz, const std::filesystem::path &asset_root,
-    const std::filesystem::path &script_root);
+    amber::catalog::State &catalog_state, amber::react::State &react_state, react::Vm &vm,
+    GeometryAssets &geometry, space::Space &space, record::Journal &journal, const Input &input,
+    react::authoring::Completion completion, bool session_live, Step now, double hz,
+    const std::filesystem::path &asset_root, const std::filesystem::path &script_root);
 
 void declare_construction_actions(react::Terms &, react::NativeActions &);
-NativeCompletion
-create_instance(Objects &objects, lifecycle::Parts &parts, Relation &declared_parts,
-                const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                const catalog::Assets &assets, const GeometryAssets &geometry,
-                const react::ValueRead &values, space::Space &space, TransformWrite transforms,
-                ParentWrite parents, SpaceFlags flags, space::PhysicalRelations &physical,
-                std::vector<space::RelationChange> &changes, AuthorityRead authority,
-                const perm::Players &players, const perm::Grants &grants, const perm::Plots &plots,
-                PlotWrite membership, PhysicsRoles roles, PhysicsDefaults defaults,
-                const NativeCall &call);
+NativeCompletion create_instance(amber::ObjectState &objects_state,
+                                 const amber::catalog::State &catalog_state,
+                                 const GeometryAssets &geometry, const react::ValueRead &values,
+                                 space::Space &space, amber::space::State &space_state,
+                                 const amber::perm::State &perm_state, PhysicsRoles roles,
+                                 PhysicsDefaults defaults, const NativeCall &call);
 NativeCompletion remove_instance(const lifecycle::Parts &, const react::ValueRead &, AuthorityRead,
                                  AttributionRead, const perm::Ledger &, const catalog::Models &,
                                  const catalog::Scripts &, const NativeCall &);
-void install_declared_attachments(space::Space &space, IdentityRead identity,
-                                  TransformWrite transforms, ParentWrite parents, SpaceFlags flags,
-                                  const Relation &declared_parts,
-                                  space::PhysicalRelations &physical,
-                                  std::vector<space::RelationChange> &changes,
+void install_declared_attachments(space::Space &space, amber::ObjectState &objects_state,
+                                  amber::space::State &space_state,
                                   std::span<const Handle> objects);
 step::NativeCompletion issue(perm::Ledger &ledger, perm::Grants &grants,
                              const perm::Players &players, IdentityRead identity,
@@ -965,12 +808,9 @@ step::NativeCompletion issue(perm::Ledger &ledger, perm::Grants &grants,
                              const step::NativeCall &call);
 void declare_issuance_action(react::Terms &terms, react::NativeActions &native);
 std::string validate_issue(const nlohmann::json &input);
-step::NativeCompletion hold_goods(perm::Players &players, const perm::Grants &grants,
-                                  const perm::OwnerLimits &limits, IdentityRead identity,
-                                  AuthorityRead authority, ParentRead parents, SpaceFlags flags,
-                                  const Relation &declared_parts, const DeliveryTargets &delivery,
-                                  const space::Space &space, std::size_t mailbox_max,
-                                  const step::NativeCall &call);
+step::NativeCompletion hold_goods(amber::perm::State &perm_state, amber::ObjectState &objects_state,
+                                  const DeliveryTargets &delivery, const space::Space &space,
+                                  std::size_t mailbox_max, const step::NativeCall &call);
 void declare_hold_goods_action(react::Terms &terms, react::NativeActions &declarations);
 std::string validate_hold_goods(const nlohmann::json &input);
 } // namespace amber::step
@@ -992,7 +832,6 @@ struct State {
   NavigationRequests navigation_requests;
   std::vector<FactKey> mutated;
   std::vector<GapDraft> gaps;
-  std::vector<TermId> inspection_terms;
   checkpoint::SnapshotProgress snapshot_progress;
   explicit State(std::size_t authors_max) : mechanical_causes(authors_max) {}
 };

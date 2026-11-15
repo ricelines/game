@@ -1,6 +1,7 @@
 #include "runtime_fixture.hpp"
 #include "space_fixture.hpp"
 #include "step/step.hpp"
+#include <toml++/toml.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -11,10 +12,10 @@ namespace {
 void mass_light_replication_lifetimes() {
   test_runtime::Fixture f;
   space::Space space{testspace::settings()};
-  lifecycle::Parts parts;
-  Relation declared;
-  catalog::Assets assets;
-  catalog::ParameterBlocks parameters;
+  auto &parts = f.objects_state.parts;
+  auto &declared = f.objects_state.declared_parts;
+  auto &assets = f.catalog_state.assets;
+  auto &parameters = f.catalog_state.parameters;
   f.terms.rows[1].source = react::Source::Intrinsic;
   f.terms.rows[1].dimensions = {-3, 1, 0, 0, 0, 0, 0, 0};
   f.terms.rows[2].source = react::Source::Measured;
@@ -81,12 +82,10 @@ void mass_light_replication_lifetimes() {
                         {}})
                     .status == space::Status::Ok,
             "real projection fixture collision import failed");
-  space::PhysicalRelations physical;
-  std::vector<space::RelationChange> relation_changes;
-  require(space::attach(space, identity(f.objects), transforms(f.objects), parents(f.objects),
-                        space_flags(f.objects), physical.contains, physical.supports,
-                        physical.attached_to, {child, root, {{1, 0, 0}, {}}, false},
-                        relation_changes)
+  amber::space::State space_state{8};
+  space::PhysicalRelations &physical = space_state.physical_relations;
+
+  require(space::attach(space, f.objects_state, space_state, {child, root, {{1, 0, 0}, {}}, false})
                   .status == space::Status::Ok,
           "real declared child attachment failed");
   const auto sensor = space::sensor_box_geometry(space, {4, 4, 4});
@@ -95,12 +94,14 @@ void mass_light_replication_lifetimes() {
                   .status == space::Status::Ok,
           "real authored zone sensor failed");
   f.state(root, 4, 100.);
-  step::AssemblyMasses masses{{2, 3}, {}, {}};
-  step::IlluminationSources illumination;
-  observe::Lights lights{8};
-  observe::LightSubscriptions points{8};
-  observe::ZoneAmbients zones;
-  observe::ActiveViews views{8};
+  amber::step::State step_state{8};
+  step::AssemblyMasses &masses = (step_state.masses = step::AssemblyMasses{{2, 3}, {}, {}});
+  step::IlluminationSources &illumination = step_state.illumination_sources;
+  observe::Lights &lights = (space_state.lights = observe::Lights{8});
+  observe::LightSubscriptions &points =
+      (space_state.light_subscriptions = observe::LightSubscriptions{8});
+  observe::ZoneAmbients &zones = space_state.zones;
+  observe::ActiveViews &views = (space_state.active_views = observe::ActiveViews{8});
   net::ReplicationIndex replicas{{32, 2, 3, 65536, 1048576}};
   step::invalidate_mass(masses, identity(f.objects), declared, assembly.objects);
   react::DeferredEffects effects;
@@ -108,9 +109,8 @@ void mass_light_replication_lifetimes() {
   const auto capacity = space::capacity(space).native_available;
   step::NativeCompletion born;
   born.visible_objects = assembly.objects;
-  step::project_visibility(illumination, lights, zones, points, views, replicas, space,
-                           transforms(f.objects), f.models, parameters, assets, *f.projection, born,
-                           .05f, 0, 20);
+  step::project_visibility(illumination, space_state, replicas, space, transforms(f.objects),
+                           f.catalog_state, *f.projection, born, .05f, 0, 20);
   require(masses.rows.at(root.bits).total_kg == 6 && lights.rows.size() == 1 &&
               zones.rows.value.size() == 1 && space::capacity(space).native_available == capacity,
           "projections lost assembled mass or duplicated native geometry");
@@ -126,8 +126,7 @@ void mass_light_replication_lifetimes() {
                   .status == space::Status::Ok,
           "real root movement failed");
   space::StepResult physics;
-  space::step(space, identity(f.objects), transforms(f.objects), parents(f.objects),
-              space_flags(f.objects), physical, 1, .05f, {}, physics);
+  space::step(space, f.objects_state, physical, 1, .05f, {}, physics);
   step::move_illumination(lights, points, views, transforms(f.objects), physics.moved);
   require(observe::take_dirty(points).size() == 2 &&
               lights.rows.at(root.bits).position == Vec3{20, 0, 1},
@@ -135,9 +134,8 @@ void mass_light_replication_lifetimes() {
   f.objects.params[root.slot()] = 1;
   step::invalidate_mass(masses, identity(f.objects), declared, std::span(&root, 1));
   step::refresh_mass(masses, *f.projection, declared, f.runtime, 1, 20, {}, effects);
-  step::register_illumination(illumination, lights, zones, points, views, space,
-                              transforms(f.objects), f.models, parameters, assets, *f.projection,
-                              std::span(&root, 1), .05f, 1, 20);
+  step::register_illumination(illumination, space_state, space, transforms(f.objects),
+                              f.catalog_state, *f.projection, std::span(&root, 1), .05f, 1, 20);
   net::register_replication(replicas, root, identity(f.objects), transforms(f.objects), f.models,
                             parameters, assets, *f.projection);
   require(masses.rows.at(root.bits).total_kg == 10 &&
@@ -157,18 +155,14 @@ void mass_light_replication_lifetimes() {
   (void)observe::take_dirty(points);
   step::NativeCompletion hidden;
   hidden.custody = {{root, {}, false}};
-  step::change_custody(space, identity(f.objects), transforms(f.objects), parents(f.objects),
-                       space_flags(f.objects), physical, parts, {}, plot_membership(f.objects), {},
-                       illumination, lights, zones, points, views, hidden);
+  step::change_custody(space, f.objects_state, space_state, {}, {}, illumination, hidden);
   const auto dirty = observe::take_dirty(points);
   require(std::ranges::any_of(dirty, [&](const auto &point) { return point.subject == f.c; }) &&
               !space::volume_bounds(space, root, space::VolumeKind::Zone),
           "custody must dirty old zone observers before removing the real Jolt sensor");
-  step::refresh_object_plots(space, identity(f.objects), transforms(f.objects),
-                             plot_membership(f.objects), {}, f.terms, f.subscriptions, {}, hidden);
-  step::project_visibility(illumination, lights, zones, points, views, replicas, space,
-                           transforms(f.objects), f.models, parameters, assets, *f.projection,
-                           hidden, .05f, 1, 20);
+  step::refresh_object_plots(space, f.objects_state, {}, f.react_state, {}, hidden);
+  step::project_visibility(illumination, space_state, replicas, space, transforms(f.objects),
+                           f.catalog_state, *f.projection, hidden, .05f, 1, 20);
   require(hidden.visible_objects.empty() && hidden.hidden_objects.size() == 2 &&
               lights.rows.empty() && zones.rows.value.empty() && replicas.rows.empty() &&
               masses.rows.at(root.bits).total_kg == 10 &&
@@ -177,10 +171,9 @@ void mass_light_replication_lifetimes() {
           "hidden assembly kept ghost projections or lost measured mass/private state");
 
   step::invalidate_mass(masses, identity(f.objects), declared, assembly.objects);
-  step::Intents intents;
-  std::vector<step::IntentEnding> endings;
-  step::retire_physics(space, identity(f.objects), parents(f.objects), space_flags(f.objects),
-                       physical, intents, endings, assembly.objects, {}, {}, hidden);
+
+  step::retire_physics(space, f.objects_state, physical, step_state, assembly.objects, {}, {},
+                       hidden);
   net::SessionViews sessions;
   catalog::InstanceTexts text;
   step::retire_publication(replicas, sessions, text, assembly.objects);
@@ -199,9 +192,8 @@ void mass_light_replication_lifetimes() {
           "new object reused a retired identity");
   step::invalidate_mass(masses, identity(f.objects), declared, std::span(&reused, 1));
   step::refresh_mass(masses, *f.projection, declared, f.runtime, 2, 20, {}, effects);
-  step::register_illumination(illumination, lights, zones, points, views, space,
-                              transforms(f.objects), f.models, parameters, assets, *f.projection,
-                              std::span(&reused, 1), .05f, 2, 20);
+  step::register_illumination(illumination, space_state, space, transforms(f.objects),
+                              f.catalog_state, *f.projection, std::span(&reused, 1), .05f, 2, 20);
   require(masses.rows.at(reused.bits).total_kg == 4 && lights.rows.empty() &&
               zones.rows.value.empty() && !replicas.rows.contains(root.bits),
           "reused slot inherited retired light/zone/mass or replication identity");
@@ -210,9 +202,10 @@ void complete_assembly_refund() {
   test_runtime::Fixture f;
   const std::array objects{f.a, f.b};
   f.objects.owner[f.a.slot()] = f.objects.owner[f.b.slot()] = 1;
-  perm::Players players;
+  amber::perm::State perm_state;
+  perm::Players &players = perm_state.players;
   players.rows.resize(2);
-  perm::Ledger ledger;
+  perm::Ledger &ledger = perm_state.ledger;
   const auto wallet = perm::Account::player(1);
   ledger.balance[wallet] = std::numeric_limits<std::int64_t>::max() - 10;
   ledger.balance[perm::Account::object(f.a)] = ledger.balance[perm::Account::object(f.b)] = 7;
@@ -222,13 +215,9 @@ void complete_assembly_refund() {
               ledger.balance == before,
           "aggregate refund overflow was accepted or changed money during validation");
   ledger.balance[wallet] = 1;
-  perm::Offers offers;
-  perm::Trades trades;
-  perm::Grants grants;
-  perm::OwnerLimits limits;
+
   step::NativeCompletion out;
-  step::retire_commerce(ledger, offers, trades, grants, players, limits, identity(f.objects),
-                        authority(f.objects), permission_flags(f.objects), objects, 1, out);
+  step::retire_commerce(perm_state, f.objects_state, objects, 1, out);
   require(perm::balance(ledger, wallet) == 15 &&
               !ledger.balance.contains(perm::Account::object(f.a)) &&
               !ledger.balance.contains(perm::Account::object(f.b)) && out.records.size() == 2,

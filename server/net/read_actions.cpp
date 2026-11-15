@@ -68,12 +68,18 @@ Json action_record(const catalog::Models &models, const catalog::Scripts &script
   }
   return result;
 }
-bool available(const catalog::Models &models, const catalog::Scripts &scripts,
-               const react::InstanceScripts &instances, const react::NativeActions &native,
+bool available(const amber::catalog::State &catalog_state, const amber::react::State &react_state,
                const react::ValueRead &values, AuthorityRead authority,
-               const perm::OwnerLimits &limits, const perm::Players &players,
-               const perm::Grants &grants, Step now, const net::Invocation &call, Handle target,
-               TermId id) {
+               const amber::perm::State &perm_state, Step now, const net::Invocation &call,
+               Handle target, TermId id) {
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+  auto &instances = react_state.installations;
+  auto &native = react_state.native_declarations;
+  auto &limits = perm_state.owner_limits;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+
   const ActionRequest request{call.principal.player, id, target, {}};
   const auto resolved = react::resolve(native, values.terms, models, scripts, instances,
                                        values.identity, request, call.principal.body);
@@ -88,13 +94,17 @@ bool available(const catalog::Models &models, const catalog::Scripts &scripts,
       .allowed;
 }
 } // namespace
-net::Reply read_actions(const catalog::Models &models, const catalog::Scripts &scripts,
-                        const react::InstanceScripts &instances, const react::NativeActions &native,
-                        const react::ValueRead &values, SessionViews &sessions,
-                        observe::Hearing &hearing, std::size_t page_size,
+net::Reply read_actions(const amber::catalog::State &catalog_state,
+                        const amber::react::State &react_state, const react::ValueRead &values,
+                        SessionViews &sessions, observe::Hearing &hearing, std::size_t page_size,
                         std::size_t events_per_response, AuthorityRead authority,
-                        const perm::OwnerLimits &limits, const perm::Players &players,
-                        const perm::Grants &grants, Step now, const net::Invocation &call) {
+                        const amber::perm::State &perm_state, Step now,
+                        const net::Invocation &call) {
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+  auto &instances = react_state.installations;
+  auto &native = react_state.native_declarations;
+
   try {
     Handle target = call.principal.body;
     if (call.request.fields.contains("target"))
@@ -116,8 +126,8 @@ net::Reply read_actions(const catalog::Models &models, const catalog::Scripts &s
         names.insert(names.end(), player_ids.begin(), player_ids.end());
       }
       std::erase_if(names, [&](TermId id) {
-        return !available(models, scripts, instances, native, values, authority, limits, players,
-                          grants, now, call, target, id);
+        return !available(catalog_state, react_state, values, authority, perm_state, now, call,
+                          target, id);
       });
       std::sort(names.begin(), names.end(), [&](TermId left, TermId right) {
         return values.terms.rows[left].name < values.terms.rows[right].name;

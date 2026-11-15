@@ -33,14 +33,20 @@ void refresh_parts(Invocation &invocation, IdentityRead identity, const Relation
   for (std::size_t i = 0; i < invocation.parts.size(); ++i)
     append(invocation.parts[i]);
 }
-bool start_invocation(Vm &vm, ScriptStates &states, RandomStates &random,
-                      Subscriptions &subscriptions, const ValueRead &values,
-                      const Triggers &triggers, const Relation &declared_parts,
-                      std::uint64_t initial_seed, AttributionRead attribution,
-                      const catalog::Models &models, const catalog::Scripts &scripts,
-                      record::Journal &journal, const react::HandlerRef &handler,
-                      InvocationInput input, react::Invocation &invocation,
-                      CompletedInvocation &result) {
+bool start_invocation(Vm &vm, amber::react::State &react_state, const ValueRead &values,
+                      const amber::ObjectState &objects_state, std::uint64_t initial_seed,
+                      const amber::catalog::State &catalog_state, record::Journal &journal,
+                      const react::HandlerRef &handler, InvocationInput input,
+                      react::Invocation &invocation, CompletedInvocation &result) {
+  auto &states = react_state.states;
+  auto &random = react_state.random;
+  auto &subscriptions = react_state.subscriptions;
+  auto &triggers = react_state.triggers;
+  auto &declared_parts = objects_state.declared_parts;
+  auto attribution = amber::attribution(std::as_const(objects_state.objects));
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+
   result.handler = handler;
   result.receiver = input.receiver;
   result.trigger = input.trigger;

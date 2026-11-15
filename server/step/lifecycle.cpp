@@ -23,23 +23,27 @@ void changed_relations(react::DeferredEffects &effects,
 }
 } // namespace
 
-void apply_custody(space::Space &space, IdentityRead identity, TransformWrite transforms,
-                   ParentWrite parents, SpaceFlags flags, space::PhysicalRelations &physical,
-                   const lifecycle::Parts &parts, std::array<TermId, 4> terms, PlotWrite membership,
+void apply_custody(space::Space &space, amber::ObjectState &objects_state,
+                   amber::space::State &space_state, std::array<TermId, 4> terms,
                    const perm::Plots &plots, std::span<const perm::CustodyChange> custody,
                    NativeCompletion &out) {
-  std::vector<space::RelationChange> changes;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(objects_state.objects);
+
+  auto &parts = objects_state.parts;
+  auto membership = amber::plot_membership(objects_state.objects);
+
+  const auto changes_begin = space_state.relation_changes.size();
   for (const auto &change : custody) {
     const auto closure = lifecycle::collect(parts, identity, change.goods);
     const auto descendants = std::span(closure).subspan(1);
     const space::VisibleCustody visible{change.goods, change.parent,
                                         change.parent &&
                                             bool(identity.flags[change.parent.slot()] & Body)};
-    const auto result = change.in_world
-                            ? space::visible_custody(space, identity, transforms, parents, flags,
-                                                     physical, visible, changes, descendants)
-                            : space::custody(space, identity, change.goods, change.parent, parents,
-                                             flags, physical, changes, descendants);
+    const auto result = change.in_world ? space::visible_custody(space, objects_state, space_state,
+                                                                 visible, descendants)
+                                        : space::custody(space, objects_state, change.goods,
+                                                         change.parent, space_state, descendants);
     if (result.status != space::Status::Ok)
       throw std::invalid_argument(space::status_text(result.status));
     perm::update_plots(identity, transforms, membership, plots, closure, change.in_world);
@@ -51,20 +55,27 @@ void apply_custody(space::Space &space, IdentityRead identity, TransformWrite tr
     });
     visibility.insert(visibility.end(), closure.begin(), closure.end());
   }
+  const auto changes = std::span(space_state.relation_changes).subspan(changes_begin);
   changed_relations(out.effects, changes, terms, {});
   for (const auto &change : changes) {
     out.changed_objects.push_back(change.from);
     out.changed_objects.push_back(change.to);
   }
+  space_state.relation_changes.resize(changes_begin);
 }
 
-void change_custody(space::Space &space, IdentityRead identity, TransformWrite transforms,
-                    ParentWrite parents, SpaceFlags flags, space::PhysicalRelations &physical,
-                    const lifecycle::Parts &parts, std::array<TermId, 4> terms,
-                    PlotWrite membership, const perm::Plots &plots, IlluminationSources &sources,
-                    observe::Lights &lights, observe::ZoneAmbients &zones,
-                    observe::LightSubscriptions &points, observe::ActiveViews &views,
-                    NativeCompletion &out) {
+void change_custody(space::Space &space, amber::ObjectState &objects_state,
+                    amber::space::State &space_state, std::array<TermId, 4> terms,
+                    const perm::Plots &plots, IlluminationSources &sources, NativeCompletion &out) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+
+  auto &parts = objects_state.parts;
+
+  auto &lights = space_state.lights;
+  auto &zones = space_state.zones;
+  auto &points = space_state.light_subscriptions;
+  auto &views = space_state.active_views;
+
   const auto custody = std::move(out.custody);
   out.custody.clear();
   std::vector<Handle> hiding;
@@ -76,31 +87,44 @@ void change_custody(space::Space &space, IdentityRead identity, TransformWrite t
   unique(hiding);
   // Zone bounds must dirty their old observers before custody removes the sensor.
   retire_illumination(sources, lights, zones, points, views, space, hiding);
-  apply_custody(space, identity, transforms, parents, flags, physical, parts, terms, membership,
-                plots, custody, out);
+  apply_custody(space, objects_state, space_state, terms, plots, custody, out);
 }
 
-void project_visibility(IlluminationSources &sources, observe::Lights &lights,
-                        observe::ZoneAmbients &zones, observe::LightSubscriptions &points,
-                        observe::ActiveViews &views, net::ReplicationIndex &replication,
-                        const space::Space &space, TransformRead transforms,
-                        const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                        const catalog::Assets &assets, const react::ValueRead &values,
-                        const NativeCompletion &out, float source_radius_m, Step now, double hz) {
+void project_visibility(IlluminationSources &sources, amber::space::State &space_state,
+                        net::ReplicationIndex &replication, const space::Space &space,
+                        TransformRead transforms, const amber::catalog::State &catalog_state,
+                        const react::ValueRead &values, const NativeCompletion &out,
+                        float source_radius_m, Step now, double hz) {
+  auto &lights = space_state.lights;
+  auto &zones = space_state.zones;
+  auto &points = space_state.light_subscriptions;
+  auto &views = space_state.active_views;
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+
   retire_illumination(sources, lights, zones, points, views, space, out.hidden_objects);
   for (auto object : out.hidden_objects)
     net::retire_replication(replication, object);
-  register_illumination(sources, lights, zones, points, views, space, transforms, models,
-                        parameters, assets, values, out.visible_objects, source_radius_m, now, hz);
+  register_illumination(sources, space_state, space, transforms, catalog_state, values,
+                        out.visible_objects, source_radius_m, now, hz);
   for (auto object : out.visible_objects)
     net::register_replication(replication, object, values.identity, transforms, models, parameters,
                               assets, values);
 }
 
-void retire_commerce(perm::Ledger &ledger, perm::Offers &offers, perm::Trades &trades,
-                     perm::Grants &grants, perm::Players &players, perm::OwnerLimits &owner_limits,
-                     IdentityRead identity, AuthorityRead authority, PermissionFlags flags,
+void retire_commerce(amber::perm::State &perm_state, amber::ObjectState &objects_state,
                      std::span<const Handle> removed, Step now, NativeCompletion &out) {
+  auto &ledger = perm_state.ledger;
+  auto &offers = perm_state.offers;
+  auto &trades = perm_state.trades;
+  auto &grants = perm_state.grants;
+  auto &players = perm_state.players;
+  auto &owner_limits = perm_state.owner_limits;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto flags = amber::permission_flags(objects_state.objects);
+
   auto cancellation = retire_goods(offers, trades, identity, flags, removed);
   out.changed |= cancellation.changed;
   out.changed_objects.insert(out.changed_objects.end(), cancellation.changed_objects.begin(),
@@ -133,11 +157,16 @@ void retire_commerce(perm::Ledger &ledger, perm::Offers &offers, perm::Trades &t
   }
 }
 
-void retire_physics(space::Space &space, IdentityRead identity, ParentWrite parents,
-                    SpaceFlags flags, space::PhysicalRelations &physical, Intents &intents,
-                    std::vector<IntentEnding> &intent_endings, std::span<const Handle> removed,
-                    std::array<TermId, 4> terms, const record::Origin &origin,
-                    NativeCompletion &out) {
+void retire_physics(space::Space &space, amber::ObjectState &objects_state,
+                    space::PhysicalRelations &physical, amber::step::State &step_state,
+                    std::span<const Handle> removed, std::array<TermId, 4> terms,
+                    const record::Origin &origin, NativeCompletion &out) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto parents = amber::parents(objects_state.objects);
+  auto flags = amber::space_flags(objects_state.objects);
+  auto &intents = step_state.intents;
+  auto &intent_endings = step_state.intent_endings;
+
   std::vector<space::RelationChange> changes;
   for (auto object : removed) {
     if (auto ending = cancel_move(intents, object))
@@ -160,10 +189,15 @@ void retire_publication(net::ReplicationIndex &replication, net::SessionViews &v
   net::invalidate(views, removed);
 }
 
-void refresh_object_plots(const space::Space &space, IdentityRead identity,
-                          TransformRead transforms, PlotWrite membership, const perm::Plots &plots,
-                          const react::Terms &terms, const react::Subscriptions &subscriptions,
+void refresh_object_plots(const space::Space &space, amber::ObjectState &objects_state,
+                          const perm::Plots &plots, const amber::react::State &react_state,
                           const record::Origin &origin, NativeCompletion &out) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(std::as_const(objects_state.objects));
+  auto membership = amber::plot_membership(objects_state.objects);
+  auto &terms = react_state.terms;
+  auto &subscriptions = react_state.subscriptions;
+
   out.changed_objects.insert(out.changed_objects.end(), out.visible_objects.begin(),
                              out.visible_objects.end());
   out.changed_objects.insert(out.changed_objects.end(), out.hidden_objects.begin(),

@@ -134,7 +134,6 @@ void catalog_roundtrip_and_capture() {
   const std::array<ModelId, 2> selected_models{1, 2};
   const std::array<ScriptId, 1> selected_scripts{1};
   const std::array<std::uint32_t, 1> selected_params{1};
-  const std::array<Handle, 1> selected_objects{object};
   snap::Buffer bytes;
   snap::Output out{bytes};
   write_models(out, models, std::span<const ModelId>(selected_models));
@@ -145,7 +144,7 @@ void catalog_roundtrip_and_capture() {
         {"expect", {{"subject", "target"}, {"term", "known.quantity"}, {"equals", 2}}}}});
   write_scripts(out, scripts, std::span<const ScriptId>(selected_scripts));
   write_text(out, texts, instances, std::span<const ModelId>(selected_models),
-             std::span<const Handle>(selected_objects));
+             std::span<const Handle>(std::array<Handle, 1>{object}));
   out.adapter().flush();
   bytes.resize(out.adapter().writtenBytesCount());
   Models loaded_models;

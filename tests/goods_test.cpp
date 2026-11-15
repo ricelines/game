@@ -10,37 +10,43 @@ namespace st = amber::step;
 namespace pe = amber::perm;
 namespace re = amber::react;
 struct Fixture {
+
+  amber::catalog::State catalog_state;
+  amber::react::State react_state;
+
   Scene scene;
-  pe::Players players;
-  pe::Grants grants;
-  pe::Plots plots;
-  pe::OwnerLimits limits;
-  Relation parts;
+  ObjectState &objects_state = scene.objects_state;
+  pe::State perm_state;
+  pe::Players &players = perm_state.players;
+  pe::Grants &grants = perm_state.grants;
+  pe::Plots &plots = perm_state.plots;
+  pe::OwnerLimits &limits = perm_state.owner_limits;
+  Relation &parts = objects_state.declared_parts;
   st::DeliveryTargets delivery;
-  lifecycle::Parts named_parts;
+  lifecycle::Parts &named_parts = objects_state.parts;
   std::vector<sp::RelationChange> changes;
-  catalog::Models models;
-  re::Terms terms;
-  re::Materials materials;
-  re::InstanceScripts installed;
-  re::MeterRows meters;
-  catalog::ParameterBlocks parameters;
-  catalog::Assets assets;
+  catalog::Models &models = catalog_state.models;
+  re::Terms &terms = react_state.terms;
+  re::Materials &materials = react_state.materials;
+  re::InstanceScripts &installed = react_state.installations;
+  re::MeterRows &meters = react_state.meters;
+  catalog::ParameterBlocks &parameters = catalog_state.parameters;
+  catalog::Assets &assets = catalog_state.assets;
   Handle controller, root, child, body;
-  react::AssetMeasurements measurements;
-  react::InstanceSettings instance_settings;
-  react::ModelSettings model_settings;
-  react::PlotSettings plot_settings;
-  react::WorldSettings world_settings;
-  react::SharedColumns shared;
-  react::RelationsRead relations;
-  react::RuntimeMeasurements runtime;
-  react::Properties properties;
-  react::Processes processes;
+  react::AssetMeasurements &measurements = catalog_state.baked_measurements;
+  react::InstanceSettings &instance_settings = react_state.instance_settings;
+  react::ModelSettings &model_settings = react_state.model_settings;
+  react::PlotSettings &plot_settings = react_state.plot_settings;
+  react::WorldSettings &world_settings = react_state.world_settings;
+  react::SharedColumns &shared = react_state.shared;
+  react::RelationsRead &relations = react_state.relations;
+  react::RuntimeMeasurements &runtime = react_state.runtime_measurements;
+  react::Properties &properties = react_state.properties;
+  react::Processes &processes = react_state.processes;
   re::Vm vm{{4096, 100, 5, 64}};
   re::ScriptState state;
   re::DeferredEffects effects;
-  re::NativeActions declarations;
+  re::NativeActions &declarations = react_state.native_declarations;
   bool changed = false;
   std::vector<Handle> hidden;
   nlohmann::json reply;
@@ -74,10 +80,8 @@ struct Fixture {
     parts.out.set(root.slot(), std::vector<Handle>{child});
     parts.in.set(child.slot(), std::vector<Handle>{root});
     named_parts.set(root.slot(), std::vector<lifecycle::NamedPart>{{"part", child}});
-    require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                       parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
-                       scene.relations.supports, scene.relations.attached_to,
-                       {child, root, {{0, 0, .5f}, {}}, false}, changes)
+    require(sp::attach(scene.space, scene.objects_state, scene.space_state,
+                       {child, root, {{0, 0, .5f}, {}}, false})
                     .status == sp::Status::Ok,
             "fixture declared child attachment");
     const react::ValueRead values{terms,
@@ -97,9 +101,7 @@ struct Fixture {
                                   runtime,
                                   0,
                                   0};
-    step::bind_metadata(vm, values, transforms(scene.objects), authority(scene.objects),
-                        parents(scene.objects), models, installed, parameters, assets, parts,
-                        meters, plots);
+    step::bind_metadata(vm, values, scene.objects_state, catalog_state, react_state, plots);
     st::declare_hold_goods_action(terms, declarations);
     action = terms.by_name.at("engine.hold_goods");
     auto code = re::compile_script(R"(
@@ -142,13 +144,9 @@ struct Fixture {
     call.arguments = nlohmann::json::object();
     call.step = step;
     call.hz = 20;
-    auto result = st::hold_goods(players, grants, limits, identity(scene.objects),
-                                 authority(scene.objects), parents(scene.objects),
-                                 space_flags(scene.objects), parts, delivery, scene.space, 1, call);
-    st::apply_custody(scene.space, identity(scene.objects), transforms(scene.objects),
-                      parents(scene.objects), space_flags(scene.objects), scene.relations,
-                      named_parts, {}, plot_membership(scene.objects), plots, result.custody,
-                      result);
+    auto result = st::hold_goods(perm_state, scene.objects_state, delivery, scene.space, 1, call);
+    st::apply_custody(scene.space, scene.objects_state, scene.space_state, {}, plots,
+                      result.custody, result);
     hidden = result.hidden_objects;
     changed = result.changed;
     reply = std::move(result.reply);
@@ -167,11 +165,8 @@ void explicit_authority_and_online_assembly() {
   const auto id =
       f.grant(pe::Scope::object(f.root), pe::bit(pe::Verb::Transfer) | pe::bit(pe::Verb::Destroy));
   f.delivery.present_bodies[1] = f.body;
-  require(sp::attach(f.scene.space, identity(f.scene.objects), transforms(f.scene.objects),
-                     parents(f.scene.objects), space_flags(f.scene.objects),
-                     f.scene.relations.contains, f.scene.relations.supports,
-                     f.scene.relations.attached_to, {f.body, f.root, {{0, 0, .5f}, {}}, false},
-                     f.changes)
+  require(sp::attach(f.scene.space, f.scene.objects_state, f.scene.space_state,
+                     {f.body, f.root, {{0, 0, .5f}, {}}, false})
                   .status == sp::Status::Ok,
           "owner seated on collected goods");
   f.collect();

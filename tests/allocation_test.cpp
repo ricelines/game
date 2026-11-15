@@ -13,7 +13,9 @@ void near(double actual, double expected, const char *message) {
 }
 struct Fixture {
   test_runtime::Fixture f{1000};
-  MeterRows meters;
+  amber::react::State &react_state = f.react_state;
+
+  MeterRows &meters = react_state.meters;
   Handle subject = f.c, third, supplier, substitute;
   ScriptId consumer;
   Step now = 0;
@@ -57,7 +59,7 @@ struct Fixture {
                      amount, f.effects);
   }
   void publish() {
-    reconcile_allocations(f.values(), f.allocations, meters, f.effects, now, 20);
+    reconcile_allocations(f.values(), f.react_state, f.effects, now, 20);
     std::vector<FactKey> facts;
     for (const auto &effect : f.effects.ordered)
       if (const auto *work = std::get_if<step::WatchWork>(&effect);
@@ -73,7 +75,7 @@ struct Fixture {
     contribute(f.a, 11, 6);
     contribute(f.b, 11, 6);
     contribute(third, 11, 1);
-    reconcile_allocations(f.values(), f.allocations, meters, f.effects, now, 20);
+    reconcile_allocations(f.values(), f.react_state, f.effects, now, 20);
     for (auto object : {f.a, f.b, third})
       f.bind(consumer, object);
     f.effects = {};
@@ -156,7 +158,7 @@ void priority_scopes_and_retirement() {
   x.f.objects.plot[x.third.slot()] = 3;
   x.baseline(6);
   const auto change = [&](SettingKey key) {
-    reconcile_priority(x.f.values(), x.f.allocations, x.meters, key, x.f.effects, x.now, 20);
+    reconcile_priority(x.f.values(), x.f.react_state, key, x.f.effects, x.now, 20);
     x.publish();
   };
   x.f.instance_settings.columns.resize(13);

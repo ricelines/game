@@ -118,13 +118,19 @@ void install_models(const Json &plan, const catalog::Assets &assets,
       throw std::invalid_argument("duplicate initial model symbol");
   }
 }
-void install_catalog(const Json &plan, const react::Terms &terms, const catalog::Hash &registry,
-                     const catalog::RuntimePins &pins, react::VmSettings limits,
-                     const std::filesystem::path &asset_root,
-                     const std::filesystem::path &script_root, catalog::Assets &assets,
-                     catalog::Models &models, catalog::Scripts &scripts, catalog::ModelTexts &texts,
-                     react::ModelSettings &settings, react::Vm &vm, react::RuleVersions &rules,
-                     Symbols &symbols) {
+void install_catalog(const Json &plan, amber::react::State &react_state,
+                     const catalog::Hash &registry, const catalog::RuntimePins &pins,
+                     react::VmSettings limits, const std::filesystem::path &asset_root,
+                     const std::filesystem::path &script_root, amber::catalog::State &catalog_state,
+                     react::Vm &vm, Symbols &symbols) {
+  auto &terms = react_state.terms;
+  auto &assets = catalog_state.assets;
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+  auto &texts = catalog_state.model_text;
+  auto &settings = react_state.model_settings;
+  auto &rules = react_state.rules;
+
   auto prepared_scripts = prepare_scripts(plan, terms, registry, pins, limits);
   for (const auto &script : prepared_scripts)
     catalog::write_script(script_root / script.artifact.hash, script.artifact);

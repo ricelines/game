@@ -1,3 +1,4 @@
+#include <toml++/toml.hpp>
 #pragma once
 
 #include "runtime_fixture.hpp"
@@ -6,30 +7,41 @@
 
 namespace amber::test_physical {
 struct Fixture {
+  amber::space::State space_state{float(
+      toml::parse_file(AMBER_CONFIG_PATH)["perception"]["LIGHT_CELL_M"].value<double>().value())};
+  amber::perm::State perm_state;
+  amber::net::State net_state{{}};
+  amber::step::State step_state{3};
+
   test_runtime::Fixture f{1000};
+  amber::ObjectState &objects_state = f.objects_state;
+
+  amber::catalog::State &catalog_state = f.catalog_state;
+  amber::react::State &react_state = f.react_state;
+
   space::Space space;
-  space::PhysicalRelations physical;
-  Relation parts;
-  perm::Players players;
-  perm::Grants grants;
-  perm::Plots plots;
-  perm::OwnerLimits limits;
-  net::Profiles profiles;
-  step::Intents intents;
-  std::vector<step::IntentEnding> endings;
-  step::MechanicalCauses causes{3};
-  observe::Hearing hearing;
-  std::vector<observe::Listener> listeners;
-  catalog::InstanceTexts instance_texts;
-  catalog::ModelTexts model_texts;
-  catalog::ParameterBlocks parameters;
-  catalog::Assets assets;
-  react::MeterRows meters;
-  react::NativeActions declarations;
-  step::Clock clock;
+  space::PhysicalRelations &physical = space_state.physical_relations;
+  Relation &parts = objects_state.declared_parts;
+  perm::Players &players = perm_state.players;
+  perm::Grants &grants = perm_state.grants;
+  perm::Plots &plots = perm_state.plots;
+  perm::OwnerLimits &limits = perm_state.owner_limits;
+  net::Profiles &profiles = net_state.profiles;
+  step::Intents &intents = step_state.intents;
+  std::vector<step::IntentEnding> &endings = step_state.intent_endings;
+  step::MechanicalCauses &causes = step_state.mechanical_causes;
+  observe::Hearing &hearing = space_state.hearing;
+  std::vector<observe::Listener> &listeners = space_state.listeners;
+  catalog::InstanceTexts &instance_texts = catalog_state.instance_text;
+  catalog::ModelTexts &model_texts = catalog_state.model_text;
+  catalog::ParameterBlocks &parameters = catalog_state.parameters;
+  catalog::Assets &assets = catalog_state.assets;
+  react::MeterRows &meters = react_state.meters;
+  react::NativeActions &declarations = react_state.native_declarations;
+  step::Clock &clock = step_state.clock;
   record::Journal journal{8, {}};
-  step::WorkQueues queues;
-  step::TimerWheel timers;
+  step::WorkQueues &queues = step_state.queues;
+  step::TimerWheel &timers = step_state.timers;
   ScriptId script = 0;
   float reach_m = 2;
 
@@ -64,12 +76,9 @@ struct Fixture {
     }
     f.relation_view.columns[22] = &physical.attached_to;
     step::declare_physical_actions(f.terms, declarations);
-    step::bind_physical(f.vm, space, identity(f.objects), transforms(f.objects), parts, causes,
-                        plot_membership(f.objects), plots, intents, endings, players, grants, 1024,
-                        hearing, listeners, instance_texts, model_texts);
-    step::bind_metadata(f.vm, f.values(), transforms(f.objects), authority(f.objects),
-                        parents(f.objects), f.models, f.installed, parameters, assets, parts,
-                        meters, plots);
+    step::bind_physical(f.vm, space, f.objects_state, step_state, perm_state, 1024, space_state,
+                        catalog_state);
+    step::bind_metadata(f.vm, f.values(), f.objects_state, f.catalog_state, f.react_state, plots);
     add_body(f.a, {.6f, .6f, 1.8f}, space::Motion::Character);
     add_body(f.b, {.4f, .4f, .4f}, item);
     add_body(f.c, {.5f, .5f, .5f}, space::Motion::Dynamic);
@@ -121,11 +130,9 @@ struct Fixture {
     call.arguments = std::move(args);
     call.step = clock.step;
     call.hz = 20;
-    return step::begin_action(f.values(), f.models, f.scripts, f.installed, f.rules, f.triggers,
-                              declarations, profiles, players, grants, limits, authority(f.objects),
-                              attribution(f.objects), transforms(f.objects), space, intents,
-                              journal, reach_m, std::move(call), parent,
-                              std::chrono::steady_clock::now() + std::chrono::seconds(1));
+    return step::begin_action(f.values(), f.catalog_state, f.react_state, profiles, perm_state,
+                              f.objects_state, space, intents, journal, reach_m, std::move(call),
+                              parent, std::chrono::steady_clock::now() + std::chrono::seconds(1));
   }
   step::ActionRun begin(std::string_view name, Handle target, nlohmann::json args,
                         record::Origin parent = {}) {
@@ -142,40 +149,30 @@ struct Fixture {
     auto run = begin("engine.transfer", target, std::move(args));
     if (run.outcome)
       return *run.outcome;
-    return finish(run,
-                  step::transfer_action(f.properties, f.processes, f.terms, identity(f.objects),
-                                        authority(f.objects), limits, players, grants, run.call));
+    return finish(run, step::transfer_action(f.react_state, f.objects_state, perm_state, run.call));
   }
   step::ActionOutcome grasp(Handle target, nlohmann::json args = nlohmann::json::object(),
                             record::Origin parent = {}) {
     auto run = begin("engine.grasp", target, std::move(args), parent);
     if (run.outcome)
       return *run.outcome;
-    return finish(run, step::grasp_action(space, identity(f.objects), transforms(f.objects),
-                                          parents(f.objects), space_flags(f.objects), physical,
-                                          parts, {20, 21, 22, 23}, reach_m, causes,
-                                          plot_membership(f.objects), plots, run.call));
+    return finish(run, step::grasp_action(space, f.objects_state, space_state, {20, 21, 22, 23},
+                                          reach_m, causes, plots, run.call));
   }
   step::ActionOutcome release(Handle target, nlohmann::json args = nlohmann::json::object(),
                               record::Origin parent = {}) {
     auto run = begin("engine.release", target, std::move(args), parent);
     if (run.outcome)
       return *run.outcome;
-    return finish(run, step::release_action(space, identity(f.objects), transforms(f.objects),
-                                            parents(f.objects), space_flags(f.objects), physical,
-                                            parts, {20, 21, 22, 23}, authority(f.objects), limits,
-                                            players, grants, causes, plot_membership(f.objects),
-                                            plots, run.call));
+    return finish(run, step::release_action(space, f.objects_state, space_state, {20, 21, 22, 23},
+                                            perm_state, causes, run.call));
   }
   step::ActionOutcome attach(Handle target, nlohmann::json args) {
     auto run = begin("engine.attach", target, std::move(args));
     if (run.outcome)
       return *run.outcome;
-    return finish(run, step::attach_action(space, identity(f.objects), transforms(f.objects),
-                                           parents(f.objects), space_flags(f.objects), physical,
-                                           parts, {20, 21, 22, 23}, authority(f.objects), limits,
-                                           players, grants, reach_m, causes,
-                                           plot_membership(f.objects), plots, run.call));
+    return finish(run, step::attach_action(space, f.objects_state, space_state, {20, 21, 22, 23},
+                                           perm_state, reach_m, causes, run.call));
   }
   step::ActionOutcome impulse(Handle target, nlohmann::json args, record::Origin parent = {}) {
     auto run = begin("engine.impulse", target, std::move(args), parent);
@@ -204,9 +201,8 @@ struct Fixture {
     const auto handlers = react::dispatch(f.triggers, f.values(), f.a, 7, clock.step, 20);
     test_runtime::require(handlers.size() == 1 && handlers.front().script == script,
                           "actual current fixture handler is installed");
-    react::start_invocation(f.vm, f.states, f.random, f.subscriptions, f.values(), f.triggers,
-                            parts, 7, attribution(f.objects), f.models, f.scripts, journal,
-                            handlers.front(), std::move(input), invocation, completed);
+    react::start_invocation(f.vm, f.react_state, f.values(), objects_state, 7, f.catalog_state,
+                            journal, handlers.front(), std::move(input), invocation, completed);
     test_runtime::require(completed.outcome.status != react::RunOutcome::Status::Action,
                           "nested checked actions belong in the actual server process tests");
     react::finish_invocation(identity(f.objects), attribution(f.objects), f.models, f.scripts,
@@ -228,8 +224,7 @@ struct Fixture {
   }
   space::StepResult tick() {
     space::StepResult result;
-    space::step(space, identity(f.objects), transforms(f.objects), parents(f.objects),
-                space_flags(f.objects), physical, ++clock.step, .05f, {}, result);
+    space::step(space, f.objects_state, physical, ++clock.step, .05f, {}, result);
     return result;
   }
 };

@@ -23,13 +23,16 @@ void referenced_settings(const Json &value, const react::Terms &terms,
     for (const auto &item : value)
       referenced_settings(item, terms, selected);
 }
-ObjectDescription
-seen_description(const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                 const catalog::Assets &assets, const catalog::Scripts &scripts,
-                 const catalog::ModelTexts &model_text, const catalog::InstanceTexts &instance_text,
-                 const react::InstanceScripts &instances, const react::NativeActions &native,
-                 const react::ValueRead &values, const std::vector<TermId> &inspection_terms,
-                 const catalog::AuthoredTexts &authored_texts, Handle object, Step now, double hz) {
+ObjectDescription seen_description(const amber::catalog::State &catalog_state,
+                                   const amber::react::State &react_state,
+                                   const react::ValueRead &values, Handle object, Step now,
+                                   double hz) {
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+
+  auto &inspection_terms = react_state.inspection_terms;
+
   const auto &asset = view_detail::asset(models, parameters, assets, values, object);
   std::unordered_set<TermId> selected(asset.replicated.begin(), asset.replicated.end());
   referenced_settings(asset.manifest.at("bindings"), values.terms, selected);
@@ -47,9 +50,7 @@ seen_description(const catalog::Models &models, const catalog::ParameterBlocks &
         selected.contains(id))
       inspected.push_back(id);
   }
-  return view_detail::describe(models, parameters, assets, scripts, model_text, instance_text,
-                               instances, native, values, authored_texts, object, now, hz,
-                               inspected);
+  return view_detail::describe(catalog_state, react_state, values, object, now, hz, inspected);
 }
 } // namespace
 std::vector<TermId> object_action_ids(const catalog::Models &models,
@@ -147,19 +148,29 @@ void append_heard(Json &result, observe::Hearing &hearing, net::SessionId sessio
   }
   result["events_omitted"] = result.value("events_omitted", std::size_t{}) + omitted;
 }
-void refresh_view(const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                  const catalog::Assets &assets, const catalog::Scripts &scripts,
-                  const catalog::ModelTexts &model_text,
-                  const catalog::InstanceTexts &instance_text,
-                  const react::InstanceScripts &instances, const react::NativeActions &native,
-                  const react::ValueRead &values, const std::vector<TermId> &inspection_terms,
-                  const catalog::AuthoredTexts &authored_texts, SessionViews &sessions,
-                  observe::ActiveViews &active, const space::Space &space, TransformRead transforms,
-                  const Relation &declared_parts, const Relation &attached_to,
-                  const observe::Lights &lights, const observe::ZoneAmbients &zones,
-                  const std::vector<observe::MotionSample> &motion, const step::Intents &intents,
-                  observe::Settings settings, Step now, double hz, double world_ambient_lux,
-                  net::SessionId session, const net::Principal &principal, std::size_t limit) {
+void refresh_view(const amber::catalog::State &catalog_state,
+                  const amber::react::State &react_state, const react::ValueRead &values,
+                  SessionViews &sessions, amber::space::State &space_state,
+                  const space::Space &space, const amber::ObjectState &objects_state,
+                  const step::Intents &intents, observe::Settings settings, Step now, double hz,
+                  double world_ambient_lux, net::SessionId session, const net::Principal &principal,
+                  std::size_t limit) {
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+  auto &scripts = catalog_state.scripts;
+
+  auto &instances = react_state.installations;
+  auto &native = react_state.native_declarations;
+  auto &inspection_terms = react_state.inspection_terms;
+
+  auto &active = space_state.active_views;
+  auto transforms = amber::transforms(std::as_const(objects_state.objects));
+
+  auto &attached_to = space_state.physical_relations.attached_to;
+
+  auto &zones = space_state.zones;
+
   const auto identity = values.identity;
   if (!identity.valid(principal.body))
     throw std::invalid_argument("Player has no live body");
@@ -175,8 +186,8 @@ void refresh_view(const catalog::Models &models, const catalog::ParameterBlocks 
         held = object;
         break;
       }
-  const auto scan = observe::scan(space, identity, transforms, declared_parts, observer, held,
-                                  settings, lights, zones, motion, world_ambient_lux, limit);
+  const auto scan = observe::scan(space, objects_state, observer, held, settings, space_state,
+                                  world_ambient_lux, limit);
   auto &row = sessions.rows[session];
   row.player = principal.player;
   row.body = principal.body;
@@ -209,17 +220,14 @@ void refresh_view(const catalog::Models &models, const catalog::ParameterBlocks 
     return pa != pb ? pa > pb : left < right;
   });
   for (const auto zone : ordered_zones) {
-    auto description = view_detail::describe(models, parameters, assets, scripts, model_text,
-                                             instance_text, instances, native, values,
-                                             authored_texts, zone, now, hz, inspection_terms);
+    auto description =
+        view_detail::describe(catalog_state, react_state, values, zone, now, hz, inspection_terms);
     next.self.zones.emplace_back(zone, description.says.name);
   }
   auto prepare = [&](const auto &seen, auto &output) {
     for (const auto &thing : seen)
       output.push_back(
-          {thing, seen_description(models, parameters, assets, scripts, model_text, instance_text,
-                                   instances, native, values, inspection_terms, authored_texts,
-                                   thing.object, now, hz)});
+          {thing, seen_description(catalog_state, react_state, values, thing.object, now, hz)});
   };
   prepare(scan.things, next.things);
   prepare(scan.far, next.far);
@@ -231,29 +239,24 @@ void refresh_view(const catalog::Models &models, const catalog::ParameterBlocks 
     observe::track_view(active, session, observer.eye, settings.sight_m);
   active.dirty.erase(session);
 }
-net::Reply read_look(const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                     const catalog::Assets &assets, const catalog::Scripts &scripts,
-                     const catalog::ModelTexts &model_text,
-                     const catalog::InstanceTexts &instance_text,
-                     const react::InstanceScripts &instances, const react::NativeActions &native,
-                     const react::ValueRead &values, const std::vector<TermId> &inspection_terms,
-                     const catalog::AuthoredTexts &authored_texts, SessionViews &sessions,
-                     observe::ActiveViews &active, observe::Hearing &hearing,
-                     const space::Space &space, TransformRead transforms,
-                     const Relation &declared_parts, const Relation &attached_to,
-                     const observe::Lights &lights, const observe::ZoneAmbients &zones,
-                     const std::vector<observe::MotionSample> &motion, const step::Intents &intents,
-                     observe::Settings settings, Step now, double hz, double world_ambient_lux,
-                     const net::Invocation &call) {
+net::Reply read_look(const amber::catalog::State &catalog_state,
+                     const amber::react::State &react_state, const react::ValueRead &values,
+                     SessionViews &sessions, amber::space::State &space_state,
+                     const space::Space &space, const amber::ObjectState &objects_state,
+                     const step::Intents &intents, observe::Settings settings, Step now, double hz,
+                     double world_ambient_lux, const net::Invocation &call) {
+
+  auto &active = space_state.active_views;
+  auto &hearing = space_state.hearing;
+
   try {
     const auto limit = call.request.fields.value("limit", settings.things_max);
     auto &row = sessions.rows[call.session];
     if (!row.pending.ready || row.pending.step != now || row.pending.limit < limit ||
         active.dirty.contains(call.session))
-      refresh_view(models, parameters, assets, scripts, model_text, instance_text, instances,
-                   native, values, inspection_terms, authored_texts, sessions, active, space,
-                   transforms, declared_parts, attached_to, lights, zones, motion, intents,
-                   settings, now, hz, world_ambient_lux, call.session, call.principal, limit);
+      refresh_view(catalog_state, react_state, values, sessions, space_state, space, objects_state,
+                   intents, settings, now, hz, world_ambient_lux, call.session, call.principal,
+                   limit);
     auto &pending = row.pending;
     const auto things = std::span<const net::PreparedThing>(pending.things)
                             .first(std::min(limit, pending.things.size()));

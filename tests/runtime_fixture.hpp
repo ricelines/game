@@ -10,32 +10,36 @@ inline void require(bool value, const char *message) {
     throw std::runtime_error(message);
 }
 struct Fixture {
-  Objects objects;
+  amber::ObjectState objects_state;
+  amber::react::State react_state;
+  amber::catalog::State catalog_state;
+
+  Objects &objects = objects_state.objects;
   Handle a, b, c;
-  Terms terms;
-  Materials materials;
-  AssetMeasurements assets;
-  Properties properties;
-  Processes processes;
-  InstanceSettings instance_settings;
-  ModelSettings model_settings;
-  PlotSettings plots;
-  WorldSettings world;
-  SharedColumns shared;
-  GivesTo gives_to;
-  AllocationRows allocations;
-  AuthoredRelations relations;
-  RelationsRead relation_view;
-  RuntimeMeasurements runtime;
-  catalog::Models models;
-  catalog::Scripts scripts;
+  Terms &terms = react_state.terms;
+  Materials &materials = react_state.materials;
+  AssetMeasurements &assets = catalog_state.baked_measurements;
+  Properties &properties = react_state.properties;
+  Processes &processes = react_state.processes;
+  InstanceSettings &instance_settings = react_state.instance_settings;
+  ModelSettings &model_settings = react_state.model_settings;
+  PlotSettings &plots = react_state.plot_settings;
+  WorldSettings &world = react_state.world_settings;
+  SharedColumns &shared = react_state.shared;
+  GivesTo &gives_to = react_state.gives_to;
+  AllocationRows &allocations = react_state.allocations;
+  AuthoredRelations &relations = react_state.authored_relations;
+  RelationsRead &relation_view = react_state.relations;
+  RuntimeMeasurements &runtime = react_state.runtime_measurements;
+  catalog::Models &models = catalog_state.models;
+  catalog::Scripts &scripts = catalog_state.scripts;
   std::unordered_map<ScriptId, CompiledScript> code;
-  InstanceScripts installed;
-  Triggers triggers;
-  RuleVersions rules;
-  Subscriptions subscriptions;
-  ScriptStates states;
-  RandomStates random;
+  InstanceScripts &installed = react_state.installations;
+  Triggers &triggers = react_state.triggers;
+  RuleVersions &rules = react_state.rules;
+  Subscriptions &subscriptions = react_state.subscriptions;
+  ScriptStates &states = react_state.states;
+  RandomStates &random = react_state.random;
   DeferredEffects effects;
   std::optional<ValueRead> projection;
   Vm vm;
@@ -68,7 +72,7 @@ struct Fixture {
     models.rows.resize(2);
     models.rows[1].id = 1;
     projection.emplace(values());
-    bind_values(vm, *projection, properties, processes, shared, gives_to);
+    bind_values(vm, *projection, react_state);
     bind_events(vm, terms);
   }
   ValueRead values() {
@@ -108,8 +112,8 @@ struct Fixture {
     set_state(properties, processes, terms.rows[term], object, Value(value), now, 20, effects);
   }
   void bind(ScriptId id, Handle object, SyncMode mode = SyncMode::Initial) {
-    (void)sync_watches(subscriptions, values(), allocations, {object, id},
-                       scripts.rows[id].declaration, 0, 20, {}, mode);
+    (void)sync_watches(react_state, values(), {object, id}, scripts.rows[id].declaration, 0, 20, {},
+                       mode);
   }
   std::vector<InvocationPlan> changed(FactKey fact, Step now = 0) {
     auto changes = refresh_dependencies(subscriptions, values(), fact, now, 20, {});

@@ -182,16 +182,27 @@ void install_physics(space::Space &space, IdentityRead identity, TransformRead t
       throw std::invalid_argument(space::status_text(added.status));
   }
 }
-std::vector<Handle> initialize_physics(
-    space::Space &space, const GeometryAssets &geometry, const catalog::Models &models,
-    const catalog::ParameterBlocks &parameters, const catalog::Assets &assets,
-    const react::ValueRead &values, TransformWrite transforms, ParentWrite parents,
-    SpaceFlags flags, const lifecycle::Parts &parts, const Relation &declared_parts,
-    const perm::Players &players, space::PhysicalRelations &physical,
-    std::vector<space::RelationChange> &changes, MechanicalCauses &causes,
-    std::span<const Handle> initial, std::span<const space::MotionRow> restored_motion,
-    std::span<const BodyCauseRow> restored_causes, PhysicsRoles roles, PhysicsDefaults defaults,
-    bool restored, Step now, double hz) {
+std::vector<Handle>
+initialize_physics(space::Space &space, amber::step::State &step_state,
+                   const amber::catalog::State &catalog_state, const react::ValueRead &values,
+                   amber::ObjectState &objects_state, const perm::Players &players,
+                   amber::space::State &space_state, std::span<const Handle> initial,
+                   std::span<const space::MotionRow> restored_motion,
+                   std::span<const BodyCauseRow> restored_causes, PhysicsRoles roles,
+                   PhysicsDefaults defaults, bool restored, Step now, double hz) {
+  auto &geometry = step_state.geometry;
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+  auto transforms = amber::transforms(objects_state.objects);
+  auto parents = amber::parents(objects_state.objects);
+  auto flags = amber::space_flags(objects_state.objects);
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+  auto &physical = space_state.physical_relations;
+
+  auto &causes = step_state.mechanical_causes;
+
   const auto identity = values.identity;
   std::unordered_set<std::uint64_t> stored;
   for (const auto &player : players.rows)
@@ -219,8 +230,7 @@ std::vector<Handle> initialize_physics(
     visible.push_back(object);
   }
   if (!restored)
-    install_declared_attachments(space, identity, transforms, parents, flags, declared_parts,
-                                 physical, changes, initial);
+    install_declared_attachments(space, objects_state, space_state, initial);
   if (restored) {
     space::rebuild_attachments(space, identity, transforms, parents, physical.attached_to);
     for (auto root : initial)

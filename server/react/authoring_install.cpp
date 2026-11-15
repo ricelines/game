@@ -8,12 +8,18 @@ Json failure(std::string error) {
   return {{"ok", false}, {"errors", Json::array({std::move(error)})}};
 }
 step::NativeCompletion install_model(PreparedModel prepared, PlayerId author, double created_s,
-                                     catalog::Assets &assets, catalog::Models &models,
-                                     catalog::ParameterBlocks &parameters,
-                                     catalog::ModelTexts &texts, react::ModelSettings &settings,
-                                     react::AssetMeasurements &measurements,
-                                     const catalog::Scripts &scripts, const react::Terms &terms,
+                                     amber::catalog::State &catalog_state,
+                                     amber::react::State &react_state,
                                      catalog::MeasurementBindings measured_terms) {
+  auto &assets = catalog_state.assets;
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+
+  auto &settings = react_state.model_settings;
+  auto &measurements = catalog_state.baked_measurements;
+  auto &scripts = catalog_state.scripts;
+  auto &terms = react_state.terms;
+
   step::NativeCompletion out;
   const auto before = models.rows.size();
   try {
@@ -43,25 +49,21 @@ step::NativeCompletion install_model(PreparedModel prepared, PlayerId author, do
     submission.author = author;
     submission.created_s = created_s;
     submission.text = std::move(prepared.text);
-    auto register_family = [&](catalog::Models &models, catalog::ModelTexts &texts,
-                               react::ModelSettings &settings, catalog::ParameterBlocks &params) {
-      const auto root =
-          catalog::submit_model(models, texts, settings, assets, scripts, terms, submission);
+    auto register_family = [&](catalog::State &family, react::ModelSettings &settings) {
+      const auto root = catalog::submit_model(family.models, family.model_text, settings, assets,
+                                              scripts, terms, submission);
       std::vector<std::uint32_t> variants;
       for (const auto &hash : variant_hashes)
-        variants.push_back(catalog::add_variant(params, models, texts, settings, assets, scripts,
-                                                terms, root.root, hash,
-                                                assets.rows.at(hash).canonical_params));
+        variants.push_back(catalog::add_variant(family, catalog_state, settings, terms, root.root,
+                                                hash, assets.rows.at(hash).canonical_params));
       return std::pair{root, variants};
     };
     // Validation depends only on this proposal and immutable artifacts, so the
     // scratch tables stay bounded by its own family/variants, not world history.
-    catalog::Models checked_models;
-    catalog::ModelTexts checked_texts;
+    catalog::State checked_catalog;
     react::ModelSettings checked_settings;
-    catalog::ParameterBlocks checked_parameters;
-    (void)register_family(checked_models, checked_texts, checked_settings, checked_parameters);
-    const auto [registered, variants] = register_family(models, texts, settings, parameters);
+    (void)register_family(checked_catalog, checked_settings);
+    const auto [registered, variants] = register_family(catalog_state, settings);
     auto project = [&](ModelId id, std::uint32_t params, const catalog::Hash &hash) {
       catalog::project_measurements(measurements, id, params, assets.rows.at(hash), measured_terms);
     };
@@ -128,13 +130,16 @@ step::NativeCompletion install_script(catalog::PreparedScript prepared, PlayerId
     return out;
   }
 }
-step::NativeCompletion install_variant(PreparedVariant prepared, catalog::Assets &assets,
-                                       catalog::Models &models,
-                                       catalog::ParameterBlocks &parameters,
-                                       catalog::ModelTexts &texts, react::ModelSettings &settings,
-                                       react::AssetMeasurements &measurements,
-                                       const catalog::Scripts &scripts, const react::Terms &terms,
+step::NativeCompletion install_variant(PreparedVariant prepared,
+                                       amber::catalog::State &catalog_state,
+                                       amber::react::State &react_state,
                                        catalog::MeasurementBindings measured_terms) {
+  auto &assets = catalog_state.assets;
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+
+  auto &measurements = catalog_state.baked_measurements;
+
   step::NativeCompletion out;
   const auto before_models = models.rows.size();
   const auto before_params = parameters.rows.size();
@@ -151,8 +156,9 @@ step::NativeCompletion install_variant(PreparedVariant prepared, catalog::Assets
     for (auto &asset : prepared.assets) {
       catalog::import_asset(assets, std::move(asset));
     }
-    const auto params = catalog::add_variant(parameters, models, texts, settings, assets, scripts,
-                                             terms, prepared.model, root_hash, canonical);
+    const auto params =
+        catalog::add_variant(catalog_state, catalog_state, react_state.model_settings,
+                             react_state.terms, prepared.model, root_hash, canonical);
     catalog::project_measurements(measurements, prepared.model, params, assets.rows.at(root_hash),
                                   measured_terms);
     for (const auto &[name, child] : parameters.rows[params].parts) {

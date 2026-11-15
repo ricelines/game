@@ -17,20 +17,25 @@ std::vector<OfferExpired> advance_offer_expiry(perm::Offers &offers, IdentityRea
   }
   return completed;
 }
-step::NativeCompletion give(perm::Players &players, perm::Grants &grants, AuthorityWrite authority,
-                            PermissionFlags flags, perm::OwnerLimits &limits,
-                            const space::Space &space, IdentityRead identity, ParentRead parents,
-                            const lifecycle::Parts &parts, const Relation &declared_parts,
-                            const DeliveryTargets &delivery, std::size_t mailbox_max,
-                            const step::NativeCall &call) {
+step::NativeCompletion give(amber::perm::State &perm_state, amber::ObjectState &objects_state,
+                            const space::Space &space, const DeliveryTargets &delivery,
+                            std::size_t mailbox_max, const step::NativeCall &call) {
+  auto &players = perm_state.players;
+  auto authority = amber::authority(objects_state.objects);
+
+  auto &limits = perm_state.owner_limits;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto parents = amber::parents(std::as_const(objects_state.objects));
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+
   const auto item = commerce_detail::goods(identity, parts, declared_parts, authority, limits,
                                            call.request.target);
   const auto recipient = commerce_detail::player_id(call.arguments.at("recipient"), players);
   const auto body = commerce_detail::present(delivery, identity, recipient);
   commerce_detail::check_custody(space, identity, parents, parts, {item.root.object, body, false});
-  const auto given =
-      perm::give(players, grants, authority, flags, limits, commerce_detail::actor(call), item.root,
-                 recipient, body, bool(body), mailbox_max, call.step, item.parts);
+  const auto given = perm::give(perm_state, objects_state, commerce_detail::actor(call), item.root,
+                                recipient, body, bool(body), mailbox_max, call.step, item.parts);
   if (!given)
     return commerce_detail::denied(given.reason, "transfer", to_string(item.root.object),
                                    item.root.owner);
@@ -44,12 +49,19 @@ step::NativeCompletion give(perm::Players &players, perm::Grants &grants, Author
   out.permissions_changed = !out.reply.value("revoked", Json::array()).empty();
   return out;
 }
-step::NativeCompletion offer(perm::Offers &offers, PermissionFlags flags,
-                             const perm::Players &players, const perm::Grants &grants,
-                             AuthorityRead authority, const perm::OwnerLimits &limits,
-                             const space::Space &space, IdentityRead identity, ParentRead parents,
-                             const lifecycle::Parts &parts, const Relation &declared_parts,
-                             const step::NativeCall &call) {
+step::NativeCompletion offer(amber::perm::State &perm_state, amber::ObjectState &objects_state,
+                             const space::Space &space, const step::NativeCall &call) {
+
+  auto flags = amber::permission_flags(objects_state.objects);
+  auto &players = perm_state.players;
+
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &limits = perm_state.owner_limits;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto parents = amber::parents(std::as_const(objects_state.objects));
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+
   const auto item = commerce_detail::goods(identity, parts, declared_parts, authority, limits,
                                            call.request.target);
   const auto buyer = call.arguments.contains("buyer")
@@ -68,7 +80,7 @@ step::NativeCompletion offer(perm::Offers &offers, PermissionFlags flags,
                                    item.root.owner);
   commerce_detail::check_custody(space, identity, parents, parts, {item.root.object, {}, true});
   const auto offered =
-      perm::offer(offers, flags, commerce_detail::actor(call), item.root, players, grants,
+      perm::offer(perm_state, flags, commerce_detail::actor(call), item.root,
                   call.arguments.at("price").get<std::int64_t>(), buyer,
                   duration ? call.step + duration : 0, true, call.step, item.parts);
   if (!offered)
@@ -99,13 +111,22 @@ step::NativeCompletion offers(const perm::Offers &offers, const perm::Players &p
                       {"expires_step", row.expires_step}});
   return commerce_detail::result(false, {{"offers", std::move(rows)}});
 }
-step::NativeCompletion accept(perm::Offers &offers, perm::Ledger &ledger, perm::Grants &grants,
-                              perm::Players &players, AuthorityWrite authority,
-                              PermissionFlags flags, perm::OwnerLimits &limits,
-                              const space::Space &space, IdentityRead identity, ParentRead parents,
-                              const lifecycle::Parts &parts, const Relation &declared_parts,
-                              const DeliveryTargets &delivery, std::size_t mailbox_max,
-                              const perm::Groups &groups, const step::NativeCall &call) {
+step::NativeCompletion accept(amber::perm::State &perm_state, amber::ObjectState &objects_state,
+                              const space::Space &space, const DeliveryTargets &delivery,
+                              std::size_t mailbox_max, const step::NativeCall &call) {
+  auto &offers = perm_state.offers;
+
+  auto &grants = perm_state.grants;
+  auto &players = perm_state.players;
+  auto authority = amber::authority(objects_state.objects);
+
+  auto &limits = perm_state.owner_limits;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto parents = amber::parents(std::as_const(objects_state.objects));
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+  auto &groups = perm_state.groups;
+
   const auto id = step::identifier(call.arguments.at("offer"), "offer:");
   const auto &row = commerce_detail::offer_row(offers, id);
   const auto item =
@@ -121,7 +142,7 @@ step::NativeCompletion accept(perm::Offers &offers, perm::Ledger &ledger, perm::
   const auto body = commerce_detail::present(delivery, identity, beneficiary);
   commerce_detail::check_custody(space, identity, parents, parts, {row.goods, body, false});
   const auto bought =
-      perm::accept(offers, ledger, grants, players, authority, flags, limits,
+      perm::accept(perm_state, objects_state,
                    {commerce_detail::actor(call), beneficiary, payer, body, bool(body)}, item.root,
                    id, mailbox_max, call.step, item.parts);
   if (!bought) {
@@ -150,17 +171,24 @@ step::NativeCompletion accept(perm::Offers &offers, perm::Ledger &ledger, perm::
   out.permissions_changed = !bought.revoked.empty();
   return out;
 }
-step::NativeCompletion cancel_offer(perm::Offers &offers, PermissionFlags flags,
-                                    const perm::Players &players, const perm::Grants &grants,
-                                    AuthorityRead authority, const perm::OwnerLimits &limits,
-                                    IdentityRead identity, const lifecycle::Parts &parts,
-                                    const Relation &declared_parts, const step::NativeCall &call) {
+step::NativeCompletion cancel_offer(amber::perm::State &perm_state,
+                                    amber::ObjectState &objects_state,
+                                    const step::NativeCall &call) {
+  auto &offers = perm_state.offers;
+  auto flags = amber::permission_flags(objects_state.objects);
+
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &limits = perm_state.owner_limits;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+
   const auto id = step::identifier(call.arguments.at("offer"), "offer:");
   const auto &row = commerce_detail::offer_row(offers, id);
   const auto item =
       commerce_detail::goods(identity, parts, declared_parts, authority, limits, row.goods);
-  const auto cancelled = perm::cancel_offer(offers, flags, commerce_detail::actor(call), item.root,
-                                            players, grants, id, call.step, item.parts);
+  const auto cancelled = perm::cancel_offer(perm_state, flags, commerce_detail::actor(call),
+                                            item.root, id, call.step, item.parts);
   if (!cancelled)
     return commerce_detail::denied(cancelled.reason, "transfer", to_string(item.root.object),
                                    item.root.owner);

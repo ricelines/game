@@ -96,12 +96,16 @@ step::NativeCompletion define_term(const step::NativeCall &call, std::span<const
 }
 step::NativeCompletion
 define_material(const step::NativeCall &call, std::span<const std::string> roles,
-                react::Materials &materials, const react::ValueRead &values,
-                const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                const catalog::Assets &assets, const GeometryAssets &geometry, space::Space &space,
-                PhysicsRoles physical_roles, PhysicsDefaults defaults,
-                const react::RuleVersions &rules, const catalog::MechanicalBindings &mechanical,
-                catalog::RegistryDocument &document, const std::filesystem::path &directory) {
+                amber::react::State &react_state, const react::ValueRead &values,
+                amber::catalog::State &catalog_state, const GeometryAssets &geometry,
+                space::Space &space, PhysicsRoles physical_roles, PhysicsDefaults defaults,
+                const std::filesystem::path &directory) {
+  auto &materials = react_state.materials;
+
+  auto &rules = react_state.rules;
+  auto &mechanical = catalog_state.mechanical;
+  auto &document = catalog_state.registry;
+
   TermId changed_material = 0;
   std::vector<Handle> changed_objects;
   std::unordered_map<FactKey, react::Answer, FactKeyHash> old_values;
@@ -151,7 +155,7 @@ define_material(const step::NativeCall &call, std::span<const std::string> roles
     changed_objects = objects;
     const auto pin =
         persist_registry(document, directory, values.terms, materials, rules, mechanical);
-    refresh_material(space, geometry, models, parameters, assets, values, physical_roles, defaults,
+    refresh_material(space, geometry, catalog_state, values, physical_roles, defaults,
                      std::span(&material, 1), call.step, call.hz);
     auto out = detail::result(
         true,

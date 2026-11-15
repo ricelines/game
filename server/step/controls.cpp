@@ -165,14 +165,17 @@ void deliver_input(Inputs &inputs, net::Sessions &sessions, observe::Hearing &he
 }
 
 std::pair<NativeCompletion, record::Origin> complete_authoring(
-    catalog::Assets &assets, catalog::Models &models, catalog::Scripts &scripts,
-    catalog::ParameterBlocks &parameters, catalog::ModelTexts &model_text,
-    react::ModelSettings &model_settings, react::AssetMeasurements &baked_measurements,
-    const react::Terms &terms, const catalog::MechanicalBindings &mechanical, react::Vm &vm,
-    const react::NativeActions &native_declarations, GeometryAssets &geometry, space::Space &space,
-    record::Journal &journal, const Input &input, react::authoring::Completion completion,
-    bool session_live, Step now, double hz, const std::filesystem::path &asset_root,
-    const std::filesystem::path &script_root) {
+    amber::catalog::State &catalog_state, amber::react::State &react_state, react::Vm &vm,
+    GeometryAssets &geometry, space::Space &space, record::Journal &journal, const Input &input,
+    react::authoring::Completion completion, bool session_live, Step now, double hz,
+    const std::filesystem::path &asset_root, const std::filesystem::path &script_root) {
+
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+
+  auto &mechanical = catalog_state.mechanical;
+  auto &native_declarations = react_state.native_declarations;
+
   const auto player = std::get<PlayerId>(input.caller);
   const bool variant = input.kind == net::ControlKind::RegisterVariant;
   const bool script = input.kind == net::ControlKind::RegisterScript;
@@ -195,15 +198,13 @@ std::pair<NativeCompletion, record::Origin> complete_authoring(
       geometry_ready(prepared->assets);
       for (const auto &rows : prepared->variants)
         geometry_ready(rows);
-      installed = react::authoring::install_model(std::move(*prepared), player, now / hz, assets,
-                                                  models, parameters, model_text, model_settings,
-                                                  baked_measurements, scripts, terms, measured);
+      installed = react::authoring::install_model(std::move(*prepared), player, now / hz,
+                                                  catalog_state, react_state, measured);
     } else if (auto *prepared =
                    std::get_if<react::authoring::PreparedVariant>(&completion.result)) {
       geometry_ready(prepared->assets);
-      installed = react::authoring::install_variant(std::move(*prepared), assets, models,
-                                                    parameters, model_text, model_settings,
-                                                    baked_measurements, scripts, terms, measured);
+      installed = react::authoring::install_variant(std::move(*prepared), catalog_state,
+                                                    react_state, measured);
     } else {
       installed = react::authoring::install_script(
           std::move(std::get<catalog::PreparedScript>(completion.result)), player, now / hz,
@@ -245,10 +246,14 @@ std::pair<NativeCompletion, record::Origin> complete_authoring(
   return {std::move(installed), origin};
 }
 std::variant<NativeCall, InputReply>
-prepare_input(react::authoring::Worker &worker, const react::Terms &terms,
-              const react::NativeActions &native, const catalog::RegistryDocument &registry,
-              Intents &intents, std::vector<IntentEnding> &endings, record::Journal &journal,
-              Input &input, Step now, double hz) {
+prepare_input(react::authoring::Worker &worker, const amber::react::State &react_state,
+              const catalog::RegistryDocument &registry, amber::step::State &step_state,
+              record::Journal &journal, Input &input, Step now, double hz) {
+  auto &terms = react_state.terms;
+  auto &native = react_state.native_declarations;
+  auto &intents = step_state.intents;
+  auto &endings = step_state.intent_endings;
+
   switch (input.kind) {
   case net::ControlKind::Do:
     return parse_action_input(input, terms, native, journal, now, hz);

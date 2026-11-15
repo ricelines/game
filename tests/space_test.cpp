@@ -51,9 +51,8 @@ void sensor_contacts_use_body_overlap() {
   require(scene.result.moved.empty() && scene.result.relations.empty(),
           "stationary container contact produced spurious movement or relation changes");
   std::vector<sp::RelationChange> changes;
-  require(sp::custody(scene.space, identity(scene.objects), moving, {}, parents(scene.objects),
-                      space_flags(scene.objects), scene.relations, changes)
-                  .status == sp::Status::Ok,
+  require(sp::custody(scene.space, scene.objects_state, moving, {}, scene.space_state).status ==
+              sp::Status::Ok,
           "collect zone member into hidden custody");
   scene.tick();
   require(!edge(scene.relations.in_zone, moving, zone),
@@ -105,11 +104,9 @@ void plot_membership_follows_real_motion_and_hidden_custody() {
   };
   require(refresh(true) == std::vector<Handle>{item} && scene.objects.plot[item.slot()] == 1,
           "placed goods plot not initialized");
-  std::vector<sp::RelationChange> changes;
-  require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                     parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
-                     scene.relations.supports, scene.relations.attached_to,
-                     {item, holder, {{0, 0, 1}, {}}, true}, changes)
+
+  require(sp::attach(scene.space, scene.objects_state, scene.space_state,
+                     {item, holder, {{0, 0, 1}, {}}, true})
                   .status == sp::Status::Ok,
           "grasp plot test goods");
   require(sp::set_pose(scene.space, identity(scene.objects), transforms(scene.objects), holder,
@@ -120,15 +117,13 @@ void plot_membership_follows_real_motion_and_hidden_custody() {
   require(refresh(true) == std::vector<Handle>{item} && scene.objects.plot[item.slot()] == 2 &&
               scene.objects.parent[item.slot()] == holder,
           "visible held goods did not follow its actual world plot");
-  require(sp::custody(scene.space, identity(scene.objects), item, holder, parents(scene.objects),
-                      space_flags(scene.objects), scene.relations, changes)
-                  .status == sp::Status::Ok,
+  require(sp::custody(scene.space, scene.objects_state, item, holder, scene.space_state).status ==
+              sp::Status::Ok,
           "hide plot test goods in inventory");
   require(refresh(false) == std::vector<Handle>{item} && scene.objects.plot[item.slot()] == 0,
           "hidden inventory retained its custodian's plot");
-  require(sp::custody(scene.space, identity(scene.objects), item, {}, parents(scene.objects),
-                      space_flags(scene.objects), scene.relations, changes)
-                  .status == sp::Status::Ok,
+  require(sp::custody(scene.space, scene.objects_state, item, {}, scene.space_state).status ==
+              sp::Status::Ok,
           "move inventory goods to mailbox custody");
   require(refresh(false).empty() && scene.objects.plot[item.slot()] == 0,
           "mailbox goods gained a plot without being revealed");
@@ -207,22 +202,16 @@ void attachments_and_sweep() {
   auto holder = scene.character({-3, 0, 0});
   auto item = scene.box({.2f, .2f, .2f}, {-2.5f, 0, 0}, sp::Motion::Dynamic, 0, false);
   std::vector<sp::RelationChange> changes;
-  auto attached = sp::attach(
-      scene.space, identity(scene.objects), transforms(scene.objects), parents(scene.objects),
-      space_flags(scene.objects), scene.relations.contains, scene.relations.supports,
-      scene.relations.attached_to, {item, holder, {{.5f, 0, 1}, {}}, true}, changes);
+  auto attached = sp::attach(scene.space, scene.objects_state, scene.space_state,
+                             {item, holder, {{.5f, 0, 1}, {}}, true});
   require(attached.status == sp::Status::Ok, "grasp failed");
   require(scene.objects.parent[item.slot()] == holder && (scene.objects.flags[item.slot()] & Held),
           "grasp did not update masked flags/parent");
-  auto cycle = sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                          parents(scene.objects), space_flags(scene.objects),
-                          scene.relations.contains, scene.relations.supports,
-                          scene.relations.attached_to, {holder, item, {}, false}, changes);
+  auto cycle =
+      sp::attach(scene.space, scene.objects_state, scene.space_state, {holder, item, {}, false});
   require(cycle.status == sp::Status::AttachmentCycle, "attachment cycle accepted");
-  auto release =
-      sp::detach(scene.space, identity(scene.objects), transforms(scene.objects),
-                 parents(scene.objects), space_flags(scene.objects), scene.relations.attached_to,
-                 {item, sp::Motion::Dynamic, {2, 0, 0}, {}}, changes);
+  auto release = sp::detach(scene.space, scene.objects_state, scene.space_state,
+                            {item, sp::Motion::Dynamic, {2, 0, 0}, {}});
   require(release.status == sp::Status::Ok, "release failed");
   for (int i = 0; i < 40; ++i)
     scene.tick();
@@ -286,18 +275,13 @@ void snapshot_continuation_and_fixed_parts() {
   ObjectInit root_init;
   root_init.model = 3;
   auto root = create(restored.objects, root_init);
-  std::vector<sp::RelationChange> changes;
-  require(sp::attach(restored.space, identity(restored.objects), transforms(restored.objects),
-                     parents(restored.objects), space_flags(restored.objects),
-                     restored.relations.contains, restored.relations.supports,
-                     restored.relations.attached_to, {grandchild, part, {{0, 0, 2}, {}}, false},
-                     changes)
+
+  require(sp::attach(restored.space, restored.objects_state, restored.space_state,
+                     {grandchild, part, {{0, 0, 2}, {}}, false})
                   .status == sp::Status::Ok,
           "nested part attach failed");
-  require(sp::attach(restored.space, identity(restored.objects), transforms(restored.objects),
-                     parents(restored.objects), space_flags(restored.objects),
-                     restored.relations.contains, restored.relations.supports,
-                     restored.relations.attached_to, {part, root, {}, false}, changes)
+  require(sp::attach(restored.space, restored.objects_state, restored.space_state,
+                     {part, root, {}, false})
                   .status == sp::Status::Ok,
           "empty assembly attach failed");
   require(sp::set_pose(restored.space, identity(restored.objects), transforms(restored.objects),
@@ -526,11 +510,9 @@ void custody_and_empty_root_updates() {
   require(sp::register_logical_root(scene.space, identity(scene.objects), parent).status ==
               sp::Status::Ok,
           "empty root registration failed");
-  std::vector<sp::RelationChange> changes;
-  require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                     parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
-                     scene.relations.supports, scene.relations.attached_to,
-                     {child, parent, {{1, 0, 0}, {}}, false}, changes)
+
+  require(sp::attach(scene.space, scene.objects_state, scene.space_state,
+                     {child, parent, {{1, 0, 0}, {}}, false})
                   .status == sp::Status::Ok,
           "empty-root part attach failed");
   sp::set_pose(scene.space, identity(scene.objects), transforms(scene.objects), parent,
@@ -539,16 +521,13 @@ void custody_and_empty_root_updates() {
   require(std::abs(scene.objects.position[child.slot()].x - 5) < .001f,
           "moving an empty root did not move its child");
   auto occupant = scene.character({5, 0, 1});
-  require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                     parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
-                     scene.relations.supports, scene.relations.attached_to,
-                     {occupant, child, {{0, 0, 1}, {}}, false}, changes)
+  require(sp::attach(scene.space, scene.objects_state, scene.space_state,
+                     {occupant, child, {{0, 0, 1}, {}}, false})
                   .status == sp::Status::Ok,
           "occupant attach failed");
   auto custodian = create(scene.objects, init);
   const auto child_position = scene.objects.position[child.slot()];
-  require(sp::custody(scene.space, identity(scene.objects), parent, custodian,
-                      parents(scene.objects), space_flags(scene.objects), scene.relations, changes,
+  require(sp::custody(scene.space, scene.objects_state, parent, custodian, scene.space_state,
                       {&child, 1})
                   .status == sp::Status::Ok,
           "assembly custody failed");
@@ -563,23 +542,20 @@ void custody_and_empty_root_updates() {
   require(!sp::raycast(scene.space, identity(scene.objects), {5, -2, .5f}, {5, 2, .5f}, {}),
           "assembly child remained query-visible in custody");
   auto item = scene.box({1, 1, 1}, {8, 0, 0});
-  require(sp::custody(scene.space, identity(scene.objects), item, parent, parents(scene.objects),
-                      space_flags(scene.objects), scene.relations, changes)
-                  .status == sp::Status::Ok,
+  require(sp::custody(scene.space, scene.objects_state, item, parent, scene.space_state).status ==
+              sp::Status::Ok,
           "custody transition failed");
   require(scene.objects.parent[item.slot()] == parent &&
               !sp::bounds(scene.space, identity(scene.objects), item),
           "custody item remained query-visible or lost its custodian");
   require(!sp::raycast(scene.space, identity(scene.objects), {8, -2, .5f}, {8, 2, .5f}, {}),
           "custody retained native collision geometry");
-  require(sp::custody(scene.space, identity(scene.objects), item, {}, parents(scene.objects),
-                      space_flags(scene.objects), scene.relations, changes)
-                      .status == sp::Status::Ok &&
+  require(sp::custody(scene.space, scene.objects_state, item, {}, scene.space_state).status ==
+                  sp::Status::Ok &&
               !scene.objects.parent[item.slot()],
           "offline mailbox custody rejected a null parent");
-  require(sp::custody(scene.space, identity(scene.objects), parent, child, parents(scene.objects),
-                      space_flags(scene.objects), scene.relations, changes)
-                  .status == sp::Status::AttachmentCycle,
+  require(sp::custody(scene.space, scene.objects_state, parent, child, scene.space_state).status ==
+              sp::Status::AttachmentCycle,
           "custody permitted a parent cycle");
 }
 
@@ -589,10 +565,8 @@ void visible_custody_preserves_scene_and_preflights_capacity() {
   const auto goods = scene.box({1, 1, 1}, {2, 0, 1}, sp::Motion::Kinematic);
   const auto part = scene.box({.2f, .2f, .2f}, {3, 0, 1}, sp::Motion::Kinematic);
   std::vector<sp::RelationChange> changes;
-  require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                     parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
-                     scene.relations.supports, scene.relations.attached_to,
-                     {part, goods, {{1, 0, 0}, {}}, false}, changes)
+  require(sp::attach(scene.space, scene.objects_state, scene.space_state,
+                     {part, goods, {{1, 0, 0}, {}}, false})
                   .status == sp::Status::Ok,
           "visible custody part fixture");
   const std::array descendants{part};
@@ -603,9 +577,8 @@ void visible_custody_preserves_scene_and_preflights_capacity() {
                                     change, descendants)
                     .status == sp::Status::Ok,
             "visible custody preflight");
-    return sp::visible_custody(scene.space, identity(scene.objects), transforms(scene.objects),
-                               parents(scene.objects), space_flags(scene.objects), scene.relations,
-                               change, changes, descendants);
+    return sp::visible_custody(scene.space, scene.objects_state, scene.space_state, change,
+                               descendants);
   };
   require(apply({goods, holder, true}).status == sp::Status::Ok &&
               (scene.objects.flags[goods.slot()] & Held),
@@ -641,11 +614,8 @@ void visible_custody_preserves_scene_and_preflights_capacity() {
   const auto placed = limited.box({1, 1, 1}, {0, 0, 0});
   const auto occupant = limited.box({.2f, .2f, .2f}, {2, 0, 0}, sp::Motion::Kinematic);
   changes.clear();
-  require(sp::attach(limited.space, identity(limited.objects), transforms(limited.objects),
-                     parents(limited.objects), space_flags(limited.objects),
-                     limited.relations.contains, limited.relations.supports,
-                     limited.relations.attached_to, {occupant, placed, {{2, 0, 0}, {}}, false},
-                     changes)
+  require(sp::attach(limited.space, limited.objects_state, limited.space_state,
+                     {occupant, placed, {{2, 0, 0}, {}}, false})
                   .status == sp::Status::Ok,
           "full-pool unrelated occupant");
   require(sp::capacity(limited.space).native_available == 0 &&
@@ -659,9 +629,7 @@ void visible_custody_preserves_scene_and_preflights_capacity() {
   require(sp::can_custody(limited.space, identity(limited.objects), placed, {},
                           parents(limited.objects))
                       .status == sp::Status::Ok &&
-              sp::custody(limited.space, identity(limited.objects), placed, {},
-                          parents(limited.objects), space_flags(limited.objects), limited.relations,
-                          changes)
+              sp::custody(limited.space, limited.objects_state, placed, {}, limited.space_state)
                       .status == sp::Status::Ok &&
               !limited.objects.parent[occupant.slot()] &&
               sp::body_motion(limited.space, identity(limited.objects), occupant)->motion ==
@@ -686,13 +654,11 @@ void movable_logical_assembly() {
   auto first = scene.box({.4f, .4f, .5f}, {-.5f, 0, 2}, sp::Motion::Kinematic, .5f, false);
   auto second = scene.box({.4f, .4f, .5f}, {.5f, 0, 2}, sp::Motion::Kinematic, 0, false);
   auto non_solid = scene.box({.2f, .2f, .2f}, {0, 0, -1}, sp::Motion::Kinematic, 0, false, false);
-  std::vector<sp::RelationChange> changes;
+
   for (auto child : {first, second, non_solid}) {
     auto local = scene.objects.position[child.slot()] - scene.objects.position[root.slot()];
-    require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                       parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
-                       scene.relations.supports, scene.relations.attached_to,
-                       {child, root, {local, {}}, false}, changes)
+    require(sp::attach(scene.space, scene.objects_state, scene.space_state,
+                       {child, root, {local, {}}, false})
                     .status == sp::Status::Ok,
             "attach compound child");
   }
@@ -706,19 +672,15 @@ void movable_logical_assembly() {
   require(glass.clear && std::abs(glass.transmission - .5f) < .01f &&
               glass.through == std::vector<Handle>{first},
           "compound keeps child optical truth without double attenuation");
-  require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                     parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
-                     scene.relations.supports, scene.relations.attached_to,
-                     {root, carrier, {{0, 1, 1}, {}}, true}, changes)
+  require(sp::attach(scene.space, scene.objects_state, scene.space_state,
+                     {root, carrier, {{0, 1, 1}, {}}, true})
                   .status == sp::Status::Ok,
           "grasp movable assembly");
   scene.tick();
   require(std::abs(scene.objects.position[first.slot()].y + 2) < .02f,
           "ordinary child follows held root");
-  require(sp::detach(scene.space, identity(scene.objects), transforms(scene.objects),
-                     parents(scene.objects), space_flags(scene.objects),
-                     scene.relations.attached_to, {root, sp::Motion::Dynamic, {0, 0, 0}, {}},
-                     changes)
+  require(sp::detach(scene.space, scene.objects_state, scene.space_state,
+                     {root, sp::Motion::Dynamic, {0, 0, 0}, {}})
                   .status == sp::Status::Ok,
           "release convex assembly dynamically");
   require(
@@ -811,11 +773,8 @@ void movable_physical_assembly() {
   auto second = scene.box({.4f, .4f, .5f}, {-1, 0, 2}, sp::Motion::Kinematic, 0, false);
   std::vector<sp::RelationChange> changes;
   for (auto child : {first, second})
-    require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                       parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
-                       scene.relations.supports, scene.relations.attached_to,
-                       {child, root, {{scene.objects.position[child.slot()].x, 0, 0}, {}}, false},
-                       changes)
+    require(sp::attach(scene.space, scene.objects_state, scene.space_state,
+                       {child, root, {{scene.objects.position[child.slot()].x, 0, 0}, {}}, false})
                     .status == sp::Status::Ok,
             "physical root child attachment");
   std::array members{first, second};
@@ -860,9 +819,8 @@ void movable_physical_assembly() {
   const auto edit = sp::extract_assembly(scene.space, identity(scene.objects), root, members);
   const std::array attachments{sp::Attachment{first, root, {{1, 0, 0}, {}}, false},
                                sp::Attachment{second, root, {{-1, 0, 0}, {}}, false}};
-  require(sp::rebuild_assembly(scene.space, identity(scene.objects), transforms(scene.objects),
-                               parents(scene.objects), space_flags(scene.objects), scene.relations,
-                               edit, rebuilt, {}, {}, attachments, changes)
+  require(sp::rebuild_assembly(scene.space, scene.objects_state, scene.space_state, edit, rebuilt,
+                               {}, {}, attachments)
                       .status == sp::Status::Ok &&
               sp::capacity(scene.space).native_available == before - 1,
           "actual extraction/rebuild preserves the aggregate and physical root query capacity");
@@ -895,13 +853,11 @@ void nested_nonsolid_assembly() {
                 sp::Status::Ok,
             "nested logical registration");
   auto child = scene.box({.5f, .5f, .5f}, {2, 0, 0}, sp::Motion::Kinematic, .5f, false, false);
-  std::vector<sp::RelationChange> changes;
+
   for (const auto &attachment : {sp::Attachment{logical, root, {{1, 0, 0}, {}}, false},
                                  sp::Attachment{child, logical, {{1, 0, 0}, {}}, false}})
-    require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                       parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
-                       scene.relations.supports, scene.relations.attached_to, attachment, changes)
-                    .status == sp::Status::Ok,
+    require(sp::attach(scene.space, scene.objects_state, scene.space_state, attachment).status ==
+                sp::Status::Ok,
             "nested logical attachment");
   sp::rebuild_attachments(scene.space, identity(scene.objects), transforms(scene.objects),
                           parents(scene.objects), scene.relations.attached_to);
@@ -939,10 +895,8 @@ void assembly_geometry_rebuild() {
   auto displaced = scene.character({15, 0, 0});
   std::vector<sp::RelationChange> changes;
   auto attach = [&](Handle child, Handle parent, Vec3 local, bool grasp = false) {
-    require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                       parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
-                       scene.relations.supports, scene.relations.attached_to,
-                       {child, parent, {local, {}}, grasp}, changes)
+    require(sp::attach(scene.space, scene.objects_state, scene.space_state,
+                       {child, parent, {local, {}}, grasp})
                     .status == sp::Status::Ok,
             "assembly edit fixture attachment");
   };
@@ -999,9 +953,8 @@ void assembly_geometry_rebuild() {
   std::array internal{sp::Attachment{seat, root, {{1, 0, 1}, {}}, false},
                       sp::Attachment{added, root, {{2, 0, 0}, {}}, false}};
   std::array volumes{sp::VolumeSpec{root, sensor, {}, sp::VolumeKind::Container}};
-  require(sp::rebuild_assembly(scene.space, identity(scene.objects), transforms(scene.objects),
-                               parents(scene.objects), space_flags(scene.objects), scene.relations,
-                               edit, future, {}, volumes, internal, changes)
+  require(sp::rebuild_assembly(scene.space, scene.objects_state, scene.space_state, edit, future,
+                               {}, volumes, internal)
                   .status == sp::Status::Ok,
           "physical held assembly rebuild");
   require(scene.objects.parent[root.slot()] == carrier &&
@@ -1010,10 +963,8 @@ void assembly_geometry_rebuild() {
               scene.objects.position[seated.slot()] ==
                   scene.objects.position[seat.slot()] + Vec3{0, 0, .6f},
           "rebuild preserves grasp and follows retained occupant to new part pose");
-  require(sp::detach(scene.space, identity(scene.objects), transforms(scene.objects),
-                     parents(scene.objects), space_flags(scene.objects),
-                     scene.relations.attached_to, {root, sp::Motion::Dynamic, {1, 0, 0}, {}},
-                     changes)
+  require(sp::detach(scene.space, scene.objects_state, scene.space_state,
+                     {root, sp::Motion::Dynamic, {1, 0, 0}, {}})
                   .status == sp::Status::Ok,
           "rebuilt held assembly releases as actual dynamic body");
   std::array parts{seat, added};
@@ -1027,10 +978,8 @@ void assembly_geometry_rebuild() {
   require(std::abs(velocity().x - 1) < .001f, "release sets actual aggregate velocity");
   auto empty_edit = sp::extract_assembly(scene.space, identity(scene.objects), root, parts);
   std::array only_children{future[1], future[2]};
-  require(sp::rebuild_assembly(scene.space, identity(scene.objects), transforms(scene.objects),
-                               parents(scene.objects), space_flags(scene.objects), scene.relations,
-                               empty_edit, only_children, std::span(&root, 1), {}, internal,
-                               changes)
+  require(sp::rebuild_assembly(scene.space, scene.objects_state, scene.space_state, empty_edit,
+                               only_children, std::span(&root, 1), {}, internal)
                       .status == sp::Status::Ok &&
               sp::is_logical_root(scene.space, identity(scene.objects), root) &&
               std::abs(velocity().x - 1) < .001f,
@@ -1042,23 +991,21 @@ void assembly_geometry_rebuild() {
           "restored velocity advances actual replacement collider");
   const auto flying_velocity = velocity();
   auto solid_edit = sp::extract_assembly(scene.space, identity(scene.objects), root, parts);
-  require(sp::rebuild_assembly(scene.space, identity(scene.objects), transforms(scene.objects),
-                               parents(scene.objects), space_flags(scene.objects), scene.relations,
-                               solid_edit, future, {}, {}, internal, changes)
+  require(sp::rebuild_assembly(scene.space, scene.objects_state, scene.space_state, solid_edit,
+                               future, {}, {}, internal)
                       .status == sp::Status::Ok &&
               !sp::is_logical_root(scene.space, identity(scene.objects), root) &&
               (velocity() - flying_velocity).length() < .001f,
           "geometry-free to physical root preserves ordinary handle and flight");
-  require(sp::custody(scene.space, identity(scene.objects), root, {}, parents(scene.objects),
-                      space_flags(scene.objects), scene.relations, changes, parts)
-                  .status == sp::Status::Ok,
-          "store rebuilt assembly in offline mailbox");
+  require(
+      sp::custody(scene.space, scene.objects_state, root, {}, scene.space_state, parts).status ==
+          sp::Status::Ok,
+      "store rebuilt assembly in offline mailbox");
   const auto available = sp::capacity(scene.space).native_available;
   auto hidden = sp::extract_assembly(scene.space, identity(scene.objects), root, parts);
   require(!hidden.in_scene &&
-              sp::rebuild_assembly(scene.space, identity(scene.objects), transforms(scene.objects),
-                                   parents(scene.objects), space_flags(scene.objects),
-                                   scene.relations, hidden, future, {}, volumes, internal, changes)
+              sp::rebuild_assembly(scene.space, scene.objects_state, scene.space_state, hidden,
+                                   future, {}, volumes, internal)
                       .status == sp::Status::Ok &&
               sp::capacity(scene.space).native_available == available &&
               !sp::bounds(scene.space, identity(scene.objects), root) &&
@@ -1072,7 +1019,8 @@ void density_benchmarks() {
     auto cfg = settings();
     cfg.max_bodies = count + 128;
     sp::Space space(cfg);
-    Objects objects;
+    amber::ObjectState objects_state;
+    Objects &objects = objects_state.objects;
     sp::PhysicalRelations relations;
     sp::StepResult result;
     Box shape({.5f, .5f, .5f});
@@ -1090,10 +1038,7 @@ void density_benchmarks() {
               "density body add failed");
     }
     Step now = 0;
-    auto tick = [&] {
-      sp::step(space, identity(objects), transforms(objects), parents(objects),
-               space_flags(objects), relations, ++now, .05f, {}, result);
-    };
+    auto tick = [&] { sp::step(space, objects_state, relations, ++now, .05f, {}, result); };
     tick();
     auto label = std::string("inert_") + std::to_string(count);
     benchmark(label.c_str(), 100, tick);
@@ -1144,10 +1089,7 @@ void assembly_benchmarks() {
     before.push_back(h);
     bodies.push_back({h, geometry, sp::Motion::Kinematic, {.5f, 0, 0}, 10, false, false, {}});
     attachments.push_back({h, root, {{float(i + 1), 0, 0}, {}}, false});
-    require(sp::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                       parents(scene.objects), space_flags(scene.objects), scene.relations.contains,
-                       scene.relations.supports, scene.relations.attached_to, attachments.back(),
-                       changes)
+    require(sp::attach(scene.space, scene.objects_state, scene.space_state, attachments.back())
                     .status == sp::Status::Ok,
             "benchmark assembly attachment");
   }
@@ -1161,9 +1103,8 @@ void assembly_benchmarks() {
   benchmark("assembly_extract_rebuild_17", 100, [&] {
     auto edit = sp::extract_assembly(scene.space, identity(scene.objects), root, parts);
     changes.clear();
-    require(sp::rebuild_assembly(scene.space, identity(scene.objects), transforms(scene.objects),
-                                 parents(scene.objects), space_flags(scene.objects),
-                                 scene.relations, edit, bodies, {}, {}, attachments, changes)
+    require(sp::rebuild_assembly(scene.space, scene.objects_state, scene.space_state, edit, bodies,
+                                 {}, {}, attachments)
                     .status == sp::Status::Ok,
             "benchmark actual native assembly rebuild");
   });

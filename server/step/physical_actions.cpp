@@ -265,13 +265,19 @@ step::NativeCompletion native_result(space::OperationResult result, Handle subje
   return out;
 }
 } // namespace
-step::NativeCompletion grasp_action(space::Space &world, IdentityRead identity,
-                                    TransformWrite transforms, ParentWrite parents,
-                                    SpaceFlags flags, space::PhysicalRelations &relations,
-                                    const Relation &declared_parts,
+step::NativeCompletion grasp_action(space::Space &world, amber::ObjectState &objects_state,
+                                    amber::space::State &space_state,
                                     const PhysicalRelationTerms &relation_terms, float reach_m,
-                                    MechanicalCauses &causes, PlotWrite plot_write,
-                                    const perm::Plots &plots, const step::NativeCall &call) {
+                                    MechanicalCauses &causes, const perm::Plots &plots,
+                                    const step::NativeCall &call) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(objects_state.objects);
+  auto parents = amber::parents(objects_state.objects);
+
+  auto &relations = space_state.physical_relations;
+  auto &declared_parts = objects_state.declared_parts;
+  auto plot_write = amber::plot_membership(objects_state.objects);
+
   const auto target = call.request.target, body = actor_body(call);
   const auto local = input_pose(call.arguments.value("local_pose", Json::object()));
   if (!identity.valid(body) || !within_reach(world, identity, transforms, reach_m, body, target) ||
@@ -291,27 +297,35 @@ step::NativeCompletion grasp_action(space::Space &world, IdentityRead identity,
     if (assembled.status != space::Status::Ok)
       return native_result(assembled, target, false);
   }
-  std::vector<space::RelationChange> changes;
-  auto result = space::attach(world, identity, transforms, parents, flags, relations.contains,
-                              relations.supports, relations.attached_to,
-                              {target, body, local, true}, changes, token);
+  const auto changes_begin = space_state.relation_changes.size();
+  auto result =
+      space::attach(world, objects_state, space_state, {target, body, local, true}, token);
   auto out = native_result(result, target, true);
-  relation_effects(out.effects, relation_terms, changes);
+  relation_effects(out.effects, relation_terms,
+                   std::span(space_state.relation_changes).subspan(changes_begin));
+  space_state.relation_changes.resize(changes_begin);
   if (out.changed) {
     perm::update_plots(identity, transforms, plot_write, plots, objects, true);
     out.changed_objects = objects;
   }
   return out;
 }
-step::NativeCompletion attach_action(space::Space &world, IdentityRead identity,
-                                     TransformWrite transforms, ParentWrite parents,
-                                     SpaceFlags flags, space::PhysicalRelations &relations,
-                                     const Relation &declared_parts,
+step::NativeCompletion attach_action(space::Space &world, amber::ObjectState &objects_state,
+                                     amber::space::State &space_state,
                                      const PhysicalRelationTerms &relation_terms,
-                                     AuthorityRead authority, const perm::OwnerLimits &limits,
-                                     const perm::Players &players, const perm::Grants &grants,
-                                     float reach_m, MechanicalCauses &causes, PlotWrite plot_write,
-                                     const perm::Plots &plots, const step::NativeCall &call) {
+                                     const amber::perm::State &perm_state, float reach_m,
+                                     MechanicalCauses &causes, const step::NativeCall &call) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(objects_state.objects);
+
+  auto &declared_parts = objects_state.declared_parts;
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &limits = perm_state.owner_limits;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+  auto plot_write = amber::plot_membership(objects_state.objects);
+  auto &plots = perm_state.plots;
+
   const auto subject = call.request.target;
   const auto parent = input_handle(call.arguments.at("parent"), identity);
   const auto permit =
@@ -323,14 +337,15 @@ step::NativeCompletion attach_action(space::Space &world, IdentityRead identity,
   if (!identity.valid(body) || !within_reach(world, identity, transforms, reach_m, body, parent))
     return native_denied("reach", parent, Reason::InvalidScope);
   auto token = causes.intern(call.origin);
-  std::vector<space::RelationChange> changes;
+  const auto changes_begin = space_state.relation_changes.size();
   auto result = space::attach(
-      world, identity, transforms, parents, flags, relations.contains, relations.supports,
-      relations.attached_to,
+      world, objects_state, space_state,
       {subject, parent, input_pose(call.arguments.value("local_pose", Json::object())), false},
-      changes, token);
+      token);
   auto out = native_result(result, subject, true);
-  relation_effects(out.effects, relation_terms, changes);
+  relation_effects(out.effects, relation_terms,
+                   std::span(space_state.relation_changes).subspan(changes_begin));
+  space_state.relation_changes.resize(changes_begin);
   if (out.changed) {
     const auto objects = closure(declared_parts, subject);
     perm::update_plots(identity, transforms, plot_write, plots, objects, true);
@@ -338,13 +353,23 @@ step::NativeCompletion attach_action(space::Space &world, IdentityRead identity,
   }
   return out;
 }
-step::NativeCompletion
-release_action(space::Space &world, IdentityRead identity, TransformWrite transforms,
-               ParentWrite parents, SpaceFlags flags, space::PhysicalRelations &relations,
-               const Relation &declared_parts, const PhysicalRelationTerms &relation_terms,
-               AuthorityRead authority, const perm::OwnerLimits &limits,
-               const perm::Players &players, const perm::Grants &grants, MechanicalCauses &causes,
-               PlotWrite plot_write, const perm::Plots &plots, const step::NativeCall &call) {
+step::NativeCompletion release_action(space::Space &world, amber::ObjectState &objects_state,
+                                      amber::space::State &space_state,
+                                      const PhysicalRelationTerms &relation_terms,
+                                      const amber::perm::State &perm_state,
+                                      MechanicalCauses &causes, const step::NativeCall &call) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(objects_state.objects);
+  auto parents = amber::parents(objects_state.objects);
+
+  auto &declared_parts = objects_state.declared_parts;
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &limits = perm_state.owner_limits;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+  auto plot_write = amber::plot_membership(objects_state.objects);
+  auto &plots = perm_state.plots;
+
   const auto target = call.request.target;
   const auto holder = actor(call);
   const bool held_here =
@@ -365,13 +390,15 @@ release_action(space::Space &world, IdentityRead identity, TransformWrite transf
   const auto angular =
       call.arguments.contains("angular") ? input_vector(call.arguments.at("angular")) : Vec3{};
   auto token = causes.intern(call.origin);
-  std::vector<space::RelationChange> changes;
+  const auto changes_begin = space_state.relation_changes.size();
   const auto motion =
       identity.flags[target.slot()] & Body ? space::Motion::Character : space::Motion::Dynamic;
-  auto result = space::detach(world, identity, transforms, parents, flags, relations.attached_to,
-                              {target, motion, linear, angular}, changes, token);
+  auto result =
+      space::detach(world, objects_state, space_state, {target, motion, linear, angular}, token);
   auto out = native_result(result, target, true);
-  relation_effects(out.effects, relation_terms, changes);
+  relation_effects(out.effects, relation_terms,
+                   std::span(space_state.relation_changes).subspan(changes_begin));
+  space_state.relation_changes.resize(changes_begin);
   if (out.changed) {
     const auto objects = closure(declared_parts, target);
     perm::update_plots(identity, transforms, plot_write, plots, objects, true);
@@ -391,11 +418,19 @@ step::NativeCompletion impulse_action(space::Space &world, IdentityRead identity
     out.changed_objects.push_back(target);
   return out;
 }
-step::NativeCompletion transfer_action(react::Properties &properties, react::Processes &processes,
-                                       const react::Terms &terms, IdentityRead identity,
-                                       AuthorityRead authority, const perm::OwnerLimits &limits,
-                                       const perm::Players &players, const perm::Grants &grants,
+step::NativeCompletion transfer_action(amber::react::State &react_state,
+                                       const amber::ObjectState &objects_state,
+                                       const amber::perm::State &perm_state,
                                        const step::NativeCall &call) {
+  auto &properties = react_state.properties;
+  auto &processes = react_state.processes;
+  auto &terms = react_state.terms;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &limits = perm_state.owner_limits;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+
   const auto source = call.request.target;
   const auto destination = input_handle(call.arguments.at("to"), identity);
   const auto permit =
@@ -431,8 +466,8 @@ step::NativeCompletion transfer_action(react::Properties &properties, react::Pro
   amount =
       std::min(amount, std::max(0., ceiling - (received.present ? received.value.numeric() : 0.)));
   step::NativeCompletion out;
-  out.changed = react::transfer_state(properties, processes, quantity, source, destination, amount,
-                                      call.step, call.hz, out.effects);
+  out.changed = react::transfer_state(react_state, quantity, source, destination, amount, call.step,
+                                      call.hz, out.effects);
   out.result = out.changed ? record::Result::Applied : record::Result::NoEffect;
   out.reply = {{"ok", true},
                {"effect", out.changed ? "applied" : "none"},
@@ -694,15 +729,25 @@ int sound_binding(lua_State *L) {
   return 1;
 }
 } // namespace
-void bind_physical(react::Vm &vm, space::Space &space, IdentityRead identity,
-                   TransformWrite transforms, const Relation &declared_parts,
-                   MechanicalCauses &causes, PlotWrite plot_write, const perm::Plots &plots,
-                   step::Intents &intents, std::vector<step::IntentEnding> &endings,
-                   const perm::Players &players, const perm::Grants &grants,
-                   std::size_t part_batch_max, observe::Hearing &hearing,
-                   const std::vector<observe::Listener> &listeners,
-                   const catalog::InstanceTexts &instance_texts,
-                   const catalog::ModelTexts &model_texts) {
+void bind_physical(react::Vm &vm, space::Space &space, amber::ObjectState &objects_state,
+                   amber::step::State &step_state, const amber::perm::State &perm_state,
+                   std::size_t part_batch_max, amber::space::State &space_state,
+                   const amber::catalog::State &catalog_state) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(objects_state.objects);
+  auto &declared_parts = objects_state.declared_parts;
+  auto &causes = step_state.mechanical_causes;
+  auto plot_write = amber::plot_membership(objects_state.objects);
+  auto &plots = perm_state.plots;
+  auto &intents = step_state.intents;
+  auto &endings = step_state.intent_endings;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+  auto &hearing = space_state.hearing;
+  auto &listeners = space_state.listeners;
+  auto &instance_texts = catalog_state.instance_text;
+  auto &model_texts = catalog_state.model_text;
+
   const auto navigation = std::make_shared<NavigationBinding>(
       NavigationBinding{intents, endings, identity, players, grants, plots});
   const auto sweep = std::make_shared<SweepBinding>(

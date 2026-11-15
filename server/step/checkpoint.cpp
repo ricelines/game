@@ -5,12 +5,16 @@
 
 namespace amber::step::checkpoint {
 namespace {
-void write_prop(snap::Output &out, const react::Properties &properties,
-                const react::Processes &processes, const react::InstanceSettings &instances,
-                const react::ModelSettings &models, const react::PlotSettings &plots,
-                const react::WorldSettings &world, const snap::ObjectSelection &selected,
-                const CatalogSelection *catalog_filter,
+void write_prop(snap::Output &out, const amber::react::State &react_state,
+                const snap::ObjectSelection &selected, const CatalogSelection *catalog_filter,
                 std::optional<std::span<const PlotId>> plot_ids) {
+  auto &properties = react_state.properties;
+  auto &processes = react_state.processes;
+  auto &instances = react_state.instance_settings;
+  auto &models = react_state.model_settings;
+  auto &plots = react_state.plot_settings;
+  auto &world = react_state.world_settings;
+
   react::write_properties(out, properties, processes, selected);
   react::write_settings(
       out, instances, models, plots, world, selected,
@@ -39,11 +43,15 @@ void read_rels(snap::Input &in, react::AuthoredRelations &authored,
   space::read_physical_relations(in, physical, slots);
   lifecycle::read_parts(in, parts, identity, declared);
 }
-void write_text(snap::Output &out, const catalog::Models &models,
-                const catalog::ParameterBlocks &parameters, const catalog::Scripts &scripts,
-                const catalog::ModelTexts &model_text, const catalog::InstanceTexts &instance_text,
-                const catalog::AuthoredTexts &authored_text, const CatalogSelection *selected,
-                std::optional<std::span<const Handle>> objects) {
+void write_text(snap::Output &out, const amber::catalog::State &catalog_state,
+                const CatalogSelection *selected, std::optional<std::span<const Handle>> objects) {
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &scripts = catalog_state.scripts;
+  auto &model_text = catalog_state.model_text;
+  auto &instance_text = catalog_state.instance_text;
+  auto &authored_text = catalog_state.authored_text;
+
   const auto model_ids = selected ? catalog::ModelSelection(selected->models) : std::nullopt;
   catalog::write_models(out, models, model_ids);
   catalog::write_parameters(
@@ -250,27 +258,42 @@ CatalogSelection catalog_selection(const catalog::Models &models,
           {script_ids.begin(), script_ids.end()}};
 }
 void encode_checkpoint(
-    snap::Buffer &bytes, const snap::Header &header, const Objects &objects,
-    const react::Properties &properties, const react::Processes &processes,
-    const react::InstanceSettings &instance_settings, const react::ModelSettings &model_settings,
-    const react::PlotSettings &plot_settings, const react::WorldSettings &world_settings,
-    const react::AuthoredRelations &authored_relations,
-    const space::PhysicalRelations &physical_relations, const lifecycle::Parts &parts,
-    const react::SharedColumns &shared, const react::GivesTo &gives,
-    const react::AllocationRows &allocations, const react::MeterRows &meters,
-    const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-    const catalog::Scripts &scripts, const catalog::ModelTexts &model_text,
-    const catalog::InstanceTexts &instance_text, const catalog::AuthoredTexts &authored_text,
-    const perm::Players &players, const perm::Ledger &ledger, const perm::Plots &plots,
-    const perm::Groups &groups, const net::Profiles &profiles, const perm::Grants &grants,
-    const perm::Offers &offers, const perm::Trades &trades, const perm::OwnerLimits &limits,
-    const react::ScriptStates &states, const react::Subscriptions &subscriptions,
-    const react::InstanceScripts &installations, const TimerWheel &timers, const WorkQueues &queues,
-    const Intents &intents, const Inputs &inputs, const elaborate::Requests &requests,
-    const elaborate::GapCounts &gap_counts, const elaborate::LastGaps &last_gaps,
-    const elaborate::CaptureRefs &captures, const react::RandomStates &random,
-    const std::vector<space::MotionRow> &motion, const std::vector<BodyCauseRow> &causes,
-    std::uint64_t next_record, const CaptureSelection *selection) {
+    snap::Buffer &bytes, const snap::Header &header, const amber::ObjectState &objects_state,
+    const amber::react::State &react_state, const space::PhysicalRelations &physical_relations,
+    const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
+    const net::Profiles &profiles, const amber::step::State &step_state,
+    const amber::elaborate::State &elaborate_state, const std::vector<space::MotionRow> &motion,
+    const std::vector<BodyCauseRow> &causes, std::uint64_t next_record,
+    const CaptureSelection *selection) {
+  auto &objects = objects_state.objects;
+
+  auto &authored_relations = react_state.authored_relations;
+  auto &parts = objects_state.parts;
+  auto &shared = react_state.shared;
+  auto &gives = react_state.gives_to;
+  auto &allocations = react_state.allocations;
+  auto &meters = react_state.meters;
+
+  auto &players = perm_state.players;
+  auto &ledger = perm_state.ledger;
+  auto &plots = perm_state.plots;
+  auto &groups = perm_state.groups;
+  auto &grants = perm_state.grants;
+  auto &offers = perm_state.offers;
+  auto &trades = perm_state.trades;
+  auto &limits = perm_state.owner_limits;
+  auto &states = react_state.states;
+  auto &subscriptions = react_state.subscriptions;
+  auto &installations = react_state.installations;
+  auto &timers = step_state.timers;
+  auto &queues = step_state.queues;
+  auto &intents = step_state.intents;
+  auto &inputs = step_state.inputs;
+  auto &requests = elaborate_state.requests;
+  auto &gap_counts = elaborate_state.gap_counts;
+  auto &last_gaps = elaborate_state.last_gaps;
+  auto &captures = elaborate_state.captures;
+  auto &random = react_state.random;
 
   ZoneScopedN("snapshot serialization");
   bytes.clear();
@@ -291,8 +314,7 @@ void encode_checkpoint(
   }
   {
     const auto marker = snap::begin_section(out, snap::tags[1]);
-    write_prop(out, properties, processes, instance_settings, model_settings, plot_settings,
-               world_settings, selected, catalog_filter,
+    write_prop(out, react_state, selected, catalog_filter,
                selection ? std::optional<std::span<const PlotId>>(plot_ids) : std::nullopt);
     snap::end_section(out, marker);
   }
@@ -308,8 +330,7 @@ void encode_checkpoint(
   }
   {
     const auto marker = snap::begin_section(out, snap::tags[4]);
-    write_text(out, models, parameters, scripts, model_text, instance_text, authored_text,
-               catalog_filter, handles);
+    write_text(out, catalog_state, catalog_filter, handles);
     snap::end_section(out, marker);
   }
   {
@@ -355,23 +376,53 @@ void encode_checkpoint(
   }
   snap::finish(out, bytes);
 }
-Decoded decode_checkpoint(
-    const snap::View &view, Objects &objects, react::Properties &properties,
-    react::Processes &processes, react::InstanceSettings &instance_settings,
-    react::ModelSettings &model_settings, react::PlotSettings &plot_settings,
-    react::WorldSettings &world_settings, react::AuthoredRelations &authored_relations,
-    space::PhysicalRelations &physical_relations, lifecycle::Parts &parts,
-    react::SharedColumns &shared, react::GivesTo &gives, react::AllocationRows &allocations,
-    react::MeterRows &meters, catalog::Models &models, catalog::ParameterBlocks &parameters,
-    catalog::Scripts &scripts, catalog::ModelTexts &model_text,
-    catalog::InstanceTexts &instance_text, catalog::AuthoredTexts &authored_text,
-    perm::Players &players, perm::Ledger &ledger, perm::Plots &plots, perm::Groups &groups,
-    net::Profiles &profiles, perm::Grants &grants, perm::Offers &offers, perm::Trades &trades,
-    perm::OwnerLimits &limits, react::ScriptStates &states, react::Subscriptions &subscriptions,
-    react::InstanceScripts &installations, TimerWheel &timers, WorkQueues &queues, Intents &intents,
-    Inputs &inputs, elaborate::Requests &requests, elaborate::GapCounts &gap_counts,
-    elaborate::LastGaps &last_gaps, elaborate::CaptureRefs &captures, react::RandomStates &random,
-    Relation &declared_parts) {
+Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_state,
+                          amber::react::State &react_state,
+                          space::PhysicalRelations &physical_relations,
+                          amber::catalog::State &catalog_state, amber::perm::State &perm_state,
+                          net::Profiles &profiles, amber::step::State &step_state,
+                          amber::elaborate::State &elaborate_state) {
+  auto &objects = objects_state.objects;
+  auto &properties = react_state.properties;
+  auto &processes = react_state.processes;
+  auto &instance_settings = react_state.instance_settings;
+  auto &model_settings = react_state.model_settings;
+  auto &plot_settings = react_state.plot_settings;
+  auto &world_settings = react_state.world_settings;
+  auto &authored_relations = react_state.authored_relations;
+  auto &parts = objects_state.parts;
+  auto &shared = react_state.shared;
+  auto &gives = react_state.gives_to;
+  auto &allocations = react_state.allocations;
+  auto &meters = react_state.meters;
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &scripts = catalog_state.scripts;
+  auto &model_text = catalog_state.model_text;
+  auto &instance_text = catalog_state.instance_text;
+  auto &authored_text = catalog_state.authored_text;
+  auto &players = perm_state.players;
+  auto &ledger = perm_state.ledger;
+  auto &plots = perm_state.plots;
+  auto &groups = perm_state.groups;
+  auto &grants = perm_state.grants;
+  auto &offers = perm_state.offers;
+  auto &trades = perm_state.trades;
+  auto &limits = perm_state.owner_limits;
+  auto &states = react_state.states;
+  auto &subscriptions = react_state.subscriptions;
+  auto &installations = react_state.installations;
+  auto &timers = step_state.timers;
+  auto &queues = step_state.queues;
+  auto &intents = step_state.intents;
+  auto &inputs = step_state.inputs;
+  auto &requests = elaborate_state.requests;
+  auto &gap_counts = elaborate_state.gap_counts;
+  auto &last_gaps = elaborate_state.last_gaps;
+  auto &captures = elaborate_state.captures;
+  auto &random = react_state.random;
+  auto &declared_parts = objects_state.declared_parts;
+
   Decoded result;
   {
     auto in = snap::section_input(view, snap::tags[0]);
@@ -442,28 +493,17 @@ Decoded decode_checkpoint(
   }
   return result;
 }
-bool save_snapshot(
-    snap::Writer &writer, SnapshotProgress &progress, const snap::Header &header,
-    const Objects &objects, const react::Properties &properties, const react::Processes &processes,
-    const react::InstanceSettings &instance_settings, const react::ModelSettings &model_settings,
-    const react::PlotSettings &plot_settings, const react::WorldSettings &world_settings,
-    const react::AuthoredRelations &authored_relations,
-    const space::PhysicalRelations &physical_relations, const lifecycle::Parts &parts,
-    const react::SharedColumns &shared, const react::GivesTo &gives,
-    const react::AllocationRows &allocations, const react::MeterRows &meters,
-    const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-    const catalog::Scripts &scripts, const catalog::ModelTexts &model_text,
-    const catalog::InstanceTexts &instance_text, const catalog::AuthoredTexts &authored_text,
-    const perm::Players &players, const perm::Ledger &ledger, const perm::Plots &plots,
-    const perm::Groups &groups, const net::Profiles &profiles, const perm::Grants &grants,
-    const perm::Offers &offers, const perm::Trades &trades, const perm::OwnerLimits &limits,
-    const react::ScriptStates &states, const react::Subscriptions &subscriptions,
-    const react::InstanceScripts &installations, const TimerWheel &timers, const WorkQueues &queues,
-    const Intents &intents, const Inputs &inputs, const elaborate::Requests &requests,
-    const elaborate::GapCounts &gap_counts, const elaborate::LastGaps &last_gaps,
-    const elaborate::CaptureRefs &captures, const react::RandomStates &random,
-    const space::Space &space, const MechanicalCauses &mechanical_causes,
-    std::uint64_t next_record) {
+bool save_snapshot(snap::Writer &writer, SnapshotProgress &progress, const snap::Header &header,
+                   const amber::ObjectState &objects_state, const amber::react::State &react_state,
+                   const space::PhysicalRelations &physical_relations,
+                   const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
+                   const net::Profiles &profiles, const amber::step::State &step_state,
+                   const amber::elaborate::State &elaborate_state, const space::Space &space,
+                   std::uint64_t next_record) {
+  auto &objects = objects_state.objects;
+
+  auto &mechanical_causes = step_state.mechanical_causes;
+
   ZoneScopedN("snapshot capture");
   auto bytes = writer.acquire();
   if (!bytes)
@@ -472,13 +512,9 @@ bool save_snapshot(
   std::vector<space::MotionRow> motion;
   std::vector<BodyCauseRow> causes;
   sample_motion(space, mechanical_causes, identity(objects), nullptr, motion, causes);
-  encode_checkpoint(*bytes, header, objects, properties, processes, instance_settings,
-                    model_settings, plot_settings, world_settings, authored_relations,
-                    physical_relations, parts, shared, gives, allocations, meters, models,
-                    parameters, scripts, model_text, instance_text, authored_text, players, ledger,
-                    plots, groups, profiles, grants, offers, trades, limits, states, subscriptions,
-                    installations, timers, queues, intents, inputs, requests, gap_counts, last_gaps,
-                    captures, random, motion, causes, next_record, nullptr);
+  encode_checkpoint(*bytes, header, objects_state, react_state, physical_relations, catalog_state,
+                    perm_state, profiles, step_state, elaborate_state, motion, causes, next_record,
+                    nullptr);
   progress.pause_max_ms =
       std::max(progress.pause_max_ms,
                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
@@ -487,14 +523,23 @@ bool save_snapshot(
   progress.last_step = header.step;
   return true;
 }
-CaptureSelection capture_selection(
-    const GapDraft &gap, const react::ValueRead &values, const Objects &objects,
-    const lifecycle::Parts &parts, const catalog::Models &models,
-    const catalog::ParameterBlocks &parameters, const react::InstanceScripts &installations,
-    const react::RuleVersions &rules, const perm::Players &players, const perm::Plots &plots,
-    const perm::Groups &groups, const perm::Grants &grants, const perm::Offers &offers,
-    const perm::Trades &trades, const net::SessionViews &views, const net::Profiles &profiles,
-    const space::Space &space, float radius_m) {
+CaptureSelection capture_selection(const GapDraft &gap, const react::ValueRead &values,
+                                   const amber::ObjectState &objects_state,
+                                   const amber::catalog::State &catalog_state,
+                                   const amber::react::State &react_state,
+                                   const amber::perm::State &perm_state,
+                                   const amber::net::State &net_state, const space::Space &space,
+                                   float radius_m) {
+  auto &objects = objects_state.objects;
+  auto &parts = objects_state.parts;
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &installations = react_state.installations;
+  auto &rules = react_state.rules;
+
+  auto &views = net_state.session_views;
+  auto &profiles = net_state.profiles;
+
   const auto id = identity(objects);
   std::vector<Handle> seeds{gap.target};
   if (gap.requester) {
@@ -524,34 +569,30 @@ CaptureSelection capture_selection(
   selected.catalog = catalog_selection(models, parameters, installations, id, objects.params, rules,
                                        selected.objects);
   const std::array<PlayerId, 1> actors{gap.requester};
-  selected.permissions = perm::capture_authority(authority(objects), selected.objects, actors,
-                                                 players, plots, groups, grants, offers, trades);
+  selected.permissions =
+      perm::capture_authority(authority(objects), selected.objects, actors, perm_state);
   return selected;
 }
-void flush_gaps(
-    std::vector<GapDraft> &pending, record::Journal &journal, elaborate::CaptureWriter &writer,
-    const snap::Header &header, std::size_t capture_limit, float radius_m,
-    const react::ValueRead &values, const net::SessionViews &views,
-    const react::RuleVersions &rules, const space::Space &space,
-    const MechanicalCauses &mechanical_causes, const Objects &objects,
-    const react::Properties &properties, const react::Processes &processes,
-    const react::InstanceSettings &instance_settings, const react::ModelSettings &model_settings,
-    const react::PlotSettings &plot_settings, const react::WorldSettings &world_settings,
-    const react::AuthoredRelations &authored_relations,
-    const space::PhysicalRelations &physical_relations, const lifecycle::Parts &parts,
-    const react::SharedColumns &shared, const react::GivesTo &gives,
-    const react::AllocationRows &allocations, const react::MeterRows &meters,
-    const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-    const catalog::Scripts &scripts, const catalog::ModelTexts &model_text,
-    const catalog::InstanceTexts &instance_text, const catalog::AuthoredTexts &authored_text,
-    const perm::Players &players, const perm::Ledger &ledger, const perm::Plots &plots,
-    const perm::Groups &groups, const net::Profiles &profiles, const perm::Grants &grants,
-    const perm::Offers &offers, const perm::Trades &trades, const perm::OwnerLimits &limits,
-    const react::ScriptStates &states, const react::Subscriptions &subscriptions,
-    const react::InstanceScripts &installations, const TimerWheel &timers, const WorkQueues &queues,
-    const Intents &intents, const Inputs &inputs, elaborate::Requests &requests,
-    elaborate::GapCounts &gap_counts, elaborate::LastGaps &last_gaps,
-    elaborate::CaptureRefs &captures, const react::RandomStates &random) {
+void flush_gaps(amber::step::State &step_state, record::Journal &journal,
+                elaborate::CaptureWriter &writer, const snap::Header &header,
+                std::size_t capture_limit, float radius_m, const react::ValueRead &values,
+                const amber::net::State &net_state, const amber::react::State &react_state,
+                const space::Space &space, const amber::ObjectState &objects_state,
+                const space::PhysicalRelations &physical_relations,
+                const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
+                amber::elaborate::State &elaborate_state) {
+  auto &pending = step_state.gaps;
+
+  auto &mechanical_causes = step_state.mechanical_causes;
+  auto &objects = objects_state.objects;
+
+  auto &profiles = net_state.profiles;
+
+  auto &requests = elaborate_state.requests;
+  auto &gap_counts = elaborate_state.gap_counts;
+  auto &last_gaps = elaborate_state.last_gaps;
+  auto &captures = elaborate_state.captures;
+
   const auto id = identity(objects);
   for (const auto &gap : pending) {
     if (!id.valid(gap.target))
@@ -571,20 +612,16 @@ void flush_gaps(
         {"count", noted.count}, {"term", gap.term}, {"material", key.material}, {"agent", false}};
     if (noted.capture_required) {
       try {
-        const auto selected = capture_selection(
-            gap, values, objects, parts, models, parameters, installations, rules, players, plots,
-            groups, grants, offers, trades, views, profiles, space, radius_m);
+        const auto selected =
+            capture_selection(gap, values, objects_state, catalog_state, react_state, perm_state,
+                              net_state, space, radius_m);
         std::vector<space::MotionRow> motion;
         std::vector<BodyCauseRow> causes;
         sample_motion(space, mechanical_causes, id, &selected, motion, causes);
         snap::Buffer bytes;
-        encode_checkpoint(
-            bytes, header, objects, properties, processes, instance_settings, model_settings,
-            plot_settings, world_settings, authored_relations, physical_relations, parts, shared,
-            gives, allocations, meters, models, parameters, scripts, model_text, instance_text,
-            authored_text, players, ledger, plots, groups, profiles, grants, offers, trades, limits,
-            states, subscriptions, installations, timers, queues, intents, inputs, requests,
-            gap_counts, last_gaps, captures, random, motion, causes, journal.next_id(), &selected);
+        encode_checkpoint(bytes, header, objects_state, react_state, physical_relations,
+                          catalog_state, perm_state, profiles, step_state, elaborate_state, motion,
+                          causes, journal.next_id(), &selected);
         const auto hash = writer.submit(std::move(bytes));
         captures.rows.try_emplace(
             hash, elaborate::CaptureRef{hash, {}, elaborate::CaptureStatus::Pending, {}});

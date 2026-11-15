@@ -90,19 +90,31 @@ std::string validate_model_edit(const nlohmann::json &value) {
     return "expected {model:'m:N',proposal:'m:N'}";
   return {};
 }
-NativeCompletion
-revise_model(Objects &objects, lifecycle::Parts &parts, Relation &declared_parts,
-             catalog::Models &models, catalog::ParameterBlocks &parameters,
-             catalog::ModelTexts &texts, react::ModelSettings &settings,
-             const catalog::Assets &assets, react::AssetMeasurements &measurements,
-             catalog::MeasurementBindings measurement_roles, const GeometryAssets &geometry,
-             const react::ValueRead &values, space::Space &space, TransformWrite transforms,
-             ParentWrite parents, SpaceFlags flags, PermissionFlags permissions,
-             space::PhysicalRelations &physical, std::vector<space::RelationChange> &changes,
-             AuthorityRead authority, AttributionRead attribution, const perm::Ledger &ledger,
-             perm::Offers &offers, perm::Trades &trades, const perm::Plots &plots,
-             const catalog::Scripts &scripts, PlotWrite membership, PhysicsRoles roles,
-             PhysicsDefaults defaults, const NativeCall &call) {
+NativeCompletion revise_model(amber::ObjectState &objects_state,
+                              amber::catalog::State &catalog_state, react::ModelSettings &settings,
+                              catalog::MeasurementBindings measurement_roles,
+                              const GeometryAssets &geometry, const react::ValueRead &values,
+                              space::Space &space, amber::space::State &space_state,
+                              amber::perm::State &perm_state, PhysicsRoles roles,
+                              PhysicsDefaults defaults, const NativeCall &call) {
+
+  auto &parts = objects_state.parts;
+
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &texts = catalog_state.model_text;
+  auto &assets = catalog_state.assets;
+  auto &measurements = catalog_state.baked_measurements;
+  auto transforms = amber::transforms(objects_state.objects);
+
+  auto permissions = amber::permission_flags(objects_state.objects);
+
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &ledger = perm_state.ledger;
+  auto &offers = perm_state.offers;
+  auto &trades = perm_state.trades;
+  auto &plots = perm_state.plots;
+
   using namespace structural_detail;
   NativeCompletion out;
   const auto target = identifier(call.arguments.at("model"), "m:");
@@ -142,9 +154,9 @@ revise_model(Objects &objects, lifecycle::Parts &parts, Relation &declared_parts
       auto assembly = lifecycle::expand(models, parameters, assets, proposal, mapped->after);
       auto rows = lifecycle::plan_replace(models, parts, identity, transforms, params, root,
                                           assembly, identity.material[root.slot()]);
-      replacements.push_back(replacement_geometry(
-          space, parts, identity, transforms, parents, authority.plot, geometry, models, parameters,
-          assets, values, roles, defaults, call, std::move(rows), true));
+      replacements.push_back(replacement_geometry(space, objects_state, authority.plot, geometry,
+                                                  catalog_state, values, roles, defaults, call,
+                                                  std::move(rows), true));
     }
     std::vector<Handle> removed;
     for (const auto &replacement : replacements)
@@ -180,8 +192,7 @@ revise_model(Objects &objects, lifecycle::Parts &parts, Relation &declared_parts
         space::extract_assembly(space, identity, group.root, std::span(first.before).subspan(1)));
   }
   for (std::size_t i = 0; i < groups.size(); ++i)
-    rebuild_instances(objects, parts, declared_parts, space, transforms, parents, flags, physical,
-                      changes, membership, plots, authority, attribution, models, scripts, values,
+    rebuild_instances(objects_state, space, space_state, plots, catalog_state,
                       groups[i].replacements, extracted[i], *author, call, out);
   out.changed = true;
   out.result = record::Result::Applied;

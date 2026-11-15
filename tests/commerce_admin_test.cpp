@@ -20,12 +20,13 @@ GrantId grant_id(const step::NativeCompletion &result) {
 int main() {
   try {
     test_runtime::Fixture f;
-    perm::Players players;
+    amber::perm::State perm_state;
+    perm::Players &players = perm_state.players;
     players.rows.resize(5);
-    perm::Groups groups;
-    perm::Grants grants;
-    perm::OwnerLimits limits;
-    perm::Plots plots;
+    perm::Groups &groups = perm_state.groups;
+    perm::Grants &grants = perm_state.grants;
+    perm::OwnerLimits &limits = perm_state.owner_limits;
+    perm::Plots &plots = perm_state.plots;
     plots.rows.push_back({1, 1, 0, 0, {-10, -10, 10, 10}, {}});
     f.objects.owner[f.a.slot()] = 1;
     f.objects.owner[f.b.slot()] = 2;
@@ -44,9 +45,7 @@ int main() {
       const auto *player = std::get_if<PlayerId>(&input.request.caller);
       const bool architect = player && *player == 4;
       return step::native_permissions(
-          f.models, f.scripts, values, f.rules, f.installed, players, groups, plots, grants, limits,
-          identity(f.objects), authority(f.objects), permission_flags(f.objects), architect,
-          f.objects.group, f.objects.preset,
+          f.catalog_state, values, f.react_state, perm_state, f.objects_state, architect,
           std::get<react::PermissionAction>(native.rows.at(input.request.action).operation), input);
     };
     auto run = [&](PlayerId player, TermId action, Handle object, Json input) {
@@ -197,7 +196,7 @@ int main() {
                  {{"holder", "p:2"}, {"scope", {{"object", to_string(f.c)}}}, {"rights", {"copy"}}})
                  .reply["ok"],
         "script grant omitted expiry or inherited ceiling was widened");
-    perm::Ledger ledger;
+    perm::Ledger &ledger = perm_state.ledger;
     ledger.balance[perm::Account::player(1)] = 200;
     require(bool(perm::pay(ledger, grants, perm::Holder::script(script, f.b),
                            perm::AccountTarget::player(1), perm::Account::player(3), 30, 10)),

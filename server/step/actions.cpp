@@ -40,16 +40,26 @@ bool installed_caller(const catalog::Models &models, const catalog::Scripts &scr
   return std::ranges::find(installed, caller.script) != installed.end();
 }
 } // namespace
-ActionRun begin_action(const react::ValueRead &values, const catalog::Models &models,
-                       const catalog::Scripts &scripts, const react::InstanceScripts &installations,
-                       const react::RuleVersions &rules, const react::Triggers &triggers,
-                       const react::NativeActions &native, const net::Profiles &profiles,
-                       const perm::Players &players, const perm::Grants &grants,
-                       const perm::OwnerLimits &limits, AuthorityRead authority,
-                       AttributionRead attribution, TransformRead poses, const space::Space &space,
+ActionRun begin_action(const react::ValueRead &values, const amber::catalog::State &catalog_state,
+                       const amber::react::State &react_state, const net::Profiles &profiles,
+                       const amber::perm::State &perm_state,
+                       const amber::ObjectState &objects_state, const space::Space &space,
                        const Intents &intents, record::Journal &journal, float reach_m,
                        NativeCall call, const record::Origin &parent,
                        Monotonic::time_point deadline) {
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+  auto &installations = react_state.installations;
+  auto &rules = react_state.rules;
+  auto &triggers = react_state.triggers;
+  auto &native = react_state.native_declarations;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+  auto &limits = perm_state.owner_limits;
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto attribution = amber::attribution(std::as_const(objects_state.objects));
+  auto poses = amber::transforms(std::as_const(objects_state.objects));
+
   ActionRun run;
   run.call = std::move(call);
   run.deadline = deadline;

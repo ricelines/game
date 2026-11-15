@@ -108,11 +108,13 @@ void remove_watches(Subscriptions &subscriptions, ScriptKey consumer) {
       ++row;
   }
 }
-WatchChanges sync_watches(react::Subscriptions &subscriptions, const react::ValueRead &values,
-                          const react::AllocationRows &allocations, ScriptKey consumer,
-                          const react::ScriptDeclaration &declaration, Step now, double hz,
-                          const record::Origin &origin, SyncMode mode,
+WatchChanges sync_watches(amber::react::State &react_state, const react::ValueRead &values,
+                          ScriptKey consumer, const react::ScriptDeclaration &declaration, Step now,
+                          double hz, const record::Origin &origin, SyncMode mode,
                           std::optional<std::span<const TermId>> allowed_terms) {
+  auto &subscriptions = react_state.subscriptions;
+  auto &allocations = react_state.allocations;
+
   WatchChanges changes;
   if (!declaration.active) {
     remove_watches(subscriptions, consumer);
@@ -193,11 +195,14 @@ std::vector<Handle> source_consumers(const react::ValueRead &values, FactKey sou
                 [&](Handle h) { return resolve(values, {h, 0}, watch).source != source; });
   return consumers;
 }
-WatchChanges sync_rule_watches(react::Subscriptions &subscriptions, const react::ValueRead &values,
-                               const react::AllocationRows &allocations,
-                               const catalog::Scripts &scripts, const react::RuleVersions &rules,
+WatchChanges sync_rule_watches(amber::react::State &react_state, const react::ValueRead &values,
+                               const catalog::Scripts &scripts,
                                std::span<const react::Effect> outputs, Step now, double hz,
                                const record::Origin &origin) {
+  auto &subscriptions = react_state.subscriptions;
+
+  auto &rules = react_state.rules;
+
   std::unordered_set<FactKey, FactKeyHash> changed;
   for (const auto &effect : outputs)
     if (const auto *work = std::get_if<step::WatchWork>(&effect);
@@ -234,9 +239,9 @@ WatchChanges sync_rule_watches(react::Subscriptions &subscriptions, const react:
       remove_watches(subscriptions, consumer);
       continue;
     }
-    auto changes = sync_watches(subscriptions, values, allocations, consumer,
-                                scripts.rows.at(consumer.script).declaration, now, hz, origin,
-                                SyncMode::Change, std::span<const TermId>(allowed));
+    auto changes =
+        sync_watches(react_state, values, consumer, scripts.rows.at(consumer.script).declaration,
+                     now, hz, origin, SyncMode::Change, std::span<const TermId>(allowed));
     result.dirty.insert(result.dirty.end(), std::make_move_iterator(changes.dirty.begin()),
                         std::make_move_iterator(changes.dirty.end()));
     result.timers.insert(result.timers.end(), std::make_move_iterator(changes.timers.begin()),

@@ -14,16 +14,28 @@ space::Pose relative(space::Pose subject, space::Pose parent) {
 }
 } // namespace
 step::NativeCompletion
-place_existing(space::Space &space, IdentityRead identity, TransformWrite transforms,
-               ParentWrite parents, SpaceFlags space_flags, space::PhysicalRelations &physical,
-               const lifecycle::Parts &parts, const Relation &declared_parts,
-               std::array<TermId, 4> relation_terms, PlotWrite membership, const perm::Plots &plots,
-               perm::Players &players, const perm::Grants &grants, AuthorityRead authority,
-               const perm::OwnerLimits &limits, const GeometryAssets &geometry,
-               const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-               const catalog::Assets &assets, const react::ValueRead &values, PhysicsRoles roles,
-               PhysicsDefaults defaults, react::AllocationRows &allocations,
-               react::MeterRows &meters, const step::NativeCall &call) {
+place_existing(space::Space &space, amber::ObjectState &objects_state,
+               amber::space::State &space_state, std::array<TermId, 4> relation_terms,
+               amber::perm::State &perm_state, const GeometryAssets &geometry,
+               const amber::catalog::State &catalog_state, const react::ValueRead &values,
+               PhysicsRoles roles, PhysicsDefaults defaults, amber::react::State &react_state,
+               const step::NativeCall &call) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(objects_state.objects);
+  auto parents = amber::parents(objects_state.objects);
+
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+  auto membership = amber::plot_membership(objects_state.objects);
+  auto &plots = perm_state.plots;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &limits = perm_state.owner_limits;
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+
   const auto holder = commerce_detail::actor(call);
   const auto item = commerce_detail::goods(identity, parts, declared_parts, authority, limits,
                                            call.request.target);
@@ -132,10 +144,9 @@ place_existing(space::Space &space, IdentityRead identity, TransformWrite transf
     transforms.rotation[h.slot()] = poses.at(h.bits).rotation;
   }
   parents.parent[item.root.object.slot()] = {};
-  std::vector<space::RelationChange> relations;
-  const auto installed =
-      space::rebuild_assembly(space, identity, transforms, parents, space_flags, physical, edit,
-                              bodies, logical, volumes, internal, relations);
+  const auto changes_begin = space_state.relation_changes.size();
+  const auto installed = space::rebuild_assembly(space, objects_state, space_state, edit, bodies,
+                                                 logical, volumes, internal);
   if (installed.status != space::Status::Ok)
     throw std::invalid_argument(space::status_text(installed.status));
   std::erase(players.rows[who].inventory, item.root.object);
@@ -146,18 +157,18 @@ place_existing(space::Space &space, IdentityRead identity, TransformWrite transf
                                      {"position", {destination.x, destination.y, destination.z}}});
   perm::update_plots(identity, transforms, membership, plots, item.closure, true);
   for (auto h : item.closure)
-    react::reconcile_object_priorities(values, allocations, meters, h, out.effects, call.step,
-                                       call.hz);
+    react::reconcile_object_priorities(values, react_state, h, out.effects, call.step, call.hz);
   for (const auto &[key, before] : settings)
     if (before != react::read(values, key.subject, key.term, call.step, call.hz))
       out.effects.ordered.emplace_back(step::WatchWork{key, {}});
-  for (const auto &row : relations) {
+  for (const auto &row : std::span(space_state.relation_changes).subspan(changes_begin)) {
     const auto term = relation_terms.at(static_cast<std::size_t>(row.kind));
     if (term) {
       out.effects.ordered.emplace_back(step::WatchWork{{row.from, term}, {}});
       out.effects.ordered.emplace_back(step::WatchWork{{row.to, term}, {}});
     }
   }
+  space_state.relation_changes.resize(changes_begin);
   out.changed_objects = item.closure;
   out.visible_objects = item.closure;
   commerce_detail::record(out, call, "place_existing", item.closure, out.reply);

@@ -23,20 +23,24 @@ Term term(TermId id, const char *name, Source source = Source::State,
   return t;
 }
 struct Fixture {
-  Objects objects;
+  amber::ObjectState objects_state;
+  amber::react::State react_state;
+  amber::catalog::State catalog_state;
+
+  Objects &objects = objects_state.objects;
   Handle a, b, c;
-  Terms terms;
-  Materials materials;
-  AssetMeasurements assets;
-  Properties properties;
-  Processes processes;
-  InstanceSettings instance;
-  ModelSettings models;
-  PlotSettings plots;
-  WorldSettings world;
-  SharedColumns shared;
-  RelationsRead relations;
-  RuntimeMeasurements runtime;
+  Terms &terms = react_state.terms;
+  Materials &materials = react_state.materials;
+  AssetMeasurements &assets = catalog_state.baked_measurements;
+  Properties &properties = react_state.properties;
+  Processes &processes = react_state.processes;
+  InstanceSettings &instance = react_state.instance_settings;
+  ModelSettings &models = react_state.model_settings;
+  PlotSettings &plots = react_state.plot_settings;
+  WorldSettings &world = react_state.world_settings;
+  SharedColumns &shared = react_state.shared;
+  RelationsRead &relations = react_state.relations;
+  RuntimeMeasurements &runtime = react_state.runtime_measurements;
   Fixture() {
     ObjectInit init;
     init.model = 1;
@@ -101,13 +105,13 @@ void process_thresholds_and_transfer() {
   t.conserved = true;
   set_state(f.properties, f.processes, t, f.a, Value(10.0), 0, 20, effects);
   set_state(f.properties, f.processes, t, f.b, Value(1.0), 0, 20, effects);
-  set_rate(f.properties, f.processes, t, f.a, -2, 0, 10, 0, 20, effects);
-  require(!set_rate(f.properties, f.processes, t, f.a, -2, 0, 10, 0, 20, effects),
+  set_rate(f.react_state, t, f.a, -2, 0, 10, 0, 20, effects);
+  require(!set_rate(f.react_state, t, f.a, -2, 0, 10, 0, 20, effects),
           "same effective process rate/bounds is unchanged");
 
   auto p = *f.processes[1].get(f.a.slot());
   const auto effect_count = effects.ordered.size();
-  require(!set_rate(f.properties, f.processes, t, f.a, -2, 0, 10, 20, 20, effects) &&
+  require(!set_rate(f.react_state, t, f.a, -2, 0, 10, 20, 20, effects) &&
               f.processes[1].get(f.a.slot())->step0 == p.step0 &&
               effects.ordered.size() == effect_count,
           "repeating an unchanged process later preserves its closed form and armed timers");
@@ -123,13 +127,12 @@ void process_thresholds_and_transfer() {
           "rising inclusive threshold");
   require(!next_crossing(rising, {Threshold::Predicate::Above, 10}, 0, 20),
           "clamped unreachable threshold");
-  require(transfer_state(f.properties, f.processes, t, f.a, f.b, 2, 50, 20, effects),
-          "transfer succeeds");
+  require(transfer_state(f.react_state, t, f.a, f.b, 2, 50, 20, effects), "transfer succeeds");
   near(read_state(f.properties, f.processes, f.a, 1, 50, 20).value.numeric(), 3,
        "settled source debit");
   near(read_state(f.properties, f.processes, f.b, 1, 50, 20).value.numeric(), 3,
        "equal destination credit");
-  set_rate(f.properties, f.processes, t, f.c, -1, 0, 10, 50, 20, effects);
+  set_rate(f.react_state, t, f.c, -1, 0, 10, 50, 20, effects);
   auto current = read_state(f.properties, f.processes, f.c, 1, 50, 20).value;
   require(set_state(f.properties, f.processes, t, f.c, current, 50, 20, effects),
           "stopping current nonzero process rate counts as change");
@@ -137,12 +140,12 @@ void process_thresholds_and_transfer() {
           "transfer preserves ongoing source rate/bounds");
   near(read_state(f.properties, f.processes, f.a, 1, 60, 20).value.numeric(), 2,
        "source process continues after conserved transfer");
-  set_rate(f.properties, f.processes, t, f.b, 0.5, 0, 4, 50, 20, effects);
+  set_rate(f.react_state, t, f.b, 0.5, 0, 4, 50, 20, effects);
   const auto source_before = *f.processes[1].get(f.a.slot());
   const auto destination_before = *f.processes[1].get(f.b.slot());
   bool bounded = false;
   try {
-    transfer_state(f.properties, f.processes, t, f.a, f.b, 2, 50, 20, effects);
+    transfer_state(f.react_state, t, f.a, f.b, 2, 50, 20, effects);
   } catch (const std::invalid_argument &) {
     bounded = true;
   }
@@ -153,12 +156,12 @@ void process_thresholds_and_transfer() {
   require(unchanged(*f.processes[1].get(f.a.slot()), source_before) &&
               unchanged(*f.processes[1].get(f.b.slot()), destination_before),
           "failed process-bound transfer changes neither endpoint");
-  require(transfer_state(f.properties, f.processes, t, f.a, f.b, 0.5, 50, 20, effects),
+  require(transfer_state(f.react_state, t, f.a, f.b, 0.5, 50, 20, effects),
           "bounded transfer into running destination");
   near(read_state(f.properties, f.processes, f.b, 1, 60, 20).value.numeric(), 3.75,
        "destination process continues after transfer");
 
-  require(!transfer_state(f.properties, f.processes, t, f.a, f.b, 4, 50, 20, effects),
+  require(!transfer_state(f.react_state, t, f.a, f.b, 4, 50, 20, effects),
           "insufficient transfer no mutation");
   near(read_state(f.properties, f.processes, f.a, 1, 50, 20).value.numeric(), 2.5,
        "failed transfer retains value");
@@ -214,8 +217,9 @@ void subscription_rebind_and_relations() {
 }
 void allocation_rows_track_current_nonzero_shares_only() {
   Fixture f;
-  AllocationRows allocations;
-  MeterRows meters;
+  amber::react::State react_state;
+  AllocationRows &allocations = react_state.allocations;
+  MeterRows &meters = react_state.meters;
   const Shared supply{2, {{f.a, 2}}};
   const Shared empty;
   PriorityValues priority;
@@ -224,18 +228,17 @@ void allocation_rows_track_current_nonzero_shares_only() {
     init.model = 1;
     const auto consumer = create(f.objects, init);
     const Shared demand{1, {{consumer, 1}}};
-    allocate(supply, demand, Combine::ShareEqual, priority, f.b, 1, 2, allocations, meters, i * 2,
-             20);
+    allocate(supply, demand, Combine::ShareEqual, priority, f.b, 1, 2, react_state, i * 2, 20);
     require(allocations.values.size() == 2,
             "current allocation rows grew with withdrawn contributors");
   }
-  allocate(empty, empty, Combine::ShareEqual, priority, f.b, 1, 2, allocations, meters, 512, 20);
+  allocate(empty, empty, Combine::ShareEqual, priority, f.b, 1, 2, react_state, 512, 20);
   require(allocations.values.empty() && !meters.empty(),
           "zero shares retained current-state rows or discarded earned integrals");
   retire_allocations(allocations, meters, f.b);
   require(meters.empty(), "retiring a fully withdrawn subject retained historical meters");
   const Shared demand{1, {{f.c, 1}}};
-  allocate(empty, demand, Combine::ShareEqual, priority, f.b, 1, 2, allocations, meters, 513, 20);
+  allocate(empty, demand, Combine::ShareEqual, priority, f.b, 1, 2, react_state, 513, 20);
   require(allocations.values.empty() && meters.empty(),
           "never-served zero demand allocated redundant rows and meters");
 }
@@ -243,7 +246,8 @@ void allocation_rows_track_current_nonzero_shares_only() {
 void contribution_and_metering() {
   Fixture f;
   DeferredEffects effects;
-  GivesTo reverse;
+  amber::react::State react_state;
+  GivesTo &reverse = react_state.gives_to;
   auto &t = f.terms.rows[1];
   t.combine = Combine::Sum;
   set_contribution(f.shared, reverse, t, f.b, f.a, 5, effects);
@@ -259,21 +263,21 @@ void contribution_and_metering() {
   f.relations.columns[2] = &relation;
   t.along = 2;
   near(read_shared(f.shared, f.relations, f.b, t).value.numeric(), 7, "along relation fallback");
-  AllocationRows allocations;
-  MeterRows meters;
+  AllocationRows &allocations = react_state.allocations;
+  MeterRows &meters = react_state.meters;
   PriorityValues priorities;
   Shared supply{100, {{f.a, 100}}}, demand{30, {{f.b, 10}, {f.c, 20}}};
-  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, allocations, meters, 0, 20);
+  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, react_state, 0, 20);
   near(get_share(allocations, f.a, 2, f.b), 10, "satisfied small demand");
   near(get_share(allocations, f.a, 2, f.c), 20, "satisfied larger demand");
   near(metered(meters.at({f.a, f.a, 1, true}), 20, 20), 30,
        "supplier meters actual served rather than offered");
   demand = {0, {}};
-  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, allocations, meters, 20, 20);
+  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, react_state, 20, 20);
   near(metered(meters.at({f.a, f.a, 1, true}), 40, 20), 30, "unused supply not metered");
   supply = {12, {{f.a, 12}}};
   demand = {25, {{f.b, 5}, {f.c, 20}}};
-  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, allocations, meters, 40, 20);
+  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, react_state, 40, 20);
   near(get_share(allocations, f.a, 2, f.b), 5, "waterfill caps small demand");
   near(get_share(allocations, f.a, 2, f.c), 7, "waterfill redistributes surplus");
 }
@@ -433,9 +437,8 @@ void live_activation_and_dispatch_authority() {
 void luau_bound_values_and_events() {
   Fixture f;
   auto projection = f.values();
-  GivesTo gives_to;
   Vm vm({4096, 50, 5, 64});
-  bind_values(vm, projection, f.properties, f.processes, f.shared, gives_to);
+  bind_values(vm, projection, f.react_state);
   bind_events(vm, f.terms);
   f.terms.rows[2].kind = Kind::Event;
   f.terms.rows[3].kind = Kind::Action;
@@ -484,7 +487,7 @@ void luau_bound_values_and_events() {
               !std::get<Value>(empty_event.payload).present(),
           "omitted optional timer and event payloads are ordinary absent scalars");
   Vm foreign({4096, 50, 5, 64});
-  bind_values(foreign, projection, f.properties, f.processes, f.shared, gives_to);
+  bind_values(foreign, projection, f.react_state);
   ScriptDeclaration foreign_declaration;
   foreign_declaration.id = 3;
   auto foreign_code = compile_script(R"(return {on={run=function(self, sender, target)
@@ -665,16 +668,15 @@ void candidate_start_uses_current_installation() {
               candidates[1].script == model && candidates[2].script == removed &&
               candidates[3].script == retained,
           "material, model and instance candidates retain broadest-first order");
-  Relation parts;
+  auto &objects_state = f.objects_state;
   record::Journal journal(8, {});
   const auto start = [&](const HandlerRef &handler, Invocation &inv, CompletedInvocation &done) {
     InvocationInput input;
     input.receiver = f.a;
     input.trigger = 6;
     input.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-    return start_invocation(f.vm, f.states, f.random, f.subscriptions, f.values(), f.triggers,
-                            parts, 7, attribution(f.objects), f.models, f.scripts, journal, handler,
-                            std::move(input), inv, done);
+    return start_invocation(f.vm, f.react_state, f.values(), objects_state, 7, f.catalog_state,
+                            journal, handler, std::move(input), inv, done);
   };
   Invocation broad;
   CompletedInvocation broad_result;
@@ -718,8 +720,9 @@ void suspended_handler_sees_replaced_parts() {
     end}})");
   f.models.rows[1].script = script;
   project_model(f.triggers, f.models, f.scripts, f.terms, 1);
-  lifecycle::Parts parts;
-  Relation declared;
+  auto &objects_state = f.objects_state;
+  lifecycle::Parts &parts = objects_state.parts;
+  Relation &declared = objects_state.declared_parts;
   ObjectInit initial;
   const auto born = lifecycle::instantiate(f.objects, parts, declared,
                                            {1, 0, 8, {{"old", 1, 8, {}, {}}}}, initial);
@@ -732,9 +735,8 @@ void suspended_handler_sees_replaced_parts() {
   CompletedInvocation completed;
   record::Journal journal(8, {});
   const auto handlers = dispatch(f.triggers, f.values(), root, 6, 0, 20);
-  require(start_invocation(f.vm, f.states, f.random, f.subscriptions, f.values(), f.triggers,
-                           declared, 7, attribution(f.objects), f.models, f.scripts, journal,
-                           handlers.front(), std::move(input), invocation, completed) &&
+  require(start_invocation(f.vm, f.react_state, f.values(), objects_state, 7, f.catalog_state,
+                           journal, handlers.front(), std::move(input), invocation, completed) &&
               completed.outcome.status == RunOutcome::Status::Action,
           "actual script suspends while its assembly still has the old part");
   const auto plan =

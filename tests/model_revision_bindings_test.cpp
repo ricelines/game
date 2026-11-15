@@ -78,18 +78,13 @@ struct Fixture : test_structural::Fixture {
       assets.rows.at(f.models.rows[3].asset).manifest["bindings"]["motion"]["mode"] = "invalid";
   }
   step::NativeCompletion revise(Caller caller = PlayerId{1}) {
-    return step::revise_model(
-        f.objects, parts, declared, f.models, parameters, texts, f.model_settings, assets, f.assets,
-        {0, 0}, geometry, *f.projection, world, transforms(f.objects), parents(f.objects),
-        space_flags(f.objects), permission_flags(f.objects), physical, physical_changes,
-        authority(f.objects), attribution(f.objects), ledger, offers, trades, plots, f.scripts,
-        plot_membership(f.objects), {10, 11}, {.6f, 0},
-        call({}, {{"model", "m:1"}, {"proposal", "m:3"}}, caller));
+    return step::revise_model(f.objects_state, f.catalog_state, f.model_settings, {0, 0}, geometry,
+                              *f.projection, world, space_state, perm_state, {10, 11}, {.6f, 0},
+                              call({}, {{"model", "m:1"}, {"proposal", "m:3"}}, caller));
   }
   void offered(Handle root) {
     const auto out =
-        step::offer(offers, permission_flags(f.objects), players, grants, authority(f.objects),
-                    limits, world, identity(f.objects), parents(f.objects), parts, declared,
+        step::offer(perm_state, f.objects_state, world,
                     call(root, {{"price", 5}}, PlayerId{f.objects.owner[root.slot()]}));
     require(out.reply.at("ok"), "ordinary placed goods offer");
   }
@@ -106,9 +101,8 @@ void two_owners_and_hidden_goods() {
   x.f.terms.rows[12].source = react::Source::Setting;
   x.f.instance_settings.columns.resize(13);
   x.f.instance_settings.columns[12].set(first[1].slot(), Value(91.0));
-  std::vector<space::RelationChange> changes;
-  require(space::custody(x.world, identity(x.f.objects), second[0], x.f.a, parents(x.f.objects),
-                         space_flags(x.f.objects), x.physical, changes,
+
+  require(space::custody(x.world, x.f.objects_state, second[0], x.f.a, x.space_state,
                          std::span(second).subspan(1))
                   .status == space::Status::Ok,
           "second owner's goods enter actual hidden custody");
@@ -231,9 +225,7 @@ void two_edits_share_one_rigid_assembly() {
   x.f.objects.parent[b[0].slot()] = parent;
   lifecycle::rebuild_declared_parts(x.parts, identity(x.f.objects), x.declared);
   const std::array<Handle, 2> joined{a[0], b[0]};
-  step::install_declared_attachments(x.world, identity(x.f.objects), transforms(x.f.objects),
-                                     parents(x.f.objects), space_flags(x.f.objects), x.declared,
-                                     x.physical, x.physical_changes, joined);
+  step::install_declared_attachments(x.world, x.f.objects_state, x.space_state, joined);
   auto all = lifecycle::collect(x.parts, identity(x.f.objects), parent);
   require(space::assemble(x.world, identity(x.f.objects), transforms(x.f.objects), parent,
                           std::span(all).subspan(1), space::Motion::Dynamic)
@@ -263,13 +255,9 @@ void removed_parts_use_ordinary_retirement() {
               result.removed_objects == std::vector<Handle>{a[1]},
           "geometry replacement leaves retired identities live for owner cleanup");
   step::NativeCompletion cleanup;
-  step::retire_commerce(x.ledger, x.offers, x.trades, x.grants, x.players, x.limits,
-                        identity(x.f.objects), authority(x.f.objects),
-                        permission_flags(x.f.objects), result.removed_objects, 0, cleanup);
-  react::retire_reactions(
-      x.f.models, *x.f.projection, x.f.installed, x.f.triggers, x.f.subscriptions, x.f.properties,
-      x.f.processes, x.f.instance_settings, x.f.states, x.f.random, x.f.shared, x.f.gives_to,
-      x.f.relations, x.f.allocations, x.meters, result.removed_objects, 0, 20, {}, cleanup.effects);
+  step::retire_commerce(x.perm_state, x.f.objects_state, result.removed_objects, 0, cleanup);
+  react::retire_reactions(x.f.models, *x.f.projection, x.f.react_state, result.removed_objects, 0,
+                          20, {}, cleanup.effects);
   lifecycle::release_rows(x.f.objects, x.parts, x.declared, result.removed_objects);
   require(!identity(x.f.objects).valid(a[1]) && !x.grants.rows[grant].live &&
               !x.f.properties[1].get(a[1].slot()) &&

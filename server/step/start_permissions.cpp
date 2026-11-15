@@ -82,11 +82,20 @@ void install_money(const Json &plan, const Symbols &symbols, IdentityRead identi
   }
 }
 void install_grants(const Json &plan, const Symbols &symbols, const react::ValueRead &values,
-                    AuthorityRead authority, const perm::OwnerLimits &limits,
-                    const catalog::Models &models, const catalog::Scripts &scripts,
-                    const react::InstanceScripts &instances, const react::RuleVersions &rules,
-                    const perm::Plots &plots, const net::Profiles &profiles, perm::Grants &grants,
-                    perm::Players &players, Step now, double hz, const perm::Groups &groups) {
+                    AuthorityRead authority, amber::perm::State &perm_state,
+                    const amber::catalog::State &catalog_state,
+                    const amber::react::State &react_state, const net::Profiles &profiles, Step now,
+                    double hz) {
+  auto &limits = perm_state.owner_limits;
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+  auto &instances = react_state.installations;
+  auto &rules = react_state.rules;
+  auto &plots = perm_state.plots;
+  auto &grants = perm_state.grants;
+  auto &players = perm_state.players;
+  auto &groups = perm_state.groups;
+
   const auto holder = [&](const Json &row) -> perm::HolderControl {
     if (row.is_string()) {
       const auto id = detail::account(row);
@@ -144,12 +153,18 @@ void install_grants(const Json &plan, const Symbols &symbols, const react::Value
                                   std::string(perm::reason_text(created.reason)));
   }
 }
-void provision_body_grants(const Json &plan, const Symbols &symbols, const catalog::Models &models,
-                           const catalog::Scripts &scripts, IdentityRead identity,
-                           AuthorityRead authority, const perm::OwnerLimits &limits,
-                           const perm::Plots &plots, const perm::Groups &groups,
-                           const net::Profiles &profiles, perm::Players &players,
-                           perm::Grants &grants, Step now, double hz) {
+void provision_body_grants(const Json &plan, const Symbols &symbols,
+                           const amber::catalog::State &catalog_state,
+                           const amber::ObjectState &objects_state, amber::perm::State &perm_state,
+                           const net::Profiles &profiles, Step now, double hz) {
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+
   for (const auto &row : plan.at("profiles")) {
     if (!row.contains("body") ||
         std::find(row.at("modes").begin(), row.at("modes").end(), "play") == row.at("modes").end())
@@ -184,9 +199,8 @@ void provision_body_grants(const Json &plan, const Symbols &symbols, const catal
           scope["owned_on_plot"]["owner"] =
               "p:" + std::to_string(scope["owned_on_plot"]["owner"].get<PlayerId>());
       }
-      const auto requested =
-          editing::detail::slot_choices(choices, source, identity, authority, limits, players,
-                                        plots, groups, profiles.rows[player].roles, call);
+      const auto requested = editing::detail::slot_choices(
+          choices, source, objects_state, perm_state, profiles.rows[player].roles, call);
       const auto granted =
           editing::detail::fill_slots(source, requested, authority, players, grants, call);
       if (granted.reply.at("grants").size() != choices.size())

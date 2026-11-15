@@ -12,12 +12,15 @@ namespace ca = amber::catalog;
 namespace ne = amber::net;
 using testspace::require;
 struct Fixture {
-  Objects objects;
-  ca::Models models;
-  ca::ParameterBlocks parameters;
-  ca::Assets assets;
-  ca::ModelTexts texts;
-  ca::InstanceTexts instance_texts;
+  amber::ObjectState objects_state;
+  ca::State catalog_state;
+
+  Objects &objects = objects_state.objects;
+  ca::Models &models = catalog_state.models;
+  ca::ParameterBlocks &parameters = catalog_state.parameters;
+  ca::Assets &assets = catalog_state.assets;
+  ca::ModelTexts &texts = catalog_state.model_text;
+  ca::InstanceTexts &instance_texts = catalog_state.instance_text;
   re::Terms terms;
   re::Materials materials;
   re::AssetMeasurements measurements;
@@ -107,9 +110,8 @@ void descriptions_and_roles() {
   f.instance_texts.rows[h.bits] = {"", "instance fiction", ""};
   const std::array<TermId, 2> inspected{1, 2};
   const std::array<std::string, 1> actions{"invented.poke"};
-  auto description =
-      bi::describe_object(h, identity(f.objects), f.models, f.parameters, f.assets, f.texts,
-                          f.instance_texts, f.values(), inspected, actions, 0, 20);
+  auto description = bi::describe_object(h, identity(f.objects), f.catalog_state, f.values(),
+                                         inspected, actions, 0, 20);
   require(description.measured["size_m"][2] == 5 && description.measured["params"]["height"] == 5,
           "effective parameter asset supplies actual geometry measurements");
   require(description.measured["mass_kg"] == 3925 && description.measured["capacity_l"] == 200 &&
@@ -117,8 +119,8 @@ void descriptions_and_roles() {
               !description.measured.contains("capacity_m3"),
           "S5 mass, capacity units and material name come from the actual variant");
   f.materials.rows[3][6] = Value(1000.);
-  require(bi::describe_object(h, identity(f.objects), f.models, f.parameters, f.assets, f.texts,
-                              f.instance_texts, f.values(), inspected, actions, 0, 20)
+  require(bi::describe_object(h, identity(f.objects), f.catalog_state, f.values(), inspected,
+                              actions, 0, 20)
                   .measured["mass_kg"] == 500,
           "material edits must change measured mass without rebaking");
   require(description.measured["values"]["invented.q1"] == 7 && description.says.name.empty() &&
@@ -315,9 +317,8 @@ void coherent_catalog_publication() {
     if (const auto *send = std::get_if<net::Send>(&output))
       require(send->session != 103, "publication reached an unauthenticated transport");
   const std::array inspected{added};
-  const auto description =
-      net::describe_object(object, identity(f.objects), f.models, f.parameters, f.assets, f.texts,
-                           f.instance_texts, f.values(), inspected, {}, 0, 20);
+  const auto description = net::describe_object(object, identity(f.objects), f.catalog_state,
+                                                f.values(), inspected, {}, 0, 20);
   require(description.measured["values"]["p9.live_fact"] == 123,
           "live inspection did not consume the newly appended quantity");
 }

@@ -6,10 +6,10 @@
 #include <stdexcept>
 
 namespace amber::step::start {
-void provision_body_grants(const Json &, const Symbols &, const catalog::Models &,
-                           const catalog::Scripts &, IdentityRead, AuthorityRead,
-                           const perm::OwnerLimits &, const perm::Plots &, const perm::Groups &,
-                           const net::Profiles &, perm::Players &, perm::Grants &, Step, double);
+void provision_body_grants(const Json &, const Symbols &,
+                           const amber::catalog::State &catalog_state,
+                           const amber::ObjectState &objects_state, amber::perm::State &perm_state,
+                           const net::Profiles &, Step, double);
 }
 
 namespace amber::step::start::detail {

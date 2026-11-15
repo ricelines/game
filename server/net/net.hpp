@@ -1,4 +1,7 @@
 #pragma once
+namespace amber::net {
+struct State;
+}
 
 #include "perm/perm.hpp"
 #include "react/react.hpp"
@@ -157,9 +160,7 @@ struct LightRole {
   float radius_m, source_radius_m;
 };
 double binding_value(const ScalarBinding &, Handle, const react::ValueRead &, Step, double hz);
-ObjectDescription describe_object(Handle, IdentityRead, const catalog::Models &,
-                                  const catalog::ParameterBlocks &, const catalog::Assets &,
-                                  const catalog::ModelTexts &, const catalog::InstanceTexts &,
+ObjectDescription describe_object(Handle, IdentityRead, const amber::catalog::State &catalog_state,
                                   const react::ValueRead &,
                                   std::span<const TermId> inspection_terms,
                                   std::span<const std::string> declared_actions, Step, double hz);
@@ -387,53 +388,29 @@ void invalidate(SessionViews &views, std::span<const Handle> changed);
 void remove_session(SessionViews &views, observe::ActiveViews &active, observe::Hearing &hearing,
                     SessionId session);
 void append_heard(Json &result, observe::Hearing &hearing, SessionId session, std::size_t limit);
-void refresh_view(const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                  const catalog::Assets &assets, const catalog::Scripts &scripts,
-                  const catalog::ModelTexts &model_text,
-                  const catalog::InstanceTexts &instance_text,
-                  const react::InstanceScripts &instances, const react::NativeActions &native,
-                  const react::ValueRead &values, const std::vector<TermId> &inspection_terms,
-                  const catalog::AuthoredTexts &authored_texts, SessionViews &sessions,
-                  observe::ActiveViews &active, const space::Space &space, TransformRead transforms,
-                  const Relation &declared_parts, const Relation &attached_to,
-                  const observe::Lights &lights, const observe::ZoneAmbients &zones,
-                  const std::vector<observe::MotionSample> &motion, const step::Intents &intents,
-                  observe::Settings settings, Step now, double hz, double world_ambient_lux,
-                  SessionId session, const Principal &principal, std::size_t limit);
-Reply read_look(const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                const catalog::Assets &assets, const catalog::Scripts &scripts,
-                const catalog::ModelTexts &model_text, const catalog::InstanceTexts &instance_text,
-                const react::InstanceScripts &instances, const react::NativeActions &native,
-                const react::ValueRead &values, const std::vector<TermId> &inspection_terms,
-                const catalog::AuthoredTexts &authored_texts, SessionViews &sessions,
-                observe::ActiveViews &active, observe::Hearing &hearing, const space::Space &space,
-                TransformRead transforms, const Relation &declared_parts,
-                const Relation &attached_to, const observe::Lights &lights,
-                const observe::ZoneAmbients &zones,
-                const std::vector<observe::MotionSample> &motion, const step::Intents &intents,
+void refresh_view(const amber::catalog::State &catalog_state,
+                  const amber::react::State &react_state, const react::ValueRead &values,
+                  SessionViews &sessions, amber::space::State &space_state,
+                  const space::Space &space, const amber::ObjectState &objects_state,
+                  const step::Intents &intents, observe::Settings settings, Step now, double hz,
+                  double world_ambient_lux, SessionId session, const Principal &principal,
+                  std::size_t limit);
+Reply read_look(const amber::catalog::State &catalog_state, const amber::react::State &react_state,
+                const react::ValueRead &values, SessionViews &sessions,
+                amber::space::State &space_state, const space::Space &space,
+                const amber::ObjectState &objects_state, const step::Intents &intents,
                 observe::Settings settings, Step now, double hz, double world_ambient_lux,
                 const Invocation &call);
-Reply read_actions(const catalog::Models &models, const catalog::Scripts &scripts,
-                   const react::InstanceScripts &instances, const react::NativeActions &native,
-                   const react::ValueRead &values, SessionViews &sessions,
-                   observe::Hearing &hearing, std::size_t page_size,
+Reply read_actions(const amber::catalog::State &catalog_state,
+                   const amber::react::State &react_state, const react::ValueRead &values,
+                   SessionViews &sessions, observe::Hearing &hearing, std::size_t page_size,
                    std::size_t events_per_response, AuthorityRead authority,
-                   const perm::OwnerLimits &limits, const perm::Players &players,
-                   const perm::Grants &grants, Step now, const Invocation &call);
-Reply read_inspect(const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                   const catalog::Assets &assets, const catalog::Scripts &scripts,
-                   const catalog::ModelTexts &model_text,
-                   const catalog::InstanceTexts &instance_text,
-                   const react::InstanceScripts &instances, const react::NativeActions &native,
-                   const react::ValueRead &values, const std::vector<TermId> &inspection_terms,
-                   const catalog::AuthoredTexts &authored_texts, SessionViews &sessions,
-                   observe::Hearing &hearing, TransformRead transforms, AuthorityRead authority,
-                   ParentRead parents, AttributionRead attribution,
-                   const react::RelationsRead &relations, const perm::OwnerLimits &limits,
-                   const perm::Players &players, const perm::Grants &grants,
-                   const perm::Plots &plots, const perm::Ledger &ledger, Step now, double hz,
-                   std::size_t events_per_response, const react::ScriptStates &states,
-                   const react::RuleVersions &rules, const Invocation &call);
+                   const amber::perm::State &perm_state, Step now, const Invocation &call);
+Reply read_inspect(const amber::catalog::State &catalog_state,
+                   const amber::react::State &react_state, const react::ValueRead &values,
+                   SessionViews &sessions, observe::Hearing &hearing,
+                   const amber::ObjectState &objects_state, const amber::perm::State &perm_state,
+                   Step now, double hz, std::size_t events_per_response, const Invocation &call);
 void append_records(RecordFeed &feed, std::span<const Json> records, IdentityRead identity,
                     TransformRead transforms);
 Reply read_events(const RecordFeed &feed, const SessionViews &sessions, float radius_m,

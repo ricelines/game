@@ -46,10 +46,9 @@ void round_trip_and_real_vm_continuation() {
             "fresh VM loads the same immutable compiled fixture artifacts");
   }
   const auto before = loaded.f.subscriptions.rows.at({original.f.a, 1}).front().last;
-  auto changes = react::sync_watches(loaded.f.subscriptions, loaded.f.values(), loaded.allocations,
-                                     {original.f.a, original.script},
-                                     loaded.f.scripts.rows[original.script].declaration, 12, 20, {},
-                                     react::SyncMode::Restore);
+  auto changes = react::sync_watches(
+      loaded.f.react_state, loaded.f.values(), {original.f.a, original.script},
+      loaded.f.scripts.rows[original.script].declaration, 12, 20, {}, react::SyncMode::Restore);
   require(changes.dirty.empty() && changes.timers.empty() &&
               loaded.f.subscriptions.rows.at({original.f.a, 1}).front().last == before,
           "runtime watch rehydration preserves saved last answers and does not duplicate timers");
@@ -83,9 +82,8 @@ void local_capture_filters_authority_and_runtime_rows() {
                                        identity(original.f.objects), original.f.objects.params,
                                        original.f.rules, objects);
   const std::array<PlayerId, 1> actors{1};
-  auto permission = perm::capture_authority(authority(original.f.objects), objects, actors,
-                                            original.players, original.plots, original.groups,
-                                            original.grants, original.offers, original.trades);
+  auto permission =
+      perm::capture_authority(authority(original.f.objects), objects, actors, original.perm_state);
   snap::Buffer bytes;
   original.write(bytes, std::span<const Handle>(objects), &catalog, &permission);
   const std::array<std::string_view, 1> versions{"checkpoint-fixture"};

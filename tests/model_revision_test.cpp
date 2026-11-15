@@ -21,11 +21,14 @@ template <class F> void rejects(F run, const char *message) {
   throw std::runtime_error(message);
 }
 struct Fixture {
-  Models models;
-  ParameterBlocks parameters;
-  Assets assets;
-  ModelTexts texts;
-  react::ModelSettings settings;
+  amber::catalog::State catalog_state;
+  amber::react::State react_state;
+
+  Models &models = catalog_state.models;
+  ParameterBlocks &parameters = catalog_state.parameters;
+  Assets &assets = catalog_state.assets;
+  ModelTexts &texts = catalog_state.model_text;
+  react::ModelSettings &settings = react_state.model_settings;
   Hash old_source = sha256("old source"), new_source = sha256("new source");
   Hash asset(std::string name, bool revised, std::string canonical, double volume = 1) {
     const auto id = sha256(name);

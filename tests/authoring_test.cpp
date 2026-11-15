@@ -75,9 +75,11 @@ int main(int argc, char **argv) {
     const auto plan = step::start::read_plan(argv[1]);
     const auto directory = std::filesystem::current_path() / ".cache/authoring-test";
     std::filesystem::remove_all(directory);
-    react::Terms terms;
-    react::Materials materials;
-    catalog::MechanicalBindings mechanical;
+    amber::react::State react_state;
+    react::Terms &terms = react_state.terms;
+    react::Materials &materials = react_state.materials;
+    amber::catalog::State catalog_state;
+    catalog::MechanicalBindings &mechanical = catalog_state.mechanical;
     const auto registry =
         step::start::load_registry(plan, directory / "registry", terms, materials, mechanical);
     const auto &model = named(plan.at("models"), "door");
@@ -122,22 +124,20 @@ int main(int argc, char **argv) {
     auto prepared = std::get<PreparedModel>(std::move(completed[0].result));
     require(prepared.assets.size() == 2 && prepared.assets[0].volume != 999999,
             "transported manifest replaced real root/part geometry");
-    catalog::Assets assets;
-    catalog::Models models;
-    catalog::ModelTexts texts;
-    react::ModelSettings settings;
-    react::AssetMeasurements measured;
-    catalog::Scripts scripts;
-    catalog::ParameterBlocks parameters;
+    catalog::Assets &assets = catalog_state.assets;
+    catalog::Models &models = catalog_state.models;
+
+    react::AssetMeasurements &measured = catalog_state.baked_measurements;
+    catalog::Scripts &scripts = catalog_state.scripts;
+    catalog::ParameterBlocks &parameters = catalog_state.parameters;
     const catalog::MeasurementBindings measured_terms{terms.by_name.at("base.volume"),
                                                       terms.by_name.at("base.capacity")};
     auto model_install = [&](PreparedModel model, PlayerId author, double created_s) {
-      return install_model(std::move(model), author, created_s, assets, models, parameters, texts,
-                           settings, measured, scripts, terms, measured_terms);
+      return install_model(std::move(model), author, created_s, catalog_state, react_state,
+                           measured_terms);
     };
     auto variant_install = [&](PreparedVariant variant) {
-      return install_variant(std::move(variant), assets, models, parameters, texts, settings,
-                             measured, scripts, terms, measured_terms);
+      return install_variant(std::move(variant), catalog_state, react_state, measured_terms);
     };
     const auto first = model_install(prepared, 9, 12).reply;
     const auto second = model_install(prepared, 10, 15).reply;
@@ -215,7 +215,7 @@ int main(int argc, char **argv) {
                 measured.parameter_rows.contains(params_before_batch),
             "one batched model install did not expose its complete measured parameter set");
     react::Vm vm(limits);
-    react::NativeActions native;
+    react::NativeActions &native = react_state.native_declarations;
     auto script_install = [&](catalog::PreparedScript script) {
       return install_script(std::move(script), 9, 12, scripts, vm, native, directory / "scripts");
     };

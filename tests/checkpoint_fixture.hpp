@@ -6,34 +6,43 @@
 namespace amber::checkpoint_test {
 namespace cp = step::checkpoint;
 struct Fixture {
+  amber::perm::State perm_state;
+  amber::net::State net_state{{}};
+  amber::step::State step_state{8};
+  amber::elaborate::State elaborate_state;
+
   test_runtime::Fixture f;
-  lifecycle::Parts parts;
-  Relation declared;
+  amber::ObjectState &objects_state = f.objects_state;
+  amber::catalog::State &catalog_state = f.catalog_state;
+  amber::react::State &react_state = f.react_state;
+
+  lifecycle::Parts &parts = objects_state.parts;
+  Relation &declared = objects_state.declared_parts;
   space::PhysicalRelations physical;
-  catalog::ParameterBlocks parameters;
-  catalog::ModelTexts model_text;
-  catalog::InstanceTexts instance_text;
-  catalog::AuthoredTexts authored_text;
-  react::GivesTo gives;
-  react::AllocationRows allocations;
-  react::MeterRows meters;
-  perm::Players players;
-  perm::Ledger ledger;
-  perm::Plots plots;
-  perm::Groups groups;
-  perm::Grants grants;
-  perm::Offers offers;
-  perm::Trades trades;
-  perm::OwnerLimits limits;
-  net::Profiles profiles;
-  step::TimerWheel timers;
-  step::WorkQueues queues;
-  step::Intents intents;
-  step::Inputs inputs;
-  elaborate::Requests requests;
-  elaborate::GapCounts gaps;
-  elaborate::LastGaps last;
-  elaborate::CaptureRefs captures;
+  catalog::ParameterBlocks &parameters = catalog_state.parameters;
+  catalog::ModelTexts &model_text = catalog_state.model_text;
+  catalog::InstanceTexts &instance_text = catalog_state.instance_text;
+  catalog::AuthoredTexts &authored_text = catalog_state.authored_text;
+  react::GivesTo &gives = react_state.gives_to;
+  react::AllocationRows &allocations = react_state.allocations;
+  react::MeterRows &meters = react_state.meters;
+  perm::Players &players = perm_state.players;
+  perm::Ledger &ledger = perm_state.ledger;
+  perm::Plots &plots = perm_state.plots;
+  perm::Groups &groups = perm_state.groups;
+  perm::Grants &grants = perm_state.grants;
+  perm::Offers &offers = perm_state.offers;
+  perm::Trades &trades = perm_state.trades;
+  perm::OwnerLimits &limits = perm_state.owner_limits;
+  net::Profiles &profiles = net_state.profiles;
+  step::TimerWheel &timers = step_state.timers;
+  step::WorkQueues &queues = step_state.queues;
+  step::Intents &intents = step_state.intents;
+  step::Inputs &inputs = step_state.inputs;
+  elaborate::Requests &requests = elaborate_state.requests;
+  elaborate::GapCounts &gaps = elaborate_state.gap_counts;
+  elaborate::LastGaps &last = elaborate_state.last_gaps;
+  elaborate::CaptureRefs &captures = elaborate_state.captures;
   std::vector<space::MotionRow> motion;
   std::vector<step::BodyCauseRow> causes;
   std::uint64_t next_record = 31;
@@ -83,8 +92,8 @@ struct Fixture {
     physical.attached_to.in.set(f.b.slot(), std::vector<Handle>{part});
     f.state(f.a, 1, 0);
     f.state(f.c, 1, 20);
-    set_rate(f.properties, f.processes, f.terms.rows[1], f.a, 1, 0, 100, 0, 20, f.effects);
-    auto armed = react::sync_watches(f.subscriptions, f.values(), allocations, {f.a, script},
+    set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 100, 0, 20, f.effects);
+    auto armed = react::sync_watches(f.react_state, f.values(), {f.a, script},
                                      f.scripts.rows[script].declaration, 0, 20, {},
                                      react::SyncMode::Initial);
     for (auto &timer : armed.timers)
@@ -223,21 +232,14 @@ struct Fixture {
       filter->catalog = *catalog;
       filter->permissions = *permission;
     }
-    cp::encode_checkpoint(
-        bytes, header, f.objects, f.properties, f.processes, f.instance_settings, f.model_settings,
-        f.plots, f.world, f.relations, physical, parts, f.shared, gives, allocations, meters,
-        f.models, parameters, f.scripts, model_text, instance_text, authored_text, players, ledger,
-        plots, groups, profiles, grants, offers, trades, limits, f.states, f.subscriptions,
-        f.installed, timers, queues, intents, inputs, requests, gaps, last, captures, f.random,
-        motion, causes, next_record, filter ? &*filter : nullptr);
+    cp::encode_checkpoint(bytes, header, f.objects_state, f.react_state, physical, f.catalog_state,
+                          perm_state, profiles, step_state, elaborate_state, motion, causes,
+                          next_record, filter ? &*filter : nullptr);
   }
   void read(const snap::View &view) {
-    auto decoded = cp::decode_checkpoint(
-        view, f.objects, f.properties, f.processes, f.instance_settings, f.model_settings, f.plots,
-        f.world, f.relations, physical, parts, f.shared, gives, allocations, meters, f.models,
-        parameters, f.scripts, model_text, instance_text, authored_text, players, ledger, plots,
-        groups, profiles, grants, offers, trades, limits, f.states, f.subscriptions, f.installed,
-        timers, queues, intents, inputs, requests, gaps, last, captures, f.random, declared);
+    auto decoded =
+        cp::decode_checkpoint(view, f.objects_state, f.react_state, physical, f.catalog_state,
+                              perm_state, profiles, step_state, elaborate_state);
     next_record = decoded.next_record;
     motion = std::move(decoded.motion);
     causes = std::move(decoded.causes);

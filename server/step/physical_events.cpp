@@ -86,11 +86,15 @@ TermId relation_term(const PhysicalRelationTerms &terms, space::RelationKind kin
   }
   std::terminate();
 }
-record::Origin published_origin(record::Journal &journal, IdentityRead identity,
-                                AttributionRead attribution, const catalog::Models &models,
-                                const catalog::Scripts &scripts, double hz,
+record::Origin published_origin(record::Journal &journal, const amber::ObjectState &objects_state,
+                                const amber::catalog::State &catalog_state, double hz,
                                 const CauseSummary &summary, Step step,
                                 std::span<const Handle> things) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto attribution = amber::attribution(std::as_const(objects_state.objects));
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+
   if (!summary.ambiguous) {
     auto origin = summary.origin;
     const auto credits = record::credits(identity, attribution, models, scripts, things, 0, hz);
@@ -117,17 +121,20 @@ void relation_effects(react::DeferredEffects &effects, const PhysicalRelationTer
     effects.ordered.emplace_back(step::WatchWork{{change.to, term}, {}});
   }
 }
-void publish_physical(MechanicalCauses &causes, step::WorkQueues &queues, record::Journal &journal,
+void publish_physical(amber::step::State &step_state, record::Journal &journal,
                       const PhysicalEventTerms &terms, std::size_t event_limit, double hz,
-                      IdentityRead identity, AttributionRead attribution,
-                      const catalog::Models &models, const catalog::Scripts &scripts,
-                      const space::StepResult &physics, Step now) {
+                      const amber::ObjectState &objects_state,
+                      const amber::catalog::State &catalog_state, const space::StepResult &physics,
+                      Step now) {
+  auto &causes = step_state.mechanical_causes;
+  auto &queues = step_state.queues;
+
   for (const auto &contact : physics.contacts) {
     const auto summary =
         causes.combine(causes.lookup(contact.causes.first), causes.lookup(contact.causes.second));
     const std::array<Handle, 2> things{contact.first, contact.second};
     const auto origin =
-        published_origin(journal, identity, attribution, models, scripts, hz, summary, now, things);
+        published_origin(journal, objects_state, catalog_state, hz, summary, now, things);
     for (const auto &[receiver, sender, normal] :
          {std::tuple{contact.first, contact.second, contact.normal},
           std::tuple{contact.second, contact.first, contact.normal * -1}}) {
@@ -162,8 +169,8 @@ void publish_physical(MechanicalCauses &causes, step::WorkQueues &queues, record
   }
   for (const auto &[key, summary] : facts) {
     const Handle object{key.first};
-    const auto origin = published_origin(journal, identity, attribution, models, scripts, hz,
-                                         summary, now, std::span(&object, 1));
+    const auto origin = published_origin(journal, objects_state, catalog_state, hz, summary, now,
+                                         std::span(&object, 1));
     step::enqueue_watch(queues, {{object, key.second}, origin});
   }
 }
@@ -172,14 +179,22 @@ void collect_physical_causes(MechanicalCauses &causes, const space::Space &space
   space::active_cause_tokens(space, tokens);
   causes.retain(tokens);
 }
-space::StepResult advance_motion(space::Space &space, IdentityRead ids, TransformWrite poses,
-                                 ParentWrite parent, SpaceFlags physical_flags,
-                                 space::PhysicalRelations &physical_relations, Intents &intents,
-                                 std::vector<IntentEnding> &intent_endings,
-                                 TravelAccess &travel_access, const perm::Plots &plots,
-                                 const perm::Players &players, const perm::Grants &grants,
-                                 AuthorityRead auth, MechanicalCauses &mechanical_causes, Step now,
-                                 double hz, float goal_tolerance_m, float reach_m) {
+space::StepResult advance_motion(space::Space &space, amber::ObjectState &objects_state,
+                                 space::PhysicalRelations &physical_relations,
+                                 amber::step::State &step_state,
+                                 const amber::perm::State &perm_state, Step now, double hz,
+                                 float goal_tolerance_m, float reach_m) {
+  auto ids = amber::identity(std::as_const(objects_state.objects));
+
+  auto &intents = step_state.intents;
+  auto &intent_endings = step_state.intent_endings;
+  auto &travel_access = step_state.travel_access;
+  auto &plots = perm_state.plots;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+  auto auth = amber::authority(std::as_const(objects_state.objects));
+  auto &mechanical_causes = step_state.mechanical_causes;
+
   std::vector<space::MoveRequest> moving;
   moving.reserve(intents.moving.size());
   for (const auto &[bits, intent] : intents.moving) {
@@ -196,8 +211,7 @@ space::StepResult advance_motion(space::Space &space, IdentityRead ids, Transfor
   std::erase_if(travel_access.bodies,
                 [&](const auto &row) { return !intents.moving.contains(row.first); });
   space::StepResult physics;
-  space::step(space, ids, poses, parent, physical_flags, physical_relations, now, 1.0f / hz, moving,
-              physics);
+  space::step(space, objects_state, physical_relations, now, 1.0f / hz, moving, physics);
   for (const auto &progress : physics.intents)
     if (progress.state == space::IntentState::Arrived ||
         progress.state == space::IntentState::Blocked ||
@@ -210,10 +224,15 @@ space::StepResult advance_motion(space::Space &space, IdentityRead ids, Transfor
     }
   return physics;
 }
-void publish_intent_endings(std::vector<IntentEnding> &intent_endings, const react::Terms &terms,
-                            TermId arrived, TermId blocked, TermId cancelled, IdentityRead ids,
-                            AuthorityRead auth, net::Sessions &sessions, WorkQueues &queues,
+void publish_intent_endings(amber::step::State &step_state, const react::Terms &terms,
+                            TermId arrived, TermId blocked, TermId cancelled,
+                            const amber::ObjectState &objects_state, net::Sessions &sessions,
                             record::Journal &journal, Step now, std::size_t event_queue_max) {
+  auto &intent_endings = step_state.intent_endings;
+  auto ids = amber::identity(std::as_const(objects_state.objects));
+  auto auth = amber::authority(std::as_const(objects_state.objects));
+  auto &queues = step_state.queues;
+
   for (const auto &ending : intent_endings) {
     const auto event = ending.reason == step::IntentEnd::Arrived   ? arrived
                        : ending.reason == step::IntentEnd::Blocked ? blocked

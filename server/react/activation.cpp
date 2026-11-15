@@ -4,11 +4,14 @@
 #include <unordered_set>
 
 namespace amber::react {
-bool update_rule(catalog::Scripts &scripts, RuleVersions &rules, Triggers &triggers,
-                 Subscriptions &subscriptions, step::WorkQueues &queues, Vm &vm,
-                 const ValueRead &values, const AllocationRows &allocations, ScriptId id,
+bool update_rule(catalog::Scripts &scripts, amber::react::State &react_state,
+                 step::WorkQueues &queues, Vm &vm, const ValueRead &values, ScriptId id,
                  RuleMode mode, Step now, double hz, const record::Origin &origin,
                  DeferredEffects &effects) {
+  auto &rules = react_state.rules;
+  auto &triggers = react_state.triggers;
+  auto &subscriptions = react_state.subscriptions;
+
   if (!id || id >= scripts.rows.size() || scripts.rows[id].id != id ||
       scripts.rows[id].declaration.kind != react::ScriptDeclaration::Kind::Rule)
     throw std::invalid_argument("registered world rule required");
@@ -75,7 +78,7 @@ bool update_rule(catalog::Scripts &scripts, RuleVersions &rules, Triggers &trigg
         react::remove_watches(subscriptions, consumer);
         continue;
       }
-      auto changes = react::sync_watches(subscriptions, values, allocations, consumer,
+      auto changes = react::sync_watches(react_state, values, consumer,
                                          scripts.rows.at(script).declaration, now, hz, origin,
                                          react::SyncMode::Change, std::span<const TermId>(allowed));
       for (auto &dirty : changes.dirty)

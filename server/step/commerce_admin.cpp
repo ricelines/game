@@ -32,11 +32,17 @@ perm::Holder actor(const step::NativeCall &call) {
   return perm::Holder::script(script.script, script.object);
 }
 perm::HolderControl installed_holder(perm::Holder selected, const perm::Players &players,
-                                     IdentityRead identity, AuthorityRead authority,
-                                     const catalog::Models &models, const catalog::Scripts &scripts,
-                                     const react::InstanceScripts &instances,
-                                     const react::RuleVersions &rules,
+                                     const amber::ObjectState &objects_state,
+                                     const amber::catalog::State &catalog_state,
+                                     const amber::react::State &react_state,
                                      const react::ValueRead &values, const step::NativeCall &call) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+  auto &instances = react_state.installations;
+  auto &rules = react_state.rules;
+
   if (selected.kind == perm::HolderKind::Player) {
     if (!selected.id || selected.id >= players.rows.size())
       throw std::invalid_argument("unknown current player holder");
@@ -233,16 +239,22 @@ GrantUpdates advance_grants(perm::Grants &grants, perm::Players &players, Step n
     publish(id, true);
   return updates;
 }
-step::NativeCompletion grant(perm::Grants &grants, perm::Players &players, IdentityRead identity,
-                             AuthorityRead authority, const perm::OwnerLimits &limits,
-                             const perm::Plots &plots, const perm::Groups &groups,
-                             const catalog::Models &models, const catalog::Scripts &scripts,
-                             const react::InstanceScripts &instances,
-                             const react::RuleVersions &rules, const react::ValueRead &values,
+step::NativeCompletion grant(amber::perm::State &perm_state,
+                             const amber::ObjectState &objects_state,
+                             const amber::catalog::State &catalog_state,
+                             const amber::react::State &react_state, const react::ValueRead &values,
                              bool issuer_is_architect, const step::NativeCall &call) {
+  auto &grants = perm_state.grants;
+  auto &players = perm_state.players;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &limits = perm_state.owner_limits;
+  auto &plots = perm_state.plots;
+  auto &groups = perm_state.groups;
+
   try {
-    const auto issuer = installed_holder(actor(call), players, identity, authority, models, scripts,
-                                         instances, rules, values, call);
+    const auto issuer = installed_holder(actor(call), players, objects_state, catalog_state,
+                                         react_state, values, call);
     if (!issuer.installed)
       return denied("installation", holder_json(issuer.holder),
                     "caller script is not currently installed",
@@ -252,8 +264,8 @@ step::NativeCompletion grant(perm::Grants &grants, perm::Players &players, Ident
         step::scope(call.arguments.at("scope"), identity, authority, limits, players, plots, groups,
                     issuer_is_architect && actor(call).kind == perm::HolderKind::Player);
     const auto recipient =
-        installed_holder(holder(call.arguments.at("holder"), players), players, identity, authority,
-                         models, scripts, instances, rules, values, call);
+        installed_holder(holder(call.arguments.at("holder"), players), players, objects_state,
+                         catalog_state, react_state, values, call);
     const auto duration = step::duration_steps(call.arguments.value("expires_s", 0.0), call.hz);
     if (duration > std::numeric_limits<Step>::max() - call.step)
       throw std::invalid_argument("grant expiry exceeds world step range");
@@ -280,10 +292,17 @@ step::NativeCompletion grant(perm::Grants &grants, perm::Players &players, Ident
     return bad_input(error.what());
   }
 }
-step::NativeCompletion revoke(perm::Grants &grants, perm::Players &players, IdentityRead identity,
-                              AuthorityRead authority, const perm::OwnerLimits &limits,
-                              const perm::Plots &plots, const perm::Groups &groups,
-                              bool issuer_is_architect, const step::NativeCall &call) {
+step::NativeCompletion revoke(amber::perm::State &perm_state,
+                              const amber::ObjectState &objects_state, bool issuer_is_architect,
+                              const step::NativeCall &call) {
+  auto &grants = perm_state.grants;
+  auto &players = perm_state.players;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &limits = perm_state.owner_limits;
+  auto &plots = perm_state.plots;
+  auto &groups = perm_state.groups;
+
   try {
     const auto issuer = actor(call);
     PlayerId who = 0;
@@ -371,11 +390,17 @@ step::NativeCompletion list_grants(const perm::Grants &grants, const perm::Playe
     return bad_input(error.what());
   }
 }
-step::NativeCompletion preset(std::vector<GroupId> &object_groups,
-                              std::vector<std::uint32_t> &presets, PermissionFlags flags,
-                              IdentityRead identity, AuthorityRead authority,
-                              const perm::OwnerLimits &limits, const perm::Players &players,
-                              const perm::Groups &groups, const step::NativeCall &call) {
+step::NativeCompletion preset(amber::ObjectState &objects_state,
+                              std::vector<std::uint32_t> &presets,
+                              const amber::perm::State &perm_state, const step::NativeCall &call) {
+  auto &object_groups = objects_state.objects.group;
+  auto flags = amber::permission_flags(objects_state.objects);
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &limits = perm_state.owner_limits;
+  auto &players = perm_state.players;
+  auto &groups = perm_state.groups;
+
   if (!std::holds_alternative<PlayerId>(call.request.caller))
     return denied("player_caller", "goods presets", "this action requires a current player caller",
                   "have the player perform this administrative action directly");
@@ -529,10 +554,12 @@ step::NativeCompletion plot_permissions(perm::Plots &plots, const perm::Players 
     return bad_input(error.what());
   }
 }
-void advance_permission_deadlines(perm::Grants &grants, perm::Players &players,
-                                  TravelAccess &travel_access, net::Sessions &sessions,
-                                  record::Journal &journal, Step now, double hz,
-                                  double reminder_seconds, std::size_t limit) {
+void advance_permission_deadlines(amber::perm::State &perm_state, TravelAccess &travel_access,
+                                  net::Sessions &sessions, record::Journal &journal, Step now,
+                                  double hz, double reminder_seconds, std::size_t limit) {
+  auto &grants = perm_state.grants;
+  auto &players = perm_state.players;
+
   auto grant_updates = advance_grants(
       grants, players, now, static_cast<Step>(std::llround(reminder_seconds * hz)), hz, limit);
   invalidate_travel(travel_access, grants, now);

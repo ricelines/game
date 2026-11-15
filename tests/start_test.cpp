@@ -34,8 +34,11 @@ int main(int argc, char **argv) {
     plan["registry"] = native_registry.data;
     const auto directory = std::filesystem::current_path() / ".cache/start-test";
     std::filesystem::remove_all(directory);
-    react::Terms terms;
-    react::Materials materials;
+    amber::react::State react_state;
+    catalog::State catalog_state;
+    perm::State perm_state;
+    react::Terms &terms = react_state.terms;
+    react::Materials &materials = react_state.materials;
     catalog::MechanicalBindings mechanical;
     const auto registry = load_registry(plan, directory / "registry", terms, materials, mechanical);
     std::ifstream metadata(std::filesystem::path(argv[2]) /
@@ -60,50 +63,48 @@ int main(int argc, char **argv) {
         fixture_approvals.push_back(
             {row.at("key"), "isolated importer test authority; not a gameplay approval"});
     react::Vm vm(vm_settings);
-    catalog::Scripts scripts;
+    catalog::Scripts &scripts = catalog_state.scripts;
     Symbols symbols;
     install_scripts(std::move(prepared), scripts, vm, symbols, fixture_approvals);
-    catalog::Assets assets;
+    catalog::Assets &assets = catalog_state.assets;
     import_assets(prepare_assets(plan, argv[2], pins, terms), assets);
     auto malformed = plan;
     malformed["models"][0]["canonical_params"] =
         malformed["models"][0]["canonical_params"].get<std::string>() + " ";
     rejects([&] { (void)prepare_assets(malformed, argv[2], pins, terms); },
             "asset canonical byte mismatch must fail");
-    catalog::Models models;
-    catalog::ModelTexts model_text;
-    react::ModelSettings model_settings;
+    catalog::Models &models = catalog_state.models;
+    catalog::ModelTexts &model_text = catalog_state.model_text;
+    react::ModelSettings &model_settings = react_state.model_settings;
     install_models(plan, assets, scripts, terms, models, model_text, model_settings, symbols);
-    catalog::ParameterBlocks parameters;
-    Objects objects;
-    lifecycle::Parts parts;
-    Relation declared_parts;
-    const auto created = install_objects(plan, symbols, models, parameters, assets, terms, objects,
-                                         parts, declared_parts, 0);
+
+    amber::ObjectState objects_state;
+    Objects &objects = objects_state.objects;
+
+    const auto created = install_objects(plan, symbols, catalog_state, terms, objects_state, 0);
     std::size_t expected_children = 0;
     for (const auto &row : plan.at("objects"))
       expected_children +=
           models.rows[symbols.models.at(row.at("model").get<std::string>())].parts.size();
     require(created.size() == plan.at("objects").size() + expected_children,
             "ordinary declared child objects must actually exist");
-    react::Properties properties;
-    react::Processes processes;
-    react::InstanceSettings instance_settings;
-    react::WorldSettings world_settings;
-    react::PlotSettings plot_settings;
-    install_properties(plan, symbols, terms, properties, processes, instance_settings,
-                       world_settings, plot_settings, 0, 20);
-    react::AuthoredRelations relations;
+    react::Properties &properties = react_state.properties;
+    react::Processes &processes = react_state.processes;
+    react::InstanceSettings &instance_settings = react_state.instance_settings;
+    react::WorldSettings &world_settings = react_state.world_settings;
+    react::PlotSettings &plot_settings = react_state.plot_settings;
+    install_properties(plan, symbols, react_state, 0, 20);
+    react::AuthoredRelations &relations = react_state.authored_relations;
     react::DeferredEffects initial;
     install_relations(plan, symbols, terms, relations, initial);
-    react::RelationsRead relation_read;
+    react::RelationsRead &relation_read = react_state.relations;
     for (auto &[id, relation] : relations)
       relation_read.columns[id] = &relation;
-    react::ScriptStates states;
+    react::ScriptStates &states = react_state.states;
     install_script_state(plan, symbols, states);
-    perm::Plots plots;
-    perm::Groups groups;
-    perm::Players players;
+    perm::Plots &plots = perm_state.plots;
+    perm::Groups &groups = perm_state.groups;
+    perm::Players &players = perm_state.players;
     net::Profiles profiles;
     auto profile_plan = plan;
     for (auto &profile : profile_plan["profiles"])
@@ -113,7 +114,7 @@ int main(int argc, char **argv) {
     require(::stat((directory / "keys/2.key").c_str(), &info) == 0 && (info.st_mode & 0777) == 0600,
             "generated credentials must remain private");
     install_land(plan, plots, groups, players);
-    perm::Ledger ledger;
+    perm::Ledger &ledger = perm_state.ledger;
     auto money_plan = plan;
     groups.rows.push_back({1, 1, "Funded institution"});
     money_plan["balances"].push_back({{"holder", "public.treasury"}, {"amount", 100}});
@@ -126,13 +127,13 @@ int main(int argc, char **argv) {
                 perm::balance(ledger, perm::Account::group(1)) == 25 &&
                 perm::balance(ledger, perm::Account::player(1)) == 0,
             "startup aliased an object or group account to its controller's player wallet");
-    react::RuleVersions rules;
+    react::RuleVersions &rules = react_state.rules;
     for (const auto &script : scripts.rows)
       if (script.id && script.declaration.kind == react::ScriptDeclaration::Kind::Rule)
         react::add_rule(rules, scripts, terms, script.id);
-    react::AssetMeasurements measurements;
-    react::SharedColumns shared;
-    react::RuntimeMeasurements runtime;
+    react::AssetMeasurements &measurements = catalog_state.baked_measurements;
+    react::SharedColumns &shared = react_state.shared;
+    react::RuntimeMeasurements &runtime = react_state.runtime_measurements;
     const react::ValueRead values{terms,
                                   identity(objects),
                                   objects.plot,
@@ -149,11 +150,10 @@ int main(int argc, char **argv) {
                                   relation_read,
                                   runtime,
                                   0};
-    const react::InstanceScripts installations;
-    const perm::OwnerLimits limits;
-    perm::Grants grants;
-    install_grants(plan, symbols, values, authority(std::as_const(objects)), limits, models,
-                   scripts, installations, rules, plots, profiles, grants, players, 0, 20, groups);
+
+    perm::Grants &grants = perm_state.grants;
+    install_grants(plan, symbols, values, authority(std::as_const(objects)), perm_state,
+                   catalog_state, react_state, profiles, 0, 20);
     require(grants.rows.size() == plan.at("grants").size() + 1,
             "every initial grant passed real permission creation");
     auto missing_body_choices = plan;
@@ -162,18 +162,17 @@ int main(int argc, char **argv) {
         profile.erase("body_installs");
         break;
       }
-    auto rejected_players = players;
-    perm::Grants missing_grants;
+    perm::State missing_permissions;
+    missing_permissions.players = players;
+    missing_permissions.plots = plots;
+    missing_permissions.groups = groups;
     rejects(
         [&] {
-          provision_body_grants(missing_body_choices, symbols, models, scripts, identity(objects),
-                                authority(std::as_const(objects)), limits, plots, groups, profiles,
-                                rejected_players, missing_grants, 0, 20);
+          provision_body_grants(missing_body_choices, symbols, catalog_state, objects_state,
+                                missing_permissions, profiles, 0, 20);
         },
         "a starting body with unfilled declared slots silently started");
-    provision_body_grants(plan, symbols, models, scripts, identity(objects),
-                          authority(std::as_const(objects)), limits, plots, groups, profiles,
-                          players, grants, 0, 20);
+    provision_body_grants(plan, symbols, catalog_state, objects_state, perm_state, profiles, 0, 20);
     for (const auto &profile : plan["profiles"])
       if (profile.contains("body")) {
         const auto player = profile.at("id").get<PlayerId>();
@@ -193,12 +192,14 @@ int main(int argc, char **argv) {
     wrong_owner["grants"] = Json::array({plan.at("grants")[0]});
     wrong_owner["grants"][0]["issuer"] = 3;
     wrong_owner["grants"][0]["controller"] = 3;
-    perm::Grants rejected_grants;
+    perm::State rejected_permissions;
+    rejected_permissions.players = players;
+    rejected_permissions.plots = plots;
+    rejected_permissions.groups = groups;
     rejects(
         [&] {
-          install_grants(wrong_owner, symbols, values, authority(std::as_const(objects)), limits,
-                         models, scripts, installations, rules, plots, profiles, rejected_grants,
-                         players, 0, 20, groups);
+          install_grants(wrong_owner, symbols, values, authority(std::as_const(objects)),
+                         rejected_permissions, catalog_state, react_state, profiles, 0, 20);
         },
         "plan cannot forge current goods control");
     auto wrong_installation = plan;
@@ -207,8 +208,7 @@ int main(int argc, char **argv) {
     rejects(
         [&] {
           install_grants(wrong_installation, symbols, values, authority(std::as_const(objects)),
-                         limits, models, scripts, installations, rules, plots, profiles,
-                         rejected_grants, players, 0, 20, groups);
+                         rejected_permissions, catalog_state, react_state, profiles, 0, 20);
         },
         "plan cannot claim an uninstalled script is installed");
     step::WorkQueues queues;

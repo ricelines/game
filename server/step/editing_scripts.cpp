@@ -47,13 +47,20 @@ void withdraw_removed(react::SharedColumns &shared, react::GivesTo &gives,
                               0, effects);
   }
 }
-bool synchronize(react::Subscriptions &subscriptions, react::ScriptStates &states,
-                 react::SharedColumns &shared, react::GivesTo &gives,
-                 const react::ValueRead &values, const react::AllocationRows &allocations,
-                 const catalog::Scripts &scripts, const react::Triggers &triggers,
-                 perm::Grants &grants, perm::Players &players, TermId start_event, Handle object,
-                 std::span<const ScriptId> before, std::span<const ScriptId> after, Step now,
-                 double hz, const record::Origin &origin, react::DeferredEffects &effects) {
+bool synchronize(amber::react::State &react_state, const react::ValueRead &values,
+                 const catalog::Scripts &scripts, amber::perm::State &perm_state,
+                 TermId start_event, Handle object, std::span<const ScriptId> before,
+                 std::span<const ScriptId> after, Step now, double hz, const record::Origin &origin,
+                 react::DeferredEffects &effects) {
+  auto &subscriptions = react_state.subscriptions;
+  auto &states = react_state.states;
+  auto &shared = react_state.shared;
+  auto &gives = react_state.gives_to;
+
+  auto &triggers = react_state.triggers;
+  auto &grants = perm_state.grants;
+  auto &players = perm_state.players;
+
   bool permissions_changed = false;
   auto remaining = std::vector<ScriptId>(after.begin(), after.end());
   if (std::any_of(before.begin(), before.end(), [&](ScriptId old) {
@@ -76,8 +83,8 @@ bool synchronize(react::Subscriptions &subscriptions, react::ScriptStates &state
     if (std::find(before.begin(), before.end(), added) == before.end()) {
       const auto &declaration = scripts.rows[added].declaration;
       detail::watches(effects,
-                      react::sync_watches(subscriptions, values, allocations, {object, added},
-                                          declaration, now, hz, origin, react::SyncMode::Change));
+                      react::sync_watches(react_state, values, {object, added}, declaration, now,
+                                          hz, origin, react::SyncMode::Change));
       if (start_event && declaration.active &&
           std::find(declaration.handlers.begin(), declaration.handlers.end(), start_event) !=
               declaration.handlers.end())
@@ -88,11 +95,17 @@ bool synchronize(react::Subscriptions &subscriptions, react::ScriptStates &state
 } // namespace
 namespace detail {
 std::vector<SlotRequest> slot_choices(const Json &rows, const catalog::Script &source,
-                                      IdentityRead identity, AuthorityRead authority,
-                                      const perm::OwnerLimits &limits, const perm::Players &players,
-                                      const perm::Plots &plots, const perm::Groups &groups,
+                                      const amber::ObjectState &objects_state,
+                                      const amber::perm::State &perm_state,
                                       std::span<const std::string> roles,
                                       const step::NativeCall &call) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &limits = perm_state.owner_limits;
+  auto &players = perm_state.players;
+  auto &plots = perm_state.plots;
+  auto &groups = perm_state.groups;
+
   std::vector<SlotRequest> result;
   std::set<std::string> chosen;
   for (const auto &row : rows) {
@@ -205,14 +218,21 @@ Json preview(const catalog::Script &source, Handle object, IdentityRead identity
 }
 } // namespace
 step::NativeCompletion
-install_script(const step::NativeCall &call, react::InstanceScripts &instances,
-               react::Triggers &triggers, react::Subscriptions &subscriptions,
-               react::ScriptStates &states, react::SharedColumns &shared, react::GivesTo &gives,
-               const react::AllocationRows &allocations, const react::ValueRead &values,
-               const catalog::Models &models, const catalog::Scripts &scripts,
-               AuthorityRead authority, const perm::OwnerLimits &limits, perm::Players &players,
-               perm::Grants &grants, const perm::Plots &plots, const perm::Groups &groups,
+install_script(const step::NativeCall &call, amber::react::State &react_state,
+               const react::ValueRead &values, const amber::catalog::State &catalog_state,
+               const amber::ObjectState &objects_state, amber::perm::State &perm_state,
                std::span<const std::string> roles, TermId start_event) {
+  auto &instances = react_state.installations;
+  auto &triggers = react_state.triggers;
+
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+  auto &plots = perm_state.plots;
+
   try {
     const auto object = call.request.target;
     const auto &source = script(scripts, call.arguments.at("script"));
@@ -220,9 +240,8 @@ install_script(const step::NativeCall &call, react::InstanceScripts &instances,
       return detail::result(false,
                             {{"slots", preview(source, object, values.identity, authority, call)},
                              {"requires_commit", true}});
-    const auto requested =
-        detail::slot_choices(call.arguments.at("choices"), source, values.identity, authority,
-                             limits, players, plots, groups, roles, call);
+    const auto requested = detail::slot_choices(call.arguments.at("choices"), source, objects_state,
+                                                perm_state, roles, call);
     const auto plot = authority.plot[object.slot()];
     if (plot) {
       if (plot >= plots.rows.size())
@@ -245,9 +264,8 @@ install_script(const step::NativeCall &call, react::InstanceScripts &instances,
       react::project_instance(triggers, instances, scripts, values.terms, object);
       const auto after = react::installed_scripts(models, instances, values.identity, object);
       out.permissions_changed |=
-          synchronize(subscriptions, states, shared, gives, values, allocations, scripts, triggers,
-                      grants, players, start_event, object, before, after, call.step, call.hz,
-                      call.origin, out.effects);
+          synchronize(react_state, values, scripts, perm_state, start_event, object, before, after,
+                      call.step, call.hz, call.origin, out.effects);
       out.changed = true;
     }
     auto granted = detail::fill_slots(source, requested, authority, players, grants, call);
@@ -263,13 +281,17 @@ install_script(const step::NativeCall &call, react::InstanceScripts &instances,
     return detail::failed(error);
   }
 }
-step::NativeCompletion
-uninstall_script(const step::NativeCall &call, react::InstanceScripts &instances,
-                 react::Triggers &triggers, react::Subscriptions &subscriptions,
-                 react::ScriptStates &states, react::SharedColumns &shared, react::GivesTo &gives,
-                 const react::AllocationRows &allocations, const react::ValueRead &values,
-                 const catalog::Models &models, const catalog::Scripts &scripts,
-                 perm::Players &players, perm::Grants &grants, TermId start_event) {
+step::NativeCompletion uninstall_script(const step::NativeCall &call,
+                                        amber::react::State &react_state,
+                                        const react::ValueRead &values,
+                                        const amber::catalog::State &catalog_state,
+                                        amber::perm::State &perm_state, TermId start_event) {
+  auto &instances = react_state.installations;
+  auto &triggers = react_state.triggers;
+
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+
   try {
     const auto object = call.request.target;
     const auto &source = script(scripts, call.arguments.at("script"));
@@ -283,22 +305,25 @@ uninstall_script(const step::NativeCall &call, react::InstanceScripts &instances
     react::project_instance(triggers, instances, scripts, values.terms, object);
     const auto after = react::installed_scripts(models, instances, values.identity, object);
     auto out = detail::result(true);
-    out.permissions_changed |= synchronize(
-        subscriptions, states, shared, gives, values, allocations, scripts, triggers, grants,
-        players, start_event, object, before, after, call.step, call.hz, call.origin, out.effects);
+    out.permissions_changed |=
+        synchronize(react_state, values, scripts, perm_state, start_event, object, before, after,
+                    call.step, call.hz, call.origin, out.effects);
     out.changed_objects.push_back(object);
     return out;
   } catch (const std::exception &error) {
     return detail::failed(error);
   }
 }
-step::NativeCompletion model_script(const step::NativeCall &call, react::InstanceScripts &instances,
-                                    react::Triggers &triggers, react::Subscriptions &subscriptions,
-                                    react::ScriptStates &states, react::SharedColumns &shared,
-                                    react::GivesTo &gives, const react::AllocationRows &allocations,
-                                    const react::ValueRead &values, catalog::Models &models,
-                                    const catalog::Scripts &scripts, perm::Players &players,
-                                    perm::Grants &grants, TermId start_event) {
+step::NativeCompletion model_script(const step::NativeCall &call, amber::react::State &react_state,
+                                    const react::ValueRead &values,
+                                    amber::catalog::State &catalog_state,
+                                    amber::perm::State &perm_state, TermId start_event) {
+  auto &instances = react_state.installations;
+  auto &triggers = react_state.triggers;
+
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+
   try {
     const auto model = detail::model(models, call);
     const auto replacement = call.arguments.at("script").is_null()
@@ -318,9 +343,8 @@ step::NativeCompletion model_script(const step::NativeCall &call, react::Instanc
       const auto after =
           react::installed_scripts(models, instances, values.identity, objects[index]);
       out.permissions_changed |=
-          synchronize(subscriptions, states, shared, gives, values, allocations, scripts, triggers,
-                      grants, players, start_event, objects[index], before[index], after, call.step,
-                      call.hz, call.origin, out.effects);
+          synchronize(react_state, values, scripts, perm_state, start_event, objects[index],
+                      before[index], after, call.step, call.hz, call.origin, out.effects);
     }
     out.changed_objects = objects;
     out.changed_models.push_back(model);
@@ -329,14 +353,16 @@ step::NativeCompletion model_script(const step::NativeCall &call, react::Instanc
     return detail::failed(error);
   }
 }
-void rebind_scripts(const catalog::Models &models, const catalog::Scripts &scripts,
-                    const react::InstanceScripts &instances, const react::RuleVersions &rules,
-                    const react::ValueRead &values, react::Triggers &triggers,
-                    react::Subscriptions &subscriptions, const react::AllocationRows &allocations,
-                    react::ScriptStates &states, react::SharedColumns &shared,
-                    react::GivesTo &gives, perm::Grants &grants, perm::Players &players,
+void rebind_scripts(const amber::catalog::State &catalog_state, amber::react::State &react_state,
+                    const react::ValueRead &values, amber::perm::State &perm_state,
                     TermId start_event, Step now, double hz, const record::Origin &origin,
                     NativeCompletion &out) {
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+  auto &instances = react_state.installations;
+
+  auto &triggers = react_state.triggers;
+
   const auto identity = values.identity;
   const auto unique = [](auto &rows) {
     std::sort(rows.begin(), rows.end());
@@ -376,15 +402,15 @@ void rebind_scripts(const catalog::Models &models, const catalog::Scripts &scrip
           if (std::find(before.begin(), before.end(), script) == before.end())
             before.push_back(script);
       const auto after = react::installed_scripts(models, instances, identity, binding.object);
-      out.permissions_changed |= synchronize(
-          subscriptions, states, shared, gives, values, allocations, scripts, triggers, grants,
-          players, start_event, binding.object, before, after, now, hz, origin, out.effects);
+      out.permissions_changed |=
+          synchronize(react_state, values, scripts, perm_state, start_event, binding.object, before,
+                      after, now, hz, origin, out.effects);
     }
-    react::rebind_reactions(models, scripts, instances, rules, values, triggers, subscriptions,
-                            allocations, rebound, now, hz, origin, out.effects);
+    react::rebind_reactions(catalog_state, react_state, values, rebound, now, hz, origin,
+                            out.effects);
   }
   if (!out.created_objects.empty())
-    react::install_reactions(models, scripts, instances, rules, values, triggers, subscriptions,
-                             allocations, out.created_objects, now, hz, origin, out.effects);
+    react::install_reactions(catalog_state, react_state, values, out.created_objects, now, hz,
+                             origin, out.effects);
 }
 } // namespace amber::step::editing

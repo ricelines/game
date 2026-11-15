@@ -119,11 +119,16 @@ space::Pose relative_pose(TransformRead transforms, Handle subject, Handle paren
   return {rotate(inverse, transforms.position[subject.slot()] - transforms.position[parent.slot()]),
           compose(inverse, transforms.rotation[subject.slot()])};
 }
-record::Event birth_record(const step::NativeCall &call, Handle object, IdentityRead identity,
+record::Event birth_record(const step::NativeCall &call, Handle object,
+                           const amber::ObjectState &objects_state,
                            const std::vector<PlayerId> &owners, const std::vector<PlotId> &plots,
-                           const std::vector<std::uint32_t> &params, PlayerId maker,
-                           AttributionRead attribution, const catalog::Models &models,
-                           const catalog::Scripts &scripts) {
+                           PlayerId maker, const amber::catalog::State &catalog_state) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto &params = objects_state.objects.params;
+  auto attribution = amber::attribution(std::as_const(objects_state.objects));
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+
   auto event = structural_record(call, record::Kind::Create, "instance", {object});
   const auto slot = object.slot();
   event.detail = {{"model", "m:" + std::to_string(identity.model[slot])},
@@ -138,35 +143,47 @@ record::Event birth_record(const step::NativeCall &call, Handle object, Identity
 }
 } // namespace structural_detail
 using namespace structural_detail;
-void install_declared_attachments(space::Space &space, IdentityRead identity,
-                                  TransformWrite transforms, ParentWrite parents, SpaceFlags flags,
-                                  const Relation &declared_parts,
-                                  space::PhysicalRelations &physical,
-                                  std::vector<space::RelationChange> &changes,
+void install_declared_attachments(space::Space &space, amber::ObjectState &objects_state,
+                                  amber::space::State &space_state,
                                   std::span<const Handle> objects) {
+  auto transforms = amber::transforms(objects_state.objects);
+  auto parents = amber::parents(objects_state.objects);
+
+  auto &declared_parts = objects_state.declared_parts;
+
   for (auto h : objects) {
     const auto parent = parents.parent[h.slot()];
     const auto *declared = declared_parts.in.get(h.slot());
     if (!parent || !declared || std::ranges::find(*declared, parent) == declared->end())
       continue;
-    const auto result = space::attach(
-        space, identity, transforms, parents, flags, physical.contains, physical.supports,
-        physical.attached_to, {h, parent, relative_pose(transforms, h, parent), false}, changes);
+    const auto result = space::attach(space, objects_state, space_state,
+                                      {h, parent, relative_pose(transforms, h, parent), false});
     if (result.status != space::Status::Ok)
       throw std::logic_error("declared attachment installation failed: " +
                              std::string(space::status_text(result.status)));
   }
 }
-NativeCompletion
-create_instance(Objects &objects, lifecycle::Parts &parts, Relation &declared_parts,
-                const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-                const catalog::Assets &assets, const GeometryAssets &geometry,
-                const react::ValueRead &values, space::Space &space, TransformWrite transforms,
-                ParentWrite parents, SpaceFlags flags, space::PhysicalRelations &physical,
-                std::vector<space::RelationChange> &changes, AuthorityRead authority,
-                const perm::Players &players, const perm::Grants &grants, const perm::Plots &plots,
-                PlotWrite membership, PhysicsRoles roles, PhysicsDefaults defaults,
-                const NativeCall &call) {
+NativeCompletion create_instance(amber::ObjectState &objects_state,
+                                 const amber::catalog::State &catalog_state,
+                                 const GeometryAssets &geometry, const react::ValueRead &values,
+                                 space::Space &space, amber::space::State &space_state,
+                                 const amber::perm::State &perm_state, PhysicsRoles roles,
+                                 PhysicsDefaults defaults, const NativeCall &call) {
+  auto &objects = objects_state.objects;
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+  auto transforms = amber::transforms(objects_state.objects);
+  auto flags = amber::space_flags(objects_state.objects);
+
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+  auto &plots = perm_state.plots;
+  auto membership = amber::plot_membership(objects_state.objects);
+
   const auto identity = values.identity;
   step::NativeCompletion out;
   const auto input = native_input(call);
@@ -243,8 +260,7 @@ create_instance(Objects &objects, lifecycle::Parts &parts, Relation &declared_pa
   auto created = lifecycle::instantiate(objects, parts, declared_parts, assembly, init);
   for (std::size_t i = 0; i < created.objects.size(); ++i)
     install_physics(space, identity, transforms, flags, created.objects[i], definitions[i]);
-  install_declared_attachments(space, identity, transforms, parents, flags, declared_parts,
-                               physical, changes, created.objects);
+  install_declared_attachments(space, objects_state, space_state, created.objects);
   perm::update_plots(identity, transforms, membership, plots, created.objects, true);
   out.created_objects = created.objects;
   out.visible_objects = created.objects;

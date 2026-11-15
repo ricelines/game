@@ -8,15 +8,15 @@ using namespace amber::react;
 using test_runtime::require;
 namespace {
 struct Runner {
+
   test_runtime::Fixture f{1000};
   step::WorkQueues queues;
   void activate(ScriptId id, RuleMode mode, DeferredEffects &effects) {
-    update_rule(f.scripts, f.rules, f.triggers, f.subscriptions, queues, f.vm, f.values(),
-                f.allocations, id, mode, 0, 20, {}, effects);
+    update_rule(f.scripts, f.react_state, queues, f.vm, f.values(), id, mode, 0, 20, {}, effects);
   }
   void changed(DeferredEffects &effects) {
-    auto changes = sync_rule_watches(f.subscriptions, f.values(), f.allocations, f.scripts, f.rules,
-                                     effects.ordered, 0, 20, {});
+    auto changes =
+        sync_rule_watches(f.react_state, f.values(), f.scripts, effects.ordered, 0, 20, {});
     std::vector<FactKey> facts;
     auto add = [&](FactKey fact) {
       if (std::find(facts.begin(), facts.end(), fact) == facts.end())
@@ -94,7 +94,7 @@ void catchup_is_filtered_and_replacement_preserves_state() {
        source_consumers(f.values(), {item.receiver, item.trigger}, declaration.watches[0])) {
     const auto allowed = rule_watch_terms(f.rules, f.values(), object, id, 0, 20);
     if (!allowed.empty())
-      sync_watches(f.subscriptions, f.values(), f.allocations, {object, id}, declaration, 0, 20, {},
+      sync_watches(f.react_state, f.values(), {object, id}, declaration, 0, 20, {},
                    SyncMode::Change, std::span<const TermId>(allowed));
   }
   auto checked = check_changed(f.subscriptions, f.values(), f.allocations,
@@ -146,9 +146,9 @@ void partial_replacement_and_timer_retirement() {
   effects = {};
   r.activate(threshold, RuleMode::Enable, effects);
   set_state(f.properties, f.processes, f.terms.rows[1], f.b, Value(0.0), 0, 20, effects);
-  set_rate(f.properties, f.processes, f.terms.rows[1], f.b, 1, 0, 10, 0, 20, effects);
-  auto changes = sync_rule_watches(f.subscriptions, f.values(), f.allocations, f.scripts, f.rules,
-                                   effects.ordered, 0, 20, {});
+  set_rate(f.react_state, f.terms.rows[1], f.b, 1, 0, 10, 0, 20, effects);
+  auto changes =
+      sync_rule_watches(f.react_state, f.values(), f.scripts, effects.ordered, 0, 20, {});
   require(!changes.timers.empty(), "current process arms its authored crossing");
   const auto token = *changes.timers.front().threshold;
   effects = {};

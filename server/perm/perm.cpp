@@ -631,9 +631,13 @@ std::vector<GrantId> transfer_goods(AuthorityWrite authority, OwnerLimits &limit
 }
 } // namespace
 
-OfferResult offer(Offers &offers, PermissionFlags flags, Holder seller, const Target &goods,
-                  const Players &players, const Grants &grants, std::int64_t price, PlayerId buyer,
-                  Step expiry, bool placed, Step now, std::span<const Target> parts) {
+OfferResult offer(amber::perm::State &perm_state, PermissionFlags flags, Holder seller,
+                  const Target &goods, std::int64_t price, PlayerId buyer, Step expiry, bool placed,
+                  Step now, std::span<const Target> parts) {
+  auto &offers = perm_state.offers;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+
   const auto permission = check(seller, Verb::Transfer, goods, players, grants, now);
   if (!permission)
     return {permission.reason, 0, {}};
@@ -662,9 +666,12 @@ OfferResult offer(Offers &offers, PermissionFlags flags, Holder seller, const Ta
   return {Reason::Allowed, id, {{goods.object, {}, true}}};
 }
 
-OfferResult cancel_offer(Offers &offers, PermissionFlags flags, Holder actor, const Target &goods,
-                         const Players &players, const Grants &grants, OfferId id, Step now,
-                         std::span<const Target> parts) {
+OfferResult cancel_offer(amber::perm::State &perm_state, PermissionFlags flags, Holder actor,
+                         const Target &goods, OfferId id, Step now, std::span<const Target> parts) {
+  auto &offers = perm_state.offers;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+
   if (id == 0 || id >= offers.rows.size() || !offers.rows[id].live || offers.rows[id].trade)
     return {Reason::OfferGone, 0, {}};
   auto &row = offers.rows[id];
@@ -709,10 +716,17 @@ std::vector<OfferId> advance_offers(Offers &offers, IdentityRead identity, Permi
   return expired;
 }
 
-SwapResult accept(Offers &offers, Ledger &ledger, Grants &grants, Players &players,
-                  AuthorityWrite authority, PermissionFlags flags, OwnerLimits &limits,
+SwapResult accept(amber::perm::State &perm_state, amber::ObjectState &objects_state,
                   const Buyer &buyer, const Target &goods, OfferId id, std::size_t mailbox_max,
                   Step now, std::span<const Target> parts) {
+  auto &offers = perm_state.offers;
+  auto &ledger = perm_state.ledger;
+  auto &grants = perm_state.grants;
+  auto &players = perm_state.players;
+  auto authority = amber::authority(objects_state.objects);
+  auto flags = amber::permission_flags(objects_state.objects);
+  auto &limits = perm_state.owner_limits;
+
   if (id == 0 || id >= offers.rows.size() || !offers.rows[id].live || offers.rows[id].trade)
     return {Reason::OfferGone, {}, {}};
   auto &row = offers.rows[id];
@@ -754,10 +768,15 @@ SwapResult accept(Offers &offers, Ledger &ledger, Grants &grants, Players &playe
           std::move(revoked)};
 }
 
-SwapResult give(Players &players, Grants &grants, AuthorityWrite authority, PermissionFlags flags,
-                OwnerLimits &limits, Holder sender, const Target &goods, PlayerId recipient,
-                Handle body, bool present, std::size_t mailbox_max, Step now,
-                std::span<const Target> parts) {
+SwapResult give(amber::perm::State &perm_state, amber::ObjectState &objects_state, Holder sender,
+                const Target &goods, PlayerId recipient, Handle body, bool present,
+                std::size_t mailbox_max, Step now, std::span<const Target> parts) {
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+  auto authority = amber::authority(objects_state.objects);
+  auto flags = amber::permission_flags(objects_state.objects);
+  auto &limits = perm_state.owner_limits;
+
   const auto permission = check(sender, Verb::Transfer, goods, players, grants, now);
   if (!permission)
     return {permission.reason, {}, {}};
@@ -779,9 +798,12 @@ SwapResult give(Players &players, Grants &grants, AuthorityWrite authority, Perm
   return {Reason::Allowed, {{goods.object, present ? body : Handle{}, false}}, std::move(revoked)};
 }
 
-SwapResult store_goods(Players &players, const Grants &grants, Holder actor, const Target &goods,
+SwapResult store_goods(amber::perm::State &perm_state, Holder actor, const Target &goods,
                        std::span<const Target> parts, PlayerId recipient, Handle body, bool present,
                        std::size_t mailbox_max, Step now) {
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+
   if (goods.flags & Body)
     return {Reason::NotGoods, {}, {}};
   if (goods.flags & Escrow)
@@ -830,10 +852,14 @@ TradeResult open_trade(Trades &trades, const Players &players, PlayerId first, P
   return {Reason::Allowed, id, false, {}, {}};
 }
 
-TradeResult change_trade(Trades &trades, Offers &offers, PermissionFlags flags,
-                         const Players &players, const Grants &grants, TradeId id, PlayerId actor,
-                         const Target *goods, std::int64_t money, bool in_world, Step now,
-                         std::span<const Target> parts) {
+TradeResult change_trade(amber::perm::State &perm_state, PermissionFlags flags, TradeId id,
+                         PlayerId actor, const Target *goods, std::int64_t money, bool in_world,
+                         Step now, std::span<const Target> parts) {
+  auto &trades = perm_state.trades;
+  auto &offers = perm_state.offers;
+  auto &players = perm_state.players;
+  auto &grants = perm_state.grants;
+
   if (!id || id >= trades.rows.size() || !trades.rows[id].live)
     return {Reason::OfferGone, id, false, {}, {}};
   auto &trade = trades.rows[id];
@@ -911,11 +937,19 @@ std::vector<Handle> invalidate_goods_offers(Offers &offers, Trades &trades, Iden
   return changed;
 }
 
-TradeResult confirm_trade(Trades &trades, Offers &offers, Ledger &ledger, Grants &grants,
-                          Players &players, AuthorityWrite authority, PermissionFlags flags,
-                          OwnerLimits &limits, TradeId id, PlayerId actor,
-                          const std::array<Target, 2> &goods, const std::array<Handle, 2> &bodies,
-                          Step now, const std::array<std::span<const Target>, 2> &parts) {
+TradeResult confirm_trade(amber::perm::State &perm_state, amber::ObjectState &objects_state,
+                          TradeId id, PlayerId actor, const std::array<Target, 2> &goods,
+                          const std::array<Handle, 2> &bodies, Step now,
+                          const std::array<std::span<const Target>, 2> &parts) {
+  auto &trades = perm_state.trades;
+  auto &offers = perm_state.offers;
+  auto &ledger = perm_state.ledger;
+  auto &grants = perm_state.grants;
+  auto &players = perm_state.players;
+  auto authority = amber::authority(objects_state.objects);
+  auto flags = amber::permission_flags(objects_state.objects);
+  auto &limits = perm_state.owner_limits;
+
   if (!id || id >= trades.rows.size() || !trades.rows[id].live)
     return {Reason::OfferGone, id, false, {}, {}};
   auto &trade = trades.rows[id];

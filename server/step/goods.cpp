@@ -8,12 +8,18 @@ namespace amber::step {
 std::string validate_hold_goods(const nlohmann::json &input) {
   return input.is_object() && input.empty() ? "" : "hold_goods takes no inputs";
 }
-step::NativeCompletion hold_goods(perm::Players &players, const perm::Grants &grants,
-                                  const perm::OwnerLimits &limits, IdentityRead identity,
-                                  AuthorityRead authority, ParentRead parents, SpaceFlags flags,
-                                  const Relation &declared_parts, const DeliveryTargets &delivery,
-                                  const space::Space &space, std::size_t mailbox_max,
-                                  const step::NativeCall &call) {
+step::NativeCompletion hold_goods(amber::perm::State &perm_state, amber::ObjectState &objects_state,
+                                  const DeliveryTargets &delivery, const space::Space &space,
+                                  std::size_t mailbox_max, const step::NativeCall &call) {
+  auto &players = perm_state.players;
+
+  auto &limits = perm_state.owner_limits;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto parents = amber::parents(std::as_const(objects_state.objects));
+  auto flags = amber::space_flags(objects_state.objects);
+  auto &declared_parts = objects_state.declared_parts;
+
   const auto h = call.request.target;
   const auto recipient = authority.owner[h.slot()];
   const auto deny = [&](std::string_view reason) {
@@ -64,8 +70,8 @@ step::NativeCompletion hold_goods(perm::Players &players, const perm::Grants &gr
       return deny(space::status_text(ready.status));
   }
   const auto stored_goods =
-      perm::store_goods(players, grants, holder, perm::target(identity, authority, limits, h),
-                        parts, recipient, custodian, present, mailbox_max, call.step);
+      perm::store_goods(perm_state, holder, perm::target(identity, authority, limits, h), parts,
+                        recipient, custodian, present, mailbox_max, call.step);
   if (!stored_goods)
     return deny(perm::reason_text(stored_goods.reason));
   step::NativeCompletion out;

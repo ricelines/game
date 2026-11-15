@@ -73,8 +73,9 @@ std::vector<FactKey> priority_inputs(const ValueRead &values, SettingKey key) {
   }
   return pairs;
 }
-bool reconcile_allocation(const ValueRead &values, AllocationRows &allocations, MeterRows &meters,
-                          FactKey pair, Step now, double hz) {
+bool reconcile_allocation(const ValueRead &values, amber::react::State &react_state, FactKey pair,
+                          Step now, double hz) {
+
   if (!values.identity.valid(pair.subject))
     return false;
   const auto &term = values.terms.rows.at(pair.term);
@@ -93,7 +94,7 @@ bool reconcile_allocation(const ValueRead &values, AllocationRows &allocations, 
         priority.values.emplace(part.from.bits, value.value.numeric());
     }
   const auto changed = allocate(row(term.paired), demand, term.combine, priority, pair.subject,
-                                term.paired, term.id, allocations, meters, now, hz);
+                                term.paired, term.id, react_state, now, hz);
   return std::any_of(changed.begin(), changed.end(), [](const auto &key) { return !key.supplier; });
 }
 } // namespace amber::react
@@ -104,15 +105,17 @@ using Pairs = std::unordered_set<FactKey, FactKeyHash>;
 void add(Pairs &pairs, std::vector<FactKey> inputs) {
   pairs.insert(inputs.begin(), inputs.end());
 }
-void reconcile(const ValueRead &values, AllocationRows &allocations, MeterRows &meters,
-               const Pairs &pairs, react::DeferredEffects &effects, Step now, double hz) {
+void reconcile(const ValueRead &values, amber::react::State &react_state, const Pairs &pairs,
+               react::DeferredEffects &effects, Step now, double hz) {
+
   for (const auto pair : pairs)
-    if (react::reconcile_allocation(values, allocations, meters, pair, now, hz))
+    if (react::reconcile_allocation(values, react_state, pair, now, hz))
       effects.ordered.emplace_back(step::WatchWork{pair, {}});
 }
 } // namespace
-void reconcile_allocations(const ValueRead &values, AllocationRows &allocations, MeterRows &meters,
+void reconcile_allocations(const ValueRead &values, amber::react::State &react_state,
                            react::DeferredEffects &effects, Step now, double hz) {
+
   Pairs pairs;
   for (const auto &effect : effects.ordered)
     if (const auto *changed = std::get_if<react::ContributionChange>(&effect))
@@ -123,23 +126,25 @@ void reconcile_allocations(const ValueRead &values, AllocationRows &allocations,
   std::erase_if(effects.ordered, [](const auto &effect) {
     return std::holds_alternative<react::ContributionChange>(effect);
   });
-  reconcile(values, allocations, meters, pairs, effects, now, hz);
+  reconcile(values, react_state, pairs, effects, now, hz);
 }
-void reconcile_priority(const ValueRead &values, AllocationRows &allocations, MeterRows &meters,
+void reconcile_priority(const ValueRead &values, amber::react::State &react_state,
                         react::SettingKey scope, react::DeferredEffects &effects, Step now,
                         double hz) {
+
   Pairs pairs;
   add(pairs, react::priority_inputs(values, scope));
-  reconcile(values, allocations, meters, pairs, effects, now, hz);
+  reconcile(values, react_state, pairs, effects, now, hz);
 }
-void reconcile_object_priorities(const ValueRead &values, AllocationRows &allocations,
-                                 MeterRows &meters, Handle object, react::DeferredEffects &effects,
-                                 Step now, double hz) {
+void reconcile_object_priorities(const ValueRead &values, amber::react::State &react_state,
+                                 Handle object, react::DeferredEffects &effects, Step now,
+                                 double hz) {
+
   Pairs pairs;
   for (const auto &term : values.terms.rows)
     if (term.combine == react::Combine::SharePriority && term.priority)
       add(pairs, react::priority_inputs(
                      values, {react::SettingKey::Scope::Instance, object.bits, term.priority}));
-  reconcile(values, allocations, meters, pairs, effects, now, hz);
+  reconcile(values, react_state, pairs, effects, now, hz);
 }
 } // namespace amber::react

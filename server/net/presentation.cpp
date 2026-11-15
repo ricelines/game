@@ -57,12 +57,16 @@ double binding_value(const ScalarBinding &s, Handle h, const react::ValueRead &v
   auto value = react::read(values, h, std::get<TermRef>(s).id, now, hz);
   return value.present ? value.value.numeric() : 0;
 }
-ObjectDescription describe_object(Handle h, IdentityRead identity, const catalog::Models &models,
-                                  const catalog::ParameterBlocks &parameters,
-                                  const catalog::Assets &assets, const catalog::ModelTexts &texts,
-                                  const catalog::InstanceTexts &instances,
+ObjectDescription describe_object(Handle h, IdentityRead identity,
+                                  const amber::catalog::State &catalog_state,
                                   const react::ValueRead &values, std::span<const TermId> inspected,
                                   std::span<const std::string> actions, Step now, double hz) {
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+  auto &texts = catalog_state.model_text;
+  auto &instances = catalog_state.instance_text;
+
   auto model = identity.model[h.slot()], material = identity.material[h.slot()];
   auto effective = catalog::resolve_asset(models, parameters, model, values.params[h.slot()]);
   const auto &asset = assets.rows.at(effective.hash);

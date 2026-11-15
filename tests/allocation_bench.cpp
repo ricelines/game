@@ -27,7 +27,6 @@ void run(unsigned subjects) {
   f.terms.rows[12].id = 12;
   f.terms.rows[12].source = Source::Setting;
   GivesTo gives;
-  MeterRows meters;
   set_contribution(f.shared, gives, f.terms.rows[10], f.a, f.c, 7, f.effects);
   set_contribution(f.shared, gives, f.terms.rows[11], f.a, f.c, 6, f.effects);
   set_contribution(f.shared, gives, f.terms.rows[11], f.b, f.c, 7, f.effects);
@@ -39,7 +38,7 @@ void run(unsigned subjects) {
     set_contribution(f.shared, gives, f.terms.rows[11], h, h, 9, f.effects);
   }
   validate_shared_terms(f.terms);
-  reconcile_allocations(*f.projection, f.allocations, meters, f.effects, 0, 20);
+  reconcile_allocations(*f.projection, f.react_state, f.effects, 0, 20);
   constexpr unsigned count = 2000;
   std::vector<double> samples;
   samples.reserve(count);
@@ -47,7 +46,7 @@ void run(unsigned subjects) {
     f.effects = {};
     const auto begin = Clock::now();
     set_contribution(f.shared, gives, f.terms.rows[10], f.a, f.c, (i & 1) ? 8 : 6, f.effects);
-    reconcile_allocations(*f.projection, f.allocations, meters, f.effects, i, 20);
+    reconcile_allocations(*f.projection, f.react_state, f.effects, i, 20);
     samples.push_back(std::chrono::duration<double, std::micro>(Clock::now() - begin).count());
   }
   test_runtime::require(
@@ -60,8 +59,8 @@ void run(unsigned subjects) {
     f.effects = {};
     const auto begin = Clock::now();
     f.instance_settings.columns[12].set(f.b.slot(), Value((i & 1) ? -1.0 : 1.0));
-    reconcile_priority(*f.projection, f.allocations, meters,
-                       {SettingKey::Scope::Instance, f.b.bits, 12}, f.effects, count + i, 20);
+    reconcile_priority(*f.projection, f.react_state, {SettingKey::Scope::Instance, f.b.bits, 12},
+                       f.effects, count + i, 20);
     samples.push_back(std::chrono::duration<double, std::micro>(Clock::now() - begin).count());
   }
   test_runtime::require(

@@ -12,32 +12,36 @@ void require(bool ok, const char *message) {
     throw std::runtime_error(message);
 }
 struct Fixture {
-  Objects objects;
+  amber::ObjectState objects_state;
+  amber::react::State react_state;
+  amber::catalog::State catalog_state;
+
+  Objects &objects = objects_state.objects;
   Handle object, other;
-  react::Terms terms;
-  react::Properties properties;
-  react::Processes processes;
-  react::Materials materials;
-  react::AssetMeasurements assets;
-  react::InstanceSettings settings;
-  react::ModelSettings models;
-  react::PlotSettings plots;
-  react::WorldSettings world;
-  react::SharedColumns shared;
-  react::RelationsRead relations;
-  react::RuntimeMeasurements runtime;
-  react::ScriptStates states;
-  react::RandomStates random;
-  Relation parts;
+  react::Terms &terms = react_state.terms;
+  react::Properties &properties = react_state.properties;
+  react::Processes &processes = react_state.processes;
+  react::Materials &materials = react_state.materials;
+  react::AssetMeasurements &assets = catalog_state.baked_measurements;
+  react::InstanceSettings &settings = react_state.instance_settings;
+  react::ModelSettings &models = react_state.model_settings;
+  react::PlotSettings &plots = react_state.plot_settings;
+  react::WorldSettings &world = react_state.world_settings;
+  react::SharedColumns &shared = react_state.shared;
+  react::RelationsRead &relations = react_state.relations;
+  react::RuntimeMeasurements &runtime = react_state.runtime_measurements;
+  react::ScriptStates &states = react_state.states;
+  react::RandomStates &random = react_state.random;
+  Relation &parts = objects_state.declared_parts;
   record::Journal journal{8, {}};
   react::Vm vm{{4096, 50, 5, 64}};
   react::ValueRead values;
-  react::GivesTo gives_to;
-  catalog::Models definitions;
-  catalog::Scripts scripts;
-  react::InstanceScripts installations;
-  react::Triggers triggers;
-  react::Subscriptions subscriptions;
+  react::GivesTo &gives_to = react_state.gives_to;
+  catalog::Models &definitions = catalog_state.models;
+  catalog::Scripts &scripts = catalog_state.scripts;
+  react::InstanceScripts &installations = react_state.installations;
+  react::Triggers &triggers = react_state.triggers;
+  react::Subscriptions &subscriptions = react_state.subscriptions;
   Fixture()
       : values{terms,        identity(objects),
                objects.plot, objects.params,
@@ -63,7 +67,7 @@ struct Fixture {
     terms.rows[4].kind = react::Kind::Event;
     definitions.rows.resize(2);
     definitions.rows[1].id = 1;
-    react::bind_values(vm, values, properties, processes, shared, gives_to);
+    react::bind_values(vm, values, react_state);
     react::bind_events(vm, terms);
     load(1, R"(return {kind='model', sets={'unforeseen.3'},
       on={['unforeseen.1']=function(self,from,args)
@@ -117,8 +121,7 @@ struct Fixture {
     input.action_caller = PlayerId{7};
     react::Invocation invocation;
     react::CompletedInvocation completed;
-    react::start_invocation(vm, states, random, subscriptions, values, triggers, parts, 971,
-                            attribution(objects), definitions, scripts, journal,
+    react::start_invocation(vm, react_state, values, objects_state, 971, catalog_state, journal,
                             {script, terms.rows[term].name, script + 10, 1, true}, std::move(input),
                             invocation, completed);
     react::finish_invocation(identity(objects), attribution(objects), definitions, scripts, journal,
@@ -212,9 +215,10 @@ void model_rebind_retires_only_removed_installations() {
   f.states[{f.a, keep}][std::string("saved")] = std::string("surviving state");
   react::set_contribution(f.shared, f.gives_to, f.terms.rows[4], f.a, f.b, 10, f.effects);
   react::set_contribution(f.shared, f.gives_to, f.terms.rows[2], f.a, f.b, 7, f.effects);
-  perm::Players players;
+  amber::perm::State perm_state;
+  perm::Players &players = perm_state.players;
   players.rows.resize(2);
-  perm::Grants grants;
+  perm::Grants &grants = perm_state.grants;
   f.objects.owner[f.a.slot()] = f.objects.owner[f.b.slot()] = f.objects.owner[f.c.slot()] = 1;
   const auto grant = [&](ScriptId script, Handle installation) {
     const auto holder = perm::Holder::script(script, installation);
@@ -236,9 +240,8 @@ void model_rebind_retires_only_removed_installations() {
     lifecycle::apply_replacement(f.objects, parts, declared, plan, 1, 12);
     step::NativeCompletion completed;
     completed.rebound_objects = plan.retained;
-    step::editing::rebind_scripts(f.models, f.scripts, f.installed, f.rules, f.values(), f.triggers,
-                                  f.subscriptions, f.allocations, f.states, f.shared, f.gives_to,
-                                  grants, players, 6, 12, 20, {}, completed);
+    step::editing::rebind_scripts(f.catalog_state, f.react_state, f.values(), perm_state, 6, 12, 20,
+                                  {}, completed);
     return std::pair{completed.permissions_changed, std::move(completed.effects)};
   };
   const auto [changed, effects] = replace(f.a);

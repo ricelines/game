@@ -335,12 +335,19 @@ AssemblyEdit extract_assembly(Space &space, IdentityRead identity, Handle root,
   return edit;
 }
 
-OperationResult
-rebuild_assembly(Space &space, IdentityRead identity, TransformWrite transforms,
-                 ParentWrite parents, SpaceFlags flags, PhysicalRelations &relations,
-                 const AssemblyEdit &edit, std::span<const BodySpec> bodies,
-                 std::span<const Handle> logical_roots, std::span<const VolumeSpec> volumes,
-                 std::span<const Attachment> internal, std::vector<RelationChange> &changes) {
+OperationResult rebuild_assembly(Space &space, amber::ObjectState &objects_state,
+                                 amber::space::State &space_state, const AssemblyEdit &edit,
+                                 std::span<const BodySpec> bodies,
+                                 std::span<const Handle> logical_roots,
+                                 std::span<const VolumeSpec> volumes,
+                                 std::span<const Attachment> internal) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(objects_state.objects);
+  auto parents = amber::parents(objects_state.objects);
+  auto flags = amber::space_flags(objects_state.objects);
+  auto &relations = space_state.physical_relations;
+  auto &changes = space_state.relation_changes;
+
   auto &n = *space.native;
   if (!identity.valid(edit.root))
     return {Status::StaleHandle, edit.root};
@@ -418,8 +425,7 @@ rebuild_assembly(Space &space, IdentityRead identity, TransformWrite transforms,
                   ? Motion::Kinematic
                   : Motion::Static);
   for (const auto &attachment : internal) {
-    auto result = attach(space, identity, transforms, parents, flags, relations.contains,
-                         relations.supports, relations.attached_to, attachment, changes);
+    auto result = attach(space, objects_state, space_state, attachment);
     if (result.status != Status::Ok)
       return result;
   }

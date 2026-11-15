@@ -120,10 +120,14 @@ WatchPlan plan_watch(react::Subscriptions &subscriptions, const react::ValueRead
     plan.shared_gap = work.source;
   return plan;
 }
-WatchPlan plan_background(react::Subscriptions &subscriptions, const react::ValueRead &values,
-                          const react::AllocationRows &allocations, const react::Triggers &triggers,
-                          const catalog::Scripts &scripts, const react::RuleVersions &rules,
-                          const step::BackgroundItem &item, Step now, double hz) {
+WatchPlan plan_background(amber::react::State &react_state, const react::ValueRead &values,
+                          const catalog::Scripts &scripts, const step::BackgroundItem &item,
+                          Step now, double hz) {
+  auto &subscriptions = react_state.subscriptions;
+  auto &allocations = react_state.allocations;
+  auto &triggers = react_state.triggers;
+  auto &rules = react_state.rules;
+
   WatchPlan result;
   if (!react::catch_up_valid(item, rules, values, now, hz))
     return result;
@@ -135,8 +139,8 @@ WatchPlan plan_background(react::Subscriptions &subscriptions, const react::Valu
         if (std::find(allowed.begin(), allowed.end(), item.trigger) == allowed.end())
           continue;
         auto changes = react::sync_watches(
-            subscriptions, values, allocations, {consumer, item.script}, declaration, now, hz,
-            item.origin, react::SyncMode::Change, std::span<const TermId>(allowed));
+            react_state, values, {consumer, item.script}, declaration, now, hz, item.origin,
+            react::SyncMode::Change, std::span<const TermId>(allowed));
         result.changes.dirty.insert(result.changes.dirty.end(), changes.dirty.begin(),
                                     changes.dirty.end());
         result.changes.timers.insert(result.changes.timers.end(), changes.timers.begin(),
@@ -163,10 +167,16 @@ WatchPlan plan_background(react::Subscriptions &subscriptions, const react::Valu
   return result;
 }
 std::optional<std::vector<PlannedInvocation>>
-prepare_reactive(react::Subscriptions &subscriptions, const react::ValueRead &values,
-                 const react::AllocationRows &allocations, const react::Triggers &triggers,
-                 const catalog::Scripts &scripts, WorkQueues &queues, TimerWheel &timers,
-                 std::vector<GapDraft> &gaps, ForegroundItem item, Step now, double hz) {
+prepare_reactive(amber::react::State &react_state, const react::ValueRead &values,
+                 const catalog::Scripts &scripts, amber::step::State &step_state,
+                 ForegroundItem item, Step now, double hz) {
+  auto &subscriptions = react_state.subscriptions;
+  auto &allocations = react_state.allocations;
+  auto &triggers = react_state.triggers;
+  auto &queues = step_state.queues;
+  auto &timers = step_state.timers;
+  auto &gaps = step_state.gaps;
+
   if (auto *event = std::get_if<EventWork>(&item.work)) {
     EventTurn turn{std::move(*event), std::move(item.threshold)};
     if (!valid_event(turn, values.identity, values.processes, subscriptions, now, hz))

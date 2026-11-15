@@ -13,11 +13,10 @@ struct SlotRequest {
   perm::GrantRequest request;
   perm::ScopeControl control;
 };
-std::vector<SlotRequest> slot_choices(const Json &, const catalog::Script &, IdentityRead,
-                                      AuthorityRead, const perm::OwnerLimits &,
-                                      const perm::Players &, const perm::Plots &,
-                                      const perm::Groups &, std::span<const std::string>,
-                                      const NativeCall &);
+std::vector<SlotRequest> slot_choices(const Json &, const catalog::Script &,
+                                      const amber::ObjectState &objects_state,
+                                      const amber::perm::State &perm_state,
+                                      std::span<const std::string>, const NativeCall &);
 NativeCompletion fill_slots(const catalog::Script &, std::span<const SlotRequest>, AuthorityRead,
                             perm::Players &, perm::Grants &, const NativeCall &);
 struct PolicyDenied : std::runtime_error {

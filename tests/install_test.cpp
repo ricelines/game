@@ -103,9 +103,9 @@ void threshold_restore_and_selected_instance_codec() {
   set_instances(f.installed, f.a, ids, f.scripts);
   set_instances(f.installed, f.b, ids, f.scripts);
   project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
-  set_rate(f.properties, f.processes, f.terms.rows[1], f.a, 1, 0, 10, 0, 20, f.effects);
-  auto changes = sync_watches(f.subscriptions, f.values(), f.allocations, {f.a, id},
-                              f.scripts.rows[id].declaration, 0, 20, {}, SyncMode::Initial);
+  set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 10, 0, 20, f.effects);
+  auto changes = sync_watches(f.react_state, f.values(), {f.a, id}, f.scripts.rows[id].declaration,
+                              0, 20, {}, SyncMode::Initial);
   require(changes.timers.size() == 1 && changes.timers[0].due == 41,
           "real process threshold schedules strict boundary");
   const auto timer = changes.timers[0];
@@ -119,17 +119,18 @@ void threshold_restore_and_selected_instance_codec() {
   write_script_states(out, f.states, f.subscriptions, SnapshotSelection(chosen));
   out.adapter().flush();
   bytes.resize(out.adapter().writtenBytesCount());
-  InstanceScripts loaded;
-  ScriptStates loaded_states;
-  Subscriptions loaded_subs;
+  amber::react::State react_state;
+  InstanceScripts &loaded = react_state.installations;
+  ScriptStates &loaded_states = react_state.states;
+  Subscriptions &loaded_subs = react_state.subscriptions;
   snap::Input in{bytes.data(), bytes.size()};
   read_instances(in, loaded, f.objects.model.size());
   read_script_states(in, loaded_states, loaded_subs);
   snap::check_complete(in);
   require(loaded.get(f.a.slot()) && !loaded.get(f.b.slot()),
           "selected installation snapshot excludes unrelated object");
-  auto restored = sync_watches(loaded_subs, f.values(), f.allocations, {f.a, id},
-                               f.scripts.rows[id].declaration, 0, 20, {}, SyncMode::Restore);
+  auto restored = sync_watches(react_state, f.values(), {f.a, id}, f.scripts.rows[id].declaration,
+                               0, 20, {}, SyncMode::Restore);
   require(
       restored.dirty.empty() && restored.timers.empty() &&
           valid_threshold(*timer.threshold, identity(f.objects), f.processes, loaded_subs, 41, 20),
@@ -143,7 +144,7 @@ void threshold_restore_and_selected_instance_codec() {
   require(std::get<bool>(f.states.at({f.a, id}).at(StateKey{std::string("crossed")})),
           "threshold invokes real Luau after restore");
   check_changed(loaded_subs, f.values(), f.allocations, {f.a, 1}, 41, 20, {});
-  set_rate(f.properties, f.processes, f.terms.rows[1], f.a, -1, 0, 10, 41, 20, f.effects);
+  set_rate(f.react_state, f.terms.rows[1], f.a, -1, 0, 10, 41, 20, f.effects);
   require(!valid_threshold(*timer.threshold, identity(f.objects), f.processes, loaded_subs, 41, 20),
           "unchanged predicate suppresses a previously delivered crossing");
   require(
@@ -192,9 +193,8 @@ void rule_versions_partial_replacement_and_catchup() {
   const auto allowed = rule_watch_terms(f.rules, f.values(), f.a, old, 0, 20);
   require(allowed == std::vector<TermId>{4},
           "partial replacement preserves old script's other active trigger");
-  sync_watches(f.subscriptions, f.values(), f.allocations, {f.a, old},
-               f.scripts.rows[old].declaration, 0, 20, {}, SyncMode::Change,
-               std::span<const TermId>(allowed));
+  sync_watches(f.react_state, f.values(), {f.a, old}, f.scripts.rows[old].declaration, 0, 20, {},
+               SyncMode::Change, std::span<const TermId>(allowed));
   require(f.subscriptions.rows.size() == 1 && f.subscriptions.rows.begin()->second.size() == 1 &&
               f.subscriptions.rows.begin()->second[0].index == 1,
           "only retired watch removed, original watch index retained");
@@ -229,8 +229,8 @@ void selector_changes_publish_after_subscription_rebinding() {
   f.effects = {};
   f.state(f.a, 1, 5); // Deliberately dirties quantity before the selector in one invocation.
   f.state(f.a, 5, 1);
-  auto synced = sync_rule_watches(f.subscriptions, f.values(), f.allocations, f.scripts, f.rules,
-                                  f.effects.ordered, 0, 20, {});
+  auto synced =
+      sync_rule_watches(f.react_state, f.values(), f.scripts, f.effects.ordered, 0, 20, {});
   require(synced.dirty.size() == 1 && synced.dirty[0].source == FactKey{f.a, 1},
           "new applicable rule subscription queues its current fact before any dirty publication");
   auto plans = f.changed({f.a, 1});
@@ -240,13 +240,12 @@ void selector_changes_publish_after_subscription_rebinding() {
   require(read(f.values(), f.a, 2, 0, 20).value.numeric() == 45 &&
               std::get<double>(f.states.at({f.a, rule}).at(std::string("count"))) == 1,
           "new flag-selected watch executes the actual current-state Luau handler once");
-  auto unchanged = sync_rule_watches(f.subscriptions, f.values(), f.allocations, f.scripts, f.rules,
-                                     f.effects.ordered, 0, 20, {});
+  auto unchanged =
+      sync_rule_watches(f.react_state, f.values(), f.scripts, f.effects.ordered, 0, 20, {});
   require(unchanged.dirty.empty(), "existing applicable subscriptions do not get replayed");
   f.effects = {};
   f.state(f.a, 5, 0);
-  sync_rule_watches(f.subscriptions, f.values(), f.allocations, f.scripts, f.rules,
-                    f.effects.ordered, 0, 20, {});
+  sync_rule_watches(f.react_state, f.values(), f.scripts, f.effects.ordered, 0, 20, {});
   require(watch_sources(f.subscriptions, ScriptKey{f.a, rule}).empty(),
           "false selector removes the formerly applicable world-rule consumer");
 }

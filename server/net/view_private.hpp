@@ -52,16 +52,19 @@ inline Json description(const ObjectDescription &d) {
   return {{"h", to_string(d.object)}, {"model", d.model},           {"measured", d.measured},
           {"says", text(d.says)},     {"elaborated", d.elaborated}, {"actions", d.actions}};
 }
-inline ObjectDescription
-describe(const catalog::Models &models, const catalog::ParameterBlocks &parameters,
-         const catalog::Assets &assets, const catalog::Scripts &scripts,
-         const catalog::ModelTexts &model_text, const catalog::InstanceTexts &instance_text,
-         const react::InstanceScripts &instances, const react::NativeActions &native,
-         const react::ValueRead &values, const catalog::AuthoredTexts &authored_texts, Handle h,
-         Step now, double hz, std::span<const TermId> inspected) {
+inline ObjectDescription describe(const amber::catalog::State &catalog_state,
+                                  const amber::react::State &react_state,
+                                  const react::ValueRead &values, Handle h, Step now, double hz,
+                                  std::span<const TermId> inspected) {
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+  auto &instances = react_state.installations;
+  auto &native = react_state.native_declarations;
+  auto &authored_texts = catalog_state.authored_text;
+
   const auto actions = object_actions(models, scripts, instances, native, values, h);
-  auto result = describe_object(h, values.identity, models, parameters, assets, model_text,
-                                instance_text, values, inspected, actions, now, hz);
+  auto result =
+      describe_object(h, values.identity, catalog_state, values, inspected, actions, now, hz);
   for (const auto &entry : authored_texts.rows)
     if (entry.id && entry.target == h && entry.kind == catalog::AuthoredTextKind::Detail)
       result.elaborated.push_back({{"id", entry.id},

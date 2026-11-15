@@ -2,32 +2,33 @@
 #include <stdexcept>
 
 namespace amber::step {
-NativeCompletion native_mechanics(
-    const Relation &declared_parts, const react::Terms &terms, react::Properties &properties,
-    react::Processes &processes, const perm::Players &players, const perm::Plots &plots,
-    const perm::Grants &grants, const perm::OwnerLimits &owner_limits, space::Space &space,
-    space::PhysicalRelations &physical_relations, MechanicalCauses &mechanical_causes,
-    IdentityRead identity, TransformWrite poses, ParentWrite parents, AuthorityRead authority_read,
-    SpaceFlags physical_flags, PlotWrite membership, PhysicalRelationTerms physical_terms,
-    float reach_m, react::MechanicAction operation, const NativeCall &call) {
+NativeCompletion native_mechanics(amber::ObjectState &objects_state,
+                                  amber::react::State &react_state,
+                                  const amber::perm::State &perm_state, space::Space &space,
+                                  amber::space::State &space_state,
+                                  MechanicalCauses &mechanical_causes,
+                                  PhysicalRelationTerms physical_terms, float reach_m,
+                                  react::MechanicAction operation, const NativeCall &call) {
+
+  auto &plots = perm_state.plots;
+
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+
   NativeCompletion out;
   switch (operation) {
   case react::MechanicAction::Grasp: {
-    out = grasp_action(space, identity, poses, parents, physical_flags, physical_relations,
-                       declared_parts, physical_terms, reach_m, mechanical_causes, membership,
-                       plots, call);
+    out = grasp_action(space, objects_state, space_state, physical_terms, reach_m,
+                       mechanical_causes, plots, call);
     break;
   }
   case react::MechanicAction::Release: {
-    out = release_action(space, identity, poses, parents, physical_flags, physical_relations,
-                         declared_parts, physical_terms, authority_read, owner_limits, players,
-                         grants, mechanical_causes, membership, plots, call);
+    out = release_action(space, objects_state, space_state, physical_terms, perm_state,
+                         mechanical_causes, call);
     break;
   }
   case react::MechanicAction::Attach: {
-    out = attach_action(space, identity, poses, parents, physical_flags, physical_relations,
-                        declared_parts, physical_terms, authority_read, owner_limits, players,
-                        grants, reach_m, mechanical_causes, membership, plots, call);
+    out = attach_action(space, objects_state, space_state, physical_terms, perm_state, reach_m,
+                        mechanical_causes, call);
     break;
   }
   case react::MechanicAction::Impulse: {
@@ -35,42 +36,39 @@ NativeCompletion native_mechanics(
     break;
   }
   case react::MechanicAction::Transfer: {
-    out = transfer_action(properties, processes, terms, identity, authority_read, owner_limits,
-                          players, grants, call);
+    out = transfer_action(react_state, objects_state, perm_state, call);
     break;
   }
   }
   return out;
 }
-NativeCompletion native_construction(
-    Objects &objects, lifecycle::Parts &parts, Relation &declared_parts,
-    const catalog::Assets &assets, catalog::Models &models, const catalog::Scripts &scripts,
-    catalog::ParameterBlocks &parameters, catalog::ModelTexts &model_text,
-    const react::ValueRead &values, react::ModelSettings &model_settings,
-    react::AllocationRows &allocations, react::MeterRows &meters,
-    react::AssetMeasurements &baked_measurements, perm::Players &players, const perm::Plots &plots,
-    const perm::Grants &grants, const perm::Ledger &ledger, const perm::OwnerLimits &owner_limits,
-    perm::Offers &offers, perm::Trades &trades, const GeometryAssets &geometry, space::Space &space,
-    space::PhysicalRelations &physical_relations,
-    std::vector<space::RelationChange> &relation_changes, std::array<TermId, 4> relation_terms,
-    PhysicsRoles physics_roles, PhysicsDefaults physics_defaults,
-    catalog::MeasurementBindings measurement_roles, react::ConstructionAction operation,
-    const NativeCall &call) {
-  const auto identity = values.identity;
-  const auto poses = transforms(objects);
-  const auto parents = amber::parents(objects);
+NativeCompletion native_construction(amber::ObjectState &objects_state,
+                                     amber::catalog::State &catalog_state,
+                                     const react::ValueRead &values,
+                                     amber::react::State &react_state,
+                                     amber::perm::State &perm_state, const GeometryAssets &geometry,
+                                     space::Space &space, amber::space::State &space_state,
+                                     std::array<TermId, 4> relation_terms,
+                                     PhysicsRoles physics_roles, PhysicsDefaults physics_defaults,
+                                     catalog::MeasurementBindings measurement_roles,
+                                     react::ConstructionAction operation, const NativeCall &call) {
+  auto &objects = objects_state.objects;
+  auto &parts = objects_state.parts;
+
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+
+  auto &model_settings = react_state.model_settings;
+
+  auto &ledger = perm_state.ledger;
+
   const auto authority_read = authority(std::as_const(objects));
   const auto attribution_read = attribution(objects);
-  const auto physical_flags = space_flags(objects);
-  const auto permission_bits = permission_flags(objects);
-  const auto membership = plot_membership(objects);
   NativeCompletion out;
   switch (operation) {
   case react::ConstructionAction::Create: {
-    out = create_instance(objects, parts, declared_parts, models, parameters, assets, geometry,
-                          values, space, poses, parents, physical_flags, physical_relations,
-                          relation_changes, authority_read, players, grants, plots, membership,
-                          physics_roles, physics_defaults, call);
+    out = create_instance(objects_state, catalog_state, geometry, values, space, space_state,
+                          perm_state, physics_roles, physics_defaults, call);
     break;
   }
   case react::ConstructionAction::Destroy: {
@@ -79,46 +77,46 @@ NativeCompletion native_construction(
     break;
   }
   case react::ConstructionAction::Reconfigure: {
-    out = replace_instance(objects, parts, declared_parts, models, parameters, assets, geometry,
-                           values, space, poses, parents, physical_flags, physical_relations,
-                           relation_changes, authority_read, attribution_read, owner_limits,
-                           players, grants, plots, ledger, scripts, membership, physics_roles,
-                           physics_defaults, call);
+    out = replace_instance(objects_state, catalog_state, geometry, values, space, space_state,
+                           perm_state, physics_roles, physics_defaults, call);
     break;
   }
   case react::ConstructionAction::ReviseModel: {
     if (const auto error = validate_model_edit(call.arguments); !error.empty())
       throw std::invalid_argument(error);
     out =
-        revise_model(objects, parts, declared_parts, models, parameters, model_text, model_settings,
-                     assets, baked_measurements, measurement_roles, geometry, values, space, poses,
-                     parents, physical_flags, permission_bits, physical_relations, relation_changes,
-                     authority_read, attribution_read, ledger, offers, trades, plots, scripts,
-                     membership, physics_roles, physics_defaults, call);
+        revise_model(objects_state, catalog_state, model_settings, measurement_roles, geometry,
+                     values, space, space_state, perm_state, physics_roles, physics_defaults, call);
     break;
   }
   case react::ConstructionAction::PlaceExisting: {
     if (const auto error = validate_place_existing(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = place_existing(space, identity, poses, parents, physical_flags, physical_relations, parts,
-                         declared_parts, relation_terms, membership, plots, players, grants,
-                         authority_read, owner_limits, geometry, models, parameters, assets, values,
-                         physics_roles, physics_defaults, allocations, meters, call);
+    out = place_existing(space, objects_state, space_state, relation_terms, perm_state, geometry,
+                         catalog_state, values, physics_roles, physics_defaults, react_state, call);
     break;
   }
   }
   return out;
 }
-NativeCompletion native_exchange(const lifecycle::Parts &parts, const Relation &declared_parts,
-                                 perm::Players &players, const perm::Groups &groups,
-                                 perm::Grants &grants, perm::Ledger &ledger,
-                                 perm::OwnerLimits &owner_limits, perm::Offers &offers,
-                                 perm::Trades &trades, const space::Space &space,
-                                 const DeliveryTargets &delivery, IdentityRead identity,
-                                 ParentRead parents, AuthorityRead authority_read,
-                                 AuthorityWrite authority_write, SpaceFlags physical_flags,
-                                 PermissionFlags permission_bits, std::size_t mailbox_max,
-                                 react::ExchangeAction operation, const NativeCall &call) {
+NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm::State &perm_state,
+                                 const space::Space &space, const DeliveryTargets &delivery,
+                                 std::size_t mailbox_max, react::ExchangeAction operation,
+                                 const NativeCall &call) {
+  auto &parts = objects_state.parts;
+
+  auto &players = perm_state.players;
+  auto &groups = perm_state.groups;
+  auto &grants = perm_state.grants;
+  auto &ledger = perm_state.ledger;
+
+  auto &offers = perm_state.offers;
+  auto &trades = perm_state.trades;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto authority_read = amber::authority(std::as_const(objects_state.objects));
+
+  auto permission_bits = amber::permission_flags(objects_state.objects);
+
   NativeCompletion out;
   switch (operation) {
   case react::ExchangeAction::Issue: {
@@ -130,8 +128,7 @@ NativeCompletion native_exchange(const lifecycle::Parts &parts, const Relation &
   case react::ExchangeAction::HoldGoods: {
     if (const auto error = validate_hold_goods(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = hold_goods(players, grants, owner_limits, identity, authority_read, parents,
-                     physical_flags, declared_parts, delivery, space, mailbox_max, call);
+    out = hold_goods(perm_state, objects_state, delivery, space, mailbox_max, call);
     break;
   }
   case react::ExchangeAction::Pay: {
@@ -155,15 +152,13 @@ NativeCompletion native_exchange(const lifecycle::Parts &parts, const Relation &
   case react::ExchangeAction::Give: {
     if (const auto error = validate_give(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = give(players, grants, authority_write, permission_bits, owner_limits, space, identity,
-               parents, parts, declared_parts, delivery, mailbox_max, call);
+    out = give(perm_state, objects_state, space, delivery, mailbox_max, call);
     break;
   }
   case react::ExchangeAction::Offer: {
     if (const auto error = validate_offer(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = offer(offers, permission_bits, players, grants, authority_read, owner_limits, space,
-                identity, parents, parts, declared_parts, call);
+    out = offer(perm_state, objects_state, space, call);
     break;
   }
   case react::ExchangeAction::Offers: {
@@ -175,16 +170,13 @@ NativeCompletion native_exchange(const lifecycle::Parts &parts, const Relation &
   case react::ExchangeAction::Accept: {
     if (const auto error = validate_accept(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = step::accept(offers, ledger, grants, players, authority_write, permission_bits,
-                       owner_limits, space, identity, parents, parts, declared_parts, delivery,
-                       mailbox_max, groups, call);
+    out = step::accept(perm_state, objects_state, space, delivery, mailbox_max, call);
     break;
   }
   case react::ExchangeAction::CancelOffer: {
     if (const auto error = validate_cancel_offer(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = cancel_offer(offers, permission_bits, players, grants, authority_read, owner_limits,
-                       identity, parts, declared_parts, call);
+    out = cancel_offer(perm_state, objects_state, call);
     break;
   }
   case react::ExchangeAction::TradeOpen: {
@@ -196,16 +188,13 @@ NativeCompletion native_exchange(const lifecycle::Parts &parts, const Relation &
   case react::ExchangeAction::TradeChange: {
     if (const auto error = validate_trade_change(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = trade_change(trades, offers, permission_bits, players, grants, authority_read,
-                       owner_limits, space, identity, parents, parts, declared_parts, call);
+    out = trade_change(perm_state, objects_state, space, call);
     break;
   }
   case react::ExchangeAction::TradeConfirm: {
     if (const auto error = validate_trade_confirm(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = trade_confirm(trades, offers, ledger, grants, players, authority_write, permission_bits,
-                        owner_limits, space, identity, parents, parts, declared_parts, delivery,
-                        call);
+    out = trade_confirm(perm_state, objects_state, space, delivery, call);
     break;
   }
   case react::ExchangeAction::TradeCancel: {
@@ -217,29 +206,32 @@ NativeCompletion native_exchange(const lifecycle::Parts &parts, const Relation &
   }
   return out;
 }
-NativeCompletion
-native_permissions(const catalog::Models &models, const catalog::Scripts &scripts,
-                   const react::ValueRead &values, const react::RuleVersions &rules,
-                   const react::InstanceScripts &installations, perm::Players &players,
-                   perm::Groups &groups, perm::Plots &plots, perm::Grants &grants,
-                   const perm::OwnerLimits &owner_limits, IdentityRead identity,
-                   AuthorityRead authority_read, PermissionFlags permission_bits, bool architect,
-                   std::vector<GroupId> &object_groups, std::vector<std::uint32_t> &object_presets,
-                   react::PermissionAction operation, const NativeCall &call) {
+NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
+                                    const react::ValueRead &values,
+                                    const amber::react::State &react_state,
+                                    amber::perm::State &perm_state,
+                                    amber::ObjectState &objects_state, bool architect,
+                                    react::PermissionAction operation, const NativeCall &call) {
+
+  auto &players = perm_state.players;
+  auto &groups = perm_state.groups;
+  auto &plots = perm_state.plots;
+  auto &grants = perm_state.grants;
+
+  auto &object_presets = objects_state.objects.preset;
+
   NativeCompletion out;
   switch (operation) {
   case react::PermissionAction::Grant: {
     if (const auto error = validate_grant(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = grant(grants, players, identity, authority_read, owner_limits, plots, groups, models,
-                scripts, installations, rules, values, architect, call);
+    out = grant(perm_state, objects_state, catalog_state, react_state, values, architect, call);
     break;
   }
   case react::PermissionAction::Revoke: {
     if (const auto error = validate_revoke(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = revoke(grants, players, identity, authority_read, owner_limits, plots, groups, architect,
-                 call);
+    out = revoke(perm_state, objects_state, architect, call);
     break;
   }
   case react::PermissionAction::ListGrants: {
@@ -251,8 +243,7 @@ native_permissions(const catalog::Models &models, const catalog::Scripts &script
   case react::PermissionAction::Preset: {
     if (const auto error = validate_preset(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = preset(object_groups, object_presets, permission_bits, identity, authority_read,
-                 owner_limits, players, groups, call);
+    out = preset(objects_state, object_presets, perm_state, call);
     break;
   }
   case react::PermissionAction::GroupCreate: {
@@ -276,53 +267,50 @@ native_permissions(const catalog::Models &models, const catalog::Scripts &script
   }
   return out;
 }
-NativeCompletion native_scripts(catalog::Models &models, const catalog::Scripts &scripts,
-                                const react::ValueRead &values, react::SharedColumns &shared,
-                                react::GivesTo &gives_to, react::ScriptStates &states,
-                                react::Triggers &triggers, react::Subscriptions &subscriptions,
-                                react::InstanceScripts &installations,
-                                react::AllocationRows &allocations, perm::Players &players,
-                                const perm::Groups &groups, const perm::Plots &plots,
-                                perm::Grants &grants, const perm::OwnerLimits &owner_limits,
-                                AuthorityRead authority_read, TermId start_event,
+NativeCompletion native_scripts(amber::catalog::State &catalog_state,
+                                const react::ValueRead &values, amber::react::State &react_state,
+                                amber::perm::State &perm_state,
+                                const amber::ObjectState &objects_state, TermId start_event,
                                 std::span<const std::string> roles, react::ScriptAction operation,
                                 const NativeCall &call) {
+
   NativeCompletion out;
   switch (operation) {
   case react::ScriptAction::Install: {
     if (const auto error = editing::validate_install(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = editing::install_script(call, installations, triggers, subscriptions, states, shared,
-                                  gives_to, allocations, values, models, scripts, authority_read,
-                                  owner_limits, players, grants, plots, groups, roles, start_event);
+    out = editing::install_script(call, react_state, values, catalog_state, objects_state,
+                                  perm_state, roles, start_event);
     break;
   }
   case react::ScriptAction::Uninstall: {
     if (const auto error = editing::validate_uninstall(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = editing::uninstall_script(call, installations, triggers, subscriptions, states, shared,
-                                    gives_to, allocations, values, models, scripts, players, grants,
+    out = editing::uninstall_script(call, react_state, values, catalog_state, perm_state,
                                     start_event);
     break;
   }
   case react::ScriptAction::ModelScript: {
     if (const auto error = editing::validate_model_script(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = editing::model_script(call, installations, triggers, subscriptions, states, shared,
-                                gives_to, allocations, values, models, scripts, players, grants,
-                                start_event);
+    out = editing::model_script(call, react_state, values, catalog_state, perm_state, start_event);
     break;
   }
   }
   return out;
 }
-NativeCompletion
-native_values(const catalog::Models &models, const react::ValueRead &values,
-              react::Properties &properties, react::Processes &processes,
-              react::InstanceSettings &instance_settings, react::ModelSettings &model_settings,
-              react::AuthoredRelations &authored_relations, react::RelationsRead &relations,
-              std::array<TermId, 4> relation_terms, std::span<const std::string> roles,
-              react::ValueAction operation, const NativeCall &call) {
+NativeCompletion native_values(const catalog::Models &models, const react::ValueRead &values,
+                               amber::react::State &react_state,
+                               std::array<TermId, 4> relation_terms,
+                               std::span<const std::string> roles, react::ValueAction operation,
+                               const NativeCall &call) {
+  auto &properties = react_state.properties;
+  auto &processes = react_state.processes;
+  auto &instance_settings = react_state.instance_settings;
+  auto &model_settings = react_state.model_settings;
+  auto &authored_relations = react_state.authored_relations;
+  auto &relations = react_state.relations;
+
   NativeCompletion out;
   switch (operation) {
   case react::ValueAction::SetSetting: {
@@ -379,14 +367,19 @@ NativeCompletion native_writing(const catalog::Models &models, catalog::ModelTex
   }
   return out;
 }
-NativeCompletion native_registry(
-    const catalog::Assets &assets, const catalog::Models &models,
-    const catalog::ParameterBlocks &parameters, react::Terms &terms, react::Materials &materials,
-    const catalog::MechanicalBindings &mechanical, catalog::RegistryDocument &registry,
-    const std::filesystem::path &registry_directory, const react::ValueRead &values,
-    const react::RuleVersions &rules, const GeometryAssets &geometry, space::Space &space,
-    PhysicsRoles physics_roles, PhysicsDefaults physics_defaults,
-    std::span<const std::string> roles, react::RegistryAction operation, const NativeCall &call) {
+NativeCompletion
+native_registry(amber::catalog::State &catalog_state, amber::react::State &react_state,
+                const std::filesystem::path &registry_directory, const react::ValueRead &values,
+                const GeometryAssets &geometry, space::Space &space, PhysicsRoles physics_roles,
+                PhysicsDefaults physics_defaults, std::span<const std::string> roles,
+                react::RegistryAction operation, const NativeCall &call) {
+
+  auto &terms = react_state.terms;
+  auto &materials = react_state.materials;
+  auto &mechanical = catalog_state.mechanical;
+  auto &registry = catalog_state.registry;
+  auto &rules = react_state.rules;
+
   NativeCompletion out;
   switch (operation) {
   case react::RegistryAction::DefineTerm: {
@@ -399,25 +392,30 @@ NativeCompletion native_registry(
   case react::RegistryAction::DefineMaterial: {
     if (const auto error = editing::validate_define_material(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = editing::define_material(call, roles, materials, values, models, parameters, assets,
-                                   geometry, space, physics_roles, physics_defaults, rules,
-                                   mechanical, registry, registry_directory);
+    out = editing::define_material(call, roles, react_state, values, catalog_state, geometry, space,
+                                   physics_roles, physics_defaults, registry_directory);
     break;
   }
   }
   return out;
 }
-NativeCompletion
-native_elaboration(catalog::Scripts &scripts, catalog::AuthoredTexts &authored_text,
-                   const react::ValueRead &values, react::Vm &vm, react::Triggers &triggers,
-                   react::RuleVersions &rules, react::Subscriptions &subscriptions,
-                   react::AllocationRows &allocations, const net::Profiles &profiles,
-                   net::Sessions &sessions, WorkQueues &queues, elaborate::Requests &requests,
-                   elaborate::PendingFixtures &fixtures, elaborate::CaptureRefs &captures,
-                   elaborate::GapCounts &gap_counts, elaborate::LastGaps &last_gaps,
-                   elaborate::FixtureWorker &fixture_worker, bool architect, bool elaborator,
-                   elaborate::FixtureLimits fixture_limits, react::ElaborationAction operation,
-                   const NativeCall &call) {
+NativeCompletion native_elaboration(amber::catalog::State &catalog_state,
+                                    const react::ValueRead &values, react::Vm &vm,
+                                    amber::react::State &react_state, amber::net::State &net_state,
+                                    WorkQueues &queues, amber::elaborate::State &elaborate_state,
+                                    elaborate::FixtureWorker &fixture_worker, bool architect,
+                                    bool elaborator, elaborate::FixtureLimits fixture_limits,
+                                    react::ElaborationAction operation, const NativeCall &call) {
+  auto &scripts = catalog_state.scripts;
+  auto &authored_text = catalog_state.authored_text;
+
+  auto &profiles = net_state.profiles;
+  auto &sessions = net_state.sessions;
+  auto &requests = elaborate_state.requests;
+
+  auto &gap_counts = elaborate_state.gap_counts;
+  auto &last_gaps = elaborate_state.last_gaps;
+
   NativeCompletion out;
   switch (operation) {
   case react::ElaborationAction::RequestModel: {
@@ -441,8 +439,7 @@ native_elaboration(catalog::Scripts &scripts, catalog::AuthoredTexts &authored_t
   case react::ElaborationAction::RuleActivation: {
     if (const auto error = validate_rule_activation(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = rule_activation(scripts, rules, triggers, subscriptions, queues, vm, values, allocations,
-                          architect || elaborator, call);
+    out = rule_activation(scripts, react_state, queues, vm, values, architect || elaborator, call);
     break;
   }
   case react::ElaborationAction::Answer:
@@ -475,8 +472,8 @@ native_elaboration(catalog::Scripts &scripts, catalog::AuthoredTexts &authored_t
       const auto requester = requests.rows.at(id).requester;
       const auto body =
           requester && requester < profiles.rows.size() ? profiles.rows[requester].body : Handle{};
-      out = answer_rule(requests, fixtures, captures, scripts, fixture_worker, runtime_version,
-                        fixture_limits, elaborator, body, call);
+      out = answer_rule(elaborate_state, scripts, fixture_worker, runtime_version, fixture_limits,
+                        elaborator, body, call);
     }
     break;
   }

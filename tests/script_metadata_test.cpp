@@ -10,30 +10,35 @@ void require(bool ok, const char *message) {
     throw std::runtime_error(message);
 }
 struct Fixture {
-  Objects objects;
+  amber::ObjectState objects_state;
+  amber::catalog::State catalog_state;
+  amber::react::State react_state;
+  amber::perm::State perm_state;
+
+  Objects &objects = objects_state.objects;
   Handle root, part, unrelated;
-  catalog::Models models;
-  catalog::ParameterBlocks parameters;
-  catalog::Assets assets;
-  react::Terms terms;
-  react::Materials materials;
-  react::Properties properties;
-  react::Processes processes;
-  react::MeterRows meters;
-  Relation parts;
-  SparseColumn<std::vector<ScriptId>> instances;
-  perm::Plots plots;
-  perm::Players players;
-  perm::Grants grants;
+  catalog::Models &models = catalog_state.models;
+  catalog::ParameterBlocks &parameters = catalog_state.parameters;
+  catalog::Assets &assets = catalog_state.assets;
+  react::Terms &terms = react_state.terms;
+  react::Materials &materials = react_state.materials;
+  react::Properties &properties = react_state.properties;
+  react::Processes &processes = react_state.processes;
+  react::MeterRows &meters = react_state.meters;
+  Relation &parts = objects_state.declared_parts;
+  SparseColumn<std::vector<ScriptId>> &instances = react_state.installations;
+  perm::Plots &plots = perm_state.plots;
+  perm::Players &players = perm_state.players;
+  perm::Grants &grants = perm_state.grants;
   // This fixture verifies metadata behavior under sanitizers, not production timing.
-  react::AssetMeasurements measurements;
-  react::InstanceSettings instance_settings;
-  react::ModelSettings model_settings;
-  react::PlotSettings plot_settings;
-  react::WorldSettings world_settings;
-  react::SharedColumns shared;
-  react::RelationsRead relations;
-  react::RuntimeMeasurements runtime;
+  react::AssetMeasurements &measurements = catalog_state.baked_measurements;
+  react::InstanceSettings &instance_settings = react_state.instance_settings;
+  react::ModelSettings &model_settings = react_state.model_settings;
+  react::PlotSettings &plot_settings = react_state.plot_settings;
+  react::WorldSettings &world_settings = react_state.world_settings;
+  react::SharedColumns &shared = react_state.shared;
+  react::RelationsRead &relations = react_state.relations;
+  react::RuntimeMeasurements &runtime = react_state.runtime_measurements;
   react::Vm vm{{4096, 50, 250, 64}};
   react::ScriptState state;
   react::DeferredEffects effects;
@@ -124,8 +129,7 @@ struct Fixture {
                                   runtime,
                                   1,
                                   6};
-    step::bind_metadata(vm, values, transforms(objects), authority(objects), parents(objects),
-                        models, instances, parameters, assets, parts, meters, plots);
+    step::bind_metadata(vm, values, objects_state, catalog_state, react_state, plots);
   }
   react::RunOutcome run(std::string_view body) {
     const auto source = "return {on={run=function(self,from,args) " + std::string(body) + " end}}";

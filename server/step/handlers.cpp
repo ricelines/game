@@ -1,12 +1,9 @@
 #include "action_private.hpp"
 namespace amber::step {
 ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &execution, react::Vm &vm,
-                                  react::ScriptStates &states, react::RandomStates &random,
-                                  react::Subscriptions &subscriptions,
-                                  const react::ValueRead &values, const react::Triggers &triggers,
-                                  const Relation &declared_parts, AttributionRead attribution,
-                                  const catalog::Models &models, const catalog::Scripts &scripts,
-                                  record::Journal &journal) {
+                                  react::State &react_state, const react::ValueRead &values,
+                                  const ObjectState &objects_state,
+                                  const catalog::State &catalog_state, record::Journal &journal) {
   while (!execution.empty()) {
     if (auto *action = std::get_if<ActionRun>(&execution.back())) {
       if (action->outcome || action->resolution.route == react::Route::Native ||
@@ -19,15 +16,15 @@ ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &execution, react::
     auto &handler = std::get<HandlerRun>(execution.back());
     if (!handler.started) {
       handler.started = true;
-      if (!react::start_invocation(vm, states, random, subscriptions, values, triggers,
-                                   declared_parts, 0, attribution, models, scripts, journal,
-                                   handler.plan.handler, std::move(handler.plan.input),
+      if (!react::start_invocation(vm, react_state, values, objects_state, 0, catalog_state,
+                                   journal, handler.plan.handler, std::move(handler.plan.input),
                                    handler.invocation, handler.completed)) {
         execution.pop_back();
         continue;
       }
     }
-    react::finish_invocation(values.identity, attribution, models, scripts, journal,
+    react::finish_invocation(values.identity, attribution(objects_state.objects),
+                             catalog_state.models, catalog_state.scripts, journal,
                              handler.invocation, handler.completed);
     return &execution.back();
   }
@@ -102,22 +99,25 @@ void invalidate_execution(std::deque<ExecutionFrame> &execution, IdentityRead id
     }
 }
 
-void reconcile_effects(const react::ValueRead &values, react::AllocationRows &allocations,
-                       react::MeterRows &meters, AssemblyMasses &masses,
-                       react::RuntimeMeasurements &runtime_measurements,
-                       const Relation &declared_parts, react::Subscriptions &subscriptions,
-                       const catalog::Scripts &scripts, const react::RuleVersions &rules,
-                       std::vector<FactKey> &mutated, Step now, double hz,
+void reconcile_effects(const react::ValueRead &values, amber::react::State &react_state,
+                       amber::step::State &step_state, const Relation &declared_parts,
+                       const catalog::Scripts &scripts, Step now, double hz,
                        react::DeferredEffects &effects, const record::Origin &origin) {
-  react::reconcile_allocations(values, allocations, meters, effects, now, hz);
+
+  auto &masses = step_state.masses;
+  auto &runtime_measurements = react_state.runtime_measurements;
+
+  auto &mutated = step_state.mutated;
+
+  react::reconcile_allocations(values, react_state, effects, now, hz);
   std::vector<FactKey> facts;
   for (const auto &effect : effects.ordered)
     if (const auto *watch = std::get_if<WatchWork>(&effect))
       facts.push_back(watch->source);
   reconcile_mass(masses, values, declared_parts, runtime_measurements, facts, now, hz, origin,
                  effects);
-  auto changes = react::sync_rule_watches(subscriptions, values, allocations, scripts, rules,
-                                          effects.ordered, now, hz, origin);
+  auto changes =
+      react::sync_rule_watches(react_state, values, scripts, effects.ordered, now, hz, origin);
   for (auto &dirty : changes.dirty)
     effects.ordered.emplace_back(std::move(dirty));
   for (auto &timer : changes.timers)

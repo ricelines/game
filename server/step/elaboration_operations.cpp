@@ -89,11 +89,11 @@ AnswerCompletion refuse(elaborate::Requests &requests, catalog::AuthoredTexts &t
   elaboration_detail::record(out, call, "refuse", requests.rows[id]);
   return {std::move(out), closed};
 }
-step::NativeCompletion
-rule_activation(catalog::Scripts &scripts, react::RuleVersions &rules, react::Triggers &triggers,
-                react::Subscriptions &subscriptions, step::WorkQueues &queues, react::Vm &vm,
-                const react::ValueRead &values, const react::AllocationRows &allocations,
-                bool may_edit_rules, const step::NativeCall &call) {
+step::NativeCompletion rule_activation(catalog::Scripts &scripts, amber::react::State &react_state,
+                                       step::WorkQueues &queues, react::Vm &vm,
+                                       const react::ValueRead &values, bool may_edit_rules,
+                                       const step::NativeCall &call) {
+
   elaboration_detail::player(call);
   if (!may_edit_rules)
     throw std::invalid_argument("registry editing requires elaborator or architect role");
@@ -104,7 +104,7 @@ rule_activation(catalog::Scripts &scripts, react::RuleVersions &rules, react::Tr
   auto out = elaboration_detail::result(false);
   const auto before = elaboration_detail::activation_state(scripts);
   const auto changed = react::update_rule(
-      scripts, rules, triggers, subscriptions, queues, vm, values, allocations, id,
+      scripts, react_state, queues, vm, values, id,
       call.arguments.at("active").get<bool>() ? react::RuleMode::Enable : react::RuleMode::Disable,
       call.step, call.hz, call.origin, out.effects);
   if (changed)

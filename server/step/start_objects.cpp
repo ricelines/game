@@ -2,11 +2,16 @@
 
 namespace amber::step::start {
 std::vector<Handle> install_objects(const Json &plan, Symbols &symbols,
-                                    const catalog::Models &models,
-                                    const catalog::ParameterBlocks &parameters,
-                                    const catalog::Assets &assets, const react::Terms &terms,
-                                    Objects &objects, lifecycle::Parts &parts,
-                                    Relation &declared_parts, Step now) {
+                                    const amber::catalog::State &catalog_state,
+                                    const react::Terms &terms, amber::ObjectState &objects_state,
+                                    Step now) {
+  auto &models = catalog_state.models;
+  auto &parameters = catalog_state.parameters;
+  auto &assets = catalog_state.assets;
+  auto &objects = objects_state.objects;
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+
   std::vector<Handle> created;
   for (const auto &row : plan.at("objects")) {
     const auto model = symbols.models.at(row.at("model").get<std::string>());
@@ -45,10 +50,15 @@ std::vector<Handle> install_objects(const Json &plan, Symbols &symbols,
   }
   return created;
 }
-void install_properties(const Json &plan, const Symbols &symbols, const react::Terms &terms,
-                        react::Properties &properties, react::Processes &processes,
-                        react::InstanceSettings &instances, react::WorldSettings &world,
-                        react::PlotSettings &plots, Step now, double hz) {
+void install_properties(const Json &plan, const Symbols &symbols, amber::react::State &react_state,
+                        Step now, double hz) {
+  auto &terms = react_state.terms;
+  auto &properties = react_state.properties;
+  auto &processes = react_state.processes;
+  auto &instances = react_state.instance_settings;
+  auto &world = react_state.world_settings;
+  auto &plots = react_state.plot_settings;
+
   properties.resize(terms.rows.size());
   processes.resize(terms.rows.size());
   instances.columns.resize(terms.rows.size());

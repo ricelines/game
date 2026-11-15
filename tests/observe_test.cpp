@@ -1,5 +1,6 @@
 #include "space/space.hpp"
 #include "space_fixture.hpp"
+#include <toml++/toml.hpp>
 
 namespace ob = amber::observe;
 using namespace testspace;
@@ -15,14 +16,14 @@ void observation_geometry_and_live_light() {
   auto large = scene.box({10, 1, 10}, {10, 60, 0}, sp::Motion::Static, 0, false);
   auto held = scene.box({.2f, .2f, .2f}, {70, 70, 0}, sp::Motion::Static, 0, false);
   auto lamp = scene.box({.1f, .1f, .1f}, {0, 5, 3}, sp::Motion::Static, 0, false);
-  ob::Lights lights(8);
-  ob::ZoneAmbients ambients;
-  Relation parts;
+  amber::space::State space_state(8);
+  ob::Lights &lights = (space_state.lights = ob::Lights(8));
+
   ob::set_light(lights, {lamp, {0, 0, 0}, 100., 20, .1f}, transforms(scene.objects));
   ob::Settings settings{30, 1.5f, 256, 1, .1f, .1, 40, 8, 40};
   auto scan = [&]() {
-    return ob::scan(scene.space, identity(scene.objects), transforms(scene.objects), parts,
-                    {body, {0, 0, 1}, {0, 1, 0}, 1000}, held, settings, lights, ambients, {}, 1, 0);
+    return ob::scan(scene.space, scene.objects_state, {body, {0, 0, 1}, {0, 1, 0}, 1000}, held,
+                    settings, space_state, 1, 0);
   };
   auto first = scan();
   auto find = [](const auto &rows, Handle h) -> const ob::Seen * {
@@ -62,13 +63,12 @@ void far_salience_prefers_the_dome_over_nearer_chairs() {
     scene.box({.6f, .6f, 1.2f}, {float(i % 2 ? -10 : 10), 32.f + i * 1.4f, 0}, sp::Motion::Static,
               0, false);
   const auto dome = scene.box({20, 12, 15}, {0, 85, 0}, sp::Motion::Static, 0, false);
-  ob::Lights lights(8);
-  ob::ZoneAmbients ambients;
-  Relation parts;
+  amber::space::State space_state(8);
+  space_state.lights = ob::Lights(8);
+
   const ob::Settings settings{30, 1.5f, 256, 1, .1f, .1, 40, 8, 40};
-  const auto scan =
-      ob::scan(scene.space, identity(scene.objects), transforms(scene.objects), parts,
-               {body, {0, 0, 1}, {0, 1, 0}, 10}, {}, settings, lights, ambients, {}, 100, 0);
+  const auto scan = ob::scan(scene.space, scene.objects_state, {body, {0, 0, 1}, {0, 1, 0}, 10}, {},
+                             settings, space_state, 100, 0);
   const auto found =
       std::ranges::find_if(scan.far, [&](const auto &row) { return row.object == dome; });
   require(found != scan.far.end() && found->salience == ob::Seen::Salience::Large &&
@@ -138,9 +138,9 @@ void benchmark_inert_density() {
     auto config = settings();
     config.max_bodies = 110000;
     Scene scene(config);
-    Relation parts;
-    ob::Lights lights(8);
-    ob::ZoneAmbients zones;
+
+    amber::space::State space_state(8);
+    space_state.lights = ob::Lights(8);
     auto observer = scene.character({0, -2, 0});
     for (int i = 0; i < 12; ++i)
       scene.box({.3f, .3f, 1}, {float(i % 4) * 3 - 4.5f, float(i / 4) * 3 + 2, 0},
@@ -164,8 +164,8 @@ void benchmark_inert_density() {
     for (int i = 0; i < 200; ++i) {
       auto start = std::chrono::steady_clock::now();
       auto result =
-          ob::scan(scene.space, identity(scene.objects), transforms(scene.objects), parts,
-                   {observer, {0, -2, 1}, {0, 1, 0}, 10}, {}, settings, lights, zones, {}, 20, 0);
+          ob::scan(scene.space, scene.objects_state, {observer, {0, -2, 1}, {0, 1, 0}, 10}, {},
+                   settings, space_state, 20, 0);
       require(!result.things.empty(), "benchmark must perform actual geometry look");
       samples.push_back(
           std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)

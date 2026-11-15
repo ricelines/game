@@ -245,10 +245,16 @@ std::vector<std::uint64_t> take_dirty_views(ActiveViews &views) {
   views.dirty.clear();
   return out;
 }
-Scan scan(const space::Space &world, IdentityRead identity, TransformRead transforms,
-          const Relation &parts, const Observer &observer, Handle held, const Settings &settings,
-          const Lights &lights, const ZoneAmbients &ambients, std::span<const MotionSample> motion,
-          double world_lux, std::size_t requested) {
+Scan scan(const space::Space &world, const amber::ObjectState &objects_state,
+          const Observer &observer, Handle held, const Settings &settings,
+          amber::space::State &space_state, double world_lux, std::size_t requested) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(std::as_const(objects_state.objects));
+  auto &parts = objects_state.declared_parts;
+  auto &lights = space_state.lights;
+  auto &ambients = space_state.zones;
+  auto &motion = space_state.motion;
+
   Scan out;
   space::volumes_at(world, identity, observer.eye, space::VolumeKind::Zone, out.zones);
   std::vector<space::Nearby> nearby;

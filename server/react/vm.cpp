@@ -20,8 +20,7 @@ namespace {
 constexpr int handle_tag = 1, state_tag = 2, iterator_tag = 3;
 struct StateBinding {
   IdentityRead identity;
-  Properties &properties;
-  Processes &processes;
+  react::State &react_state;
   const Terms &terms;
 };
 struct RelationBinding {
@@ -704,11 +703,12 @@ void register_binding(Vm &vm, std::string_view name, int (*function)(lua_State *
     throw std::logic_error("register bindings before loading scripts");
   vm.impl_->bindings[std::string(name)] = {function, local.get(), std::move(local)};
 }
-void bind_values(Vm &vm, const ValueRead &values, Properties &properties, Processes &processes,
-                 SharedColumns &shared, GivesTo &gives_to) {
+void bind_values(Vm &vm, const ValueRead &values, State &react_state) {
+  auto &shared = react_state.shared;
+  auto &gives_to = react_state.gives_to;
   const auto read = std::make_shared<ValueRead>(values);
-  const auto state = std::make_shared<StateBinding>(
-      StateBinding{values.identity, properties, processes, values.terms});
+  const auto state =
+      std::make_shared<StateBinding>(StateBinding{values.identity, react_state, values.terms});
   const auto relations =
       std::make_shared<RelationBinding>(RelationBinding{values.relations, values.terms});
   const auto contribution = std::make_shared<ContributionBinding>(
@@ -1311,8 +1311,8 @@ int set_binding(lua_State *L) {
   if (!binding.identity.valid(target))
     luaL_error(L, "stale state target");
   try {
-    set_state(binding.properties, binding.processes, binding.terms.rows[id], target,
-              check_value(L, 3), inv.step, inv.hz, *inv.effects);
+    set_state(binding.react_state.properties, binding.react_state.processes, binding.terms.rows[id],
+              target, check_value(L, 3), inv.step, inv.hz, *inv.effects);
   } catch (const std::exception &e) {
     luaL_error(L, "%s", e.what());
   }
@@ -1335,9 +1335,8 @@ int rate_binding(lua_State *L) {
   if (!binding.identity.valid(target))
     luaL_error(L, "stale process target");
   try {
-    set_rate(binding.properties, binding.processes, binding.terms.rows[id], target,
-             luaL_checknumber(L, 3), luaL_checknumber(L, 4), luaL_checknumber(L, 5), inv.step,
-             inv.hz, *inv.effects);
+    set_rate(binding.react_state, binding.terms.rows[id], target, luaL_checknumber(L, 3),
+             luaL_checknumber(L, 4), luaL_checknumber(L, 5), inv.step, inv.hz, *inv.effects);
   } catch (const std::exception &e) {
     luaL_error(L, "%s", e.what());
   }

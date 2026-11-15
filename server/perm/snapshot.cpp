@@ -4,9 +4,15 @@
 
 namespace amber::perm {
 SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Handle> objects,
-                                    std::span<const PlayerId> actors, const Players &players,
-                                    const Plots &plots, const Groups &groups, const Grants &grants,
-                                    const Offers &offers, const Trades &trades) {
+                                    std::span<const PlayerId> actors,
+                                    const amber::perm::State &perm_state) {
+  auto &players = perm_state.players;
+  auto &plots = perm_state.plots;
+  auto &groups = perm_state.groups;
+  auto &grants = perm_state.grants;
+  auto &offers = perm_state.offers;
+  auto &trades = perm_state.trades;
+
   SnapshotSelection selected;
   selected.objects = snap::ObjectSelection(objects);
   selected.players.insert(actors.begin(), actors.end());

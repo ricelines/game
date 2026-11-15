@@ -17,13 +17,20 @@ step::NativeCompletion trade_open(perm::Trades &trades, const perm::Players &pla
       true, {{"trade", "trade:" + std::to_string(opened.trade)},
              {"players", {"p:" + std::to_string(who), "p:" + std::to_string(other)}}});
 }
-step::NativeCompletion trade_change(perm::Trades &trades, perm::Offers &offers,
-                                    PermissionFlags flags, const perm::Players &players,
-                                    const perm::Grants &grants, AuthorityRead authority,
-                                    const perm::OwnerLimits &limits, const space::Space &space,
-                                    IdentityRead identity, ParentRead parents,
-                                    const lifecycle::Parts &parts, const Relation &declared_parts,
+step::NativeCompletion trade_change(amber::perm::State &perm_state,
+                                    amber::ObjectState &objects_state, const space::Space &space,
                                     const step::NativeCall &call) {
+  auto &trades = perm_state.trades;
+  auto &offers = perm_state.offers;
+  auto flags = amber::permission_flags(objects_state.objects);
+
+  auto authority = amber::authority(std::as_const(objects_state.objects));
+  auto &limits = perm_state.owner_limits;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto parents = amber::parents(std::as_const(objects_state.objects));
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+
   const auto who = commerce_detail::player(call);
   const auto id = step::identifier(call.arguments.at("trade"), "trade:");
   const auto &trade = commerce_detail::trade_row(trades, id, who);
@@ -41,7 +48,7 @@ step::NativeCompletion trade_change(perm::Trades &trades, perm::Offers &offers,
       commerce_detail::check_custody(space, identity, parents, parts, {h, {}, in_world});
   }
   const auto changed = perm::change_trade(
-      trades, offers, flags, players, grants, id, who, item ? &item->root : nullptr,
+      perm_state, flags, id, who, item ? &item->root : nullptr,
       call.arguments.at("money").get<std::int64_t>(), in_world, call.step,
       item ? std::span<const perm::Target>{item->parts} : std::span<const perm::Target>{});
   if (!changed)
@@ -60,13 +67,23 @@ step::NativeCompletion trade_change(perm::Trades &trades, perm::Offers &offers,
   commerce_detail::record(out, call, "trade_change", std::move(affected), out.reply);
   return out;
 }
-step::NativeCompletion
-trade_confirm(perm::Trades &trades, perm::Offers &offers, perm::Ledger &ledger,
-              perm::Grants &grants, perm::Players &players, AuthorityWrite authority,
-              PermissionFlags flags, perm::OwnerLimits &limits, const space::Space &space,
-              IdentityRead identity, ParentRead parents, const lifecycle::Parts &parts,
-              const Relation &declared_parts, const DeliveryTargets &delivery,
-              const step::NativeCall &call) {
+step::NativeCompletion trade_confirm(amber::perm::State &perm_state,
+                                     amber::ObjectState &objects_state, const space::Space &space,
+                                     const DeliveryTargets &delivery,
+                                     const step::NativeCall &call) {
+  auto &trades = perm_state.trades;
+  auto &offers = perm_state.offers;
+
+  auto &grants = perm_state.grants;
+
+  auto authority = amber::authority(objects_state.objects);
+
+  auto &limits = perm_state.owner_limits;
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto parents = amber::parents(std::as_const(objects_state.objects));
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+
   const auto who = commerce_detail::player(call);
   const auto id = step::identifier(call.arguments.at("trade"), "trade:");
   const auto &trade = commerce_detail::trade_row(trades, id, who);
@@ -97,8 +114,7 @@ trade_confirm(perm::Trades &trades, perm::Offers &offers, perm::Ledger &ledger,
     spans[side] = part_targets[side];
   }
   const auto confirmed =
-      perm::confirm_trade(trades, offers, ledger, grants, players, authority, flags, limits, id,
-                          who, targets, bodies, call.step, spans);
+      perm::confirm_trade(perm_state, objects_state, id, who, targets, bodies, call.step, spans);
   if (!confirmed)
     return commerce_detail::denied(confirmed.reason, "confirm", "trade:" + std::to_string(id), who);
   auto out = commerce_detail::result(

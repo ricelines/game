@@ -20,10 +20,13 @@ template <class Fn> void rejects(Fn run, const char *message) {
   throw std::runtime_error(message);
 }
 struct Fixture {
-  react::Terms terms;
-  react::Materials materials;
-  react::RuleVersions rules;
-  MechanicalBindings bindings;
+  amber::react::State react_state;
+  amber::catalog::State catalog_state;
+
+  react::Terms &terms = react_state.terms;
+  react::Materials &materials = react_state.materials;
+  react::RuleVersions &rules = react_state.rules;
+  MechanicalBindings &bindings = catalog_state.mechanical;
   RuntimePins pins{"test-bake", "0.747", "ambergris-host-1", "5.6.0"};
   std::filesystem::path root = std::filesystem::current_path() / "catalog-test-artifacts";
   Fixture() {
@@ -104,12 +107,13 @@ struct Fixture {
 };
 void models_and_variants() {
   Fixture f;
-  Assets assets;
-  Models models;
-  Scripts scripts;
-  ModelTexts texts;
+  amber::catalog::State catalog_state;
+  Assets &assets = catalog_state.assets;
+  Models &models = catalog_state.models;
+  Scripts &scripts = catalog_state.scripts;
+  ModelTexts &texts = catalog_state.model_text;
   react::ModelSettings settings;
-  ParameterBlocks params;
+  ParameterBlocks &params = catalog_state.parameters;
   auto base = f.asset("same CAD program", "{\"height\":1.0}", 1, 0.5);
   auto variant = f.asset("same CAD program", "{\"height\":2.0}", 2, 1.5);
   const auto base_hash = base.hash, variant_hash = variant.hash;
@@ -129,16 +133,16 @@ void models_and_variants() {
   require(models.rows[a.root].author == 1 && models.rows[b.root].author == 2 &&
               texts.rows[b.root].name == "second",
           "submission attribution/text distinct");
-  const auto block = add_variant(params, models, texts, settings, assets, scripts, f.terms, a.root,
+  const auto block = add_variant(catalog_state, catalog_state, settings, f.terms, a.root,
                                  variant_hash, "{\"height\":2.0}");
   require(block != 0 && resolve_asset(models, params, a.root, block).hash == variant_hash,
           "global parameter block selects variant asset");
   rejects([&] { resolve_asset(models, params, b.root, block); },
           "another model's parameter block accepted");
-  require(add_variant(params, models, texts, settings, assets, scripts, f.terms, a.root,
-                      variant_hash, "{\"height\":2.0}") == block,
+  require(add_variant(catalog_state, catalog_state, settings, f.terms, a.root, variant_hash,
+                      "{\"height\":2.0}") == block,
           "same model/asset block interned");
-  react::AssetMeasurements measured;
+  react::AssetMeasurements &measured = catalog_state.baked_measurements;
   project_measurements(measured, a.root, 0, assets.rows.at(base_hash), {2, 3});
   project_measurements(measured, a.root, block, assets.rows.at(variant_hash), {2, 3});
   require(measured.rows.at(a.root).volume == 1 && measured.parameter_rows.at(block).volume == 2,
@@ -159,12 +163,13 @@ void models_and_variants() {
 }
 void topology_changing_variants() {
   Fixture f;
-  Assets assets;
-  Models models;
-  Scripts scripts;
-  ModelTexts texts;
+  amber::catalog::State catalog_state;
+  Assets &assets = catalog_state.assets;
+  Models &models = catalog_state.models;
+  Scripts &scripts = catalog_state.scripts;
+  ModelTexts &texts = catalog_state.model_text;
   react::ModelSettings settings;
-  ParameterBlocks params;
+  ParameterBlocks &params = catalog_state.parameters;
   auto base = f.asset("parameterized assembly", "{\"height\":1.0}", 1, 0);
   auto changed = f.asset("parameterized assembly", "{\"height\":2.0}", 0, 0);
   auto no_parts = f.asset("parameterized assembly", "{\"height\":3.0}", 0, 0);
@@ -201,8 +206,8 @@ void topology_changing_variants() {
   submission.created_s = 42;
   submission.text = {"assembly", {}, {}};
   auto registered = submit_model(models, texts, settings, assets, scripts, f.terms, submission);
-  auto variant = add_variant(params, models, texts, settings, assets, scripts, f.terms,
-                             registered.root, changed_hash, "{\"height\":2.0}");
+  auto variant = add_variant(catalog_state, catalog_state, settings, f.terms, registered.root,
+                             changed_hash, "{\"height\":2.0}");
   const auto &parts = part_models(models, params, registered.root, variant);
   require(parts.size() == 2 && parts.contains("new_leaf") && parts.contains("knob") &&
               !parts.contains("old_leaf"),
@@ -214,8 +219,8 @@ void topology_changing_variants() {
           "variant child identities retain original model attribution");
   require(assets.rows.at(resolve_asset(models, params, registered.root, variant).hash).volume == 0,
           "logical root transition preserves zero measured root mass");
-  auto empty = add_variant(params, models, texts, settings, assets, scripts, f.terms,
-                           registered.root, empty_hash, "{\"height\":3.0}");
+  auto empty = add_variant(catalog_state, catalog_state, settings, f.terms, registered.root,
+                           empty_hash, "{\"height\":3.0}");
   require(part_models(models, params, registered.root, empty).empty(),
           "all parts may disappear in another parameter variant");
   require(models.rows[registered.root].id == registered.root,

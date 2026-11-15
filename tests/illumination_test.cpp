@@ -41,20 +41,21 @@ void actual_lighting_watch_sampling() {
   const auto watcher = f.add(R"(return {kind='model',watches={'novel.result'},
     on={['novel.result']=function(self)end}})");
   f.bind(watcher, f.a);
-  ob::LightSubscriptions points(8);
-  ob::ActiveViews views(8);
+  space::State space_state(8);
+  auto &points = space_state.light_subscriptions;
+  auto &views = space_state.active_views;
   ob::track_view(views, 1, {30, 0, 1}, 1);
   ob::track_view(views, 2, {100, 0, 1}, 1);
   ob::take_dirty_views(views);
-  ob::Lights lights(8);
-  ob::ZoneAmbients zones;
+  auto &lights = space_state.lights;
+  auto &zones = space_state.zones;
   auto values = f.values();
   bi::IlluminationSources sources;
   f.models.rows.resize(4);
   f.objects.model[f.c.slot()] = 2;
   f.objects.model[zone.slot()] = 3;
-  catalog::ParameterBlocks parameters;
-  catalog::Assets assets;
+
+  auto &assets = f.catalog_state.assets;
   for (ModelId id = 1; id <= 3; ++id) {
     f.models.rows[id].id = id;
     f.models.rows[id].asset = std::to_string(id);
@@ -64,9 +65,8 @@ void actual_lighting_watch_sampling() {
       {"site", {0, 0, 0}}, {"intensity", "novel.heat"}, {"range", 40}};
   assets.rows["3"].manifest["bindings"]["zone"] = {{"ambient", "novel.ready"}, {"priority", 1}};
   auto install = [&](Handle object, Step now) {
-    bi::register_illumination(sources, lights, zones, points, views, world, transforms(f.objects),
-                              f.models, parameters, assets, values, std::span(&object, 1), .1f, now,
-                              20);
+    bi::register_illumination(sources, space_state, world, transforms(f.objects), f.catalog_state,
+                              values, std::span(&object, 1), .1f, now, 20);
   };
   install(f.c, 0);
   install(zone, 0);
@@ -89,8 +89,7 @@ void actual_lighting_watch_sampling() {
             "actual occluder move");
     space::StepResult physics;
     space::PhysicalRelations relations;
-    space::step(world, identity(f.objects), transforms(f.objects), parents(f.objects),
-                space_flags(f.objects), relations, 1, .05f, {}, physics);
+    space::step(world, f.objects_state, relations, 1, .05f, {}, physics);
     ob::dirty_geometry(points, lights, physics.dirty_bounds, &views);
   };
   move_wall({8, 0, 0});
@@ -100,13 +99,13 @@ void actual_lighting_watch_sampling() {
   require(near(sample(2), 12), "moving actual occluder away restores subscribed lux");
   const auto changed = [&](Handle object, TermId term, Step now) {
     const FactKey fact{object, term};
-    bi::illumination_values_changed(sources, lights, zones, points, views, world, values,
-                                    std::span(&fact, 1), now, 20);
+    bi::illumination_values_changed(sources, space_state, world, values, std::span(&fact, 1), now,
+                                    20);
   };
   const auto advance = [&](Step now) {
-    bi::advance_illumination(sources, lights, zones, points, views, world, values, now, 20);
+    bi::advance_illumination(sources, space_state, world, values, now, 20);
   };
-  re::set_rate(f.properties, f.processes, f.terms.rows[1], f.c, -9000, 0, 9000, 0, 20, f.effects);
+  re::set_rate(f.react_state, f.terms.rows[1], f.c, -9000, 0, 9000, 0, 20, f.effects);
   install(f.c, 0);
   require(sources.running_lights.contains(f.c.bits),
           "restored active light process is indexed without needing a new state mutation");
@@ -116,7 +115,7 @@ void actual_lighting_watch_sampling() {
   advance(20);
   require(sources.running_lights.empty() && near(sample(20), 2),
           "terminal process sample publishes darkness before stopping periodic work");
-  re::set_rate(f.properties, f.processes, f.terms.rows[1], f.c, 9000, 0, 9000, 20, 20, f.effects);
+  re::set_rate(f.react_state, f.terms.rows[1], f.c, 9000, 0, 9000, 20, 20, f.effects);
   changed(f.c, 1, 20);
   advance(30);
   require(!sources.running_lights.empty() && near(sample(30), 7),
@@ -126,7 +125,7 @@ void actual_lighting_watch_sampling() {
   f.state(zone, 5, 20, 40);
   changed(zone, 5, 40);
   require(near(sample(40), 30), "live zone ambient state invalidates its real sensor region");
-  re::set_rate(f.properties, f.processes, f.terms.rows[5], zone, 20, 0, 40, 40, 20, f.effects);
+  re::set_rate(f.react_state, f.terms.rows[5], zone, 20, 0, 40, 40, 20, f.effects);
   install(zone, 40);
   require(sources.running_zones.contains(zone.bits),
           "restored or rebound ambient process is indexed from current binding");
@@ -140,8 +139,7 @@ void actual_lighting_watch_sampling() {
                 relations, changes);
   bi::retire_illumination(sources, lights, zones, points, views, world, std::span(&zone, 1));
   space::StepResult physics;
-  space::step(world, identity(f.objects), transforms(f.objects), parents(f.objects),
-              space_flags(f.objects), relations, 61, .05f, {}, physics);
+  space::step(world, f.objects_state, relations, 61, .05f, {}, physics);
   ob::dirty_geometry(points, lights, physics.dirty_bounds);
   require(near(sample(61), 11), "removing real ambient sensor restores world ambient");
   bi::retire_illuminance_reads(points, f.runtime, 2, std::span(&f.a, 1));

@@ -1,5 +1,6 @@
 #include "space_fixture.hpp"
 #include "step/step.hpp"
+#include <toml++/toml.hpp>
 
 #include <chrono>
 
@@ -112,12 +113,10 @@ int main(int argc, char **argv) {
     const auto visible = scene.box({1, 1, 2}, {0, 5, 0});
     const auto far = scene.box({12, 2, 10}, {10, 60, 0}, space::Motion::Static, 0, false);
     const auto held = scene.box({.2f, .2f, .2f}, {2, 0, 0}, space::Motion::Dynamic, 0, false);
-    std::vector<space::RelationChange> changes;
-    require(space::attach(scene.space, identity(scene.objects), transforms(scene.objects),
-                          parents(scene.objects), space_flags(scene.objects),
-                          scene.relations.contains, scene.relations.supports,
-                          scene.relations.attached_to, {held, body, {{0, .3f, 1}, {}}, true},
-                          changes)
+    auto &space_state = scene.space_state;
+
+    require(space::attach(scene.space, scene.objects_state, scene.space_state,
+                          {held, body, {{0, .3f, 1}, {}}, true})
                     .status == space::Status::Ok,
             "actual grasp for held observation");
     scene.objects.owner[body.slot()] = 2;
@@ -126,7 +125,8 @@ int main(int argc, char **argv) {
     scene.objects.model[held.slot()] = 4;
     for (const auto h : {body, visible, far, held})
       scene.objects.material[h.slot()] = 2;
-    react::Terms terms;
+    amber::react::State react_state;
+    react::Terms &terms = react_state.terms;
     terms.rows.resize(17);
     for (TermId id = 1; id < 5; ++id) {
       terms.rows[id].id = id;
@@ -150,15 +150,16 @@ int main(int argc, char **argv) {
     terms.rows[3].inputs = {{"amount", react::InputType::Number, 1, false},
                             {"note", react::InputType::String, 0, true}};
     terms.rows[4].kind = react::Kind::Event;
-    react::Materials materials;
-    react::AssetMeasurements measurements;
-    react::Properties properties(17);
-    react::Processes processes(17);
-    react::InstanceSettings settings;
-    react::ModelSettings model_settings;
-    react::PlotSettings plot_settings;
-    react::WorldSettings world;
-    react::SharedColumns shared(17);
+    react::Materials &materials = react_state.materials;
+    amber::catalog::State catalog_state;
+    react::AssetMeasurements &measurements = catalog_state.baked_measurements;
+    react::Properties &properties = (react_state.properties = react::Properties(17));
+    react::Processes &processes = (react_state.processes = react::Processes(17));
+    react::InstanceSettings &settings = react_state.instance_settings;
+    react::ModelSettings &model_settings = react_state.model_settings;
+    react::PlotSettings &plot_settings = react_state.plot_settings;
+    react::WorldSettings &world = react_state.world_settings;
+    react::SharedColumns &shared = (react_state.shared = react::SharedColumns(17));
     settings.columns.resize(17);
     settings.columns[6].set(visible.slot(), Value(0.0));
     model_settings.rows[1][7] = Value(7.0);
@@ -173,8 +174,8 @@ int main(int argc, char **argv) {
     shared[13].set(visible.slot(), react::Shared{13.0, {{held, 13.0}}});
     materials.rows[2][15] = Value(15.0);
     measurements.rows[1].volume = 1;
-    react::RelationsRead relations;
-    react::RuntimeMeasurements runtime;
+    react::RelationsRead &relations = react_state.relations;
+    react::RuntimeMeasurements &runtime = react_state.runtime_measurements;
     const react::ValueRead values{terms,
                                   identity(scene.objects),
                                   scene.objects.plot,
@@ -191,10 +192,10 @@ int main(int argc, char **argv) {
                                   relations,
                                   runtime,
                                   0};
-    catalog::Models models;
+    catalog::Models &models = catalog_state.models;
     models.rows.resize(5);
-    catalog::Assets assets;
-    catalog::ParameterBlocks parameters;
+    catalog::Assets &assets = catalog_state.assets;
+    catalog::ParameterBlocks &parameters = catalog_state.parameters;
     for (ModelId id = 1; id < 5; ++id) {
       const auto hash = catalog::sha256(std::to_string(id));
       catalog::Asset asset;
@@ -219,17 +220,18 @@ int main(int argc, char **argv) {
       models.rows[id].material = 2;
       models.rows[id].script = 1;
     }
-    catalog::ModelTexts model_text;
+    catalog::ModelTexts &model_text = catalog_state.model_text;
     model_text.rows[1] = {"Claimed giant", "Maker text does not alter measured dimensions", ""};
-    catalog::InstanceTexts instance_text;
-    catalog::Scripts scripts;
+
+    catalog::Scripts &scripts = catalog_state.scripts;
     const react::VmSettings vm_settings{4096, 50, 5, 64};
     react::Vm vm(vm_settings);
-    observe::Hearing hearing;
-    const std::vector<observe::Listener> listeners{{11, body, {0, 0, 1.55f}},
-                                                   {12, body, {100, 100, 0}}};
-    react::GivesTo gives_to;
-    react::bind_values(vm, values, properties, processes, shared, gives_to);
+    observe::Hearing &hearing = space_state.hearing;
+    std::vector<observe::Listener> &listeners =
+        (space_state.listeners =
+             std::vector<observe::Listener>{{11, body, {0, 0, 1.55f}}, {12, body, {100, 100, 0}}});
+
+    react::bind_values(vm, values, react_state);
     auto prepared = catalog::prepare_script(
         R"(return {kind='model',actions={['test.t3']={right='use'}},on={
       ['test.t3']=function(self) end,
@@ -247,16 +249,16 @@ int main(int argc, char **argv) {
     require(react::load_script(vm, compiled, scripts.rows[1].declaration).status ==
                 react::RunOutcome::Status::Ok,
             "real VM module load");
-    react::InstanceScripts installed;
-    react::NativeActions native;
+
+    react::NativeActions &native = react_state.native_declarations;
     react::declare_native(
         native, terms, "engine.example", "An actual native descriptor", "", false,
         {{"type", "object"},
          {"required", {"amount"}},
          {"properties", {{"amount", {{"type", "integer"}}}, {"note", {{"type", "string"}}}}}},
         react::WritingAction::EditText);
-    const std::vector<TermId> inspected{1, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
-    catalog::AuthoredTexts authored_texts;
+    react_state.inspection_terms = {1, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    catalog::AuthoredTexts &authored_texts = catalog_state.authored_text;
     const auto detail_id = catalog::append_authored_text(
         authored_texts, visible, 1, 12, catalog::AuthoredTextKind::Detail, "A worn brass edge");
     catalog::append_authored_text(authored_texts, visible, 1, 13,
@@ -267,20 +269,16 @@ int main(int argc, char **argv) {
                                   Handle::make(visible.slot(), visible.generation() + 1), 1, 15,
                                   catalog::AuthoredTextKind::Detail, "Different generation");
     vi::SessionViews views;
-    observe::ActiveViews active(8);
-    observe::Lights lights(8);
-    observe::ZoneAmbients zones;
-    const std::vector<observe::MotionSample> motion;
+    observe::ActiveViews &active = (space_state.active_views = observe::ActiveViews(8));
+    space_state.lights = observe::Lights(8);
+
     step::Intents intents;
-    Relation parts;
+
     Step now = 0;
     const observe::Settings perception{30, 1.5f, 256, 1, .1f, .1, 40, 8, 40};
     const auto look = [&](const net::Invocation &request) {
-      return vi::read_look(models, parameters, assets, scripts, model_text, instance_text,
-                           installed, native, values, inspected, authored_texts, views, active,
-                           hearing, scene.space, transforms(scene.objects), parts,
-                           scene.relations.attached_to, lights, zones, motion, intents, perception,
-                           now, 20, 120, request);
+      return vi::read_look(catalog_state, react_state, values, views, space_state, scene.space,
+                           scene.objects_state, intents, perception, now, 20, 120, request);
     };
     net::Invocation call;
     call.session = 11;
@@ -293,13 +291,14 @@ int main(int argc, char **argv) {
                 first["player_actions"] ==
                     Json::array({"engine.example(amount: integer, note?: string)"}),
             "full observation omitted one-line authored/native input signatures");
-    perm::Players players;
+    amber::perm::State perm_state;
+    perm::Players &players = perm_state.players;
     players.rows.resize(4);
-    perm::Grants grants;
-    perm::OwnerLimits limits;
+    perm::Grants &grants = perm_state.grants;
+
     const auto offered = [&](const net::Invocation &request) {
-      return vi::read_actions(models, scripts, installed, native, values, views, hearing, 10, 40,
-                              authority(scene.objects), limits, players, grants, now, request);
+      return vi::read_actions(catalog_state, react_state, values, views, hearing, 10, 40,
+                              authority(scene.objects), perm_state, now, request);
     };
     auto action_call = call;
     action_call.request.fields = {{"name", "test.t3"}};
@@ -445,8 +444,8 @@ int main(int argc, char **argv) {
     require(rewritten_row && (*rewritten_row)["elaborated"][0]["text"] == "A polished brass edge" &&
                 (*rewritten_row)["says"]["name"] == "Claimed giant",
             "same-step detail rewrite remained hidden behind an unchanged observation row");
-    react::ScriptStates states;
-    react::RuleVersions rules;
+    react::ScriptStates &states = react_state.states;
+    react::RuleVersions &rules = react_state.rules;
     react::DeferredEffects effects;
     react::Invocation invocation;
     invocation.self = {visible, 1};
@@ -456,18 +455,14 @@ int main(int argc, char **argv) {
                 react::RunOutcome::Status::Ok,
             "actual VM changes inspected object's own state");
     scripts.rows[1].source = "verified public source";
-    perm::Plots plots;
+    perm::Plots &plots = perm_state.plots;
     plots.rows.push_back({1, 2, 0, 0, {80, 30, 90, 40}, {}});
     plots.rows.push_back({2, 3, 0, 0, {-20, -10, -10, 0}, {}});
     plots.rows.push_back({3, 2, 0, 0, {95, 30, 105, 40}, {}});
-    perm::Groups groups;
-    perm::Ledger ledger;
+
     const auto inspect = [&](const net::Invocation &request) {
-      return vi::read_inspect(models, parameters, assets, scripts, model_text, instance_text,
-                              installed, native, values, inspected, authored_texts, views, hearing,
-                              transforms(scene.objects), authority(std::as_const(scene.objects)),
-                              parents(scene.objects), attribution(scene.objects), relations, limits,
-                              players, grants, plots, ledger, now, 20, 40, states, rules, request);
+      return vi::read_inspect(catalog_state, react_state, values, views, hearing,
+                              scene.objects_state, perm_state, now, 20, 40, request);
     };
     auto grant_call = call;
     grant_call.request.fields = {{"target", "grants"}};

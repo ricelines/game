@@ -17,10 +17,9 @@ bool declared_descendant(const Relation &, IdentityRead, Handle root, Handle chi
 record::Event structural_record(const NativeCall &, record::Kind, std::string, std::vector<Handle>);
 void completed_effects(NativeCompletion &, react::DeferredEffects);
 space::Pose relative_pose(TransformRead, Handle subject, Handle parent);
-record::Event birth_record(const NativeCall &, Handle, IdentityRead, const std::vector<PlayerId> &,
-                           const std::vector<PlotId> &, const std::vector<std::uint32_t> &,
-                           PlayerId maker, AttributionRead, const catalog::Models &,
-                           const catalog::Scripts &);
+record::Event birth_record(const NativeCall &, Handle, const amber::ObjectState &objects_state,
+                           const std::vector<PlayerId> &, const std::vector<PlotId> &,
+                           PlayerId maker, const amber::catalog::State &catalog_state);
 // Scratch geometry for this one writer invocation; no owner references or callbacks.
 struct ReplacementGeometry {
   lifecycle::Replacement rows;
@@ -34,18 +33,16 @@ struct ReplacementGeometry {
   std::size_t sensors = 0;
   bool in_scene = false, promote = false;
 };
-ReplacementGeometry replacement_geometry(const space::Space &, const lifecycle::Parts &,
-                                         IdentityRead, TransformRead, ParentRead,
+ReplacementGeometry replacement_geometry(const space::Space &,
+                                         const amber::ObjectState &objects_state,
                                          const std::vector<PlotId> &, const GeometryAssets &,
-                                         const catalog::Models &, const catalog::ParameterBlocks &,
-                                         const catalog::Assets &, const react::ValueRead &,
-                                         PhysicsRoles, PhysicsDefaults, const NativeCall &,
-                                         lifecycle::Replacement, bool preserve_defaults = false);
-void rebuild_instances(Objects &, lifecycle::Parts &, Relation &, space::Space &, TransformWrite,
-                       ParentWrite, SpaceFlags, space::PhysicalRelations &,
-                       std::vector<space::RelationChange> &, PlotWrite, const perm::Plots &,
-                       AuthorityRead, AttributionRead, const catalog::Models &,
-                       const catalog::Scripts &, const react::ValueRead &,
-                       std::span<ReplacementGeometry *>, const space::AssemblyEdit &,
-                       PlayerId maker, const NativeCall &, NativeCompletion &);
+                                         const amber::catalog::State &catalog_state,
+                                         const react::ValueRead &, PhysicsRoles, PhysicsDefaults,
+                                         const NativeCall &, lifecycle::Replacement,
+                                         bool preserve_defaults = false);
+void rebuild_instances(amber::ObjectState &objects_state, space::Space &,
+                       amber::space::State &space_state, const perm::Plots &,
+                       const amber::catalog::State &catalog_state, std::span<ReplacementGeometry *>,
+                       const space::AssemblyEdit &, PlayerId maker, const NativeCall &,
+                       NativeCompletion &);
 } // namespace amber::step::structural_detail

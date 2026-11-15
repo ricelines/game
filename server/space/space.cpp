@@ -1024,9 +1024,15 @@ OperationResult can_custody(const Space &space, IdentityRead identity, Handle ob
       std::ranges::any_of(n.volumes, [&](const Volume &v) { return member(v.spec.owner); });
   return can_release_occupants(space, object, descendants, retiring_body);
 }
-OperationResult custody(Space &space, IdentityRead identity, Handle object, Handle custodian,
-                        ParentWrite parents, SpaceFlags flags, PhysicalRelations &relations,
-                        std::vector<RelationChange> &changes, std::span<const Handle> descendants) {
+OperationResult custody(Space &space, amber::ObjectState &objects_state, Handle object,
+                        Handle custodian, amber::space::State &space_state,
+                        std::span<const Handle> descendants) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto parents = amber::parents(objects_state.objects);
+  auto flags = amber::space_flags(objects_state.objects);
+  auto &relations = space_state.physical_relations;
+  auto &changes = space_state.relation_changes;
+
   const auto checked = can_custody(space, identity, object, custodian, parents, descendants);
   if (checked.status != Status::Ok)
     return checked;
@@ -1259,10 +1265,18 @@ double illuminance(const Space &space, IdentityRead identity, Handle receiver, V
   }
   return result;
 }
-OperationResult attach(Space &space, IdentityRead identity, TransformWrite transforms,
-                       ParentWrite parents, SpaceFlags flags, Edges &contains, Edges &supports,
-                       Edges &attached_to, const Attachment &attachment,
-                       std::vector<RelationChange> &changes, CauseToken cause) {
+OperationResult attach(Space &space, amber::ObjectState &objects_state,
+                       amber::space::State &space_state, const Attachment &attachment,
+                       CauseToken cause) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(objects_state.objects);
+  auto parents = amber::parents(objects_state.objects);
+  auto flags = amber::space_flags(objects_state.objects);
+  auto &contains = space_state.physical_relations.contains;
+  auto &supports = space_state.physical_relations.supports;
+  auto &attached_to = space_state.physical_relations.attached_to;
+  auto &changes = space_state.relation_changes;
+
   auto &n = *space.native;
   auto *body = get(n, identity, attachment.subject);
   if (n.compound_parent.contains(attachment.subject.bits))
@@ -1318,10 +1332,15 @@ OperationResult attach(Space &space, IdentityRead identity, TransformWrite trans
     n.dirty_objects.insert(attachment.subject.bits);
   return {Status::Ok, {}};
 }
-OperationResult detach(Space &space, IdentityRead identity, TransformWrite transforms,
-                       ParentWrite parents, SpaceFlags flags, Edges &attached_to,
-                       const Release &release, std::vector<RelationChange> &changes,
-                       CauseToken cause) {
+OperationResult detach(Space &space, amber::ObjectState &objects_state,
+                       amber::space::State &space_state, const Release &release, CauseToken cause) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(objects_state.objects);
+  auto parents = amber::parents(objects_state.objects);
+  auto flags = amber::space_flags(objects_state.objects);
+  auto &attached_to = space_state.physical_relations.attached_to;
+  auto &changes = space_state.relation_changes;
+
   auto &n = *space.native;
   auto *body = get(n, identity, release.subject);
   if (n.compound_parent.contains(release.subject.bits))
@@ -1483,9 +1502,13 @@ SweepMove translate(Space &space, IdentityRead identity, TransformWrite transfor
   return {cast ? Status::Obstructed : Status::Ok, actual, cast};
 }
 
-void step(Space &space, IdentityRead identity, TransformWrite transforms, ParentWrite parents,
-          SpaceFlags flags, PhysicalRelations &relations, Step now, float seconds,
-          std::span<const MoveRequest> requests, StepResult &out) {
+void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &relations, Step now,
+          float seconds, std::span<const MoveRequest> requests, StepResult &out) {
+  auto identity = amber::identity(std::as_const(objects_state.objects));
+  auto transforms = amber::transforms(objects_state.objects);
+  auto parents = amber::parents(objects_state.objects);
+  auto flags = amber::space_flags(objects_state.objects);
+
   ZoneScopedN("physics and navigation");
   ZoneValue(requests.size());
   auto &n = *space.native;

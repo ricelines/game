@@ -10,12 +10,16 @@ void require(bool value, const char *message) {
     throw std::runtime_error(message);
 }
 struct Fixture {
-  Objects objects;
-  react::Terms terms;
-  catalog::Models models;
-  catalog::Scripts scripts;
+  amber::ObjectState objects_state;
+  amber::react::State react_state;
+  amber::catalog::State catalog_state;
+
+  Objects &objects = objects_state.objects;
+  react::Terms &terms = react_state.terms;
+  catalog::Models &models = catalog_state.models;
+  catalog::Scripts &scripts = catalog_state.scripts;
   react::InstalledScripts installed;
-  react::NativeActions native;
+  react::NativeActions &native = react_state.native_declarations;
   Handle body, target;
   Fixture() {
     for (auto name : {"invented.turn", "invented.unanswered", "invented.signal"}) {

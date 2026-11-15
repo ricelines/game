@@ -26,8 +26,7 @@ void run(unsigned unrelated) {
   for (unsigned i = 1; i <= count; ++i) {
     react::DeferredEffects effects;
     react::set_contribution(f.shared, gives, f.terms.rows[4], f.c, f.a, i, effects);
-    react::sync_rule_watches(f.subscriptions, f.values(), f.allocations, f.scripts, f.rules,
-                             effects.ordered, i, 20, {});
+    react::sync_rule_watches(f.react_state, f.values(), f.scripts, effects.ordered, i, 20, {});
     const auto plans = f.changed({f.a, 4}, i);
     test_runtime::require(plans.size() == 1, "benchmark must admit the actual term-fallback rule");
     f.effects = {};
