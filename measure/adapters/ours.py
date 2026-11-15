@@ -35,7 +35,7 @@ class Adapter:
             actor = record.get("actor", record.get("maker", "system"))
             identity = record.get("id")
             roots[identity] = actor
-            when = float(record.get("time_s", record.get("t", record.get("step", 0) / step_hz)))
+            when = record["step"] / step_hz
             things = record.get("things", [])
             target = things[0] if things else None
             if kind == "create" and record.get("of") in ("model", "script"):
@@ -65,11 +65,6 @@ class Adapter:
                 # That is absent optional metadata in S11, not a numeric value.
                 if field in record and not (field == "oldest" and record[field] is None):
                     event[field] = record[field]
-            # S7 diagnostics can omit result while explicitly reporting no stored
-            # change. Preserve chosen attempts and explicit outcomes, but do not
-            # turn such diagnostics into applied changes via S11's missing default.
-            if record.get("changed") is False and record.get("result") is None:
-                event["result"] = "no_effect"
             event["root_actor"] = roots.get(record.get("root"), actor)
             if kind == "speech":
                 event["class"] = "speak"
@@ -79,4 +74,6 @@ class Adapter:
                 event["class"] = "move"
             else:
                 event["class"] = "change"
+                if record.get("changed") is not True and record.get("result") in (None, "applied"):
+                    event["result"] = "no_effect"
             yield event

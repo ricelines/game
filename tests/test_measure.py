@@ -107,6 +107,7 @@ def test_s7_handlers_are_not_chosen_and_submitted_model_is(tmp_path):
             "model": "m:1",
             "actor": "a",
             "result": "applied",
+            "changed": True,
             "authors": ["a"],
         }
     ]
@@ -119,6 +120,7 @@ def test_s7_handlers_are_not_chosen_and_submitted_model_is(tmp_path):
             "name": "author.switch",
             "things": ["o:1.1"],
             "result": "applied",
+            "changed": True,
             "root": 2,
             "authors": ["a", "b"],
         }
@@ -132,6 +134,7 @@ def test_s7_handlers_are_not_chosen_and_submitted_model_is(tmp_path):
             "name": "arbitrary.reaction",
             "things": ["o:2.1"],
             "result": "applied",
+            "changed": True,
             "root": 2,
             "authors": ["a", "b"],
         }
@@ -162,6 +165,7 @@ def test_s7_nullable_oldest_uses_unchanged_frozen_metadata_fallback(tmp_path):
             "authors": ["a"],
             "oldest": None,
             "result": "applied",
+            "changed": True,
         },
         {
             "id": 2,
@@ -175,6 +179,7 @@ def test_s7_nullable_oldest_uses_unchanged_frozen_metadata_fallback(tmp_path):
             "cause": None,
             "root": None,
             "result": None,
+            "changed": True,
         },
         {
             "id": 3,
@@ -186,6 +191,7 @@ def test_s7_nullable_oldest_uses_unchanged_frozen_metadata_fallback(tmp_path):
             "authors": ["a", "b"],
             "oldest": 0,
             "result": "applied",
+            "changed": True,
         },
     ]
     source.write_text("\n".join(json.dumps(row) for row in records))
@@ -261,9 +267,9 @@ def test_s7_explicit_unchanged_diagnostics_are_not_applied_changes(tmp_path):
     rows = list(adapter.events())
     assert [row["result"] for row in rows[:3]] == ["no_effect"] * 3
     assert rows[2]["agent"] is True and rows[2]["class"] == "change"
-    assert rows[4]["result"] == "applied" and rows[5]["result"] == "denied"
+    assert rows[4]["result"] == "no_effect" and rows[5]["result"] == "denied"
     report = compute(adapter.info(), rows)
-    assert report["counts"]["C"] == 2 and report["counts"]["CA"] == 1
+    assert report["counts"]["C"] == 1 and report["counts"]["CA"] == 0
     assert report["counts"]["agent_events"] == 3
 
 
