@@ -9,13 +9,14 @@ from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 
+from measure.config import WIKI_BOOTSTRAPS, WIKI_WORLDS
 from measure.wiki_sources import PublicAPI, category_universe, write_json
 
 SEED = 20261115
 METHOD = {
     "mode": "complete-universe-uniform-rejection-v1",
     "seed": SEED,
-    "worlds": 40,
+    "worlds": WIKI_WORLDS,
     "universe": "Every row of the complete English category SQL table, snapshot20261101",
     "draw": "Python Random(seed).randrange(1,N+1); discard duplicate ordinals; retain draw order",
     "eligibility": "500..5000 distinct namespace0 nonredirect pages at category depths0,1,2",
@@ -23,14 +24,14 @@ METHOD = {
     "rejection": (
         "Leaf categoryinfo pages upper bound <500, or complete closure <500, or >5000 proven"
     ),
-    "selection": "First40 eligible distinct draws; no outcome data consulted",
+    "selection": f"First{WIKI_WORLDS} eligible distinct draws; no outcome data consulted",
     "complete_eligible_frame_enumerated": False,
     "historical_views": (
         "2024 all-access user daily views; align titles to historical page identity"
     ),
     "weeks": "2024-01-01 +7days, including final2-day partial period",
     "statistic": "Spearman(delta measure,delta log summed pageviews), pooled worlds",
-    "bootstrap": "1000 fixed-seed resamples of worlds,95% interval",
+    "bootstrap": f"{WIKI_BOOTSTRAPS} fixed-seed resamples of worlds,95% interval",
     "talk_pages": (
         "Not added: category world consists of articles, not their uncategorized talk pages"
     ),
@@ -120,7 +121,7 @@ def sample(directory):
     selected, distinct = [], set()
     ordinals = iter(draw_ordinals(universe["categories"]))
     started = time.monotonic()
-    while len(selected) < 40:
+    while len(selected) < WIKI_WORLDS:
         batch = []
         for _index in range(50):
             try:
@@ -134,7 +135,9 @@ def sample(directory):
                 title = None
             batch.append((ordinal, title, row[0].hex()))
         if not batch:
-            raise ValueError("Complete candidate universe exhausted before40 eligible worlds")
+            raise ValueError(
+                f"Complete candidate universe exhausted before {WIKI_WORLDS} eligible worlds"
+            )
         new = [title for ordinal, title, _raw in batch if ordinal not in existing and title]
         information, info_proof = category_info(api, new) if new else ({}, None)
         for ordinal, title, raw in batch:
@@ -202,7 +205,7 @@ def sample(directory):
                     ),
                     flush=True,
                 )
-                if len(selected) == 40:
+                if len(selected) == WIKI_WORLDS:
                     break
         print(
             json.dumps(

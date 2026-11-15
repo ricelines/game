@@ -718,3 +718,41 @@ def test_history_only_uses_real_78_column_adapter_without_readership(tmp_path):
     assert actual["periods"][2]["counts"]["events"] == 0
     assert actual["periods"][50]["counts"]["events"] == 1
     assert actual["periods"][52]["counts"]["events"] == 0
+
+
+def test_acquisition_and_replay_follow_shared_sample_configuration(tmp_path, monkeypatch):
+    import importlib
+
+    from measure import config, wiki_history, wiki_sample, wiki_study, wiki_views
+
+    modules = (wiki_history, wiki_sample, wiki_study, wiki_views)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(config, "WIKI_WORLDS", 2)
+            patch.setattr(config, "WIKI_BOOTSTRAPS", 7)
+            for module in modules:
+                importlib.reload(module)
+            write_json(
+                tmp_path / "selected.json",
+                {
+                    "selected": [
+                        {"article_ids": [1], "article_titles": {"1": "A"}},
+                        {"article_ids": [2], "article_titles": {"2": "B"}},
+                    ]
+                },
+            )
+            assert wiki_views.selected_pages(tmp_path) == {"1": "A", "2": "B"}
+            # The configured sample passes the count gate and reaches the source check.
+            with pytest.raises(ValueError, match="All12"):
+                wiki_history.filter_histories(tmp_path, tmp_path / "selected.json", 1)
+            with pytest.raises(ValueError, match="requires 2"):
+                wiki_study.verify_draws([], 10, None, None)
+            assert wiki_sample.METHOD["worlds"] == 2
+            assert wiki_sample.METHOD["selection"].startswith("First2 ")
+            assert wiki_sample.METHOD["bootstrap"].startswith("7 ")
+            write_json(tmp_path / "selected.json", {"selected": []})
+            with pytest.raises(ValueError, match="completed 2-world"):
+                wiki_views.selected_pages(tmp_path)
+    finally:
+        for module in modules:
+            importlib.reload(module)

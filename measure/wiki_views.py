@@ -10,6 +10,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from measure.config import WIKI_WORLDS
 from measure.wiki_sources import PublicAPI, sha256, write_json
 
 START = datetime(2024, 1, 1, tzinfo=UTC).timestamp()
@@ -33,8 +34,8 @@ def timestamp(value):
 
 def selected_pages(directory):
     record = json.loads((directory / "selected.json").read_text())
-    if len(record["selected"]) != 40:
-        raise ValueError("Readership acquisition requires the completed40-world draw")
+    if len(record["selected"]) != WIKI_WORLDS:
+        raise ValueError(f"Readership acquisition requires the completed {WIKI_WORLDS}-world draw")
     return {
         str(key): title
         for world in record["selected"]
@@ -304,7 +305,7 @@ def main():
     # Waiting does not turn a failed or partial draw into a complete one.
     while options.wait_for_sample:
         path = options.output / "selected.json"
-        if path.exists() and len(json.loads(path.read_text())["selected"]) == 40:
+        if path.exists() and len(json.loads(path.read_text())["selected"]) == WIKI_WORLDS:
             break
         time.sleep(30)
     pages = selected_pages(options.output)

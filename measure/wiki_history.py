@@ -10,6 +10,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from measure.config import WIKI_WORLDS
 from measure.wiki_sources import download, sha256, write_json
 
 HISTORY_SIZES = [
@@ -121,8 +122,8 @@ def filter_month(source, output, pages):
 def filter_histories(directory, selection, workers):
     directory = Path(directory)
     chosen = json.loads(Path(selection).read_text())["selected"]
-    if len(chosen) != 40:
-        raise ValueError("History projection requires all40 fixed sampled worlds")
+    if len(chosen) != WIKI_WORLDS:
+        raise ValueError(f"History projection requires all {WIKI_WORLDS} fixed sampled worlds")
     pages = {str(page) for world in chosen for page in world["article_ids"]}
     files = sorted(directory.glob("2026-10.enwiki.2024-*.tsv.bz2"))
     if len(files) != 12:

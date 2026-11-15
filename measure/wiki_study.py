@@ -9,6 +9,7 @@ from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from measure.config import WIKI_WORLDS
 from measure.wiki_history import COLUMNS, build_creation_records, build_existence
 from measure.wiki_sample import METHOD, closure, draw_ordinals
 from measure.wiki_sources import API, CATEGORY_SOURCE, sha256, write_json
@@ -77,7 +78,7 @@ def recorded_info(api, key, title):
     return counts
 
 
-def verify_draws(records, population, title_at, api, *, worlds=40):
+def verify_draws(records, population, title_at, api, *, worlds=WIKI_WORLDS):
     """Verify the exact deterministic prefix and every eligibility decision from raw proofs."""
     accepted, reasons = [], Counter()
     ordinals = draw_ordinals(population)
