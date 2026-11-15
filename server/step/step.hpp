@@ -974,3 +974,26 @@ step::NativeCompletion hold_goods(perm::Players &players, const perm::Grants &gr
 void declare_hold_goods_action(react::Terms &terms, react::NativeActions &declarations);
 std::string validate_hold_goods(const nlohmann::json &input);
 } // namespace amber::step
+
+namespace amber::step {
+struct State {
+  WorkQueues queues;
+  TimerWheel timers;
+  Intents intents;
+  Inputs inputs;
+  std::vector<IntentEnding> intent_endings;
+  Clock clock;
+  GeometryAssets geometry;
+  MechanicalCauses mechanical_causes;
+  TravelAccess travel_access;
+  DeliveryTargets delivery;
+  AssemblyMasses masses;
+  IlluminationSources illumination_sources;
+  NavigationRequests navigation_requests;
+  std::vector<FactKey> mutated;
+  std::vector<GapDraft> gaps;
+  std::vector<TermId> inspection_terms;
+  checkpoint::SnapshotProgress snapshot_progress;
+  explicit State(std::size_t authors_max) : mechanical_causes(authors_max) {}
+};
+} // namespace amber::step

@@ -47,18 +47,27 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   }
   const auto settings = read_settings(launch.config);
   const auto hz = settings.clock.step_hz;
+  ObjectState objects_state;
+  catalog::State catalog_state;
+  react::State react_state;
+  perm::State perm_state;
+  elaborate::State elaborate_state;
+  net::State net_state(settings.network);
+  space::State space_state(settings.space, settings.light_cell_m);
+  step::State step_state(settings.authors_max);
+
   const auto plan = start::read_plan(launch.plan);
   std::filesystem::create_directories(launch.data);
-  react::Terms terms;
-  react::Materials materials;
-  catalog::MechanicalBindings mechanical;
+  auto &terms = react_state.terms;
+  auto &materials = react_state.materials;
+  auto &mechanical = catalog_state.mechanical;
   snap::Buffer restored_bytes;
   std::optional<snap::View> restored;
   const auto catalog_root =
       launch.catalog.empty()
           ? (restore_path.empty() ? launch.data : restore_path.parent_path().parent_path())
           : launch.catalog;
-  catalog::RegistryDocument registry;
+  auto &registry = catalog_state.registry;
   if (restore_path.empty()) {
     registry = start::load_registry(plan, launch.data / "registry", terms, materials, mechanical);
   } else {
@@ -75,7 +84,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     fixture::extend_vocabulary(terms, materials, mechanical, catalog_root / "registry",
                                launch.candidate_registry);
 
-  react::NativeActions native_declarations;
+  auto &native_declarations = react_state.native_declarations;
   editing::declare_editing(terms, native_declarations);
   declare_commerce(terms, native_declarations);
   declare_admin(terms, native_declarations);
@@ -92,36 +101,36 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       role("relations", "contains"), role("relations", "supports"),
       role("relations", "attached_to"), role("relations", "in_zone")};
   const auto registry_directory = launch.data / "registry";
-  Objects objects;
+  auto &objects = objects_state.objects;
   const auto ids = identity(objects);
   const auto poses = transforms(objects);
   const auto auth = authority(std::as_const(objects));
   const auto parent = parents(objects);
   const auto physical_flags = space_flags(objects);
-  lifecycle::Parts parts;
-  Relation declared_parts;
-  catalog::Assets assets;
-  catalog::Models models;
-  catalog::Scripts scripts;
-  catalog::ParameterBlocks parameters;
-  catalog::ModelTexts model_text;
-  catalog::InstanceTexts instance_text;
-  catalog::AuthoredTexts authored_text;
-  react::AssetMeasurements baked_measurements;
-  react::RuntimeMeasurements runtime_measurements;
-  react::Properties properties;
-  react::Processes processes;
-  react::InstanceSettings instance_settings;
-  react::ModelSettings model_settings;
-  react::PlotSettings plot_settings;
-  react::WorldSettings world_settings;
-  react::SharedColumns shared;
-  react::GivesTo gives_to;
-  react::AllocationRows allocations;
-  react::MeterRows meters;
-  react::AuthoredRelations authored_relations;
-  react::RelationsRead relations;
-  space::PhysicalRelations physical_relations;
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+  auto &assets = catalog_state.assets;
+  auto &models = catalog_state.models;
+  auto &scripts = catalog_state.scripts;
+  auto &parameters = catalog_state.parameters;
+  auto &model_text = catalog_state.model_text;
+  auto &instance_text = catalog_state.instance_text;
+  auto &authored_text = catalog_state.authored_text;
+  auto &baked_measurements = catalog_state.baked_measurements;
+  auto &runtime_measurements = react_state.runtime_measurements;
+  auto &properties = react_state.properties;
+  auto &processes = react_state.processes;
+  auto &instance_settings = react_state.instance_settings;
+  auto &model_settings = react_state.model_settings;
+  auto &plot_settings = react_state.plot_settings;
+  auto &world_settings = react_state.world_settings;
+  auto &shared = react_state.shared;
+  auto &gives_to = react_state.gives_to;
+  auto &allocations = react_state.allocations;
+  auto &meters = react_state.meters;
+  auto &authored_relations = react_state.authored_relations;
+  auto &relations = react_state.relations;
+  auto &physical_relations = space_state.physical_relations;
   start::bind_relation_reads(relations, authored_relations, terms, physical_relations,
                              relation_terms);
   const react::ValueRead values{terms,
@@ -141,50 +150,51 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                 runtime_measurements,
                                 role("measurements", "density"),
                                 role("measurements", "capacity")};
-  react::ScriptStates states;
-  react::RandomStates random;
-  react::Triggers triggers;
-  react::RuleVersions rules;
-  react::Subscriptions subscriptions;
-  react::InstanceScripts installations;
-  perm::Players players;
-  perm::Groups groups;
-  perm::Plots plots;
-  perm::Grants grants;
-  TravelAccess travel_access;
-  perm::Ledger ledger;
-  perm::OwnerLimits owner_limits;
-  perm::Offers offers;
-  perm::Trades trades;
-  net::Profiles profiles;
-  step::WorkQueues queues;
-  step::TimerWheel timers;
-  step::Intents intents;
-  Inputs inputs;
-  elaborate::Requests requests;
-  elaborate::GapCounts gap_counts;
-  elaborate::LastGaps last_gaps;
-  elaborate::CaptureRefs captures;
-  elaborate::PendingFixtures fixtures;
-  std::vector<step::IntentEnding> intent_endings;
-  Clock clock;
-  space::Space space(settings.space);
-  MechanicalCauses mechanical_causes(settings.authors_max);
-  GeometryAssets geometry;
-  std::vector<space::RelationChange> relation_changes;
-  observe::Hearing hearing;
-  std::vector<observe::Listener> listeners;
-  DeliveryTargets delivery;
-  observe::Lights lights(settings.light_cell_m);
-  observe::LightSubscriptions light_subscriptions(settings.light_cell_m);
-  observe::ZoneAmbients zones;
-  observe::ActiveViews active_views(settings.light_cell_m);
-  net::ReplicationIndex replication(settings.network);
-  AssemblyMasses masses{
-      {role("measurements", "mass"), role("measurements", "assembly_mass")}, {}, {}};
-  net::SessionViews session_views;
-  IlluminationSources illumination_sources;
-  NavigationRequests navigation_requests;
+  auto &states = react_state.states;
+  auto &random = react_state.random;
+  auto &triggers = react_state.triggers;
+  auto &rules = react_state.rules;
+  auto &subscriptions = react_state.subscriptions;
+  auto &installations = react_state.installations;
+  auto &players = perm_state.players;
+  auto &groups = perm_state.groups;
+  auto &plots = perm_state.plots;
+  auto &grants = perm_state.grants;
+  auto &travel_access = step_state.travel_access;
+  auto &ledger = perm_state.ledger;
+  auto &owner_limits = perm_state.owner_limits;
+  auto &offers = perm_state.offers;
+  auto &trades = perm_state.trades;
+  auto &profiles = net_state.profiles;
+  auto &queues = step_state.queues;
+  auto &timers = step_state.timers;
+  auto &intents = step_state.intents;
+  auto &inputs = step_state.inputs;
+  auto &requests = elaborate_state.requests;
+  auto &gap_counts = elaborate_state.gap_counts;
+  auto &last_gaps = elaborate_state.last_gaps;
+  auto &captures = elaborate_state.captures;
+  auto &fixtures = elaborate_state.fixtures;
+  auto &intent_endings = step_state.intent_endings;
+  auto &clock = step_state.clock;
+  auto &space = space_state.space;
+  auto &mechanical_causes = step_state.mechanical_causes;
+  auto &geometry = step_state.geometry;
+  auto &relation_changes = space_state.relation_changes;
+  auto &hearing = space_state.hearing;
+  auto &listeners = space_state.listeners;
+  auto &delivery = step_state.delivery;
+  auto &lights = space_state.lights;
+  auto &light_subscriptions = space_state.light_subscriptions;
+  auto &zones = space_state.zones;
+  auto &active_views = space_state.active_views;
+  auto &replication = net_state.replication;
+  auto &masses = step_state.masses;
+  masses =
+      AssemblyMasses{{role("measurements", "mass"), role("measurements", "assembly_mass")}, {}, {}};
+  auto &session_views = net_state.session_views;
+  auto &illumination_sources = step_state.illumination_sources;
+  auto &navigation_requests = step_state.navigation_requests;
   react::Vm vm(settings.scripts);
 
   react::bind_values(vm, values, properties, processes, shared, gives_to);
@@ -337,28 +347,28 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     start::queue_bootstrap(plan, symbols, terms, queues, settings.event_queue_max);
   net::Server server({"127.0.0.1", launch.port, launch.client, launch.assets, settings.network,
                       settings.control_max});
-  net::Sessions sessions(profiles);
+  auto &sessions = net_state.sessions;
   elaborate::FixtureWorker fixture_worker(std::filesystem::canonical("/proc/self/exe"),
                                           launch.data / "fixtures", settings.fixture_workers);
   react::authoring::Worker authoring({launch.assets, settings.pins, settings.scripts});
-  std::vector<FactKey> mutated;
-  std::vector<GapDraft> gaps;
-  std::vector<TermId> inspection_terms;
+  auto &mutated = step_state.mutated;
+  auto &gaps = step_state.gaps;
+  auto &inspection_terms = step_state.inspection_terms;
   for (const auto &term : terms.rows)
     if (term.id && term.kind == react::Kind::Quantity)
       inspection_terms.push_back(term.id);
   const net::MaterialAppearanceRoles appearance{
       role("appearance", "red"),   role("appearance", "green"),    role("appearance", "blue"),
       role("appearance", "alpha"), role("appearance", "metallic"), role("appearance", "roughness")};
-  std::vector<observe::MotionSample> motion;
-  SparseColumn<std::pair<Handle, Vec3>> previous_positions;
+  auto &motion = space_state.motion;
+  auto &previous_positions = space_state.previous_positions;
   for (auto object : initial)
     previous_positions.set(object.slot(), std::pair{object, poses.position[object.slot()]});
-  net::RecordFeed feed{{}, 4096};
+  auto &feed = net_state.feed;
   elaborate::CaptureWriter capture_writer(launch.data / "captures", settings.snapshot_zstd);
   snap::Writer snapshot_writer(launch.data / "snapshots", settings.snapshot_keep,
                                settings.snapshot_zstd);
-  checkpoint::SnapshotProgress snapshot_progress;
+  auto &snapshot_progress = step_state.snapshot_progress;
   const auto snapshot_every = static_cast<Step>(std::llround(settings.snapshot_seconds * hz));
   if (launch.network) {
     const auto error = server.start();

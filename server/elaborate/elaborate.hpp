@@ -228,3 +228,13 @@ struct Run {
 elaborate::FixtureResult evaluate(const Run &);
 int command(int argc, char **argv, const std::filesystem::path &executable);
 } // namespace amber::fixture
+
+namespace amber::elaborate {
+struct State {
+  Requests requests;
+  GapCounts gap_counts;
+  LastGaps last_gaps;
+  CaptureRefs captures;
+  PendingFixtures fixtures;
+};
+} // namespace amber::elaborate

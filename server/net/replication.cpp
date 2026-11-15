@@ -43,7 +43,7 @@ struct Quantized {
   std::uint8_t flags;
   std::array<std::int32_t, 3> position;
   std::uint32_t rotation;
-  std::vector<State> states;
+  std::vector<ReplicatedValue> states;
 };
 void asset(Wire &wire, const Quantized &row) {
   for (auto value : row.asset)

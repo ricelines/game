@@ -488,3 +488,22 @@ void emit_sound(Hearing &, const Sound &, std::span<const Listener>);
 std::vector<Heard> take_heard(Hearing &, std::uint64_t, std::size_t limit, std::size_t &omitted);
 void remove_listener(Hearing &, std::uint64_t);
 } // namespace amber::observe
+
+namespace amber::space {
+struct State {
+  Space space;
+  PhysicalRelations physical_relations;
+  std::vector<RelationChange> relation_changes;
+  observe::Hearing hearing;
+  std::vector<observe::Listener> listeners;
+  observe::Lights lights;
+  observe::LightSubscriptions light_subscriptions;
+  observe::ZoneAmbients zones;
+  observe::ActiveViews active_views;
+  std::vector<observe::MotionSample> motion;
+  SparseColumn<std::pair<Handle, Vec3>> previous_positions;
+  explicit State(const Settings &settings, float light_cell_m)
+      : space(settings), lights(light_cell_m), light_subscriptions(light_cell_m),
+        active_views(light_cell_m) {}
+};
+} // namespace amber::space

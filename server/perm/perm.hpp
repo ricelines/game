@@ -116,3 +116,16 @@ void read_grants(snap::Input &, Grants &, Offers &, Trades &, OwnerLimits &,
                  std::size_t object_slots);
 
 } // namespace amber::perm
+
+namespace amber::perm {
+struct State {
+  Players players;
+  Groups groups;
+  Plots plots;
+  Grants grants;
+  Ledger ledger;
+  OwnerLimits owner_limits;
+  Offers offers;
+  Trades trades;
+};
+} // namespace amber::perm

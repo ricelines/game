@@ -187,7 +187,8 @@ void interested_processes_and_lifecycle() {
           "no viewers means no process sampling");
   bi::view_interest(index, 1, {});
   auto first = f.publish(index, 20);
-  require(first.upserts.size() == 1 && first.upserts[0].states == std::vector<ne::State>{{1, 1}},
+  require(first.upserts.size() == 1 &&
+              first.upserts[0].states == std::vector<ne::ReplicatedValue>{{1, 1}},
           "first interested frame samples current process and omits undeclared state");
   ne::Replicator wire(index.settings);
   wire.set_view(1, {});

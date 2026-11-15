@@ -397,3 +397,45 @@ std::vector<ArgumentError> validate_arguments(const react::Terms &, const react:
 std::string format_unit(const std::array<std::int8_t, 8> &dimensions);
 std::string action_signature(const react::Terms &, const NativeActions &, TermId action);
 } // namespace amber::react
+
+namespace amber::catalog {
+struct State {
+  Assets assets;
+  Models models;
+  Scripts scripts;
+  ParameterBlocks parameters;
+  ModelTexts model_text;
+  InstanceTexts instance_text;
+  AuthoredTexts authored_text;
+  react::AssetMeasurements baked_measurements;
+  MechanicalBindings mechanical;
+  RegistryDocument registry;
+};
+} // namespace amber::catalog
+
+namespace amber::react {
+struct State {
+  Terms terms;
+  Materials materials;
+  Properties properties;
+  Processes processes;
+  InstanceSettings instance_settings;
+  ModelSettings model_settings;
+  PlotSettings plot_settings;
+  WorldSettings world_settings;
+  SharedColumns shared;
+  GivesTo gives_to;
+  AllocationRows allocations;
+  MeterRows meters;
+  AuthoredRelations authored_relations;
+  RelationsRead relations;
+  RuntimeMeasurements runtime_measurements;
+  ScriptStates states;
+  RandomStates random;
+  Triggers triggers;
+  RuleVersions rules;
+  Subscriptions subscriptions;
+  InstanceScripts installations;
+  NativeActions native_declarations;
+};
+} // namespace amber::react

@@ -1148,6 +1148,14 @@ void rebuild_declared_parts(const Parts &, IdentityRead, Relation &);
 
 } // namespace amber::lifecycle
 
+namespace amber {
+struct ObjectState {
+  Objects objects;
+  lifecycle::Parts parts;
+  Relation declared_parts;
+};
+} // namespace amber
+
 namespace amber::catalog {
 struct PreparedScript {
   Hash hash, source_hash, bytecode_hash, registry_pin;

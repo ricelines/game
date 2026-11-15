@@ -20,10 +20,10 @@ namespace amber::net {
 using SessionId = std::uint64_t;
 using Bytes = std::vector<std::uint8_t>;
 using AssetHash = std::array<std::uint8_t, 32>;
-struct State {
+struct ReplicatedValue {
   std::uint16_t term;
   float value;
-  bool operator==(const State &) const = default;
+  bool operator==(const ReplicatedValue &) const = default;
 };
 struct Entity {
   Handle object;
@@ -34,7 +34,7 @@ struct Entity {
   Quat rotation;
   float footprint_m;
   bool faces_motion;
-  std::vector<State> states;
+  std::vector<ReplicatedValue> states;
 };
 struct Publication {
   std::uint32_t step;
@@ -475,4 +475,15 @@ void view_interest(ReplicationIndex &, SessionId, Vec3);
 void remove_view_interest(ReplicationIndex &, SessionId);
 Publication publication(ReplicationIndex &, IdentityRead, TransformRead, const react::ValueRead &,
                         Step, double hz);
+} // namespace amber::net
+
+namespace amber::net {
+struct State {
+  Profiles profiles;
+  Sessions sessions;
+  SessionViews session_views;
+  ReplicationIndex replication;
+  RecordFeed feed;
+  explicit State(Settings settings) : sessions(profiles), replication(settings), feed{{}, 4096} {}
+};
 } // namespace amber::net
