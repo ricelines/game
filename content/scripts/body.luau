@@ -171,14 +171,12 @@ return {
         ['base.pour'] = function(self, selected, args)
             local held = held_item(self)
             assert(held and selected, 'Hold a source container and select a receiver.')
-            local source, destination = self:asset(held), self:asset(selected)
-            local from = source.bindings.container
-            local to = destination.bindings.container
-            assert(from and to and from.stored == to.stored, 'These containers do not declare a compatible quantity.')
-            local amount = args.amount or source.capacity
+            local source = self:measure_instance(held).capacity_m3
+            local destination = self:measure_instance(selected).capacity_m3
+            local amount = args.amount or source
             assert(amount >= 0, 'Pour amount must be nonnegative.')
             checked(self, 'engine.transfer', held, {
-                to=selected,term=from.stored,amount=amount,to_max=destination.capacity})
+                to=selected,term='base.liquid',amount=amount,to_max=destination})
         end,
         ['base.throw'] = function(self, _, args)
             local held = held_item(self)

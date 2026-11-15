@@ -2,7 +2,6 @@ from amb.shapes import hollow_cylinder
 
 MATERIAL = "base.ceramic"
 REPLICATED = ["base.liquid"]
-BINDINGS = {"container": {"stored": "base.liquid"}}
 
 
 def build(params):

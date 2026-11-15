@@ -93,9 +93,9 @@ struct Fixture {
     f.assets.rows[1].volume = 1;
     f.assets.rows[2].volume = .016;
     step::declare_construction_actions(f.terms, declarations);
-    step::bind_metadata(f.vm, identity(f.objects), transforms(f.objects), authority(f.objects),
-                        parents(f.objects), f.objects.params, f.models, f.installed, parameters,
-                        assets, f.terms, f.materials, declared, meters, plots, 10);
+    step::bind_metadata(f.vm, f.values(), transforms(f.objects), authority(f.objects),
+                        parents(f.objects), f.models, f.installed, parameters, assets, declared,
+                        meters, plots);
     f.objects.position[f.a.slot()] = {0, -2, 0};
     f.state(f.a, 1, 10);
   }

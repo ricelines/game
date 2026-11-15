@@ -664,7 +664,7 @@ struct ValueRead {
   const SharedColumns &shared;
   const RelationsRead &relations;
   const RuntimeMeasurements &runtime;
-  TermId density = 0;
+  TermId density = 0, capacity_term = 0;
 };
 
 struct HandlerRef {

@@ -433,3 +433,94 @@ return rule
     rent_position = next(row["at"] for row in plan["objects"] if row["key"] == "public.rent")
     rent = next(row for row in state["objects"] if row["position"] == rent_position)
     assert rent["values"]["base.charge"] == pytest.approx(expected)
+
+
+def test_body_pours_into_a_model_without_container_bindings(tmp_path, baked_plan):
+    plan = json.loads(json.dumps(baked_plan))
+    for profile in plan["profiles"]:
+        profile["key_file"] = str(tmp_path / "keys" / f"{profile['id']}.key")
+    cup_model = next(row for row in plan["models"] if row["key"] == "cup")
+    receiver_model = {**cup_model, "key": "test.unbound_receiver"}
+    plan["models"].append(receiver_model)
+    manifest = json.loads((ROOT / "assets" / cup_model["asset"] / "manifest.json").read_text())
+    assert not manifest["bindings"]
+    body = next(row for row in plan["objects"] if row["key"] == "resident.mira")
+    cup = next(row for row in plan["objects"] if row["model"] == "cup")
+    for key, model, dx, quantity in (
+        ("test.pour_source", "cup", 0.4, 0.0001),
+        ("test.pour_receiver", receiver_model["key"], -0.4, 0),
+    ):
+        plan["objects"].append(
+            {
+                **cup,
+                "key": key,
+                "model": model,
+                "owner": 2,
+                "plot": body["plot"],
+                "at": [body["at"][0] + dx, body["at"][1] + 0.5, 0],
+                "flags": ["dynamic"],
+                "state": {"base.liquid": quantity},
+            }
+        )
+    source = (ROOT / "content/scripts/body.luau").read_text()
+    source = (
+        "local body=(function()\n"
+        + source
+        + "\nend)()\n"
+        + """
+local start=body.on['base.start']
+body.on['base.start']=function(self,sender,args)
+    start(self,sender,args)
+    if args and args.source then
+        assert(self:measure_instance(args.receiver).capacity_m3>0)
+        assert(next(self:asset(args.receiver).bindings)==nil)
+        body.on['base.hold'](self,args.source)
+        body.on['base.pour'](self,args.receiver,{amount=0.00002})
+    end
+end
+return body
+"""
+    )
+    next(row for row in plan["scripts"] if row["key"] == "body")["source"] = source
+    plan["bootstrap"].append(
+        {
+            "target": body["key"],
+            "event": "base.start",
+            "payload": {
+                "source": {"object": "test.pour_source"},
+                "receiver": {"object": "test.pour_receiver"},
+            },
+        }
+    )
+    plan_path, report = tmp_path / "plan.json", tmp_path / "report.json"
+    plan_path.write_text(json.dumps(plan))
+    result = subprocess.run(
+        [
+            str(ROOT / ".build/release/amb-server"),
+            "--plan",
+            str(plan_path),
+            "--config",
+            str(ROOT / "config.toml"),
+            "--assets",
+            str(ROOT / "assets"),
+            "--data",
+            str(tmp_path / "world"),
+            "--no-network",
+            "--unpaced",
+            "--steps",
+            "4",
+            "--report",
+            str(report),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    state = json.loads(report.read_text())
+    assert state["script_errors"] == 0
+    receiver_id = max(row["model"] for row in state["objects"])
+    receiver = next(row for row in state["objects"] if row["model"] == receiver_id)
+    assert receiver["values"]["base.liquid"] == pytest.approx(0.00002)

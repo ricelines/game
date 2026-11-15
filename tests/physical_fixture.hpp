@@ -67,9 +67,9 @@ struct Fixture {
     step::bind_physical(f.vm, space, identity(f.objects), transforms(f.objects), parts, causes,
                         plot_membership(f.objects), plots, intents, endings, players, grants, 1024,
                         hearing, listeners, instance_texts, model_texts);
-    step::bind_metadata(f.vm, identity(f.objects), transforms(f.objects), authority(f.objects),
-                        parents(f.objects), f.objects.params, f.models, f.installed, parameters,
-                        assets, f.terms, f.materials, parts, meters, plots, 0);
+    step::bind_metadata(f.vm, f.values(), transforms(f.objects), authority(f.objects),
+                        parents(f.objects), f.models, f.installed, parameters, assets, parts,
+                        meters, plots);
     add_body(f.a, {.6f, .6f, 1.8f}, space::Motion::Character);
     add_body(f.b, {.4f, .4f, .4f}, item);
     add_body(f.c, {.5f, .5f, .5f}, space::Motion::Dynamic);

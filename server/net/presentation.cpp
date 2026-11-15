@@ -66,11 +66,12 @@ ObjectDescription describe_object(Handle h, IdentityRead identity, const catalog
   auto model = identity.model[h.slot()], material = identity.material[h.slot()];
   auto effective = catalog::resolve_asset(models, parameters, model, values.params[h.slot()]);
   const auto &asset = assets.rows.at(effective.hash);
+  const auto capacity = react::read(values, h, values.capacity_term, now, hz);
   Json measured{{"asset", asset.hash},
                 {"params", asset.manifest.at("params")},
                 {"size_m", vec(asset.maximum - asset.minimum)},
                 {"volume_m3", asset.volume},
-                {"capacity_l", asset.capacity * 1000},
+                {"capacity_l", capacity.present ? capacity.value.numeric() * 1000 : 0},
                 {"material", values.terms.rows.at(material).name},
                 {"values", Json::object()}};
   if (values.density) {

@@ -27,6 +27,16 @@ struct Fixture {
   catalog::ParameterBlocks parameters;
   catalog::Assets assets;
   Handle controller, root, child, body;
+  react::AssetMeasurements measurements;
+  react::InstanceSettings instance_settings;
+  react::ModelSettings model_settings;
+  react::PlotSettings plot_settings;
+  react::WorldSettings world_settings;
+  react::SharedColumns shared;
+  react::RelationsRead relations;
+  react::RuntimeMeasurements runtime;
+  react::Properties properties;
+  react::Processes processes;
   re::Vm vm{{4096, 100, 5, 64}};
   re::ScriptState state;
   re::DeferredEffects effects;
@@ -70,10 +80,26 @@ struct Fixture {
                        {child, root, {{0, 0, .5f}, {}}, false}, changes)
                     .status == sp::Status::Ok,
             "fixture declared child attachment");
-    st::bind_metadata(vm, identity(scene.objects), transforms(scene.objects),
-                      authority(scene.objects), parents(scene.objects), scene.objects.params,
-                      models, installed, parameters, assets, terms, materials, parts, meters, plots,
-                      0);
+    const react::ValueRead values{terms,
+                                  identity(scene.objects),
+                                  scene.objects.plot,
+                                  scene.objects.params,
+                                  materials,
+                                  measurements,
+                                  properties,
+                                  processes,
+                                  instance_settings,
+                                  model_settings,
+                                  plot_settings,
+                                  world_settings,
+                                  shared,
+                                  relations,
+                                  runtime,
+                                  0,
+                                  0};
+    step::bind_metadata(vm, values, transforms(scene.objects), authority(scene.objects),
+                        parents(scene.objects), models, installed, parameters, assets, parts,
+                        meters, plots);
     st::declare_hold_goods_action(terms, declarations);
     action = terms.by_name.at("engine.hold_goods");
     auto code = re::compile_script(R"(

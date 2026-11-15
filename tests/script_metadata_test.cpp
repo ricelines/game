@@ -26,12 +26,20 @@ struct Fixture {
   perm::Players players;
   perm::Grants grants;
   // This fixture verifies metadata behavior under sanitizers, not production timing.
+  react::AssetMeasurements measurements;
+  react::InstanceSettings instance_settings;
+  react::ModelSettings model_settings;
+  react::PlotSettings plot_settings;
+  react::WorldSettings world_settings;
+  react::SharedColumns shared;
+  react::RelationsRead relations;
+  react::RuntimeMeasurements runtime;
   react::Vm vm{{4096, 50, 250, 64}};
   react::ScriptState state;
   react::DeferredEffects effects;
   ScriptId next = 100;
   Fixture() {
-    terms.rows.resize(6);
+    terms.rows.resize(7);
     for (TermId i = 1; i < terms.rows.size(); ++i) {
       terms.rows[i].id = i;
       terms.rows[i].name = "custom." + std::to_string(i);
@@ -40,6 +48,9 @@ struct Fixture {
     terms.rows[1].source = react::Source::Intrinsic;
     terms.rows[3].kind = terms.rows[4].kind = react::Kind::Material;
     terms.rows[5].kind = react::Kind::Event;
+    terms.rows[6].source = react::Source::Measured;
+    measurements.rows[1].values[6] = Value(0.125);
+    measurements.parameter_rows[1].values[6] = Value(0.25);
     materials.rows[3][1] = Value(10.0);
     materials.rows[4][1] = Value(20.0);
     models.rows.resize(4);
@@ -89,9 +100,25 @@ struct Fixture {
     meters[{root, part, 2, false}] = {2, 0, 3};
     players.rows.resize(4);
     plots.rows.push_back({1, 2, 0, 7, {-5, -4, 30, 40}, {}});
-    step::bind_metadata(vm, identity(objects), transforms(objects), authority(objects),
-                        parents(objects), objects.params, models, instances, parameters, assets,
-                        terms, materials, parts, meters, plots, 1);
+    const react::ValueRead values{terms,
+                                  identity(objects),
+                                  objects.plot,
+                                  objects.params,
+                                  materials,
+                                  measurements,
+                                  properties,
+                                  processes,
+                                  instance_settings,
+                                  model_settings,
+                                  plot_settings,
+                                  world_settings,
+                                  shared,
+                                  relations,
+                                  runtime,
+                                  1,
+                                  6};
+    step::bind_metadata(vm, values, transforms(objects), authority(objects), parents(objects),
+                        models, instances, parameters, assets, parts, meters, plots);
   }
   react::RunOutcome run(std::string_view body) {
     const auto source = "return {on={run=function(self,from,args) " + std::string(body) + " end}}";
@@ -135,6 +162,7 @@ void effective_metadata_and_mass() {
     assert(m.materials[2].material==4 and m.materials[2].mass_kg==60)
     local live=self:measure_instance()
     assert(live.mass_kg==100 and live.bounds.min.X==9 and live.bounds.max.X==22)
+    assert(live.capacity_m3==0.25)
     assert(self:meter(self.handle,'custom.2',from)==5)
     local p=self:plot()
     assert(p.id==1 and p.owner=='p:2' and p.bounds.min[1]==-5 and p.bounds.max[2]==40)

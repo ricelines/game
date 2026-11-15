@@ -86,6 +86,7 @@ struct ModelMeasureBinding {
   TermId density;
 };
 struct InstanceMeasureBinding {
+  react::ValueRead values;
   IdentityRead identity;
   TransformRead transforms;
   const std::vector<std::uint32_t> &params;
@@ -194,7 +195,8 @@ double mass(const react::Terms &terms, const react::Materials &materials, TermId
   return asset.volume * density.value.numeric();
 }
 void push_measurements(lua_State *L, ModelId model, std::uint32_t params, TermId material,
-                       const std::map<TermId, double> &masses, Vec3 minimum, Vec3 maximum) {
+                       const std::map<TermId, double> &masses, Vec3 minimum, Vec3 maximum,
+                       std::optional<double> capacity = {}) {
   lua_createtable(L, 0, 6);
   number_field(L, "model", model);
   number_field(L, "params", params);
@@ -213,6 +215,8 @@ void push_measurements(lua_State *L, ModelId model, std::uint32_t params, TermId
   lua_setreadonly(L, -1, true);
   lua_setfield(L, -2, "materials");
   number_field(L, "mass_kg", total);
+  if (capacity)
+    number_field(L, "capacity_m3", *capacity);
   lua_createtable(L, 0, 2);
   vector_field(L, "min", minimum);
   vector_field(L, "max", maximum);
@@ -371,8 +375,11 @@ int measure_instance_binding(lua_State *L) {
         maximum = {std::max(maximum.x, p.x), std::max(maximum.y, p.y), std::max(maximum.z, p.z)};
       }
     }
+    const auto &inv = react::invocation(L);
+    const auto capacity = react::read(b.values, object, b.values.capacity_term, inv.step, inv.hz);
     push_measurements(L, b.identity.model[object.slot()], b.params[object.slot()],
-                      b.identity.material[object.slot()], masses, minimum, maximum);
+                      b.identity.material[object.slot()], masses, minimum, maximum,
+                      capacity.present ? capacity.value.numeric() : 0);
   } catch (const std::exception &error) {
     luaL_error(L, "%s", error.what());
   }
@@ -418,14 +425,17 @@ int plot_binding(lua_State *L) {
   return 1;
 }
 } // namespace
-void bind_metadata(react::Vm &vm, IdentityRead identity, TransformRead transforms,
-                   AuthorityRead authority, ParentRead parents,
-                   const std::vector<std::uint32_t> &params, const catalog::Models &models,
+void bind_metadata(react::Vm &vm, const react::ValueRead &values, TransformRead transforms,
+                   AuthorityRead authority, ParentRead parents, const catalog::Models &models,
                    const react::InstanceScripts &instances,
                    const catalog::ParameterBlocks &parameters, const catalog::Assets &assets,
-                   const react::Terms &terms, const react::Materials &materials,
                    const Relation &declared_parts, const react::MeterRows &meters,
-                   const perm::Plots &plots, TermId density) {
+                   const perm::Plots &plots) {
+  const auto identity = values.identity;
+  const auto &params = values.params;
+  const auto &terms = values.terms;
+  const auto &materials = values.materials;
+  const auto density = values.density;
   react::register_binding(
       vm, "object", object_binding,
       std::make_shared<ObjectBinding>(
@@ -441,8 +451,8 @@ void bind_metadata(react::Vm &vm, IdentityRead identity, TransformRead transform
                               terms, materials, models, parameters, assets, density}));
   react::register_binding(vm, "measure_instance", measure_instance_binding,
                           std::make_shared<InstanceMeasureBinding>(InstanceMeasureBinding{
-                              identity, transforms, params, declared_parts, terms, materials,
-                              models, parameters, assets, density}));
+                              values, identity, transforms, params, declared_parts, terms,
+                              materials, models, parameters, assets, density}));
   react::register_binding(
       vm, "meter", meter_binding,
       std::make_shared<MeterReadBinding>(MeterReadBinding{meters, terms, identity}));

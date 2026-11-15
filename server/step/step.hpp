@@ -244,12 +244,10 @@ void bind_physical(react::Vm &, space::Space &, IdentityRead, TransformWrite,
                    const catalog::InstanceTexts &, const catalog::ModelTexts &);
 void declare_physical_actions(react::Terms &, react::NativeActions &);
 
-void bind_metadata(react::Vm &, IdentityRead, TransformRead, AuthorityRead, ParentRead,
-                   const std::vector<std::uint32_t> &params, const catalog::Models &,
-                   const react::InstanceScripts &, const catalog::ParameterBlocks &,
-                   const catalog::Assets &, const react::Terms &, const react::Materials &,
-                   const Relation &declared_parts, const react::MeterRows &, const perm::Plots &,
-                   TermId density);
+void bind_metadata(react::Vm &, const react::ValueRead &, TransformRead, AuthorityRead, ParentRead,
+                   const catalog::Models &, const react::InstanceScripts &,
+                   const catalog::ParameterBlocks &, const catalog::Assets &,
+                   const Relation &declared_parts, const react::MeterRows &, const perm::Plots &);
 
 using Json = nlohmann::json;
 struct CommerceDeclarations {

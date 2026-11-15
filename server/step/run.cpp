@@ -139,7 +139,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                 shared,
                                 relations,
                                 runtime_measurements,
-                                role("measurements", "density")};
+                                role("measurements", "density"),
+                                role("measurements", "capacity")};
   react::ScriptStates states;
   react::RandomStates random;
   react::Triggers triggers;
@@ -188,8 +189,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
 
   react::bind_values(vm, values, properties, processes, shared, gives_to);
   react::bind_events(vm, terms);
-  bind_metadata(vm, ids, poses, auth, parent, objects.params, models, installations, parameters,
-                assets, terms, materials, declared_parts, meters, plots, values.density);
+  bind_metadata(vm, values, poses, auth, parent, models, installations, parameters, assets,
+                declared_parts, meters, plots);
   bind_physical(vm, space, ids, poses, declared_parts, mechanical_causes, plot_membership(objects),
                 plots, intents, intent_endings, players, grants, settings.part_batch_max, hearing,
                 listeners, instance_text, model_text);
