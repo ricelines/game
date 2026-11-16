@@ -59,8 +59,8 @@ NativeCompletion native_construction(amber::ObjectState &objects_state,
                                      PhysicsDefaults physics_defaults,
                                      react::ConstructionAction operation, const NativeCall &call);
 NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm::State &perm_state,
-                                 const space::Space &space, const DeliveryTargets &delivery,
-                                 std::size_t mailbox_max, react::ExchangeAction operation,
+                                 space::State &space_state, const DeliveryTargets &delivery,
+                                 const amber::Settings &settings, react::ExchangeAction operation,
                                  const NativeCall &call);
 NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
                                     const amber::react::State &react_state,

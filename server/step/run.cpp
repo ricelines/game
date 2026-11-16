@@ -586,8 +586,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                                  perm_state, geometry, space_state,
                                                  physics_defaults, operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::ExchangeAction>) {
-                      return native_exchange(objects_state, perm_state, space, delivery,
-                                             settings.mailbox_max, operation, action->call);
+                      return native_exchange(objects_state, perm_state, space_state, delivery,
+                                             settings, operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::PermissionAction>) {
                       return native_permissions(catalog_state, react_state, perm_state,
                                                 objects_state, architect, operation, action->call);

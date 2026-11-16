@@ -1,5 +1,6 @@
 #include "action_private.hpp"
 #include "catalog/catalog.hpp"
+#include "settings.hpp"
 #include <stdexcept>
 
 namespace amber::step {
@@ -108,9 +109,11 @@ NativeCompletion native_construction(amber::ObjectState &objects_state,
   return out;
 }
 NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm::State &perm_state,
-                                 const space::Space &space, const DeliveryTargets &delivery,
-                                 std::size_t mailbox_max, react::ExchangeAction operation,
+                                 space::State &space_state, const DeliveryTargets &delivery,
+                                 const amber::Settings &settings, react::ExchangeAction operation,
                                  const NativeCall &call) {
+  const auto &space = space_state.space;
+  const auto mailbox_max = settings.mailbox_max;
   auto &parts = objects_state.parts;
 
   auto &players = perm_state.players;
@@ -127,6 +130,18 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
 
   NativeCompletion out;
   switch (operation) {
+  case react::ExchangeAction::OfferPlot: {
+    if (const auto error = validate_offer_plot(call.arguments); !error.empty())
+      throw std::invalid_argument(error);
+    out = offer_plot(perm_state, call);
+    break;
+  }
+  case react::ExchangeAction::SetOfferPrice: {
+    if (const auto error = validate_set_offer_price(call.arguments); !error.empty())
+      throw std::invalid_argument(error);
+    out = set_offer_price(offers, call);
+    break;
+  }
   case react::ExchangeAction::HoldGoods: {
     if (const auto error = validate_hold_goods(call.arguments); !error.empty())
       throw std::invalid_argument(error);
@@ -172,7 +187,7 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
   case react::ExchangeAction::Accept: {
     if (const auto error = validate_accept(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = step::accept(perm_state, objects_state, space, delivery, mailbox_max, call);
+    out = step::accept(perm_state, objects_state, space_state, delivery, settings, call);
     break;
   }
   case react::ExchangeAction::CancelOffer: {

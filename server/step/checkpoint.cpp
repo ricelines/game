@@ -577,11 +577,16 @@ CaptureSelection capture_selection(const GapDraft &gap, const amber::ObjectState
   selected.objects =
       priority_neighborhood(id, parents(objects), parts, values.terms, values.shared, local);
   selected.priority_dependencies = selected.objects.size() - local.size();
-  selected.catalog = catalog_selection(models, parameters, installations, id, objects.params, rules,
-                                       selected.objects);
   const std::array<PlayerId, 1> actors{gap.requester};
   selected.permissions =
       perm::capture_authority(authority(objects), selected.objects, actors, perm_state);
+  for (auto bits : selected.permissions.objects.objects) {
+    const Handle object{bits};
+    if (std::ranges::find(selected.objects, object) == selected.objects.end())
+      selected.objects.push_back(object);
+  }
+  selected.catalog = catalog_selection(models, parameters, installations, id, objects.params, rules,
+                                       selected.objects);
   return selected;
 }
 void flush_gaps(amber::step::State &step_state, record::Journal &journal,

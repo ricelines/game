@@ -1,4 +1,5 @@
 #include "catalog/catalog.hpp"
+#include "settings.hpp"
 #include "space_fixture.hpp"
 #include <toml++/toml.hpp>
 
@@ -173,8 +174,10 @@ struct Fixture {
     if (args.is_null())
       args = nlohmann::json::object();
     const auto operation = std::get<react::ExchangeAction>(declarations.rows.at(action).operation);
+    auto settings = read_settings(AMBER_CONFIG_PATH);
+    settings.mailbox_max = mailbox_max;
     auto out =
-        step::native_exchange(objects_state, perm_state, world, delivery, mailbox_max, operation,
+        step::native_exchange(objects_state, perm_state, space_state, delivery, settings, operation,
                               {{actor, action, target, {}}, std::move(args), {}, 20, 20, {}});
     const auto custody = std::move(out.custody);
     step::apply_custody(f.objects_state, space_state, {0, 0, 3, 0}, plots, custody, out);
@@ -248,19 +251,19 @@ void actual_assembly_sale_and_inventory_reveal_preserve_identity() {
           "escrow hid actual goods or omitted part");
   const auto offer = offered.reply.at("offer");
   f.ledger.balance[perm::Account::player(2)] = 39;
-  require(!f.call(f.ids.accept, PlayerId{2}, {{"offer", offer}}).changed && f.visible(item.root) &&
-              f.f.objects.owner[item.root.slot()] == 1 &&
+  require(!f.call(f.ids.accept, PlayerId{2}, {{"offer", offer}, {"max_price", 50}}).changed &&
+              f.visible(item.root) && f.f.objects.owner[item.root.slot()] == 1 &&
               f.ledger.balance[perm::Account::player(1)] == 100,
           "poor acceptance changed valuables or scene");
   f.ledger.balance[perm::Account::player(2)] = 100;
   f.delivery.present_bodies.erase(2);
   f.players.rows[2].mailbox.push_back(f.f.a);
-  require(!f.call(f.ids.accept, PlayerId{2}, {{"offer", offer}}).changed && f.visible(child) &&
-              f.ledger.balance[perm::Account::player(2)] == 100,
+  require(!f.call(f.ids.accept, PlayerId{2}, {{"offer", offer}, {"max_price", 50}}).changed &&
+              f.visible(child) && f.ledger.balance[perm::Account::player(2)] == 100,
           "mailbox overflow consumed offered goods or payment");
   f.delivery.present_bodies[2] = f.bodies[1];
   f.players.rows[2].mailbox.clear();
-  const auto accepted = f.call(f.ids.accept, PlayerId{2}, {{"offer", offer}});
+  const auto accepted = f.call(f.ids.accept, PlayerId{2}, {{"offer", offer}, {"max_price", 50}});
   require(accepted.changed && f.ledger.balance[perm::Account::player(1)] == 140 &&
               f.ledger.balance[perm::Account::player(2)] == 60 &&
               f.f.objects.owner[child.slot()] == 2 && !f.grants.rows[granted.grant].live &&

@@ -21,6 +21,25 @@ SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Han
     selected.groups.insert(authority.group[object.slot()]);
     selected.plots.insert(authority.plot[object.slot()]);
   }
+  for (const auto &offer : offers.rows)
+    if (offer.id &&
+        (offer.plot ? selected.plots.contains(offer.plot)
+                    : selected.objects.contains(offer.goods)) &&
+        std::all_of(offer.parts.begin(), offer.parts.end(),
+                    [&](Handle part) { return selected.objects.contains(part); })) {
+      if (offer.maker.kind == HolderKind::Script) {
+        selected.objects.slots.insert(offer.maker.installed_on.slot());
+        selected.objects.objects.insert(offer.maker.installed_on.bits);
+        const auto slot = offer.maker.installed_on.slot();
+        selected.players.insert(authority.owner[slot]);
+        selected.groups.insert(authority.group[slot]);
+        selected.plots.insert(authority.plot[slot]);
+      } else
+        selected.players.insert(offer.maker.id);
+      selected.offers.insert(offer.id);
+      selected.players.insert(offer.seller);
+      selected.players.insert(offer.buyer);
+    }
   for (auto id : selected.plots)
     if (id && id < plots.rows.size()) {
       selected.players.insert(plots.rows[id].owner);
@@ -79,14 +98,6 @@ SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Han
     if (grant.parent)
       pending.push_back(grant.parent);
   }
-  for (const auto &offer : offers.rows)
-    if (offer.id && selected.objects.contains(offer.goods) &&
-        std::all_of(offer.parts.begin(), offer.parts.end(),
-                    [&](Handle part) { return selected.objects.contains(part); })) {
-      selected.offers.insert(offer.id);
-      selected.players.insert(offer.seller);
-      selected.players.insert(offer.buyer);
-    }
   for (const auto &trade : trades.rows)
     if (trade.id && selected.players.contains(trade.players[0]) &&
         selected.players.contains(trade.players[1]) &&
@@ -168,6 +179,8 @@ template <class S> void serialize(S &s, Offer &v) {
   s.value4b(v.trade);
   s.boolValue(v.live);
   snap::field(s, v.parts);
+  s.value4b(v.plot);
+  s.object(v.maker);
 }
 template <class S> void serialize(S &s, CustodyChange &v) {
   s.object(v.goods);

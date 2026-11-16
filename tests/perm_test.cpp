@@ -38,28 +38,76 @@ void changing_plot_owner_clears_only_old_owner_authority() {
   state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
   const auto parent = f.grant(1, Holder::script(1, Handle::make(1, 1)), Scope::plot(1), 1, 7);
   const auto child = create_grant(f.grants, f.players, f.grants.rows[parent].holder,
-      {1, Holder::player(2), Scope::plot(1), 1, 0, 0, 500},
-      {Scope::plot(1), 1, 7}, {Holder::player(2), 2, false}, 2);
+                                  {1, Holder::player(2), Scope::plot(1), 1, 0, 0, 500},
+                                  {Scope::plot(1), 1, 7}, {Holder::player(2), 2, false}, 2);
   require(bool(child), "plot delegation failed");
   const auto owned = f.grant(1, Holder::player(3), Scope::owned_on_plot(1, 1), 1, bit(Verb::Move));
   const auto unrelated = f.grant(1, Holder::player(4), Scope::owned(1), 1, bit(Verb::Move));
-  const auto root = create_root_grant(f.grants, f.players,
-      {0, Holder::player(5), Scope::plot(1), 1, 0, 0, 1000},
-      {Holder::player(5), 5, false}, 1);
+  const auto root =
+      create_root_grant(f.grants, f.players, {0, Holder::player(5), Scope::plot(1), 1, 0, 0, 1000},
+                        {Holder::player(5), 5, false}, 1);
   require(bool(root), "root grant failed");
   state.offers.rows.push_back({});
   auto &offer = state.offers.rows.back();
-  offer.id = 1; offer.live = true; offer.plot = 1; offer.expires_step = 900;
+  offer.id = 1;
+  offer.live = true;
+  offer.plot = 1;
+  offer.expires_step = 900;
   state.offers.expiring.emplace(900, 1);
   const auto removed = change_plot_owner(state, 1, 2);
   require(removed == std::vector<GrantId>{parent, child.grant, owned} &&
-      state.plots.rows[1].owner == 2 && f.grants.rows[root.grant].live &&
-      f.grants.rows[unrelated].live && !state.offers.rows[1].live && state.offers.expiring.empty(),
-      "plot sale did not clear precisely old-owner grants, children and offers");
+              state.plots.rows[1].owner == 2 && f.grants.rows[root.grant].live &&
+              f.grants.rows[unrelated].live && !state.offers.rows[1].live &&
+              state.offers.expiring.empty(),
+          "plot sale did not clear precisely old-owner grants, children and offers");
   require(change_plot_owner(state, 1, 0).empty() && f.grants.rows[root.grant].live,
-      "abandon removed root authority");
+          "abandon removed root authority");
 }
 
+void plot_sales_recheck_price_authority_and_burn_pool_payments() {
+  Fixture f;
+  auto &state = f.perm_state;
+  state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
+  const auto maker = Holder::script(1, Handle::make(7, 1));
+  const auto grant = f.grant(1, maker, Scope::plot(1), 1, 8);
+  const auto offered = offer_plot(state, maker, 1, 20, 2, 100, 2);
+  require(bool(offered) && state.offers.rows[offered.offer].maker == maker, "plot maker was lost");
+  require(offer_plot(state, maker, 1, 30, 0, 0, 2).reason == Reason::Duplicate,
+          "duplicate plot offer");
+  require(set_offer_price(state.offers, Holder::player(3), offered.offer, 30, 3) ==
+              Reason::NotController,
+          "stranger repriced land");
+  require(set_offer_price(state.offers, maker, offered.offer, 30, 3) == Reason::Allowed,
+          "maker cannot reprice");
+  f.ledger.balance[Account::player(2)] = 100;
+  const Buyer buyer{Holder::player(2), 2, AccountTarget::player(2), {}, false};
+  require(accept_plot(state, buyer, offered.offer, 20, 3).reason == Reason::PriceChanged &&
+              balance(f.ledger, buyer.payer.account) == 100 && state.plots.rows[1].owner == 1,
+          "price ceiling did not protect buyer before mutation");
+  require(
+      !plot_record(state.plots, state.grants, 1, 1000, 3, state.offers, 3).contains("for_sale") &&
+          plot_record(state.plots, state.grants, 1, 1000, 3, state.offers,
+                      2)["for_sale"]["price"] == 30,
+      "private plot offer visibility");
+  revoke(state.grants, state.players, grant);
+  require(accept_plot(state, buyer, offered.offer, 30, 3).reason == Reason::MissingRight &&
+              balance(f.ledger, buyer.payer.account) == 100,
+          "sale survived maker authority loss");
+  f.grant(1, maker, Scope::plot(1), 1, 8);
+  require(bool(accept_plot(state, buyer, offered.offer, 30, 3)) && state.plots.rows[1].owner == 2 &&
+              balance(f.ledger, buyer.payer.account) == 70 &&
+              balance(f.ledger, Account::player(1)) == 30,
+          "remote plot sale failed");
+  state.plots.rows.push_back({2, 0, 0, 2, {16, 0, 32, 32}, {}});
+  const auto root = create_root_grant(
+      f.grants, f.players, {0, maker, Scope::all_land(), 8u << 8, 0, 0, 1000}, {maker, 1, true}, 1);
+  require(bool(root), "root authority fixture");
+  const auto pool = offer_plot(state, maker, 2, 10, 0, 0, 3);
+  require(bool(pool) && bool(accept_plot(state, buyer, pool.offer, 10, 4)) &&
+              state.plots.rows[2].owner == 2 && balance(f.ledger, buyer.payer.account) == 60 &&
+              balance(f.ledger, Account::player(0)) == 0,
+          "pool land payment did not burn money");
+}
 void moved_goods_leave_plot_scoped_authority() {
   Fixture f;
   Objects objects;
@@ -630,7 +678,7 @@ struct GoodsFixture : Fixture {
                  100, true, 2);
   }
   SwapResult buy(OfferId id, Buyer buyer, std::size_t mailbox_max = 100) {
-    return accept(perm_state, objects_state, buyer, current(), id, mailbox_max, 3);
+    return accept(perm_state, objects_state, buyer, current(), id, 50, mailbox_max, 3);
   }
 };
 
@@ -1001,7 +1049,7 @@ void assembly_offers_preflight_and_transfer_every_declared_part() {
           "assembly accepted with missing component descriptor");
   f.limits.set(part.slot(), inherited_rights & ~bit(Verb::Transfer));
   auto buy_assembly = [&] {
-    return accept(f.perm_state, f.objects_state, buyer, f.current(), offered.offer, 100, 3,
+    return accept(f.perm_state, f.objects_state, buyer, f.current(), offered.offer, 50, 100, 3,
                   components());
   };
   require(buy_assembly().reason == Reason::InheritedLimit && f.current().owner == 1 &&
@@ -1187,6 +1235,7 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
 int main() {
   try {
     changing_plot_owner_clears_only_old_owner_authority();
+    plot_sales_recheck_price_authority_and_burn_pool_payments();
     moved_goods_leave_plot_scoped_authority();
     plot_records_show_live_land_control();
     object_checks_do_not_inherit_owner_or_groups_for_scripts();

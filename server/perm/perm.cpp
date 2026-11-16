@@ -7,7 +7,7 @@
 
 namespace amber::perm {
 nlohmann::json plot_record(const Plots &plots, const Grants &grants, PlotId id,
-                           float port_spacing_m, Step now) {
+                           float port_spacing_m, Step now, const Offers &offers, PlayerId caller) {
   using Json = nlohmann::json;
   const auto &plot = plots.rows.at(id);
   const auto &b = plot.bounds;
@@ -56,15 +56,25 @@ nlohmann::json plot_record(const Plots &plots, const Grants &grants, PlotId id,
     rights.push_back({{"holder", std::move(holder)}, {"verbs", std::move(names)}});
   }
   constexpr const char *kinds[]{"street", "alley", "lot"};
-  return {{"plot", id},
-          {"kind", kinds[static_cast<unsigned>(plot.kind)]},
-          {"owner", "p:" + std::to_string(plot.owner)},
-          {"bounds", b},
-          {"area_m2", (b[2] - b[0]) * (b[3] - b[1])},
-          {"fronts", fronts},
-          {"port", port},
-          {"port_x", port * port_spacing_m},
-          {"rights", std::move(rights)}};
+  Json result = {{"plot", id},
+                 {"kind", kinds[static_cast<unsigned>(plot.kind)]},
+                 {"owner", "p:" + std::to_string(plot.owner)},
+                 {"bounds", b},
+                 {"area_m2", (b[2] - b[0]) * (b[3] - b[1])},
+                 {"fronts", fronts},
+                 {"port", port},
+                 {"port_x", port * port_spacing_m},
+                 {"rights", std::move(rights)}};
+  for (const auto &offer : offers.rows)
+    if (offer.live && offer.plot == id && (!offer.expires_step || offer.expires_step > now) &&
+        (!offer.buyer || offer.buyer == caller)) {
+      result["for_sale"] = {
+          {"offer", "offer:" + std::to_string(offer.id)},
+          {"price", offer.price},
+          {"buyer", offer.buyer ? Json("p:" + std::to_string(offer.buyer)) : Json(nullptr)}};
+      break;
+    }
+  return result;
 }
 std::string_view required_right(std::string_view right, Caller caller, const perm::Target &target) {
   const auto *script = std::get_if<ScriptHolder>(&caller);
@@ -154,8 +164,9 @@ std::string_view reason_text(Reason reason) {
                                     "mailbox full",
                                     "stale goods",
                                     "not a participant",
-                                    "not present"};
-  static_assert(names.size() == static_cast<std::size_t>(Reason::NotPresent) + 1);
+                                    "not present",
+                                    "price changed"};
+  static_assert(names.size() == static_cast<std::size_t>(Reason::PriceChanged) + 1);
   return names[static_cast<std::size_t>(reason)];
 }
 namespace {
@@ -760,8 +771,7 @@ std::vector<GrantId> change_plot_owner(State &state, PlotId id, PlayerId owner) 
   if (plot.owner)
     for (const auto &grant : state.grants.rows)
       if (grant.live && grant.issuer == plot.owner &&
-          (grant.scope == Scope::plot(id) ||
-           grant.scope == Scope::owned_on_plot(plot.owner, id)))
+          (grant.scope == Scope::plot(id) || grant.scope == Scope::owned_on_plot(plot.owner, id)))
         marked[grant.id] = true;
   auto removed = remove_marked(state.grants, state.players, marked);
   for (auto &row : state.offers.rows)
@@ -797,13 +807,85 @@ OfferResult offer(amber::perm::State &perm_state, PermissionFlags flags, Holder 
   if (!components)
     return {components.reason, 0, {}};
   const auto id = static_cast<OfferId>(offers.rows.size());
-  offers.rows.push_back(
-      {id, goods.owner, buyer, goods.object, price, expiry, 0, true, part_handles(parts)});
+  offers.rows.push_back({id, goods.owner, buyer, goods.object, price, expiry, 0, true,
+                         part_handles(parts), 0, seller});
   if (expiry)
     offers.expiring.emplace(expiry, id);
   flags.set(goods.object.slot(), flags.get(goods.object.slot()) | Escrow);
   escrow_parts(flags, offers.rows.back().parts, true);
   return {Reason::Allowed, id, {{goods.object, {}, true}}};
+}
+
+OfferResult offer_plot(State &state, Holder actor, PlotId id, std::int64_t price, PlayerId buyer,
+                       Step expiry, Step now) {
+  if (!id || id >= state.plots.rows.size() || state.plots.rows[id].id != id ||
+      state.plots.rows[id].kind != PlotKind::Lot)
+    return {Reason::InvalidScope, 0, {}};
+  const auto &plot = state.plots.rows[id];
+  const auto permission =
+      check_land(actor, LandVerb::Transfer, plot, state.players, state.grants, now);
+  if (!permission)
+    return {permission.reason, 0, {}};
+  if (price < 0)
+    return {Reason::BadAmount, 0, {}};
+  if (expiry && expiry <= now)
+    return {Reason::Expired, 0, {}};
+  if (buyer >= state.players.rows.size())
+    return {Reason::UnknownHolder, 0, {}};
+  for (const auto &row : state.offers.rows)
+    if (row.live && row.plot == id && (!row.expires_step || row.expires_step > now))
+      return {Reason::Duplicate, 0, {}};
+  const auto offer = OfferId(state.offers.rows.size());
+  state.offers.rows.push_back(
+      {offer, plot.owner, buyer, {}, price, expiry, 0, true, {}, id, actor});
+  if (expiry)
+    state.offers.expiring.emplace(expiry, offer);
+  return {Reason::Allowed, offer, {}};
+}
+Reason set_offer_price(Offers &offers, Holder actor, OfferId id, std::int64_t price, Step now) {
+  if (!id || id >= offers.rows.size() || !offers.rows[id].live || offers.rows[id].trade)
+    return Reason::OfferGone;
+  auto &row = offers.rows[id];
+  if (row.expires_step && now >= row.expires_step)
+    return Reason::Expired;
+  if (actor != row.maker && actor != Holder::player(row.seller))
+    return Reason::NotController;
+  if (price < 0)
+    return Reason::BadAmount;
+  row.price = price;
+  return Reason::Allowed;
+}
+SwapResult accept_plot(State &state, const Buyer &buyer, OfferId id, std::int64_t max_price,
+                       Step now) {
+  if (!id || id >= state.offers.rows.size() || !state.offers.rows[id].live ||
+      state.offers.rows[id].trade)
+    return {Reason::OfferGone, {}, {}};
+  auto &row = state.offers.rows[id];
+  if (row.expires_step && now >= row.expires_step)
+    return {Reason::Expired, {}, {}};
+  if (!buyer.beneficiary || buyer.beneficiary >= state.players.rows.size())
+    return {Reason::UnknownHolder, {}, {}};
+  if (row.buyer && row.buyer != buyer.beneficiary)
+    return {Reason::WrongBuyer, {}, {}};
+  if (row.price > max_price)
+    return {Reason::PriceChanged, {}, {}};
+  if (!row.plot || row.plot >= state.plots.rows.size())
+    return {Reason::InvalidScope, {}, {}};
+  const auto &plot = state.plots.rows[row.plot];
+  if (plot.id != row.plot || plot.owner != row.seller)
+    return {Reason::StaleGoods, {}, {}};
+  const auto permission =
+      check_land(row.maker, LandVerb::Transfer, plot, state.players, state.grants, now);
+  if (!permission)
+    return {permission.reason, {}, {}};
+  if (row.price) {
+    const auto payment = pay(state.ledger, state.grants, buyer.actor, buyer.payer,
+                             Account::player(row.seller), row.price, now);
+    if (!payment)
+      return {payment.reason, {}, {}};
+  }
+  auto revoked = change_plot_owner(state, row.plot, buyer.beneficiary);
+  return {Reason::Allowed, {}, std::move(revoked)};
 }
 
 OfferResult cancel_offer(amber::perm::State &perm_state, PermissionFlags flags, Holder actor,
@@ -857,8 +939,8 @@ std::vector<OfferId> advance_offers(Offers &offers, IdentityRead identity, Permi
 }
 
 SwapResult accept(amber::perm::State &perm_state, amber::ObjectState &objects_state,
-                  const Buyer &buyer, const Target &goods, OfferId id, std::size_t mailbox_max,
-                  Step now, std::span<const Target> parts) {
+                  const Buyer &buyer, const Target &goods, OfferId id, std::int64_t max_price,
+                  std::size_t mailbox_max, Step now, std::span<const Target> parts) {
   auto &offers = perm_state.offers;
   auto &ledger = perm_state.ledger;
   auto &grants = perm_state.grants;
@@ -879,6 +961,8 @@ SwapResult accept(amber::perm::State &perm_state, amber::ObjectState &objects_st
     return {Reason::UnknownHolder, {}, {}};
   if (row.buyer && row.buyer != buyer.beneficiary)
     return {Reason::WrongBuyer, {}, {}};
+  if (row.price > max_price)
+    return {Reason::PriceChanged, {}, {}};
   // Escrow's seller remains the owner; a newly narrowed next-owner limit must still apply.
   const auto permission =
       check(Holder::player(row.seller), Verb::Transfer, goods, players, grants, now);

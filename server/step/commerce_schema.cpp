@@ -82,12 +82,34 @@ std::string validate_offer(const Json &row) {
       throw std::invalid_argument("expires_s must be finite nonnegative seconds");
   });
 }
+std::string validate_offer_plot(const Json &row) {
+  return validate([&] {
+    auto input = row;
+    fields(row, {"plot", "price"}, {"buyer", "expires_s"});
+    if (!row["plot"].is_number_unsigned() && !row["plot"].is_number_integer())
+      throw std::invalid_argument("plot must be a positive integer");
+    if (row["plot"].get<std::int64_t>() <= 0 || row["plot"].get<std::uint64_t>() > UINT32_MAX)
+      throw std::invalid_argument("plot must be a positive integer");
+    input.erase("plot");
+    const auto error = validate_offer(input);
+    if (!error.empty())
+      throw std::invalid_argument(error);
+  });
+}
+std::string validate_set_offer_price(const Json &row) {
+  return validate([&] {
+    fields(row, {"offer", "price"});
+    id(row, "offer");
+    amount(row, "price");
+  });
+}
 std::string validate_offers(const Json &row) {
   return validate_inventory(row);
 }
 std::string validate_accept(const Json &row) {
   return validate([&] {
-    fields(row, {"offer"}, {"payer", "beneficiary"});
+    fields(row, {"offer", "max_price"}, {"payer", "beneficiary"});
+    amount(row, "max_price");
     id(row, "offer");
     if (row.contains("payer"))
       id(row, "payer");
@@ -182,16 +204,29 @@ CommerceDeclarations declare_commerce(react::Terms &terms, react::NativeActions 
       schema(
           {{"price", money}, {"buyer", str}, {"expires_s", {{"type", "number"}, {"minimum", 0}}}},
           {"price"}, {{"price", 1}}));
+  ids.offer_plot =
+      add(react::ExchangeAction::OfferPlot, "engine.offer_plot",
+          "Offer a lot for sale to anyone or a named buyer. Requires Transfer on its land.", "",
+          schema({{"plot", {{"type", "integer"}, {"minimum", 1}, {"maximum", UINT32_MAX}}},
+                  {"price", money},
+                  {"buyer", str},
+                  {"expires_s", {{"type", "number"}, {"minimum", 0}}}},
+                 {"plot", "price"}, {{"plot", 1}, {"price", 1}}));
+  ids.set_offer_price = add(react::ExchangeAction::SetOfferPrice, "engine.set_offer_price",
+                            "Set an ordinary offer's price as its maker or seller.", "",
+                            schema({{"offer", str}, {"price", money}}, {"offer", "price"},
+                                   {{"offer", "offer:1"}, {"price", 1}}));
   ids.offers = add(react::ExchangeAction::Offers, "engine.offers",
                    "List live ordinary offers available to you or sold by you; an optional target "
                    "narrows the goods.",
                    "", schema(Json::object(), Json::array(), Json::object()));
-  ids.accept = add(react::ExchangeAction::Accept, "engine.accept",
-                   "Accept an ordinary offer, paying the seller and receiving the complete item. "
-                   "Scripts must name a beneficiary and hold payer-wallet Spend permission.",
-                   "",
-                   schema({{"offer", str}, {"payer", str}, {"beneficiary", str}}, {"offer"},
-                          {{"offer", "offer:OFFER_ID"}}));
+  ids.accept =
+      add(react::ExchangeAction::Accept, "engine.accept",
+          "Accept an ordinary offer, paying the seller and receiving the complete item. "
+          "Scripts must name a beneficiary and hold payer-wallet Spend permission.",
+          "",
+          schema({{"offer", str}, {"max_price", money}, {"payer", str}, {"beneficiary", str}},
+                 {"offer", "max_price"}, {{"offer", "offer:OFFER_ID"}, {"max_price", 1}}));
   ids.cancel_offer = add(
       react::ExchangeAction::CancelOffer, "engine.cancel_offer",
       "Cancel an ordinary offer using current Transfer permission and release its placed escrow.",

@@ -276,7 +276,8 @@ net::Reply read_inspect(const amber::catalog::State &catalog_state,
       const auto position = transforms.position[call.principal.body.slot()];
       const auto forward = rotate(transforms.rotation[call.principal.body.slot()], {0, 1, 0});
       const auto record = [&](const perm::Plot &plot) {
-        auto row = perm::plot_record(plots, grants, plot.id, settings.land.port_spacing_m, now);
+        auto row = perm::plot_record(plots, grants, plot.id, settings.land.port_spacing_m, now,
+                                     perm_state.offers, call.principal.player);
         const Vec3 delta{std::clamp(position.x, plot.bounds[0], plot.bounds[2]) - position.x,
                          std::clamp(position.y, plot.bounds[1], plot.bounds[3]) - position.y, 0};
         row["dist_m"] = delta.length();

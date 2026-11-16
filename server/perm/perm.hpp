@@ -147,7 +147,8 @@ enum class Reason {
   MailboxFull,
   StaleGoods,
   NotParticipant,
-  NotPresent
+  NotPresent,
+  PriceChanged
 };
 enum class LandVerb : std::uint8_t { Build, Enter, RunScripts, Transfer, Return };
 enum class PlotKind : std::uint8_t { Street, Alley, Lot };
@@ -217,6 +218,7 @@ struct Offer {
   bool live = false;
   std::vector<Handle> parts;
   PlotId plot = 0;
+  Holder maker = {};
 };
 struct Offers {
   std::vector<Offer> rows{Offer{}};
@@ -342,8 +344,12 @@ std::vector<OfferId> advance_offers(Offers &, IdentityRead, PermissionFlags, Ste
 // Authenticated adapters supply explicit financial and delivery descriptors.
 
 SwapResult accept(amber::perm::State &perm_state, amber::ObjectState &objects_state, const Buyer &,
-                  const Target &goods, OfferId, std::size_t mailbox_max, Step,
-                  std::span<const Target> parts = {});
+                  const Target &goods, OfferId, std::int64_t max_price, std::size_t mailbox_max,
+                  Step, std::span<const Target> parts = {});
+OfferResult offer_plot(State &, Holder, PlotId, std::int64_t price, PlayerId buyer, Step expiry,
+                       Step now);
+Reason set_offer_price(Offers &, Holder, OfferId, std::int64_t price, Step now);
+SwapResult accept_plot(State &, const Buyer &, OfferId, std::int64_t max_price, Step);
 SwapResult give(amber::perm::State &perm_state, amber::ObjectState &objects_state, Holder sender,
                 const Target &, PlayerId recipient, Handle recipient_body, bool present,
                 std::size_t mailbox_max, Step, std::span<const Target> parts = {});
@@ -392,5 +398,6 @@ struct State {
 } // namespace amber::perm
 
 namespace amber::perm {
-nlohmann::json plot_record(const Plots &, const Grants &, PlotId, float port_spacing_m, Step);
+nlohmann::json plot_record(const Plots &, const Grants &, PlotId, float port_spacing_m, Step,
+                           const Offers & = {}, PlayerId caller = 0);
 }

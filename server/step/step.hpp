@@ -281,7 +281,7 @@ Json failure(std::string);
 } // namespace amber::step::authoring
 
 namespace amber::step {
-inline constexpr char runtime_version[] = "ambergris-0.4";
+inline constexpr char runtime_version[] = "ambergris-0.5";
 
 struct NavigationRequests {
   struct Request {
@@ -504,7 +504,7 @@ using Json = nlohmann::json;
 struct CommerceDeclarations {
   TermId pay = 0, balance = 0, inventory = 0, give = 0, offer = 0, offers = 0, accept = 0,
          cancel_offer = 0, trade_open = 0, trade_change = 0, trade_confirm = 0, trade_cancel = 0,
-         place_existing = 0;
+         place_existing = 0, offer_plot = 0, set_offer_price = 0;
 };
 CommerceDeclarations declare_commerce(react::Terms &, react::NativeActions &);
 struct OfferExpired {
@@ -529,6 +529,8 @@ std::string validate_balance(const Json &);
 std::string validate_inventory(const Json &);
 std::string validate_give(const Json &);
 std::string validate_offer(const Json &);
+std::string validate_offer_plot(const Json &);
+std::string validate_set_offer_price(const Json &);
 std::string validate_offers(const Json &);
 std::string validate_accept(const Json &);
 std::string validate_cancel_offer(const Json &);
@@ -549,12 +551,14 @@ step::NativeCompletion give(amber::perm::State &perm_state, amber::ObjectState &
                             std::size_t mailbox_max, const step::NativeCall &call);
 step::NativeCompletion offer(amber::perm::State &perm_state, amber::ObjectState &objects_state,
                              const space::Space &space, const step::NativeCall &call);
+step::NativeCompletion offer_plot(perm::State &, const NativeCall &);
+step::NativeCompletion set_offer_price(perm::Offers &, const NativeCall &);
 step::NativeCompletion offers(const perm::Offers &offers, const perm::Players &players,
                               IdentityRead identity, AuthorityRead authority,
                               const step::NativeCall &call);
 step::NativeCompletion accept(amber::perm::State &perm_state, amber::ObjectState &objects_state,
-                              const space::Space &space, const DeliveryTargets &delivery,
-                              std::size_t mailbox_max, const step::NativeCall &call);
+                              space::State &space_state, const DeliveryTargets &delivery,
+                              const amber::Settings &settings, const step::NativeCall &call);
 step::NativeCompletion cancel_offer(amber::perm::State &perm_state,
                                     amber::ObjectState &objects_state,
                                     const step::NativeCall &call);
