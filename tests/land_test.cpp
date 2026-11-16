@@ -33,6 +33,10 @@ void layout_and_pool() {
       perm::plot_record(permissions.plots, permissions.grants, 4, land.port_spacing_m, 0);
   require(first["fronts"] == "street" && first["area_m2"] == 512 && first["port"] == 0,
           "lot record measures frontage, area and nearest port");
+  for (PlotId id = 4; id <= 11; ++id)
+    require(perm::plot_record(permissions.plots, permissions.grants, id, land.port_spacing_m,
+                              0)["fronts"] == (id <= 7 ? "street" : "back way"),
+            "every surveyed lot fronts its row's street or back way, including alley corners");
   for (PlotId id = 4; id <= 7; ++id)
     permissions.plots.rows[id].owner = 2;
   step::fill_pool(permissions, world, land);

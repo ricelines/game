@@ -20,14 +20,17 @@ nlohmann::json plot_record(const Plots &plots, const Grants &grants, PlotId id,
         (b[0] == w[2] || b[2] == w[0]) && std::max(b[1], w[1]) < std::min(b[3], w[3]);
     const bool horizontal =
         (b[1] == w[3] || b[3] == w[1]) && std::max(b[0], w[0]) < std::min(b[2], w[2]);
-    if (!vertical && !horizontal)
-      continue;
-    if (way.kind == PlotKind::Street) {
+    if (horizontal && way.kind == PlotKind::Street) {
       fronts = "street";
       break;
     }
-    if (std::string_view(fronts) == "none")
-      fronts = w[2] - w[0] > w[3] - w[1] ? "back way" : "alley";
+    if (way.kind == PlotKind::Alley) {
+      if (horizontal) {
+        fronts = "back way";
+      } else if (vertical && std::string_view(fronts) == "none") {
+        fronts = "alley";
+      }
+    }
   }
   const auto port = std::int64_t(std::round((b[0] + b[2]) / (2 * port_spacing_m)));
   Json rights = Json::array();
