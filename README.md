@@ -113,16 +113,24 @@ Native deadline tests retain their own strict limits in both build presets.
 After substantial native changes, run the full Debug suite for ASan/UBSan checks.
 
 Gameplay journeys that launch a server accept `--config PATH` and
-`--profile development|production` (default: production). Use an optimized
-server for strict timing acceptance. Build the required Release binaries together:
+`--profile development|production` (default: production). For functional checks,
+select the Dev server already built above; omitting `--server` selects Release:
+
+```sh
+python3 bake/run.py tests/game_deadlines.py --server .build/dev/amb-server \
+  --profile development --output .cache/integration/development-deadlines.json
+```
+
+For strict timing acceptance on a host with verified CPU accounting, build the
+required optimized Release binaries together and select the production profile:
 
 ```sh
 .tools/bin/cmake -S . -B .build/release -G Ninja \
   --toolchain "$PWD/cmake/NativeToolchain.cmake" \
   -DCMAKE_BUILD_TYPE=Release -DAMBER_SANITIZE=OFF
 .tools/bin/cmake --build .build/release --target check-binaries
-python3 bake/run.py tests/game_deadlines.py --profile development \
-  --output .cache/integration/development-deadlines.json
+python3 bake/run.py tests/game_deadlines.py --profile production \
+  --output .cache/integration/production-deadlines.json
 ```
 
 Development journey reports are labeled `functional`; they do not certify the
