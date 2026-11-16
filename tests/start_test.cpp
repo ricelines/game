@@ -115,6 +115,14 @@ int main(int argc, char **argv) {
     install_land(plan, perm_state, land_space, settings.land);
     perm::update_plots(identity(objects), transforms(objects), plot_membership(objects), plots,
                        created, true);
+    for (const auto &lot : plan.at("land").value("lots", Json::array())) {
+      const auto at = lot.at("at").get<std::array<float, 2>>();
+      const auto found = std::ranges::find_if(plots.rows, [&](const auto &plot) {
+        return plot.id && plot.bounds[0] == at[0] && plot.bounds[1] == at[1];
+      });
+      require(found != plots.rows.end() && found->owner == lot.at("owner").get<PlayerId>(),
+              "each seeded resident owns the lot named by its minimum corner");
+    }
     perm::Ledger &ledger = perm_state.ledger;
     auto money_plan = plan;
     groups.rows.push_back({2, 1, "Funded institution"});

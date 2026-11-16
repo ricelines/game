@@ -62,6 +62,12 @@ void terrain_supports_bodies_and_navigation() {
   for (int tick = 0; tick < 40; ++tick)
     scene.tick();
   require(std::abs(scene.objects.position[body.slot()].z) < .1f, "body stands on terrain at zero");
+  react::State lighting({4096, 50, 5, 64});
+  lighting.terms.by_name["base.outdoor_lux"] = 1;
+  lighting.world_settings.values[1] = Value(120.0);
+  require(space::illuminance(scene.space, identity(scene.objects), body, {10, 10, 1},
+                             step::outdoor_lux(lighting), {}) == 120,
+          "outdoor objects receive the world setting's 120 lux");
   scene.wait_navigation();
   const auto route = space::path(scene.space, identity(scene.objects), body,
                                  space::PointGoal{{20, 20, 0}, .1f}, {});

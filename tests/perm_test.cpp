@@ -83,6 +83,28 @@ void moved_goods_leave_plot_scoped_authority() {
   require(refresh(false).empty(), "unchanged membership produced a spurious change");
 }
 
+void plot_records_show_live_land_control() {
+  Fixture f;
+  Plots plots;
+  plots.rows.push_back({1, 0, 1, 6, {0, -50, 72, 50}, {}, PlotKind::Street});
+  plots.rows.push_back({2, 2, 0, 2, {8, 50, 24, 82}, {}, PlotKind::Lot});
+  const auto root_scope = Scope::all_land();
+  const auto root =
+      create_root_grant(f.grants, f.players, {0, Holder::player(4), root_scope, Rights{24} << 8},
+                        {Holder::player(4), 4, true}, 0);
+  const auto ordinary = f.grant(2, Holder::player(3), Scope::plot(2), 2, 24, 0, 0, 10);
+  require(bool(root) && ordinary, "land record fixture creates real grants");
+  const auto record = plot_record(plots, f.grants, 2, 1000, 5);
+  require(record["fronts"] == "street" &&
+              record["bounds"] == nlohmann::json::array({8, 50, 24, 82}) &&
+              record["rights"].size() == 2 && record["rights"][0]["holder"] == "p:4" &&
+              record["rights"][1]["holder"] == "p:3" &&
+              record["rights"][0]["verbs"] == nlohmann::json::array({"transfer", "return"}),
+          "lot records expose ordinary and root land control as named verbs");
+  require(plot_record(plots, f.grants, 2, 1000, 10)["rights"].size() == 1 &&
+              plot_record(plots, f.grants, 1, 1000, 5)["rights"].empty(),
+          "expired grants and all-land authority on ways are excluded");
+}
 void object_checks_do_not_inherit_owner_or_groups_for_scripts() {
   Fixture f;
   f.players.rows[2].groups = {4, 9};
@@ -1137,6 +1159,7 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
 int main() {
   try {
     moved_goods_leave_plot_scoped_authority();
+    plot_records_show_live_land_control();
     object_checks_do_not_inherit_owner_or_groups_for_scripts();
     delegated_spending_shares_one_allowance_and_failure_is_atomic();
     delegation_cannot_expand_or_leave_its_owner();
