@@ -343,7 +343,7 @@ void action_handlers_receive_the_actual_caller() {
   DeferredEffects effects;
   std::uint64_t random = 7;
   Invocation child;
-  child.self = {f.b, script};
+  child.self = {f.a, script};
   child.sender = f.a;
   child.state = &state;
   child.effects = &effects;
