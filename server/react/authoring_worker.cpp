@@ -144,7 +144,7 @@ struct Worker::Impl {
   void run() {
     const react::RightsDeclaration rights{
         {"use", "take", "move", "edit", "copy", "transfer", "destroy"},
-        {"spend", "build", "enter", "run_scripts", "animate", "camera", "issue"}};
+        {"spend", "build", "enter", "run_scripts", "animate", "camera"}};
     while (true) {
       Job job;
       {

@@ -1239,7 +1239,7 @@ struct AccountTarget {
   PlayerId controller = 0;
   static AccountTarget player(PlayerId id) { return {Account::player(id), id}; }
 };
-enum class ScopeKind : std::uint8_t { Object, OwnedOnPlot, Account, Avatar, Plot, Issuance };
+enum class ScopeKind : std::uint8_t { Object, OwnedOnPlot, Account, Avatar, Plot };
 struct Scope {
   ScopeKind kind = ScopeKind::Object;
   std::uint64_t subject = 0;
@@ -1255,7 +1255,6 @@ struct Scope {
   Account account() const { return {account_kind, subject}; }
   static Scope avatar(Handle body) { return {ScopeKind::Avatar, body.bits, 0}; }
   static Scope plot(PlotId id) { return {ScopeKind::Plot, id, 0}; }
-  static Scope issuance() { return {ScopeKind::Issuance, 0, 0}; }
   bool operator==(const Scope &) const = default;
 };
 struct GrantKey {
@@ -1369,7 +1368,6 @@ struct ScopeControl {
   PlayerId controller = 0;
   Rights available = 0;
   PlotId plot = 0;
-  bool issuer_is_architect = false;
 };
 struct HolderControl {
   Holder holder;
@@ -1487,7 +1485,6 @@ namespace amber::react {
 enum class MechanicAction { Grasp, Release, Attach, Impulse, Transfer };
 enum class ConstructionAction { Create, Destroy, Reconfigure, ReviseModel, PlaceExisting };
 enum class ExchangeAction {
-  Issue,
   HoldGoods,
   Pay,
   Balance,

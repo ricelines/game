@@ -84,8 +84,7 @@ void install_money(const Json &plan, const Symbols &symbols, IdentityRead identi
 void install_grants(const Json &plan, const Symbols &symbols,
                     const amber::ObjectState &objects_state, amber::perm::State &perm_state,
                     const amber::catalog::State &catalog_state,
-                    const amber::react::State &react_state, const net::Profiles &profiles,
-                    const amber::step::Clock &clock) {
+                    const amber::react::State &react_state, const amber::step::Clock &clock) {
   const auto values = react::value_read(objects_state, catalog_state, react_state);
   const auto authority = amber::authority(objects_state.objects);
 
@@ -138,12 +137,8 @@ void install_grants(const Json &plan, const Symbols &symbols,
       if (const auto found = symbols.objects.find(scope.at("account").get<std::string>());
           found != symbols.objects.end())
         scope["account"] = to_string(found->second);
-    const bool architect = caller.holder.kind == perm::HolderKind::Player &&
-                           issuer < profiles.rows.size() &&
-                           std::ranges::find(profiles.rows[issuer].roles, "architect") !=
-                               profiles.rows[issuer].roles.end();
     const auto control =
-        step::scope(scope, values.identity, authority, limits, players, plots, groups, architect);
+        step::scope(scope, values.identity, authority, limits, players, plots, groups);
     const auto duration = detail::steps(row.value("expires_s", 0.), hz);
     const perm::GrantRequest request{issuer,
                                      recipient.holder,
@@ -205,8 +200,8 @@ void provision_body_grants(const Json &plan, const Symbols &symbols,
           scope["owned_on_plot"]["owner"] =
               "p:" + std::to_string(scope["owned_on_plot"]["owner"].get<PlayerId>());
       }
-      const auto requested = editing::detail::slot_choices(
-          choices, source, objects_state, perm_state, profiles.rows[player].roles, call);
+      const auto requested =
+          editing::detail::slot_choices(choices, source, objects_state, perm_state, call);
       const auto granted =
           editing::detail::fill_slots(source, requested, authority, players, grants, call);
       if (granted.reply.at("grants").size() != choices.size())

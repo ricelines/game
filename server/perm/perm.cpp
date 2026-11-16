@@ -198,7 +198,7 @@ bool covered(const Grant &parent, const ScopeControl &control) {
 }
 
 bool monetary(Scope scope) {
-  return scope.kind == ScopeKind::Account || scope.kind == ScopeKind::Issuance;
+  return scope.kind == ScopeKind::Account;
 }
 } // namespace
 
@@ -294,7 +294,8 @@ Decision check_account(Holder actor, AccountTarget target, std::int64_t amount,
                        const Grants &grants, Step now) {
   if (amount < 0)
     return {Reason::BadAmount};
-  if (!target.account.subject || !target.controller || !actor.id)
+  if (((!target.account.subject || !target.controller) && target.account != Account::player(0)) ||
+      !actor.id)
     return {Reason::UnknownHolder};
   if (actor.kind == HolderKind::Player && actor.id == target.controller)
     return {Reason::Allowed};
@@ -357,10 +358,7 @@ GrantResult create_grant(Grants &grants, Players &players, Holder issuer,
     return {Reason::InvalidScope};
 
   GrantId parent_id = 0;
-  const bool controls =
-      issuer.kind == HolderKind::Player &&
-      (request.scope.kind == ScopeKind::Issuance ? control.issuer_is_architect
-                                                 : request.issuer == control.controller);
+  const bool controls = issuer.kind == HolderKind::Player && request.issuer == control.controller;
   if (!controls) {
     auto eligible = [&](const Grant *candidate) {
       return candidate && candidate->live && !expired(*candidate, now) && !candidate->parent &&
@@ -480,36 +478,25 @@ void rebuild_grant_lookup(Grants &grants) {
 
 TransferResult pay(Ledger &ledger, Grants &grants, Holder actor, AccountTarget payer,
                    Account recipient, std::int64_t amount, Step now) {
-  if (!payer.account.subject || !recipient.subject)
+  const bool root_payer = payer.account == Account::player(0);
+  const bool root_recipient = recipient == Account::player(0);
+  if ((!payer.account.subject && !root_payer) || (!recipient.subject && !root_recipient))
     return {Reason::UnknownHolder};
   const auto permission = check_account(actor, payer, amount, grants, now);
   if (!permission)
     return {permission.reason};
-  if (balance(ledger, payer.account) < amount)
+  if (!root_payer && balance(ledger, payer.account) < amount)
     return {Reason::InsufficientBalance};
   if (payer.account == recipient || amount == 0)
     return {Reason::Allowed, 0};
-  if (amount > std::numeric_limits<std::int64_t>::max() - balance(ledger, recipient))
+  if (!root_recipient &&
+      amount > std::numeric_limits<std::int64_t>::max() - balance(ledger, recipient))
     return {Reason::BalanceOverflow};
   spend(grants, permission.grant, amount, now);
-  ledger.balance[payer.account] -= amount;
-  ledger.balance[recipient] += amount;
-  return {Reason::Allowed, amount};
-}
-
-TransferResult issue(Ledger &ledger, Grants &grants, Holder actor, Account recipient,
-                     std::int64_t amount, Step now) {
-  if (!recipient.subject)
-    return {Reason::UnknownHolder};
-  if (amount < 0)
-    return {Reason::BadAmount};
-  const auto permission = budget(grants, find(grants, actor, Scope::issuance()), amount, now);
-  if (!permission)
-    return {permission.reason};
-  if (amount > std::numeric_limits<std::int64_t>::max() - balance(ledger, recipient))
-    return {Reason::BalanceOverflow};
-  spend(grants, permission.grant, amount, now);
-  ledger.balance[recipient] += amount;
+  if (!root_payer)
+    ledger.balance[payer.account] -= amount;
+  if (!root_recipient)
+    ledger.balance[recipient] += amount;
   return {Reason::Allowed, amount};
 }
 

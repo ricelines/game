@@ -65,8 +65,6 @@ Json scope_record(perm::Scope scope) {
     return {{"avatar", to_string(Handle{scope.subject})}};
   case perm::ScopeKind::Plot:
     return {{"plot", scope.subject}};
-  case perm::ScopeKind::Issuance:
-    return {{"issuance", true}};
   }
   return nullptr;
 }

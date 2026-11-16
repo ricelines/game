@@ -21,7 +21,7 @@ struct State;
 #include <unordered_set>
 
 namespace amber::step {
-inline constexpr char runtime_version[] = "ambergris-0.3";
+inline constexpr char runtime_version[] = "ambergris-0.4";
 
 struct NavigationRequests {
   struct Request {
@@ -341,8 +341,7 @@ std::string validate_plot_permissions(const Json &);
 step::NativeCompletion grant(amber::perm::State &perm_state,
                              const amber::ObjectState &objects_state,
                              const amber::catalog::State &catalog_state,
-                             const amber::react::State &react_state, bool issuer_is_architect,
-                             const step::NativeCall &call);
+                             const amber::react::State &react_state, const step::NativeCall &call);
 step::NativeCompletion revoke(amber::perm::State &perm_state,
                               const amber::ObjectState &objects_state, bool issuer_is_architect,
                               const step::NativeCall &call);
@@ -418,8 +417,7 @@ Step duration_steps(double seconds, double hz);
 perm::AccountTarget account(const Json &, IdentityRead, AuthorityRead, const perm::Players &,
                             const perm::Groups &);
 perm::ScopeControl scope(const Json &, IdentityRead, AuthorityRead, const perm::OwnerLimits &,
-                         const perm::Players &, const perm::Plots &, const perm::Groups &,
-                         bool issuer_is_architect);
+                         const perm::Players &, const perm::Plots &, const perm::Groups &);
 perm::Rights rights(const Json &, perm::ScopeKind);
 } // namespace amber::step
 
@@ -481,8 +479,7 @@ step::NativeCompletion install_script(const step::NativeCall &call,
                                       amber::react::State &react_state,
                                       const amber::catalog::State &catalog_state,
                                       const amber::ObjectState &objects_state,
-                                      amber::perm::State &perm_state,
-                                      std::span<const std::string> roles, TermId start_event);
+                                      amber::perm::State &perm_state, TermId start_event);
 step::NativeCompletion uninstall_script(const step::NativeCall &call,
                                         amber::react::State &react_state,
                                         const react::ValueRead &values,
@@ -737,8 +734,7 @@ void install_money(const Json &, const Symbols &, IdentityRead, AuthorityRead,
                    const perm::Players &, const perm::Groups &, perm::Ledger &);
 void install_grants(const Json &, const Symbols &, const amber::ObjectState &objects_state,
                     amber::perm::State &perm_state, const amber::catalog::State &catalog_state,
-                    const amber::react::State &react_state, const net::Profiles &,
-                    const amber::step::Clock &clock);
+                    const amber::react::State &react_state, const amber::step::Clock &clock);
 void install_script_state(const Json &, const Symbols &, react::ScriptStates &);
 void queue_bootstrap(const Json &, const Symbols &, const react::Terms &, step::WorkQueues &,
                      std::size_t event_limit);
@@ -802,12 +798,6 @@ NativeCompletion remove_instance(const lifecycle::Parts &, const react::ValueRea
 void install_declared_attachments(amber::ObjectState &objects_state,
                                   amber::space::State &space_state,
                                   std::span<const Handle> objects);
-step::NativeCompletion issue(perm::Ledger &ledger, perm::Grants &grants,
-                             const perm::Players &players, IdentityRead identity,
-                             AuthorityRead authority, const perm::Groups &groups,
-                             const step::NativeCall &call);
-void declare_issuance_action(react::Terms &terms, react::NativeActions &native);
-std::string validate_issue(const nlohmann::json &input);
 step::NativeCompletion hold_goods(amber::perm::State &perm_state, amber::ObjectState &objects_state,
                                   const DeliveryTargets &delivery, const space::Space &space,
                                   std::size_t mailbox_max, const step::NativeCall &call);

@@ -35,7 +35,7 @@ void holder(const Json &value) {
     throw std::invalid_argument("script holder needs a full object handle");
 }
 void scope(const Json &scope) {
-  fields(scope, {}, {"object", "owned_on_plot", "account", "avatar", "plot", "issuance"});
+  fields(scope, {}, {"object", "owned_on_plot", "account", "avatar", "plot"});
   if (scope.size() != 1)
     throw std::invalid_argument("choose one scope");
   if (scope.contains("owned_on_plot")) {
@@ -49,9 +49,6 @@ void scope(const Json &scope) {
   } else if (scope.contains("plot")) {
     if (!scope.at("plot").is_number_integer() || scope.at("plot").get<std::int64_t>() <= 0)
       throw std::invalid_argument("plot must be a positive ID");
-  } else if (scope.contains("issuance")) {
-    if (scope.at("issuance") != true)
-      throw std::invalid_argument("issuance must be true");
   } else
     string(scope.begin().value());
 }
@@ -169,7 +166,7 @@ AdminDeclarations declare_admin(react::Terms &terms, react::NativeActions &nativ
                       {"description", "group:N; null clears the assigned group"}};
   const Json scope = {{"type", "object"},
                       {"description", "Exactly one of object, owned_on_plot:{owner,plot}, "
-                                      "account:p:N, avatar, plot or issuance:true"}};
+                                      "account:p:N, avatar or plot"}};
   const Json holder = {
       {"oneOf",
        Json::array({str, schema({{"script", str}, {"on", str}}, {"script", "on"},

@@ -93,7 +93,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   declare_construction_actions(terms, native_declarations);
   declare_model_edit(terms, native_declarations);
   declare_physical_actions(terms, native_declarations);
-  declare_issuance_action(terms, native_declarations);
   declare_hold_goods_action(terms, native_declarations);
   const auto role = [&](const char *group, const char *name) {
     return mechanical.values.at(group).at(name).get<TermId>();
@@ -217,7 +216,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     start::install_land(plan, plots, groups, players);
     start::install_money(plan, symbols, ids, auth, players, groups, ledger);
     start::install_grants(plan, symbols, objects_state, perm_state, catalog_state, react_state,
-                          profiles, clock);
+                          clock);
     start::provision_body_grants(plan, symbols, catalog_state, objects_state, perm_state, profiles,
                                  clock.step, hz);
   }

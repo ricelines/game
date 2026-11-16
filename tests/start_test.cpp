@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
       if (script.id && script.declaration.kind == react::ScriptDeclaration::Kind::Rule)
         react::add_rule(rules, scripts, terms, script.id);
     perm::Grants &grants = perm_state.grants;
-    install_grants(plan, symbols, objects_state, perm_state, catalog_state, react_state, profiles,
+    install_grants(plan, symbols, objects_state, perm_state, catalog_state, react_state,
                    amber::step::Clock{.step = 0, .hz = 20});
     require(grants.rows.size() == plan.at("grants").size() + 1,
             "every initial grant passed real permission creation");
@@ -174,7 +174,7 @@ int main(int argc, char **argv) {
     rejects(
         [&] {
           install_grants(wrong_owner, symbols, objects_state, rejected_permissions, catalog_state,
-                         react_state, profiles, amber::step::Clock{.step = 0, .hz = 20});
+                         react_state, amber::step::Clock{.step = 0, .hz = 20});
         },
         "plan cannot forge current goods control");
     auto wrong_installation = plan;
@@ -183,8 +183,7 @@ int main(int argc, char **argv) {
     rejects(
         [&] {
           install_grants(wrong_installation, symbols, objects_state, rejected_permissions,
-                         catalog_state, react_state, profiles,
-                         amber::step::Clock{.step = 0, .hz = 20});
+                         catalog_state, react_state, amber::step::Clock{.step = 0, .hz = 20});
         },
         "plan cannot claim an uninstalled script is installed");
     step::WorkQueues queues;

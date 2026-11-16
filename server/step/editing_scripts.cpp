@@ -101,7 +101,6 @@ namespace detail {
 std::vector<SlotRequest> slot_choices(const Json &rows, const catalog::Script &source,
                                       const amber::ObjectState &objects_state,
                                       const amber::perm::State &perm_state,
-                                      std::span<const std::string> roles,
                                       const step::NativeCall &call) {
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto authority = amber::authority(std::as_const(objects_state.objects));
@@ -124,8 +123,7 @@ std::vector<SlotRequest> slot_choices(const Json &rows, const catalog::Script &s
                             ? actor.id
                             : authority.owner[actor.installed_on.slot()];
     const auto control =
-        step::scope(row.at("scope"), identity, authority, limits, players, plots, groups,
-                    actor.kind == perm::HolderKind::Player && detail::role(roles, "architect"));
+        step::scope(row.at("scope"), identity, authority, limits, players, plots, groups);
     const auto expires = step::duration_steps(row.at("expires_s").get<double>(), call.hz);
     if (!expires || expires > std::numeric_limits<Step>::max() - call.step)
       throw std::invalid_argument("script grant needs a future expiry");
@@ -198,9 +196,7 @@ Json preview(const catalog::Script &source, Handle object, IdentityRead identity
       selected_scope = {{"account", actor.kind == perm::HolderKind::Player
                                         ? "p:" + std::to_string(actor.id)
                                         : to_string(actor.installed_on)}};
-    } else if (name == "issue")
-      selected_scope = {{"issuance", true}};
-    else if (name == "animate" || name == "camera") {
+    } else if (name == "animate" || name == "camera") {
       const auto actor = detail::holder(call);
       const auto body = actor.kind == perm::HolderKind::Player ? call.body : actor.installed_on;
       selected_scope = body && identity.valid(body) && (identity.flags[body.slot()] & Body)
@@ -225,8 +221,7 @@ step::NativeCompletion install_script(const step::NativeCall &call,
                                       amber::react::State &react_state,
                                       const amber::catalog::State &catalog_state,
                                       const amber::ObjectState &objects_state,
-                                      amber::perm::State &perm_state,
-                                      std::span<const std::string> roles, TermId start_event) {
+                                      amber::perm::State &perm_state, TermId start_event) {
   const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   auto &instances = react_state.installations;
@@ -247,8 +242,8 @@ step::NativeCompletion install_script(const step::NativeCall &call,
       return detail::result(false,
                             {{"slots", preview(source, object, values.identity, authority, call)},
                              {"requires_commit", true}});
-    const auto requested = detail::slot_choices(call.arguments.at("choices"), source, objects_state,
-                                                perm_state, roles, call);
+    const auto requested =
+        detail::slot_choices(call.arguments.at("choices"), source, objects_state, perm_state, call);
     const auto plot = authority.plot[object.slot()];
     if (plot) {
       if (plot >= plots.rows.size())

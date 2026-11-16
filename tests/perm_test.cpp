@@ -22,11 +22,11 @@ struct Fixture {
   Fixture() { players.rows.resize(8); }
   GrantId grant(PlayerId issuer, Holder holder, Scope scope, PlayerId controller, Rights rights,
                 std::int64_t cap = 0, Step period = 0, Step expiry = 1000,
-                PlayerId holder_controller = 0, bool architect = false) {
-    const auto result = create_grant(grants, players, perm::Holder::player(issuer),
-                                     {issuer, holder, scope, rights, cap, period, expiry},
-                                     {scope, controller, all_rights, 0, architect},
-                                     {holder, holder_controller, true}, 1);
+                PlayerId holder_controller = 0) {
+    const auto result =
+        create_grant(grants, players, perm::Holder::player(issuer),
+                     {issuer, holder, scope, rights, cap, period, expiry},
+                     {scope, controller, all_rights}, {holder, holder_controller, true}, 1);
     require(static_cast<bool>(result), "fixture grant creation failed");
     return result.grant;
   }
@@ -219,10 +219,6 @@ void scripts_delegate_only_actual_parent_authority() {
                         {1, stranger, ungranted, bit(Verb::Use), 0, 0, 90},
                         {ungranted, 1, all_rights}, {stranger, 1, true}, 2),
           "a script borrowed its object's owner's grant-issuing authority");
-  require(!create_grant(f.grants, f.players, institution,
-                        {1, stranger, Scope::issuance(), 1, 10, 100, 90},
-                        {Scope::issuance(), 0, 1, 0, true}, {stranger, 3, true}, 2),
-          "a script borrowed its owner's architect role to issue currency grants");
   require(!create_grant(f.grants, f.players, Holder::player(2),
                         {1, stranger, ungranted, bit(Verb::Use), 0, 0, 90},
                         {ungranted, 1, all_rights}, {stranger, 1, true}, 2),
@@ -341,7 +337,7 @@ void repeated_revocation_keeps_only_live_deadlines() {
   }
 }
 
-void wallets_and_issuance_require_explicit_authority() {
+void wallets_and_root_require_explicit_authority() {
   Fixture f;
   const auto object = Handle::make(7, 1);
   const auto script = Holder::script(10, object);
@@ -349,22 +345,43 @@ void wallets_and_issuance_require_explicit_authority() {
   f.ledger.balance[Account::player(7)] = 200;
   require(!pay(f.ledger, f.grants, script, AccountTarget::player(2), Account::player(3), 10, 1),
           "script inherited its installed object's owner wallet");
-  require(!issue(f.ledger, f.grants, Holder::player(2), Account::player(2), 10, 1),
-          "wallet owner minted money");
-  const auto issue_id = f.grant(1, script, Scope::issuance(), 0, 1, 50, 100, 200, 2, true);
-  require(static_cast<bool>(issue(f.ledger, f.grants, script, Account::player(2), 40, 2)),
-          "authorized issuance failed");
-  require(issue(f.ledger, f.grants, script, Account::player(2), 11, 3).reason ==
-                  Reason::Allowance &&
-              balance(f.ledger, Account::player(2)) == 140,
-          "issuance exceeded cap or mutated failed result");
-  require(issue(f.ledger, f.grants, script, Account::player(0), 1, 3).reason ==
-                  Reason::UnknownHolder &&
-              f.ledger.balance.size() == 2 && f.grants.rows[issue_id].spent == 40,
-          "unknown player created a wallet or consumed issuance cap");
-  revoke(f.grants, f.players, issue_id);
-  require(!issue(f.ledger, f.grants, script, Account::player(2), 1, 4), "revoked issuer minted");
-  require(balance(f.ledger, Account::player(7)) == 200, "issuance changed another player's wallet");
+  require(!pay(f.ledger, f.grants, script, AccountTarget::player(0), Account::player(2), 10, 1),
+          "root payments need an explicit spend grant");
+  const auto root = Scope::account(Account::player(0));
+  const auto id = static_cast<GrantId>(f.grants.rows.size());
+  f.grants.rows.push_back({id, 0, 0, script, root, 1, 50, 0, 100, 0, 200, true});
+  f.grants.by_key.emplace(GrantKey{script, root}, id);
+  f.players.rows[0].grants_given.push_back(id);
+  require(
+      bool(pay(f.ledger, f.grants, script, AccountTarget::player(0), Account::player(2), 40, 2)) &&
+          balance(f.ledger, Account::player(2)) == 140 &&
+          !f.ledger.balance.contains(Account::player(0)),
+      "root creates money without keeping a balance");
+  require(
+      pay(f.ledger, f.grants, script, AccountTarget::player(0), Account::player(2), 11, 3).reason ==
+              Reason::Allowance &&
+          f.grants.rows[id].spent == 40,
+      "root spending is capped without consuming a failed payment");
+  require(
+      bool(pay(f.ledger, f.grants, script, AccountTarget::player(0), Account::player(0), 7, 3)) &&
+          f.grants.rows[id].spent == 40 && !f.ledger.balance.contains(Account::player(0)),
+      "root paying itself changes neither circulation nor allowance");
+  require(bool(pay(f.ledger, f.grants, Holder::player(2), AccountTarget::player(2),
+                   Account::player(0), 5, 4)) &&
+              balance(f.ledger, Account::player(2)) == 135 &&
+              !f.ledger.balance.contains(Account::player(0)),
+          "payments to root destroy money");
+  require(
+      bool(pay(f.ledger, f.grants, script, AccountTarget::player(0), Account::player(2), 5, 100)) &&
+          f.grants.rows[id].spent == 5 && balance(f.ledger, Account::player(2)) == 140,
+      "root spending allowance resets for the next period");
+  require(!pay(f.ledger, f.grants, Holder::player(0), AccountTarget::player(0), Account::player(2),
+               1, 101),
+          "root can never act");
+  require(!create_grant(f.grants, f.players, Holder::player(2),
+                        {2, Holder::player(0), Scope::account(Account::player(2)), 1, 5, 100, 200},
+                        {Scope::account(Account::player(2)), 2, 1}, {}, 1),
+          "root can never hold a grant");
   const auto spend = f.grant(2, script, Scope::account(Account::player(2)), 2, 1, 50, 100, 200);
   f.ledger.balance[Account::player(3)] = std::numeric_limits<std::int64_t>::max();
   require(
@@ -373,7 +390,7 @@ void wallets_and_issuance_require_explicit_authority() {
           balance(f.ledger, Account::player(2)) == 140 && f.grants.rows[spend].spent == 0,
       "overflowing payment mutated source or allowance");
   require(
-      pay(f.ledger, f.grants, Holder::player(2), AccountTarget::player(2), Account::player(0), 0, 5)
+      pay(f.ledger, f.grants, Holder::player(2), AccountTarget::player(2), Account::group(0), 0, 5)
                   .reason == Reason::UnknownHolder &&
           pay(f.ledger, f.grants, Holder::player(2), AccountTarget::player(2), Account::player(3),
               -1, 5)
@@ -1004,7 +1021,7 @@ int main() {
     reminder_deadlines_ignore_revocation_and_notify_once();
     overdue_grant_cleanup_waits_without_extending_authority();
     repeated_revocation_keeps_only_live_deadlines();
-    wallets_and_issuance_require_explicit_authority();
+    wallets_and_root_require_explicit_authority();
     next_owner_limits_preserve_fair_use_and_clear_old_script_grants();
     land_bans_override_presets_and_scripts_use_their_own_grants();
     offers_preflight_before_money_ownership_and_allowances_change();

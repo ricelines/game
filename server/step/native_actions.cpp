@@ -126,12 +126,6 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
 
   NativeCompletion out;
   switch (operation) {
-  case react::ExchangeAction::Issue: {
-    if (const auto error = validate_issue(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
-    out = issue(ledger, grants, players, identity, authority_read, groups, call);
-    break;
-  }
   case react::ExchangeAction::HoldGoods: {
     if (const auto error = validate_hold_goods(call.arguments); !error.empty())
       throw std::invalid_argument(error);
@@ -231,7 +225,7 @@ NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
   case react::PermissionAction::Grant: {
     if (const auto error = validate_grant(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = grant(perm_state, objects_state, catalog_state, react_state, architect, call);
+    out = grant(perm_state, objects_state, catalog_state, react_state, call);
     break;
   }
   case react::PermissionAction::Revoke: {
@@ -286,7 +280,7 @@ NativeCompletion native_scripts(amber::catalog::State &catalog_state,
     if (const auto error = editing::validate_install(call.arguments); !error.empty())
       throw std::invalid_argument(error);
     out = editing::install_script(call, react_state, catalog_state, objects_state, perm_state,
-                                  roles, start_event);
+                                  start_event);
     break;
   }
   case react::ScriptAction::Uninstall: {

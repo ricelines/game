@@ -118,16 +118,14 @@ Json scope_json(perm::Scope scope) {
     return {{"avatar", to_string(Handle{scope.subject})}};
   case perm::ScopeKind::Plot:
     return {{"plot", scope.subject}};
-  case perm::ScopeKind::Issuance:
-    return {{"issuance", true}};
   }
   throw std::logic_error("unknown stored grant scope");
 }
 Json rights_json(perm::Rights rights, perm::ScopeKind scope) {
   Json result = Json::array();
-  if (scope == perm::ScopeKind::Account || scope == perm::ScopeKind::Issuance) {
+  if (scope == perm::ScopeKind::Account) {
     if (rights & 1)
-      result.push_back(scope == perm::ScopeKind::Account ? "spend" : "issue");
+      result.push_back("spend");
   } else if (scope == perm::ScopeKind::Avatar) {
     if (rights & 1)
       result.push_back("animate");
@@ -157,8 +155,7 @@ bool in_force(const perm::Grants &grants, const perm::Grant &grant, Step step) {
   return parent.live && (!parent.expires_step || step < parent.expires_step);
 }
 Json grant_json(const perm::Grants &grants, const perm::Grant &grant, Step step, double hz) {
-  const bool monetary =
-      grant.scope.kind == perm::ScopeKind::Account || grant.scope.kind == perm::ScopeKind::Issuance;
+  const bool monetary = grant.scope.kind == perm::ScopeKind::Account;
   return {
       {"id", "g:" + std::to_string(grant.id)},
       {"issuer", "p:" + std::to_string(grant.issuer)},
@@ -244,8 +241,7 @@ GrantUpdates advance_grants(perm::Grants &grants, perm::Players &players, Step n
 step::NativeCompletion grant(amber::perm::State &perm_state,
                              const amber::ObjectState &objects_state,
                              const amber::catalog::State &catalog_state,
-                             const amber::react::State &react_state, bool issuer_is_architect,
-                             const step::NativeCall &call) {
+                             const amber::react::State &react_state, const step::NativeCall &call) {
   auto &grants = perm_state.grants;
   auto &players = perm_state.players;
   auto identity = amber::identity(std::as_const(objects_state.objects));
@@ -262,9 +258,8 @@ step::NativeCompletion grant(amber::perm::State &perm_state,
                     "caller script is not currently installed",
                     "install the script on that object before invoking its actions");
     const auto who = issuer.controller;
-    const auto control =
-        step::scope(call.arguments.at("scope"), identity, authority, limits, players, plots, groups,
-                    issuer_is_architect && actor(call).kind == perm::HolderKind::Player);
+    const auto control = step::scope(call.arguments.at("scope"), identity, authority, limits,
+                                     players, plots, groups);
     const auto recipient = installed_holder(holder(call.arguments.at("holder"), players), players,
                                             objects_state, catalog_state, react_state, call);
     const auto duration = step::duration_steps(call.arguments.value("expires_s", 0.0), call.hz);
@@ -332,10 +327,9 @@ step::NativeCompletion revoke(amber::perm::State &perm_state,
     } else {
       const auto selected = holder(call.arguments.at("holder"), players);
       if (call.arguments.contains("scope")) {
-        const auto scope =
-            step::scope(call.arguments.at("scope"), identity, authority, limits, players, plots,
-                        groups, issuer_is_architect && actor(call).kind == perm::HolderKind::Player)
-                .scope;
+        const auto scope = step::scope(call.arguments.at("scope"), identity, authority, limits,
+                                       players, plots, groups)
+                               .scope;
         const auto found = grants.by_key.find({selected, scope});
         if (found != grants.by_key.end()) {
           if (!allowed(grants.rows[found->second]))

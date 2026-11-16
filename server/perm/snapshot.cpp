@@ -52,8 +52,6 @@ SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Han
         return selected.groups.contains(static_cast<GroupId>(scope.subject));
       }
       return false;
-    case ScopeKind::Issuance:
-      return true;
     }
     return false;
   };

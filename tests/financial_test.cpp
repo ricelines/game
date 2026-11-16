@@ -56,15 +56,10 @@ struct Fixture {
       f.terms.rows.push_back(std::move(term));
     }
     step::declare_commerce(f.terms, declarations);
-    step::declare_issuance_action(f.terms, declarations);
     script = f.add(R"(return {kind='model',on={
       ['arbitrary.finance1']=function(self,_,args)
         local result=self:act('engine.pay',self.handle,
           {from=args.payer,to=args.to,amount=args.amount})
-        assert(result.ok==args.expect);self.state.returned=true
-      end,
-      ['arbitrary.finance2']=function(self,_,args)
-        local result=self:act('engine.issue',self.handle,{to=args.to,amount=args.amount})
         assert(result.ok==args.expect);self.state.returned=true
       end,
       ['arbitrary.finance3']=function(self,_,args)
@@ -90,7 +85,7 @@ struct Fixture {
     input.step = step;
     input.hz = 20;
     input.payload = std::move(args);
-    input.action_caller = PlayerId{2}; // display metadata never grants script Spend/Issue
+    input.action_caller = PlayerId{2}; // display metadata never grants script Spend
     input.action_body = f.a;
     const auto handlers =
         react::dispatch(f.triggers, f.values(), input.receiver, input.trigger, step, 20);
@@ -138,13 +133,6 @@ struct Fixture {
                           groups, run.call));
     finish();
   }
-  void issue(std::vector<EventField> args, Handle receiver = {}, Step step = 10) {
-    start(2, std::move(args), receiver, step);
-    auto run = emitted();
-    resume(run, step::issue(ledger, grants, players, identity(f.objects), authority(f.objects),
-                            groups, run.call));
-    finish();
-  }
   void balances(std::vector<EventField> args) {
     start(3, std::move(args));
     auto own = emitted();
@@ -162,11 +150,11 @@ struct Fixture {
                               run.call));
     finish();
   }
-  GrantId grant(perm::Scope scope, std::int64_t cap, bool architect = false) {
+  GrantId grant(perm::Scope scope, std::int64_t cap) {
     const auto holder = perm::Holder::script(script, f.a);
-    const auto granted = perm::create_grant(
-        grants, players, perm::Holder::player(2), {2, holder, scope, 1, cap, 100, 1000},
-        {scope, 2, perm::all_rights, 0, architect}, {holder, 2, true}, 0);
+    const auto granted = perm::create_grant(grants, players, perm::Holder::player(2),
+                                            {2, holder, scope, 1, cap, 100, 1000},
+                                            {scope, 2, perm::all_rights}, {holder, 2, true}, 0);
     require(bool(granted), "ordinary capped script grant");
     return granted.grant;
   }
@@ -211,8 +199,6 @@ void script_spending() {
     const nlohmann::json arguments{{"from", "p:2"}, {"to", "p:3"}, {"amount", amount}};
     require(!step::validate_pay(arguments).empty(),
             "the production payment boundary rejects negative or fractional currency");
-    require(!step::validate_issue({{"to", "p:3"}, {"amount", amount}}).empty(),
-            "the production issuance boundary rejects negative or fractional currency");
   }
   require(f.grants.rows[larger].spent == 0 &&
               perm::balance(f.ledger, perm::Account::player(2)) == 66,
@@ -221,25 +207,44 @@ void script_spending() {
               react::RunOutcome::Status::Error,
           "nonfinite action values must not cross the Lua JSON boundary");
 }
-void issuance_and_wallet_identity() {
+void root_and_wallet_identity() {
   Fixture f;
+  require(step::account("p:0", identity(f.f.objects), authority(f.f.objects), f.players, f.groups)
+                  .account == perm::Account::player(0),
+          "p:0 names the money account");
+  bool refused = false;
+  try {
+    (void)step::identifier("p:0", "p:");
+  } catch (const std::invalid_argument &) {
+    refused = true;
+  }
+  require(refused, "p:0 cannot name an ordinary player");
   auto args = [](double amount, bool expect) {
-    return std::vector<EventField>{
-        {"to", std::string("p:3")}, {"amount", Value(amount)}, {"expect", Value(expect)}};
+    return std::vector<EventField>{{"payer", std::string("p:0")},
+                                   {"to", std::string("p:3")},
+                                   {"amount", Value(amount)},
+                                   {"expect", Value(expect)}};
   };
-  f.issue(args(10, false));
-  const auto grant = f.grant(perm::Scope::issuance(), 30, true);
-  f.issue(args(21, true));
-  f.issue(args(10, false));
+  f.pay(args(10, false));
+  const auto holder = perm::Holder::script(f.script, f.f.a);
+  const auto root = perm::Scope::account(perm::Account::player(0));
+  const auto grant = static_cast<GrantId>(f.grants.rows.size());
+  f.grants.rows.push_back({grant, 0, 0, holder, root, 1, 30, 0, 100, 0, 1000, true});
+  f.grants.by_key.emplace(perm::GrantKey{holder, root}, grant);
+  f.players.rows[0].grants_given.push_back(grant);
+  f.pay(args(21, true));
+  f.pay(args(10, false));
   require(perm::balance(f.ledger, perm::Account::player(3)) == 21 &&
-              f.grants.rows[grant].spent == 21,
-          "ordinary engine.issue did not enforce capped issuance authority");
-  f.issue(args(20, true), {}, 110);
+              f.grants.rows[grant].spent == 21 &&
+              !f.ledger.balance.contains(perm::Account::player(0)),
+          "ordinary root payments enforce the cap without a root balance");
+  f.pay(args(20, true), {}, 110);
   require(perm::balance(f.ledger, perm::Account::player(3)) == 41 &&
               f.grants.rows[grant].spent == 20,
-          "issuance period reset is applied once");
-  f.issue(args(1, false), {}, 1000);
-  require(perm::balance(f.ledger, perm::Account::player(3)) == 41, "expired issuance cannot mint");
+          "root payment period resets once");
+  f.pay(args(1, false), {}, 1000);
+  require(perm::balance(f.ledger, perm::Account::player(3)) == 41,
+          "expired root spend cannot create money");
   f.f.objects.owner[f.f.a.slot()] = 3;
   f.balances({{"expected", Value(0.)}, {"explicit", Value(100.)}});
   for (const auto &account : {std::string("group:1"), to_string(f.f.a)})
@@ -280,23 +285,21 @@ void object_and_group_payments_use_their_actual_accounts() {
   f.pay(args("group:1", name, 6, false));
   f.grant(perm::Scope::account(group), 10);
   f.pay(args("group:1", name, 6, true));
-  f.grant(perm::Scope::issuance(), 20, true);
-  f.issue({{"to", name}, {"amount", Value(7.)}, {"expect", Value(true)}});
-  f.issue({{"to", std::string("group:1")}, {"amount", Value(8.)}, {"expect", Value(true)}});
-  require(perm::balance(f.ledger, object) == 38 && perm::balance(f.ledger, group) == 87 &&
+  require(perm::balance(f.ledger, object) == 31 && perm::balance(f.ledger, group) == 79 &&
               perm::balance(f.ledger, perm::Account::player(2)) == 100,
-          "actual Lua pay/issue aliased a typed account to the owner's wallet");
+          "actual Lua payment aliased a typed account to the owner's wallet");
   perm::transfer_owner(
       authority(f.f.objects), f.limits, permission_flags(f.f.objects), f.grants, f.players,
       perm::target(identity(f.f.objects), authority(f.f.objects), f.limits, f.f.a), 3);
-  f.balances({{"expected", Value(38.)}, {"explicit", Value(100.)}});
+  f.balances({{"expected", Value(31.)}, {"explicit", Value(100.)}});
   f.pay(args(name, "group:1", 1, false));
   require(!f.grants.rows[object_grant].live, "sale left an old account Spend grant installed");
 }
 } // namespace
 int main() {
   script_spending();
-  issuance_and_wallet_identity();
+  root_and_wallet_identity();
   object_and_group_payments_use_their_actual_accounts();
-  std::cout << "Actual synchronous Lua actions enforce wallet, grant, cap and issuance semantics\n";
+  std::cout
+      << "Actual synchronous Lua actions enforce wallet, grant, cap and root payment semantics\n";
 }

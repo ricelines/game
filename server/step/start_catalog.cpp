@@ -28,7 +28,7 @@ std::vector<PreparedSeedScript> prepare_scripts(const Json &plan, const react::T
                                                 react::VmSettings limits) {
   const react::RightsDeclaration rights{
       {"use", "take", "move", "edit", "copy", "transfer", "destroy"},
-      {"spend", "build", "enter", "run_scripts", "animate", "camera", "issue"}};
+      {"spend", "build", "enter", "run_scripts", "animate", "camera"}};
   std::vector<PreparedSeedScript> result;
   std::set<std::string> keys;
   for (const auto &row : plan.at("scripts")) {

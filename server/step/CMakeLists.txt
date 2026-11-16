@@ -18,7 +18,6 @@ add_library(amber_step STATIC
   replacement.cpp
   model_definition.cpp
   goods.cpp
-  finance.cpp
   authority.cpp
   authoring_failures.cpp
   checkpoint.cpp

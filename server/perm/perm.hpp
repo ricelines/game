@@ -54,7 +54,6 @@ void rebuild_grant_lookup(Grants &);
 
 TransferResult pay(Ledger &, Grants &, Holder, AccountTarget payer, Account recipient,
                    std::int64_t amount, Step);
-TransferResult issue(Ledger &, Grants &, Holder, Account recipient, std::int64_t amount, Step);
 
 Reason can_refund_object_accounts(const Ledger &, AuthorityRead, std::span<const Handle>);
 std::vector<AccountRefund> refund_object_accounts(Ledger &, AuthorityRead, std::span<const Handle>);

@@ -30,7 +30,7 @@ perm::AccountTarget account(const Json &value, IdentityRead identity, AuthorityR
                             const perm::Players &players, const perm::Groups &groups) {
   const auto &name = value.get_ref<const std::string &>();
   if (name.starts_with("p:")) {
-    const auto id = identifier(value, "p:");
+    const auto id = name == "p:0" ? PlayerId{} : identifier(value, "p:");
     if (id >= players.rows.size())
       throw std::invalid_argument("unknown player account");
     return perm::AccountTarget::player(id);
@@ -46,8 +46,7 @@ perm::AccountTarget account(const Json &value, IdentityRead identity, AuthorityR
 }
 perm::ScopeControl scope(const Json &row, IdentityRead identity, AuthorityRead authority,
                          const perm::OwnerLimits &limits, const perm::Players &players,
-                         const perm::Plots &plots, const perm::Groups &groups,
-                         bool issuer_is_architect) {
+                         const perm::Plots &plots, const perm::Groups &groups) {
   if (row.size() != 1)
     throw std::invalid_argument("choose one scope");
   if (row.contains("object")) {
@@ -56,7 +55,7 @@ perm::ScopeControl scope(const Json &row, IdentityRead identity, AuthorityRead a
     return {perm::Scope::object(object), target.owner,
             (perm::all_rights & ~perm::inherited_rights) |
                 (target.owner_limit & perm::inherited_rights),
-            target.plot, false};
+            target.plot};
   }
   if (row.contains("owned_on_plot")) {
     const auto &owned = row.at("owned_on_plot");
@@ -65,37 +64,34 @@ perm::ScopeControl scope(const Json &row, IdentityRead identity, AuthorityRead a
     if (owner >= players.rows.size() || !plot || plot >= plots.rows.size() ||
         plots.rows[plot].id != plot)
       throw std::invalid_argument("unknown owned-on-plot scope");
-    return {perm::Scope::owned_on_plot(owner, plot), owner, perm::all_rights, plot, false};
+    return {perm::Scope::owned_on_plot(owner, plot), owner, perm::all_rights, plot};
   }
   if (row.contains("account")) {
     const auto target = account(row.at("account"), identity, authority, players, groups);
-    return {perm::Scope::account(target.account), target.controller, 1, 0, false};
+    return {perm::Scope::account(target.account), target.controller, 1, 0};
   }
   if (row.contains("avatar")) {
     const auto body = live_handle(row.at("avatar"), identity);
     if (!(identity.flags[body.slot()] & Body))
       throw std::invalid_argument("avatar scope needs a Body");
-    return {perm::Scope::avatar(body), authority.owner[body.slot()], 3, authority.plot[body.slot()],
-            false};
+    return {perm::Scope::avatar(body), authority.owner[body.slot()], 3,
+            authority.plot[body.slot()]};
   }
   if (row.contains("plot")) {
     const auto id = row.at("plot").get<PlotId>();
     if (!id || id >= plots.rows.size() || plots.rows[id].id != id)
       throw std::invalid_argument("unknown plot scope");
     return {perm::Scope::plot(id), plots.rows[id].owner,
-            perm::Rights{7} | perm::bit(perm::Verb::Transfer), id, false};
+            perm::Rights{7} | perm::bit(perm::Verb::Transfer), id};
   }
-  if (row.contains("issuance") && row.at("issuance") == true)
-    return {perm::Scope::issuance(), 0, 1, 0, issuer_is_architect};
   throw std::invalid_argument("unknown grant scope");
 }
 perm::Rights rights(const Json &row, perm::ScopeKind scope) {
   perm::Rights result = 0;
   for (const auto &value : row) {
     const auto name = value.get<std::string>();
-    if (scope == perm::ScopeKind::Account || scope == perm::ScopeKind::Issuance) {
-      if ((scope == perm::ScopeKind::Account && name != "spend") ||
-          (scope == perm::ScopeKind::Issuance && name != "issue"))
+    if (scope == perm::ScopeKind::Account) {
+      if (name != "spend")
         throw std::invalid_argument("wrong financial right");
       result |= 1;
     } else if (scope == perm::ScopeKind::Avatar) {

@@ -100,7 +100,7 @@ react::RuleChange install_candidate(catalog::Scripts &scripts, amber::react::Sta
   if (!candidate) {
     const react::RightsDeclaration rights{
         {"use", "take", "move", "edit", "copy", "transfer", "destroy"},
-        {"spend", "build", "enter", "run_scripts", "animate", "camera", "issue"}};
+        {"spend", "build", "enter", "run_scripts", "animate", "camera"}};
     auto prepared = catalog::read_script(source_root, artifact, pins, registry_pin, terms, rights);
     const auto compiled = prepared.compiled;
     catalog::write_script(destination_root / prepared.hash, prepared);
