@@ -258,8 +258,8 @@ def test_door_entire_authored_sweep_clears_actual_curved_shell():
 
 
 def test_all_sources_pass_actual_luau_declaration_worker(tmp_path, baked_plan):
-    worker = ROOT / ".build/release/server/react/amb_script_validate"
-    assert worker.exists(), "Build the Release targets before the content gate"
+    worker = ROOT / ".build/debug/server/react/amb_script_validate"
+    assert worker.exists(), "Build the Debug targets before the content gate"
     # Get reserved engine declarations from the real composition, rather than
     # maintaining a second copy of native signatures in this Python test.
     plan = json.loads(json.dumps(baked_plan))
@@ -271,7 +271,7 @@ def test_all_sources_pass_actual_luau_declaration_worker(tmp_path, baked_plan):
     report = tmp_path / "report.json"
     native = subprocess.run(
         [
-            str(ROOT / ".build/release/amb-server"),
+            str(ROOT / ".build/debug/amb-server"),
             "--plan",
             str(plan_file),
             "--config",
@@ -304,7 +304,7 @@ def test_all_sources_pass_actual_luau_declaration_worker(tmp_path, baked_plan):
     pin = final.stem
     start = subprocess.run(
         [
-            str(ROOT / ".build/release/tests/start_test"),
+            str(ROOT / ".build/debug/tests/start_test"),
             str(plan_file),
             str(ROOT / "assets"),
             str(final),
@@ -395,7 +395,7 @@ return rule
     path.write_text(json.dumps(plan))
     result = subprocess.run(
         [
-            str(ROOT / ".build/release/amb-server"),
+            str(ROOT / ".build/debug/amb-server"),
             "--plan",
             str(path),
             "--config",
@@ -486,7 +486,7 @@ return body
     plan_path.write_text(json.dumps(plan))
     result = subprocess.run(
         [
-            str(ROOT / ".build/release/amb-server"),
+            str(ROOT / ".build/debug/amb-server"),
             "--plan",
             str(plan_path),
             "--config",

@@ -283,7 +283,7 @@ async def run(args, evidence):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--server", type=pathlib.Path, default=pathlib.Path(".build/release/amb-server")
+        "--server", type=pathlib.Path, default=pathlib.Path(".build/debug/amb-server")
     )
     parser.add_argument(
         "--plan", type=pathlib.Path, default=pathlib.Path(".cache/content/seeded-plan.json")
