@@ -32,7 +32,7 @@ struct Fixture {
   record::Journal journal{8, {}};
   step::WorkQueues &queues = step_state.queues;
   step::TimerWheel &timers = step_state.timers;
-  std::array<TermId, 4> triggers{};
+  std::array<TermId, 3> triggers{};
   ScriptId script = 0;
   react::Invocation invocation;
   react::CompletedInvocation completed;
@@ -62,11 +62,11 @@ struct Fixture {
           {from=args.payer,to=args.to,amount=args.amount})
         assert(result.ok==args.expect);self.state.returned=true
       end,
-      ['arbitrary.finance3']=function(self,_,args)
+      ['arbitrary.finance2']=function(self,_,args)
         assert(self:act('engine.balance',nil,{}).balance==args.expected)
         assert(self:act('engine.balance',nil,{account='p:2'}).balance==args.explicit)
       end,
-      ['arbitrary.finance4']=function(self,_,args)
+      ['arbitrary.finance3']=function(self,_,args)
         assert(self:act('engine.balance',nil,{account=args.wallet}).ok==args.expect)
       end,
     }})",
@@ -134,7 +134,7 @@ struct Fixture {
     finish();
   }
   void balances(std::vector<EventField> args) {
-    start(3, std::move(args));
+    start(2, std::move(args));
     auto own = emitted();
     resume(own, step::balance(ledger, players, identity(f.objects), authority(f.objects), groups,
                               own.call));
@@ -144,7 +144,7 @@ struct Fixture {
     finish();
   }
   void wallet(std::vector<EventField> args) {
-    start(4, std::move(args));
+    start(3, std::move(args));
     auto run = emitted();
     resume(run, step::balance(ledger, players, identity(f.objects), authority(f.objects), groups,
                               run.call));
