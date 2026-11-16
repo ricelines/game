@@ -16,17 +16,6 @@ std::optional<NativeCompletion> lot(perm::State &state, PlotId id, const NativeC
     return commerce_detail::denied(allowed.reason, "transfer", on, plot.owner);
   return std::nullopt;
 }
-void close_offers(perm::Offers &offers, PlotId id) {
-  for (auto &offer : offers.rows)
-    if (offer.live && offer.plot == id) {
-      offers.expiring.erase({offer.expires_step, offer.id});
-      offer.live = false;
-    }
-}
-bool on_plot(perm::Scope scope, PlotId id) {
-  return (scope.kind == perm::ScopeKind::Plot || scope.kind == perm::ScopeKind::OwnedOnPlot) &&
-         scope.subject == id;
-}
 void refresh(ObjectState &objects, const perm::Plots &plots, PlotId first, PlotId second,
              NativeCompletion &out) {
   auto ids = identity(std::as_const(objects.objects));
@@ -88,31 +77,7 @@ NativeCompletion split_plot(perm::State &state, ObjectState &objects, const Nati
       cut >= plot.bounds[axis + 2])
     return commerce_detail::denied("transfer", "plot:" + std::to_string(id), "invalid cut",
                                    "cut at a whole meter strictly inside the lot");
-  auto upper = plot;
-  upper.id = PlotId(state.plots.rows.size());
-  const auto next = upper.id;
-  plot.bounds[axis + 2] = cut;
-  upper.bounds[axis] = cut;
-  state.plots.rows.push_back(std::move(upper));
-  const auto count = state.grants.rows.size();
-  std::map<GrantId, GrantId> copies;
-  for (std::size_t i = 1; i < count; ++i) {
-    auto grant = state.grants.rows[i];
-    if (!grant.live || (grant.expires_step && grant.expires_step <= call.step) ||
-        !on_plot(grant.scope, id))
-      continue;
-    grant.id = GrantId(state.grants.rows.size());
-    copies.emplace(GrantId(i), grant.id);
-    grant.scope.subject = next;
-    if (copies.contains(grant.parent))
-      grant.parent = copies.at(grant.parent);
-    state.players.rows[grant.issuer].grants_given.push_back(grant.id);
-    if (grant.holder.kind == perm::HolderKind::Player)
-      state.players.rows[grant.holder.id].grants_held.push_back(grant.id);
-    state.grants.rows.push_back(grant);
-  }
-  perm::rebuild_grant_lookup(state.grants);
-  close_offers(state.offers, id);
+  const auto next = perm::split_plot(state, id, axis, cut, call.step);
   auto out = commerce_detail::result(true, {{"plots", {id, next}}});
   refresh(objects, state.plots, id, next, out);
   commerce_detail::record(out, call, "split_plot", out.changed_objects, out.reply);
@@ -138,16 +103,7 @@ NativeCompletion join_plots(perm::State &state, ObjectState &objects, const Nati
     return commerce_detail::denied(
         "transfer", "plot:" + std::to_string(a), "invalid join",
         "choose two lots of one owner that share a whole edge and form a rectangle");
-  left.bounds = {std::min(l[0], r[0]), std::min(l[1], r[1]), std::max(l[2], r[2]),
-                 std::max(l[3], r[3])};
-  right.id = 0;
-  std::vector<GrantId> ids;
-  for (const auto &grant : state.grants.rows)
-    if (grant.live && on_plot(grant.scope, b))
-      ids.push_back(grant.id);
-  const auto removed = perm::revoke_many(state.grants, state.players, ids);
-  close_offers(state.offers, a);
-  close_offers(state.offers, b);
+  const auto removed = perm::join_plots(state, a, b);
   auto out = commerce_detail::result(true, {{"plot", a}});
   std::map<PlayerId, std::vector<GrantId>> notices;
   for (auto id : removed)

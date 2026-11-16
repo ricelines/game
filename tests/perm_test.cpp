@@ -64,6 +64,29 @@ void changing_plot_owner_clears_only_old_owner_authority() {
           "abandon removed root authority");
 }
 
+void split_copies_grant_parent_and_deadlines() {
+  Fixture f;
+  auto &state = f.perm_state;
+  state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
+  const auto parent =
+      f.grant(1, Holder::script(1, Handle::make(1, 1)), Scope::plot(1), 1, 7, 0, 0, 100);
+  const auto child = create_grant(f.grants, f.players, f.grants.rows[parent].holder,
+                                  {1, Holder::player(2), Scope::plot(1), 1, 0, 0, 100},
+                                  {Scope::plot(1), 1, 7}, {Holder::player(2), 2, false}, 2);
+  require(bool(child), "split child fixture");
+  const auto next = split_plot(state, 1, 0, 8, 3);
+  const auto copied_parent = f.grants.by_key.at({f.grants.rows[parent].holder, Scope::plot(next)});
+  const auto copied_child = f.grants.by_key.at({Holder::player(2), Scope::plot(next)});
+  require(f.grants.rows[copied_child].parent == copied_parent &&
+              f.grants.reminders.contains({100, copied_parent}),
+          "copied delegation or reminder lost");
+  require(advance_grants(f.grants, f.players, 99, 0, 100).expired.empty(), "split expired early");
+  const auto expired = advance_grants(f.grants, f.players, 100, 0, 100).expired;
+  require(expired.size() == 4 && !f.grants.rows[parent].live && !f.grants.rows[child.grant].live &&
+              !f.grants.rows[copied_parent].live && !f.grants.rows[copied_child].live &&
+              f.grants.by_key.empty(),
+          "split copies did not expire with originals");
+}
 void plot_sales_recheck_price_authority_and_burn_pool_payments() {
   Fixture f;
   auto &state = f.perm_state;
@@ -1307,6 +1330,7 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
 
 int main() {
   try {
+    split_copies_grant_parent_and_deadlines();
     changing_plot_owner_clears_only_old_owner_authority();
     plot_sales_recheck_price_authority_and_burn_pool_payments();
     plot_offer_snapshots_keep_remote_maker_and_its_authority();

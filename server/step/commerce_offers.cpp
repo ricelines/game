@@ -263,8 +263,7 @@ step::NativeCompletion cancel_offer(amber::perm::State &perm_state,
     if (!allowed)
       return commerce_detail::denied(allowed.reason, "transfer",
                                      "plot:" + std::to_string(row.plot));
-    offers.expiring.erase({row.expires_step, row.id});
-    offers.rows[id].live = false;
+    perm::close_offer(offers, offers.rows[id]);
     auto out = commerce_detail::result(true, {{"offer", "offer:" + std::to_string(id)}});
     commerce_detail::record(out, call, "cancel_offer", {}, out.reply);
     return out;

@@ -326,6 +326,10 @@ TransferResult pay(Ledger &, Grants &, Holder, AccountTarget payer, Account reci
 Reason can_refund_object_accounts(const Ledger &, AuthorityRead, std::span<const Handle>);
 std::vector<AccountRefund> refund_object_accounts(Ledger &, AuthorityRead, std::span<const Handle>);
 
+void close_offer(Offers &, Offer &);
+void close_plot_offers(Offers &, PlotId);
+PlotId split_plot(State &, PlotId, int axis, float cut, Step now);
+std::vector<GrantId> join_plots(State &, PlotId, PlotId);
 std::vector<GrantId> change_plot_owner(State &, PlotId, PlayerId owner);
 
 // Changes only authority/permission-owned columns; custody is mirrored separately.
