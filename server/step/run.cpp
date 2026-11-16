@@ -141,8 +141,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &travel_access = step_state.travel_access;
   auto &ledger = perm_state.ledger;
 
-  auto &offers = perm_state.offers;
-
   auto &profiles = net_state.profiles;
   auto &queues = step_state.queues;
   auto &timers = step_state.timers;
