@@ -67,3 +67,17 @@ def test_state_guard_sees_members_after_inline_methods():
 def test_parameter_guard_does_not_mistake_inline_calls_for_declarations():
     source = "void wrapper() { target::call(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11); }"
     assert header_parameter_counts(source) == [("wrapper", 0, 1)]
+
+
+def test_parameter_exceptions_are_limited_to_snapshot_composition(tmp_path, monkeypatch):
+    from tools import check_architecture as architecture
+
+    directory = tmp_path / "step"
+    directory.mkdir()
+    names = ["encode_checkpoint", "decode_checkpoint", "save_snapshot", "flush_gaps", "other"]
+    (directory / "step.hpp").write_text(
+        "\n".join(f"void {name}({', '.join(['int'] * 11)});" for name in names)
+    )
+    monkeypatch.setattr(architecture, "SERVER", tmp_path)
+    errors = [error for error in architecture.check() if "declares 11 parameters" in error]
+    assert len(errors) == 1 and "other declares 11 parameters" in errors[0]
