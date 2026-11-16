@@ -232,15 +232,10 @@ int plot_objects_binding(lua_State *L) {
     luaL_error(L, "unknown plot");
   lua_newtable(L);
   int index = 0;
-  for (std::uint32_t slot = 1; slot < b.identity.model.size(); ++slot) {
-    if (i.deadline.passed())
-      luaL_error(L, "handler deadline exceeded");
-    if (!b.identity.model[slot] || b.plot[slot] != plot || (b.identity.flags[slot] & (Body | Held)))
-      continue;
-    const auto *part_of = b.declared_parts.in.get(slot);
-    if (part_of && !part_of->empty())
-      continue;
-    auto object = b.identity.at(slot);
+  const auto things = plot_things(b.identity, b.plot, b.declared_parts, plot, &i.deadline);
+  if (i.deadline.passed())
+    luaL_error(L, "handler deadline exceeded");
+  for (auto object : things) {
     react::push_handle(L, object);
     lua_rawseti(L, -2, ++index);
     i.acquired.push_back(object);
@@ -436,6 +431,21 @@ int plots_binding(lua_State *L) {
   return 1;
 }
 } // namespace
+std::vector<Handle> plot_things(IdentityRead identity, std::span<const PlotId> plot,
+                                const Relation &declared_parts, PlotId id,
+                                const RunDeadline *deadline) {
+  std::vector<Handle> result;
+  for (std::uint32_t slot = 1; slot < identity.model.size(); ++slot) {
+    if (deadline && deadline->passed())
+      break;
+    if (!identity.model[slot] || plot[slot] != id || (identity.flags[slot] & (Body | Held)))
+      continue;
+    const auto *part_of = declared_parts.in.get(slot);
+    if (!part_of || part_of->empty())
+      result.push_back(identity.at(slot));
+  }
+  return result;
+}
 void bind_metadata(const amber::ObjectState &objects_state,
                    const amber::catalog::State &catalog_state, amber::react::State &react_state,
                    const perm::State &permissions, float port_spacing_m) {

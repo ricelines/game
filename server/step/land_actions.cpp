@@ -40,14 +40,9 @@ NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
                                    "this lot already belongs to the pool");
   auto out = commerce_detail::result(true, {{"plot", id}, {"owner", "p:0"}});
   const auto ids = identity(std::as_const(objects.objects));
-  for (std::uint32_t slot = 1; slot < ids.model.size(); ++slot) {
-    if (!ids.model[slot] || objects.objects.plot[slot] != id || (ids.flags[slot] & (Body | Held)))
-      continue;
-    const auto *part_of = objects.declared_parts.in.get(slot);
-    if (part_of && !part_of->empty())
-      continue;
+  for (auto object : plot_things(ids, objects.objects.plot, objects.declared_parts, id)) {
     auto returning = call;
-    returning.request.target = ids.at(slot);
+    returning.request.target = object;
     const auto returned = return_goods(state, objects, delivery, space, returning, true);
     out.custody.insert(out.custody.end(), returned.custody.begin(), returned.custody.end());
     out.changed_objects.insert(out.changed_objects.end(), returned.changed_objects.begin(),

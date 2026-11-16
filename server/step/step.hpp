@@ -496,6 +496,9 @@ void bind_physical(react::Vm &, amber::ObjectState &objects_state, amber::step::
                    amber::space::State &space_state, const amber::catalog::State &catalog_state);
 void declare_physical_actions(react::Terms &, react::NativeActions &);
 
+std::vector<Handle> plot_things(IdentityRead, std::span<const PlotId> plot,
+                                const Relation &declared_parts, PlotId,
+                                const RunDeadline *deadline = nullptr);
 void bind_metadata(const amber::ObjectState &objects_state,
                    const amber::catalog::State &catalog_state, amber::react::State &react_state,
                    const perm::State &, float port_spacing_m);
