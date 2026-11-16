@@ -1,7 +1,7 @@
 #include "commerce_private.hpp"
 
 namespace amber::step {
-void notify(perm::Players &players, net::Sessions &sessions, PlayerId player, Json notice) {
+void notify(perm::Players &players, net::Sessions &sessions, std::size_t mailbox_max, PlayerId player, Json notice) {
   if (!player)
     return;
   for (auto id : sessions.sessions_for(player))
@@ -11,7 +11,7 @@ void notify(perm::Players &players, net::Sessions &sessions, PlayerId player, Js
     }
   auto &row = players.rows.at(player);
   row.notices.push_back(std::move(notice));
-  if (row.notices.size() > players.mailbox_max) {
+  if (row.notices.size() > mailbox_max) {
     row.notices.erase(row.notices.begin());
     ++row.notices_dropped;
   }

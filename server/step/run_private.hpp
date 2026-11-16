@@ -58,10 +58,10 @@ void record_frame(record::Journal &journal, record::Writer &writer, net::RecordF
 
 void advance_permission_deadlines(amber::perm::State &perm_state, TravelAccess &travel_access,
                                   net::Sessions &sessions, record::Journal &journal, Step now,
-                                  double hz, double reminder_seconds, std::size_t limit);
+                                  double hz, double reminder_seconds, std::size_t limit, std::size_t mailbox_max);
 void expire_sale_offers(perm::State &perm_state, IdentityRead ids, PermissionFlags flags,
                         net::SessionViews &session_views, net::Sessions &sessions,
-                        record::Journal &journal, Step now, std::size_t limit);
+                        record::Journal &journal, Step now, std::size_t limit, std::size_t mailbox_max);
 
 std::optional<net::Authenticated>
 connection_notice(const net::SessionNotice &notice, amber::net::State &net_state,

@@ -559,7 +559,7 @@ step::NativeCompletion plot_permissions(perm::Plots &plots, const perm::Players 
 }
 void advance_permission_deadlines(amber::perm::State &perm_state, TravelAccess &travel_access,
                                   net::Sessions &sessions, record::Journal &journal, Step now,
-                                  double hz, double reminder_seconds, std::size_t limit) {
+                                  double hz, double reminder_seconds, std::size_t limit, std::size_t mailbox_max) {
   auto &grants = perm_state.grants;
   auto &players = perm_state.players;
 
@@ -567,7 +567,7 @@ void advance_permission_deadlines(amber::perm::State &perm_state, TravelAccess &
       grants, players, now, static_cast<Step>(std::llround(reminder_seconds * hz)), hz, limit);
   invalidate_travel(travel_access, grants, now);
   for (auto &notice : grant_updates.notices)
-    notify(players, sessions, notice.recipient, std::move(notice.event));
+    notify(players, sessions, mailbox_max, notice.recipient, std::move(notice.event));
   for (auto &event : grant_updates.records)
     journal.append(std::move(event));
 }

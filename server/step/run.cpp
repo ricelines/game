@@ -52,7 +52,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   catalog::State catalog_state;
   react::State react_state(settings.scripts);
   perm::State perm_state;
-  perm_state.players.mailbox_max = settings.mailbox_max;
   elaborate::State elaborate_state;
   net::State net_state({"127.0.0.1", launch.port, launch.client, launch.assets, settings.network,
                         settings.control_max});
@@ -366,9 +365,9 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                              0}
                      : begin_frame(clock, settings.clock, costs, queues, timers, {}, frame_started);
     advance_permission_deadlines(perm_state, travel_access, sessions, journal, clock.step, hz,
-                                 settings.grant_reminder_seconds, settings.deadlines_per_step);
+                                 settings.grant_reminder_seconds, settings.deadlines_per_step, settings.mailbox_max);
     expire_sale_offers(perm_state, ids, permission_flags(objects), session_views, sessions, journal,
-                       clock.step, settings.deadlines_per_step);
+                       clock.step, settings.deadlines_per_step, settings.mailbox_max);
 
     for (auto &result : fixture_worker.take())
       fixture_results.push_back(std::move(result));
@@ -504,7 +503,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                           timers, journal, settings.event_queue_max);
           if (completed.notification) {
             const auto &closed = *completed.notification;
-            notify(players, sessions, closed.requester,
+            notify(players, sessions, settings.mailbox_max, closed.requester,
                    {{"kind", closed.kind},
                     {"request", "request:" + std::to_string(closed.request)},
                     {"text", closed.text}});
@@ -664,7 +663,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             publish_object_changes(sessions, session_views, ids, auth, parent, model_text,
                                    instance_text, completed.changed_objects);
             for (const auto &[recipient, notice] : completed.notices)
-              notify(players, sessions, recipient, notice);
+              notify(players, sessions, settings.mailbox_max, recipient, notice);
             for (auto ancestor = execution.rbegin(); ancestor != execution.rend(); ++ancestor)
               if (const auto *initiator = std::get_if<ActionRun>(&*ancestor))
                 if (const auto *player = std::get_if<PlayerId>(&initiator->call.request.caller)) {

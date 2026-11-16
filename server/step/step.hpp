@@ -509,7 +509,7 @@ step::NativeCompletion retire_goods(perm::Offers &, perm::Trades &, IdentityRead
                                     std::span<const Handle>);
 step::NativeCompletion rebind_offers(perm::Offers &, perm::Trades &, PermissionFlags, IdentityRead,
                                      const lifecycle::Parts &, std::span<const Handle>, Step);
-void notify(perm::Players &, net::Sessions &, PlayerId, Json);
+void notify(perm::Players &, net::Sessions &, std::size_t mailbox_max, PlayerId, Json);
 step::NativeCompletion deliver_mailbox(perm::Players &, net::Sessions &,
                                        const amber::ObjectState &objects_state,
                                        const space::Space &, PlayerId, Handle authenticated_body,

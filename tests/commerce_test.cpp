@@ -645,7 +645,6 @@ void rebind_trade_keeps_current_custody_at_full_capacity() {
 void offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox() {
   using Json = nlohmann::json;
   Fixture f;
-  f.players.mailbox_max = 2;
   net::Profiles profiles;
   net::put_profile(profiles, {2,
                               "Mailbox recipient",
@@ -665,9 +664,9 @@ void offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox() {
     require(sessions.principal(id).has_value(), "mailbox fixture authenticates actual sessions");
   };
   connect(10, "watch");
-  cm::notify(f.players, sessions, 0, {{"kind", "ignored"}});
+  cm::notify(f.players, sessions, 2, 0, {{"kind", "ignored"}});
   for (int i = 0; i < 3; ++i)
-    cm::notify(f.players, sessions, 2,
+    cm::notify(f.players, sessions, 2, 2,
                {{"kind", "changed"}, {"plot", 2}, {"sequence", i}, {"cleared", {"g:1"}}});
   const auto grant = perm::create_grant(
       f.grants, f.players, perm::Holder::player(2),
@@ -680,7 +679,7 @@ void offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox() {
   f.plots.rows[2].owner = 1;
   const auto removed = perm::revoke(f.grants, f.players, grant.grant);
   require(removed == std::vector<GrantId>{grant.grant}, "plot transition removes the actual grant");
-  cm::notify(f.players, sessions, former_owner,
+  cm::notify(f.players, sessions, 2, former_owner,
              {{"kind", "changed"},
               {"plot", 2},
               {"sequence", 3},
@@ -699,7 +698,6 @@ void offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox() {
   perm::write_players(output, f.players, f.ledger, f.plots, f.groups);
   bytes.resize(output.adapter().writtenBytesCount());
   perm::Players restored;
-  restored.mailbox_max = f.players.mailbox_max;
   perm::Ledger ledger;
   perm::Plots plots;
   perm::Groups groups;
@@ -718,7 +716,7 @@ void offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox() {
               f.players.rows[2].inventory == std::vector<Handle>{gift.root} &&
               f.players.rows[2].notices.empty() && f.players.rows[2].notices_dropped == 0,
           "login drains notices and goods independently and clears their waiting state");
-  cm::notify(f.players, sessions, 2, {{"kind", "live"}});
+  cm::notify(f.players, sessions, 2, 2, {{"kind", "live"}});
   std::vector<net::Invocation> ready;
   std::vector<net::SessionNotice> logins;
   std::vector<net::SessionOutput> outputs;

@@ -199,14 +199,14 @@ step::NativeCompletion cancel_offer(amber::perm::State &perm_state,
 }
 void expire_sale_offers(perm::State &perm_state, IdentityRead ids, PermissionFlags flags,
                         net::SessionViews &session_views, net::Sessions &sessions,
-                        record::Journal &journal, Step now, std::size_t limit) {
+                        record::Journal &journal, Step now, std::size_t limit, std::size_t mailbox_max) {
   for (const auto &expired : advance_offer_expiry(perm_state.offers, ids, flags, now, limit)) {
     net::invalidate(session_views, expired.cleared);
     Json notice{{"kind", "offer_expired"},
                 {"offer", "offer:" + std::to_string(expired.offer)},
                 {"goods", to_string(expired.goods)},
                 {"say", "The sale offer expired; its goods are available again."}};
-    notify(perm_state.players, sessions, expired.seller, notice);
+    notify(perm_state.players, sessions, mailbox_max, expired.seller, notice);
     record::Event event;
     event.step = now;
     event.kind = record::Kind::System;
