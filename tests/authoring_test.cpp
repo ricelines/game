@@ -174,7 +174,7 @@ int main(int argc, char **argv) {
                 models.rows[1].author == 9,
             "live variant completion must retain the family and publish its measured part graph");
     auto batch_request = request;
-    const auto &base = named(plan.at("models"), "forecourt");
+    const auto &base = named(plan.at("models"), "tank_stand");
     const auto &other = named(plan.at("models"), "counter");
     batch_request["asset"] = base.at("asset");
     batch_request["canonical_params"] = base.at("canonical_params");

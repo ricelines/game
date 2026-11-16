@@ -131,6 +131,16 @@ void install_grants(const Json &plan, const Symbols &symbols,
     const auto recipient = holder(row.at("holder"));
     const auto issuer = row.at("issuer").get<PlayerId>();
     auto scope = row.at("scope");
+    if (scope.contains("plot_at")) {
+      const auto at = scope.at("plot_at").get<std::array<float, 2>>();
+      const auto found = std::ranges::find_if(plots.rows, [&](const auto &plot) {
+        return plot.id && plot.kind == perm::PlotKind::Lot && plot.bounds[0] == at[0] &&
+               plot.bounds[1] == at[1];
+      });
+      if (found == plots.rows.end())
+        throw std::invalid_argument("initial grant names no surveyed lot");
+      scope = {{"plot", found->id}};
+    }
     for (const char *field : {"object", "avatar"})
       if (scope.contains(field))
         scope[field] = to_string(symbols.objects.at(scope.at(field).get<std::string>()));

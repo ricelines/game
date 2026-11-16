@@ -75,14 +75,24 @@ def test_root_owned_and_starting_body_grants_have_real_scopes(authored):
             assert plan["groups"] == [
                 {"id": 1, "controller": 0, "name": "architects", "members": [1]}
             ]
-            assert all(
-                row["kind"] == ("street" if row["id"] == 3 else "lot") for row in plan["plots"]
-            )
-            owners = {1: 2, 2: 3, 3: 0, 4: 4, 5: 5, 6: 6, 7: 7}
-            assert all(
-                row["owner"] == (owners[row["id"]] if mode == "seeded" else 0)
-                for row in plan["plots"]
-            )
+            assert plan["land"] == {
+                "way_group": 1,
+                "lots": (
+                    [
+                        {"owner": owner, "at": at}
+                        for owner, at in {
+                            2: [8, 50],
+                            3: [24, 50],
+                            4: [40, 50],
+                            5: [56, 50],
+                            6: [-16, 50],
+                            7: [-32, 50],
+                        }.items()
+                    ]
+                    if mode == "seeded"
+                    else []
+                ),
+            }
             assert not any(
                 "caller" in row or "owned_on_plot" in row["scope"] for row in plan["grants"]
             )
@@ -112,10 +122,10 @@ def test_root_owned_and_starting_body_grants_have_real_scopes(authored):
                 assert len(build) == (2 if mode == "seeded" else 0)
                 if build:
                     own_plot = next(
-                        row["id"] for row in plan["plots"] if row["owner"] == profile["id"]
+                        row["at"] for row in plan["land"]["lots"] if row["owner"] == profile["id"]
                     )
                     assert all(
-                        row["issuer"] == profile["id"] and row["scope"] == {"plot": own_plot}
+                        row["issuer"] == profile["id"] and row["scope"] == {"plot_at": own_plot}
                         for row in build
                     )
                 owned = [
@@ -446,7 +456,6 @@ def test_body_pours_into_a_model_without_container_bindings(tmp_path, baked_plan
                 "key": key,
                 "model": model,
                 "owner": 2,
-                "plot": body["plot"],
                 "at": [body["at"][0] + dx, body["at"][1] + 0.5, 0],
                 "flags": ["dynamic"],
                 "state": {"base.liquid": quantity},

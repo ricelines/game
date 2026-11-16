@@ -95,6 +95,12 @@ def select(document: dict, mode: str, stakes: bool) -> dict:
                     if key not in {"starts", "stakes"}
                 }
             )
+    result["land"]["lots"] = select_lots = []
+    for lot in document["land"].get("lots", []):
+        if mode in lot.get("starts", ["seeded", "forage"]):
+            select_lots.append(
+                {key: deepcopy(value) for key, value in lot.items() if key != "starts"}
+            )
     return result
 
 
@@ -167,9 +173,11 @@ def validate_symbols(plan: dict) -> None:
         elif reference["script"] not in scripts or reference["on"] not in objects:
             raise ValueError(f"Missing installed grant holder: {reference}")
 
-    for row in plan["plots"]:
-        if row["owner"] not in players | {0} or row["kind"] not in {"street", "alley", "lot"}:
-            raise ValueError("Unknown plot owner or kind")
+    if plan["land"]["way_group"] not in groups:
+        raise ValueError("Unknown way group")
+    for row in plan["land"].get("lots", []):
+        if row["owner"] not in players:
+            raise ValueError("Unknown lot owner")
     for row in plan["grants"]:
         if row["issuer"] not in players | {0}:
             raise ValueError("Unknown grant issuer")

@@ -101,33 +101,6 @@
       "author": 1
     },
     {
-      "key": "street",
-      "file": "models/street.py",
-      "material": "base.concrete",
-      "text": {
-        "name": "The Street",
-        "description": "A continuous public promenade."
-      },
-      "author": 1,
-      "group": 1
-    },
-    {
-      "key": "forecourt",
-      "file": "models/slab.py",
-      "material": "base.stone",
-      "text": {
-        "name": "Entry forecourt",
-        "description": "Continuous support between the Street and caf\u00e9."
-      },
-      "params": {
-        "width": 6,
-        "depth": 2,
-        "thickness": 0.3
-      },
-      "author": 1,
-      "group": 1
-    },
-    {
       "key": "floor",
       "file": "models/floor.py",
       "material": "base.wood",
@@ -463,34 +436,6 @@
         "thickness": 0.04
       },
       "author": 1
-    },
-    {
-      "key": "land_seeded",
-      "file": "models/land.py",
-      "material": "base.stone",
-      "params": {
-        "cafe_cut": 1
-      },
-      "text": {
-        "name": "Public ground",
-        "description": "Physical level land beside the Street."
-      },
-      "author": 1,
-      "group": 1
-    },
-    {
-      "key": "land_forage",
-      "file": "models/land.py",
-      "material": "base.stone",
-      "params": {
-        "cafe_cut": 0
-      },
-      "text": {
-        "name": "Public ground",
-        "description": "Physical level land beside the Street."
-      },
-      "author": 1,
-      "group": 1
     },
     {
       "key": "stair_rails",
@@ -986,288 +931,6 @@
       ]
     }
   ],
-  "plots": [
-    {
-      "id": 1,
-      "owner": 2,
-      "bounds": [
-        -8,
-        2,
-        8,
-        18
-      ],
-      "access": {
-        "enter": true,
-        "build": false,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "seeded"
-      ],
-      "kind": "lot"
-    },
-    {
-      "id": 1,
-      "owner": 0,
-      "bounds": [
-        -8,
-        2,
-        8,
-        18
-      ],
-      "access": {
-        "enter": true,
-        "build": false,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "forage"
-      ],
-      "kind": "lot"
-    },
-    {
-      "id": 2,
-      "owner": 3,
-      "bounds": [
-        12,
-        0,
-        24,
-        14
-      ],
-      "access": {
-        "enter": true,
-        "build": false,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "seeded"
-      ],
-      "kind": "lot"
-    },
-    {
-      "id": 2,
-      "owner": 0,
-      "bounds": [
-        12,
-        0,
-        24,
-        14
-      ],
-      "access": {
-        "enter": true,
-        "build": false,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "forage"
-      ],
-      "kind": "lot"
-    },
-    {
-      "id": 3,
-      "owner": 0,
-      "bounds": [
-        -64,
-        -14,
-        64,
-        2
-      ],
-      "access": {
-        "enter": true,
-        "build": true,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "seeded"
-      ],
-      "kind": "street"
-    },
-    {
-      "id": 3,
-      "owner": 0,
-      "bounds": [
-        -64,
-        -14,
-        64,
-        2
-      ],
-      "access": {
-        "enter": true,
-        "build": true,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "forage"
-      ],
-      "kind": "street"
-    },
-    {
-      "id": 4,
-      "owner": 4,
-      "bounds": [
-        26,
-        0,
-        38,
-        14
-      ],
-      "access": {
-        "enter": true,
-        "build": false,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "seeded"
-      ],
-      "kind": "lot"
-    },
-    {
-      "id": 4,
-      "owner": 0,
-      "bounds": [
-        26,
-        0,
-        38,
-        14
-      ],
-      "access": {
-        "enter": true,
-        "build": false,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "forage"
-      ],
-      "kind": "lot"
-    },
-    {
-      "id": 5,
-      "owner": 5,
-      "bounds": [
-        -24,
-        0,
-        -10,
-        14
-      ],
-      "access": {
-        "enter": true,
-        "build": false,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "seeded"
-      ],
-      "kind": "lot"
-    },
-    {
-      "id": 5,
-      "owner": 0,
-      "bounds": [
-        -24,
-        0,
-        -10,
-        14
-      ],
-      "access": {
-        "enter": true,
-        "build": false,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "forage"
-      ],
-      "kind": "lot"
-    },
-    {
-      "id": 6,
-      "owner": 6,
-      "bounds": [
-        40,
-        0,
-        52,
-        14
-      ],
-      "access": {
-        "enter": true,
-        "build": false,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "seeded"
-      ],
-      "kind": "lot"
-    },
-    {
-      "id": 6,
-      "owner": 0,
-      "bounds": [
-        40,
-        0,
-        52,
-        14
-      ],
-      "access": {
-        "enter": true,
-        "build": false,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "forage"
-      ],
-      "kind": "lot"
-    },
-    {
-      "id": 7,
-      "owner": 7,
-      "bounds": [
-        -42,
-        0,
-        -28,
-        14
-      ],
-      "access": {
-        "enter": true,
-        "build": false,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "seeded"
-      ],
-      "kind": "lot"
-    },
-    {
-      "id": 7,
-      "owner": 0,
-      "bounds": [
-        -42,
-        0,
-        -28,
-        14
-      ],
-      "access": {
-        "enter": true,
-        "build": false,
-        "run_scripts": true
-      },
-      "settings": {},
-      "starts": [
-        "forage"
-      ],
-      "kind": "lot"
-    }
-  ],
   "groups": [
     {
       "id": 1,
@@ -1344,91 +1007,12 @@
   },
   "objects": [
     {
-      "key": "public.street",
-      "model": "street",
-      "owner": 1,
-      "plot": 3,
-      "at": [
-        0,
-        -7,
-        -0.3
-      ],
-      "rotation": [
-        0,
-        0,
-        0.0,
-        1.0
-      ],
-      "flags": [
-        "static"
-      ],
-      "state": {
-        "base.ambient_lux": 120
-      },
-      "settings": {},
-      "preset": [
-        "use",
-        "copy"
-      ],
-      "seed": true,
-      "maker": 1,
-      "group": 1,
-      "group_rights": [
-        "use",
-        "take",
-        "move",
-        "edit",
-        "copy",
-        "transfer",
-        "destroy"
-      ]
-    },
-    {
-      "key": "public.forecourt",
-      "model": "forecourt",
-      "owner": 1,
-      "plot": 3,
-      "at": [
-        0,
-        1,
-        -0.3
-      ],
-      "rotation": [
-        0,
-        0,
-        0.0,
-        1.0
-      ],
-      "flags": [
-        "static"
-      ],
-      "state": {},
-      "settings": {},
-      "preset": [
-        "use",
-        "copy"
-      ],
-      "seed": true,
-      "maker": 1,
-      "group": 1,
-      "group_rights": [
-        "use",
-        "take",
-        "move",
-        "edit",
-        "copy",
-        "transfer",
-        "destroy"
-      ]
-    },
-    {
       "key": "public.circuit",
       "model": "circuit",
       "owner": 1,
-      "plot": 3,
       "at": [
-        -8,
-        -4,
+        8,
+        44,
         0
       ],
       "rotation": [
@@ -1463,10 +1047,9 @@
       "key": "public.socket",
       "model": "socket",
       "owner": 1,
-      "plot": 3,
       "at": [
-        -6.5,
-        -4,
+        9.5,
+        44,
         0
       ],
       "rotation": [
@@ -1505,10 +1088,9 @@
       "key": "public.collector",
       "model": "collector",
       "owner": 3,
-      "plot": 2,
       "at": [
-        17,
-        5,
+        33,
+        53,
         0
       ],
       "rotation": [
@@ -1533,10 +1115,9 @@
       "key": "public.lamp",
       "model": "lamp",
       "owner": 1,
-      "plot": 3,
       "at": [
-        -4,
-        -4,
+        12,
+        44,
         0
       ],
       "rotation": [
@@ -1576,10 +1157,9 @@
       "key": "public.power_buyer",
       "model": "power_buyer",
       "owner": 1,
-      "plot": 3,
       "at": [
-        -10,
-        -4,
+        6,
+        44,
         0
       ],
       "rotation": [
@@ -1614,10 +1194,9 @@
       "key": "cafe.floor",
       "model": "floor",
       "owner": 2,
-      "plot": 1,
       "at": [
-        0,
-        10,
+        16,
+        58,
         -0.3
       ],
       "rotation": [
@@ -1647,10 +1226,9 @@
       "key": "cafe.dome",
       "model": "dome",
       "owner": 2,
-      "plot": 1,
       "at": [
-        0,
-        10,
+        16,
+        58,
         0
       ],
       "rotation": [
@@ -1678,10 +1256,9 @@
       "key": "cafe.door",
       "model": "door",
       "owner": 2,
-      "plot": 3,
       "at": [
-        0,
-        -1.85,
+        16,
+        46.15,
         0
       ],
       "rotation": [
@@ -1711,10 +1288,9 @@
       "key": "cafe.mezzanine",
       "model": "mezzanine",
       "owner": 2,
-      "plot": 1,
       "at": [
-        0,
-        12.5,
+        16,
+        60.5,
         2.98
       ],
       "rotation": [
@@ -1742,10 +1318,9 @@
       "key": "cafe.stair",
       "model": "stair",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -4.8,
-        8.5,
+        11.2,
+        56.5,
         0
       ],
       "rotation": [
@@ -1773,10 +1348,9 @@
       "key": "cafe.tank_stand",
       "model": "tank_stand",
       "owner": 4,
-      "plot": 1,
       "at": [
-        5,
-        6,
+        21,
+        54,
         0
       ],
       "rotation": [
@@ -1804,10 +1378,9 @@
       "key": "cafe.tank",
       "model": "tank",
       "owner": 4,
-      "plot": 1,
       "at": [
-        5,
-        6,
+        21,
+        54,
         0.85
       ],
       "rotation": [
@@ -1841,10 +1414,9 @@
       "key": "cafe.school",
       "model": "school",
       "owner": 4,
-      "plot": 1,
       "at": [
-        2.5,
-        6.5,
+        18.5,
+        54.5,
         0
       ],
       "rotation": [
@@ -1874,10 +1446,9 @@
       "key": "cafe.circuit",
       "model": "circuit",
       "owner": 2,
-      "plot": 1,
       "at": [
-        6.8,
-        3,
+        22.8,
+        51,
         0
       ],
       "rotation": [
@@ -1905,10 +1476,9 @@
       "key": "cafe.breaker",
       "model": "breaker",
       "owner": 3,
-      "plot": 1,
       "at": [
-        7.4,
-        3,
+        23.4,
+        51,
         0
       ],
       "rotation": [
@@ -1940,10 +1510,9 @@
       "key": "cafe.pump",
       "model": "pump",
       "owner": 4,
-      "plot": 1,
       "at": [
-        2.5,
-        5,
+        18.5,
+        53,
         0
       ],
       "rotation": [
@@ -1975,10 +1544,9 @@
       "key": "cafe.counter",
       "model": "counter",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -2,
         14,
+        62,
         0
       ],
       "rotation": [
@@ -2006,10 +1574,9 @@
       "key": "cafe.partition",
       "model": "partition",
       "owner": 2,
-      "plot": 1,
       "at": [
-        1,
-        14,
+        17,
+        62,
         0
       ],
       "rotation": [
@@ -2037,10 +1604,9 @@
       "key": "cafe.column.0",
       "model": "column",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -5.8,
-        12,
+        10.2,
+        60,
         0
       ],
       "rotation": [
@@ -2068,10 +1634,9 @@
       "key": "cafe.column.1",
       "model": "column",
       "owner": 2,
-      "plot": 1,
       "at": [
-        5.8,
-        12,
+        21.8,
+        60,
         0
       ],
       "rotation": [
@@ -2099,10 +1664,9 @@
       "key": "cafe.column.2",
       "model": "column",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -5.8,
-        16,
+        10.2,
+        64,
         0
       ],
       "rotation": [
@@ -2130,10 +1694,9 @@
       "key": "cafe.column.3",
       "model": "column",
       "owner": 2,
-      "plot": 1,
       "at": [
-        5.8,
-        16,
+        21.8,
+        64,
         0
       ],
       "rotation": [
@@ -2161,10 +1724,9 @@
       "key": "cafe.rail.back",
       "model": "rail12",
       "owner": 2,
-      "plot": 1,
       "at": [
-        0,
-        16.5,
+        16,
+        64.5,
         3.2
       ],
       "rotation": [
@@ -2192,10 +1754,9 @@
       "key": "cafe.rail.right",
       "model": "rail8",
       "owner": 2,
-      "plot": 1,
       "at": [
-        6,
-        12.5,
+        22,
+        60.5,
         3.2
       ],
       "rotation": [
@@ -2223,10 +1784,9 @@
       "key": "cafe.rail.left",
       "model": "rail5",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -6,
-        14,
+        10,
+        62,
         3.2
       ],
       "rotation": [
@@ -2254,10 +1814,9 @@
       "key": "cafe.rail.front",
       "model": "rail9",
       "owner": 2,
-      "plot": 1,
       "at": [
-        1.3,
-        8.5,
+        17.3,
+        56.5,
         3.2
       ],
       "rotation": [
@@ -2285,10 +1844,9 @@
       "key": "cafe.rail.notch",
       "model": "rail3",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -3.4,
-        9.85,
+        12.6,
+        57.85,
         3.2
       ],
       "rotation": [
@@ -2316,10 +1874,9 @@
       "key": "cafe.lamp.0",
       "model": "lamp",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -4,
-        4.5,
+        12,
+        52.5,
         0
       ],
       "rotation": [
@@ -2352,10 +1909,9 @@
       "key": "cafe.lamp.1",
       "model": "lamp",
       "owner": 2,
-      "plot": 1,
       "at": [
-        0,
-        6,
+        16,
+        54,
         0
       ],
       "rotation": [
@@ -2388,10 +1944,9 @@
       "key": "cafe.lamp.2",
       "model": "lamp",
       "owner": 2,
-      "plot": 1,
       "at": [
-        3,
-        12,
+        19,
+        60,
         0
       ],
       "rotation": [
@@ -2424,10 +1979,9 @@
       "key": "cafe.lamp.3",
       "model": "lamp",
       "owner": 2,
-      "plot": 1,
       "at": [
-        0,
-        13,
+        16,
+        61,
         3.2
       ],
       "rotation": [
@@ -2460,10 +2014,9 @@
       "key": "cafe.table.0",
       "model": "table",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -4,
-        5,
+        12,
+        53,
         0
       ],
       "rotation": [
@@ -2493,10 +2046,9 @@
       "key": "cafe.chair.0.-1",
       "model": "chair",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -4.95,
-        5,
+        11.05,
+        53,
         0
       ],
       "rotation": [
@@ -2526,10 +2078,9 @@
       "key": "cafe.chair.0.1",
       "model": "chair",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -3.05,
-        5,
+        12.95,
+        53,
         0
       ],
       "rotation": [
@@ -2559,10 +2110,9 @@
       "key": "cafe.cup.0",
       "model": "cup",
       "owner": 5,
-      "plot": 1,
       "at": [
-        -4,
-        5,
+        12,
+        53,
         0.79
       ],
       "rotation": [
@@ -2594,10 +2144,9 @@
       "key": "cafe.table.1",
       "model": "table",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -0.5,
-        10,
+        15.5,
+        58,
         0
       ],
       "rotation": [
@@ -2627,10 +2176,9 @@
       "key": "cafe.chair.1.-1",
       "model": "chair",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -1.45,
-        10,
+        14.55,
+        58,
         0
       ],
       "rotation": [
@@ -2660,10 +2208,9 @@
       "key": "cafe.chair.1.1",
       "model": "chair",
       "owner": 2,
-      "plot": 1,
       "at": [
-        0.44999999999999996,
-        10,
+        16.45,
+        58,
         0
       ],
       "rotation": [
@@ -2693,10 +2240,9 @@
       "key": "cafe.cup.1",
       "model": "cup",
       "owner": 5,
-      "plot": 1,
       "at": [
-        -0.5,
-        10,
+        15.5,
+        58,
         0.79
       ],
       "rotation": [
@@ -2728,10 +2274,9 @@
       "key": "cafe.table.2",
       "model": "table",
       "owner": 2,
-      "plot": 1,
       "at": [
-        3.5,
-        14,
+        19.5,
+        62,
         0
       ],
       "rotation": [
@@ -2761,10 +2306,9 @@
       "key": "cafe.chair.2.-1",
       "model": "chair",
       "owner": 2,
-      "plot": 1,
       "at": [
-        2.55,
-        14,
+        18.55,
+        62,
         0
       ],
       "rotation": [
@@ -2794,10 +2338,9 @@
       "key": "cafe.chair.2.1",
       "model": "chair",
       "owner": 2,
-      "plot": 1,
       "at": [
-        4.45,
-        14,
+        20.45,
+        62,
         0
       ],
       "rotation": [
@@ -2827,10 +2370,9 @@
       "key": "cafe.cup.2",
       "model": "cup",
       "owner": 5,
-      "plot": 1,
       "at": [
-        3.5,
-        14,
+        19.5,
+        62,
         0.79
       ],
       "rotation": [
@@ -2862,10 +2404,9 @@
       "key": "cafe.table.3",
       "model": "table",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -0.5,
-        13,
+        15.5,
+        61,
         3.2
       ],
       "rotation": [
@@ -2895,10 +2436,9 @@
       "key": "cafe.chair.3.-1",
       "model": "chair",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -1.45,
-        13,
+        14.55,
+        61,
         3.2
       ],
       "rotation": [
@@ -2928,10 +2468,9 @@
       "key": "cafe.chair.3.1",
       "model": "chair",
       "owner": 2,
-      "plot": 1,
       "at": [
-        0.44999999999999996,
-        13,
+        16.45,
+        61,
         3.2
       ],
       "rotation": [
@@ -2961,10 +2500,9 @@
       "key": "cafe.cup.3",
       "model": "cup",
       "owner": 5,
-      "plot": 1,
       "at": [
-        -0.5,
-        13,
+        15.5,
+        61,
         3.99
       ],
       "rotation": [
@@ -2996,10 +2534,9 @@
       "key": "cafe.wood",
       "model": "wood_stock",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -2,
         14,
+        62,
         1.06
       ],
       "rotation": [
@@ -3029,10 +2566,9 @@
       "key": "cafe.tool",
       "model": "steel_tool",
       "owner": 3,
-      "plot": 1,
       "at": [
-        -1.2,
-        14,
+        14.8,
+        62,
         1.06
       ],
       "rotation": [
@@ -3062,10 +2598,9 @@
       "key": "resident.mira",
       "model": "body",
       "owner": 2,
-      "plot": 3,
       "at": [
-        -2,
-        -4,
+        14,
+        44,
         0
       ],
       "rotation": [
@@ -3094,10 +2629,9 @@
       "key": "resident.sol",
       "model": "body",
       "owner": 3,
-      "plot": 3,
       "at": [
-        2,
-        -4,
+        18,
+        44,
         0
       ],
       "rotation": [
@@ -3126,10 +2660,9 @@
       "key": "resident.ivo",
       "model": "body",
       "owner": 4,
-      "plot": 3,
       "at": [
-        4,
-        -4,
+        20,
+        44,
         0
       ],
       "rotation": [
@@ -3158,10 +2691,9 @@
       "key": "resident.nia",
       "model": "body",
       "owner": 5,
-      "plot": 3,
       "at": [
-        -4,
-        -6,
+        12,
+        42,
         0
       ],
       "rotation": [
@@ -3190,10 +2722,9 @@
       "key": "resident.rue",
       "model": "body",
       "owner": 6,
-      "plot": 3,
       "at": [
-        0,
-        -7,
+        16,
+        41,
         0
       ],
       "rotation": [
@@ -3222,10 +2753,9 @@
       "key": "resident.oren",
       "model": "body",
       "owner": 7,
-      "plot": 3,
       "at": [
-        5,
-        -7,
+        21,
+        41,
         0
       ],
       "rotation": [
@@ -3251,99 +2781,12 @@
       "maker": 1
     },
     {
-      "key": "public.ground",
-      "model": "land_seeded",
-      "owner": 1,
-      "plot": 0,
-      "at": [
-        0,
-        25,
-        -0.3
-      ],
-      "rotation": [
-        0,
-        0,
-        0,
-        1
-      ],
-      "flags": [
-        "static"
-      ],
-      "state": {
-        "base.ambient_lux": 120
-      },
-      "settings": {},
-      "preset": [
-        "use",
-        "copy"
-      ],
-      "seed": true,
-      "starts": [
-        "seeded"
-      ],
-      "maker": 1,
-      "group": 1,
-      "group_rights": [
-        "use",
-        "take",
-        "move",
-        "edit",
-        "copy",
-        "transfer",
-        "destroy"
-      ]
-    },
-    {
-      "key": "public.ground",
-      "model": "land_forage",
-      "owner": 1,
-      "plot": 0,
-      "at": [
-        0,
-        25,
-        -0.3
-      ],
-      "rotation": [
-        0,
-        0,
-        0,
-        1
-      ],
-      "flags": [
-        "static"
-      ],
-      "state": {
-        "base.ambient_lux": 120
-      },
-      "settings": {},
-      "preset": [
-        "use",
-        "copy"
-      ],
-      "seed": true,
-      "starts": [
-        "forage"
-      ],
-      "maker": 1,
-      "group": 1,
-      "group_rights": [
-        "use",
-        "take",
-        "move",
-        "edit",
-        "copy",
-        "transfer",
-        "destroy"
-      ]
-    },
-    {
       "key": "cafe.stair_rails",
       "model": "stair_rails",
       "owner": 2,
-      "plot": 1,
       "at": [
-        -4.8,
-        8.5,
+        11.2,
+        56.5,
         0
       ],
       "rotation": [
@@ -3720,7 +3163,10 @@
         "on": "resident.mira"
       },
       "scope": {
-        "plot": 1
+        "plot_at": [
+          8,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3737,7 +3183,10 @@
         "on": "resident.mira"
       },
       "scope": {
-        "plot": 1
+        "plot_at": [
+          8,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3755,7 +3204,10 @@
         "on": "resident.mira"
       },
       "scope": {
-        "plot": 1
+        "plot_at": [
+          8,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3773,7 +3225,10 @@
         "on": "resident.sol"
       },
       "scope": {
-        "plot": 2
+        "plot_at": [
+          24,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3790,7 +3245,10 @@
         "on": "resident.sol"
       },
       "scope": {
-        "plot": 2
+        "plot_at": [
+          24,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3808,7 +3266,10 @@
         "on": "resident.sol"
       },
       "scope": {
-        "plot": 2
+        "plot_at": [
+          24,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3826,7 +3287,10 @@
         "on": "resident.ivo"
       },
       "scope": {
-        "plot": 4
+        "plot_at": [
+          40,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3843,7 +3307,10 @@
         "on": "resident.ivo"
       },
       "scope": {
-        "plot": 4
+        "plot_at": [
+          40,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3861,7 +3328,10 @@
         "on": "resident.ivo"
       },
       "scope": {
-        "plot": 4
+        "plot_at": [
+          40,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3879,7 +3349,10 @@
         "on": "resident.nia"
       },
       "scope": {
-        "plot": 5
+        "plot_at": [
+          56,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3896,7 +3369,10 @@
         "on": "resident.nia"
       },
       "scope": {
-        "plot": 5
+        "plot_at": [
+          56,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3914,7 +3390,10 @@
         "on": "resident.nia"
       },
       "scope": {
-        "plot": 5
+        "plot_at": [
+          56,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3932,7 +3411,10 @@
         "on": "resident.rue"
       },
       "scope": {
-        "plot": 6
+        "plot_at": [
+          -16,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3949,7 +3431,10 @@
         "on": "resident.rue"
       },
       "scope": {
-        "plot": 6
+        "plot_at": [
+          -16,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3967,7 +3452,10 @@
         "on": "resident.rue"
       },
       "scope": {
-        "plot": 6
+        "plot_at": [
+          -16,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -3985,7 +3473,10 @@
         "on": "resident.oren"
       },
       "scope": {
-        "plot": 7
+        "plot_at": [
+          -32,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -4002,7 +3493,10 @@
         "on": "resident.oren"
       },
       "scope": {
-        "plot": 7
+        "plot_at": [
+          -32,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -4020,7 +3514,10 @@
         "on": "resident.oren"
       },
       "scope": {
-        "plot": 7
+        "plot_at": [
+          -32,
+          50
+        ]
       },
       "rights": [
         "build"
@@ -4329,5 +3826,70 @@
         "seeded"
       ]
     }
-  ]
+  ],
+  "land": {
+    "way_group": 1,
+    "lots": [
+      {
+        "at": [
+          8,
+          50
+        ],
+        "owner": 2,
+        "starts": [
+          "seeded"
+        ]
+      },
+      {
+        "at": [
+          24,
+          50
+        ],
+        "owner": 3,
+        "starts": [
+          "seeded"
+        ]
+      },
+      {
+        "at": [
+          40,
+          50
+        ],
+        "owner": 4,
+        "starts": [
+          "seeded"
+        ]
+      },
+      {
+        "at": [
+          56,
+          50
+        ],
+        "owner": 5,
+        "starts": [
+          "seeded"
+        ]
+      },
+      {
+        "at": [
+          -16,
+          50
+        ],
+        "owner": 6,
+        "starts": [
+          "seeded"
+        ]
+      },
+      {
+        "at": [
+          -32,
+          50
+        ],
+        "owner": 7,
+        "starts": [
+          "seeded"
+        ]
+      }
+    ]
+  }
 }
