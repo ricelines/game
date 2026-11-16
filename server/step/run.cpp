@@ -128,7 +128,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &physical_relations = space_state.physical_relations;
   start::bind_relation_reads(relations, authored_relations, terms, physical_relations,
                              relation_terms);
-  const auto values = react::value_read(objects_state, catalog_state, react_state, space_state);
+  const auto values = react::value_read(objects_state, catalog_state, react_state);
   auto &states = react_state.states;
   auto &triggers = react_state.triggers;
   auto &rules = react_state.rules;
@@ -177,7 +177,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
 
   react::bind_values(vm, values, react_state);
   react::bind_events(vm, terms);
-  bind_metadata(values, objects_state, catalog_state, react_state, plots);
+  bind_metadata(objects_state, catalog_state, react_state, plots);
   bind_physical(vm, objects_state, step_state, perm_state, settings.part_batch_max, space_state,
                 catalog_state);
   if (!restored)
@@ -216,7 +216,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     start::install_profiles(plan, symbols, profiles, players, std::filesystem::current_path());
     start::install_land(plan, plots, groups, players);
     start::install_money(plan, symbols, ids, auth, players, groups, ledger);
-    start::install_grants(plan, symbols, values, auth, perm_state, catalog_state, react_state,
+    start::install_grants(plan, symbols, objects_state, perm_state, catalog_state, react_state,
                           profiles, clock);
     start::provision_body_grants(plan, symbols, catalog_state, objects_state, perm_state, profiles,
                                  clock.step, hz);
@@ -558,7 +558,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
           continue;
       }
       auto *selected =
-          advance_execution(execution, react_state, values, objects_state, catalog_state, journal);
+          advance_execution(execution, react_state, objects_state, catalog_state, journal);
       if (!selected)
         continue;
       if (auto *action = std::get_if<ActionRun>(selected)) {
@@ -586,12 +586,12 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                       return native_exchange(objects_state, perm_state, space, delivery,
                                              settings.mailbox_max, operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::PermissionAction>) {
-                      return native_permissions(catalog_state, values, react_state, perm_state,
+                      return native_permissions(catalog_state, react_state, perm_state,
                                                 objects_state, architect, operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::ScriptAction>) {
-                      return native_scripts(catalog_state, values, react_state, perm_state,
-                                            objects_state, role("events", "start"), roles,
-                                            operation, action->call);
+                      return native_scripts(catalog_state, react_state, perm_state, objects_state,
+                                            role("events", "start"), roles, operation,
+                                            action->call);
                     } else if constexpr (std::is_same_v<Operation, react::ValueAction>) {
                       return native_values(models, values, react_state, relation_terms, roles,
                                            operation, action->call);

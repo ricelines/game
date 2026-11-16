@@ -6,11 +6,14 @@
 #include <stdexcept>
 
 namespace amber::react {
-ValueRead value_read(const ObjectState &objects, const catalog::State &catalog, const State &react,
-                     const space::State &) {
+ValueRead value_read(const ObjectState &objects, const catalog::State &catalog,
+                     const State &react) {
   // The relation projection is already bound to the authored and physical owner tables.
-  const auto measurements =
-      catalog.mechanical.values.value("measurements", nlohmann::json::object());
+  const auto measurements = catalog.mechanical.values.find("measurements");
+  const auto binding = [&](const char *name) {
+    return measurements == catalog.mechanical.values.end() ? TermId{}
+                                                           : measurements->value(name, TermId{});
+  };
   return {react.terms,
           identity(objects.objects),
           objects.objects.plot,
@@ -26,8 +29,8 @@ ValueRead value_read(const ObjectState &objects, const catalog::State &catalog, 
           react.shared,
           react.relations,
           react.runtime_measurements,
-          measurements.value("density", TermId{}),
-          measurements.value("capacity", TermId{})};
+          binding("density"),
+          binding("capacity")};
 }
 
 namespace {

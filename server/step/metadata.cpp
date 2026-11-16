@@ -436,9 +436,11 @@ int plot_binding(lua_State *L) {
   return 1;
 }
 } // namespace
-void bind_metadata(const react::ValueRead &values, const amber::ObjectState &objects_state,
+void bind_metadata(const amber::ObjectState &objects_state,
                    const amber::catalog::State &catalog_state, amber::react::State &react_state,
                    const perm::Plots &plots) {
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
+
   auto &vm = react_state.vm;
 
   auto transforms = amber::transforms(std::as_const(objects_state.objects));

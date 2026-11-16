@@ -88,11 +88,6 @@ int main(int argc, char **argv) {
           models.rows[symbols.models.at(row.at("model").get<std::string>())].parts.size();
     require(created.size() == plan.at("objects").size() + expected_children,
             "ordinary declared child objects must actually exist");
-    react::Properties &properties = react_state.properties;
-    react::Processes &processes = react_state.processes;
-    react::InstanceSettings &instance_settings = react_state.instance_settings;
-    react::WorldSettings &world_settings = react_state.world_settings;
-    react::PlotSettings &plot_settings = react_state.plot_settings;
     install_properties(plan, symbols, react_state, 0, 20);
     react::AuthoredRelations &relations = react_state.authored_relations;
     react::DeferredEffects initial;
@@ -131,29 +126,9 @@ int main(int argc, char **argv) {
     for (const auto &script : scripts.rows)
       if (script.id && script.declaration.kind == react::ScriptDeclaration::Kind::Rule)
         react::add_rule(rules, scripts, terms, script.id);
-    react::AssetMeasurements &measurements = catalog_state.baked_measurements;
-    react::SharedColumns &shared = react_state.shared;
-    react::RuntimeMeasurements &runtime = react_state.runtime_measurements;
-    const react::ValueRead values{terms,
-                                  identity(objects),
-                                  objects.plot,
-                                  objects.params,
-                                  materials,
-                                  measurements,
-                                  properties,
-                                  processes,
-                                  instance_settings,
-                                  model_settings,
-                                  plot_settings,
-                                  world_settings,
-                                  shared,
-                                  relation_read,
-                                  runtime,
-                                  0};
-
     perm::Grants &grants = perm_state.grants;
-    install_grants(plan, symbols, values, authority(std::as_const(objects)), perm_state,
-                   catalog_state, react_state, profiles, amber::step::Clock{.step = 0, .hz = 20});
+    install_grants(plan, symbols, objects_state, perm_state, catalog_state, react_state, profiles,
+                   amber::step::Clock{.step = 0, .hz = 20});
     require(grants.rows.size() == plan.at("grants").size() + 1,
             "every initial grant passed real permission creation");
     auto missing_body_choices = plan;
@@ -198,9 +173,8 @@ int main(int argc, char **argv) {
     rejected_permissions.groups = groups;
     rejects(
         [&] {
-          install_grants(wrong_owner, symbols, values, authority(std::as_const(objects)),
-                         rejected_permissions, catalog_state, react_state, profiles,
-                         amber::step::Clock{.step = 0, .hz = 20});
+          install_grants(wrong_owner, symbols, objects_state, rejected_permissions, catalog_state,
+                         react_state, profiles, amber::step::Clock{.step = 0, .hz = 20});
         },
         "plan cannot forge current goods control");
     auto wrong_installation = plan;
@@ -208,8 +182,8 @@ int main(int argc, char **argv) {
     wrong_installation["grants"][0]["holder"]["script"] = "body";
     rejects(
         [&] {
-          install_grants(wrong_installation, symbols, values, authority(std::as_const(objects)),
-                         rejected_permissions, catalog_state, react_state, profiles,
+          install_grants(wrong_installation, symbols, objects_state, rejected_permissions,
+                         catalog_state, react_state, profiles,
                          amber::step::Clock{.step = 0, .hz = 20});
         },
         "plan cannot claim an uninstalled script is installed");

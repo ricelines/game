@@ -95,8 +95,7 @@ revise_model(amber::ObjectState &objects_state, amber::catalog::State &catalog_s
              amber::react::State &react_state, catalog::MeasurementBindings measurement_roles,
              const GeometryAssets &geometry, amber::space::State &space_state,
              amber::perm::State &perm_state, PhysicsDefaults defaults, const NativeCall &call) {
-  const auto values =
-      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   auto &settings = react_state.model_settings;
 

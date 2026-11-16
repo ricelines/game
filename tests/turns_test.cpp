@@ -15,8 +15,8 @@ react::CompletedInvocation invoke(test_runtime::Fixture &f, const step::PlannedI
                                   record::Journal &journal) {
   react::Invocation invocation;
   react::CompletedInvocation completed;
-  react::start_invocation(f.react_state, f.values(), f.objects_state, 7, f.catalog_state, journal,
-                          plan.handler, plan.input, invocation, completed);
+  react::start_invocation(f.react_state, f.objects_state, 7, f.catalog_state, journal, plan.handler,
+                          plan.input, invocation, completed);
   require(completed.outcome.status == react::RunOutcome::Status::Ok,
           "single-segment test must complete actual Lua without an action continuation");
   react::finish_invocation(identity(f.objects), attribution(f.objects), f.models, f.scripts,
@@ -43,9 +43,8 @@ void a_watch_is_acknowledged_only_when_its_handler_starts() {
   react::Invocation invocation;
   react::CompletedInvocation completed;
   const auto &candidate = plan.invocations.front();
-  require(!react::start_invocation(f.react_state, f.values(), objects_state, 7, f.catalog_state,
-                                   journal, candidate.handler, candidate.input, invocation,
-                                   completed),
+  require(!react::start_invocation(f.react_state, objects_state, 7, f.catalog_state, journal,
+                                   candidate.handler, candidate.input, invocation, completed),
           "disabled planned handler does not start");
   require(!f.states.contains({f.a, script}) && journal.take().empty(),
           "skipping a planned handler changes no script state or journal");

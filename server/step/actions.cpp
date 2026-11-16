@@ -49,8 +49,7 @@ ActionRun begin_action(const amber::catalog::State &catalog_state,
   const auto parent = call.origin;
   const auto deadline = call.deadline;
 
-  const auto values =
-      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   auto &space = space_state.space;
 

@@ -163,8 +163,7 @@ void answer_query(amber::net::State &net_state, amber::space::State &space_state
   const auto &clock = step_state.clock;
   const auto &settings = loaded_settings.perception;
 
-  const auto values =
-      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   auto &space = space_state.space;
   const auto now = clock.step;
@@ -179,7 +178,6 @@ void answer_query(amber::net::State &net_state, amber::space::State &space_state
 
   auto &scripts = catalog_state.scripts;
 
-  auto authority = amber::authority(std::as_const(objects_state.objects));
   auto attribution = amber::attribution(std::as_const(objects_state.objects));
 
   auto &feed = net_state.feed;
@@ -204,12 +202,12 @@ void answer_query(amber::net::State &net_state, amber::space::State &space_state
     break;
   }
   case net::ControlKind::Inspect:
-    reply = net::read_inspect(catalog_state, react_state, values, views, hearing, objects_state,
-                              perm_state, clock, settings.events_per_response, request);
+    reply = net::read_inspect(catalog_state, react_state, views, hearing, objects_state, perm_state,
+                              clock, settings.events_per_response, request);
     break;
   case net::ControlKind::Actions:
-    reply = net::read_actions(catalog_state, react_state, values, views, hearing, loaded_settings,
-                              authority, perm_state, now, request);
+    reply = net::read_actions(catalog_state, react_state, objects_state, views, hearing,
+                              loaded_settings, perm_state, now, request);
     break;
   case net::ControlKind::Events:
     reply = net::read_events(feed, views, settings.sight_m, settings.events_per_response, request);
@@ -272,8 +270,7 @@ void refresh_connections(amber::net::State &net_state, amber::space::State &spac
                          const amber::react::State &react_state,
                          const amber::ObjectState &objects_state, observe::Settings settings,
                          const amber::step::Clock &clock) {
-  const auto values =
-      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   const auto now = clock.step;
   const auto hz = clock.hz;

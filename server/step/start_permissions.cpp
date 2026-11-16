@@ -81,11 +81,14 @@ void install_money(const Json &plan, const Symbols &symbols, IdentityRead identi
     ledger.balance[account] = amount;
   }
 }
-void install_grants(const Json &plan, const Symbols &symbols, const react::ValueRead &values,
-                    AuthorityRead authority, amber::perm::State &perm_state,
+void install_grants(const Json &plan, const Symbols &symbols,
+                    const amber::ObjectState &objects_state, amber::perm::State &perm_state,
                     const amber::catalog::State &catalog_state,
                     const amber::react::State &react_state, const net::Profiles &profiles,
                     const amber::step::Clock &clock) {
+  const auto values = react::value_read(objects_state, catalog_state, react_state);
+  const auto authority = amber::authority(objects_state.objects);
+
   const auto now = clock.step;
   const auto hz = clock.hz;
 

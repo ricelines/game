@@ -301,14 +301,14 @@ int main(int argc, char **argv) {
 
     const auto offered = [&](const net::Invocation &request) {
       return vi::read_actions(
-          catalog_state, react_state, values, views, hearing,
+          catalog_state, react_state, scene.objects_state, views, hearing,
           [&] {
             amber::Settings s{};
             s.actions_page = 10;
             s.perception.events_per_response = 40;
             return s;
           }(),
-          authority(scene.objects), perm_state, now, request);
+          perm_state, now, request);
     };
     auto action_call = call;
     action_call.request.fields = {{"name", "test.t3"}};
@@ -471,9 +471,8 @@ int main(int argc, char **argv) {
     plots.rows.push_back({3, 2, 0, 0, {95, 30, 105, 40}, {}});
 
     const auto inspect = [&](const net::Invocation &request) {
-      return vi::read_inspect(catalog_state, react_state, values, views, hearing,
-                              scene.objects_state, perm_state,
-                              amber::step::Clock{.step = now, .hz = 20}, 40, request);
+      return vi::read_inspect(catalog_state, react_state, views, hearing, scene.objects_state,
+                              perm_state, amber::step::Clock{.step = now, .hz = 20}, 40, request);
     };
     auto grant_call = call;
     grant_call.request.fields = {{"target", "grants"}};

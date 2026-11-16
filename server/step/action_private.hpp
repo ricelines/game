@@ -34,8 +34,7 @@ struct HandlerRun {
   bool started = false;
 };
 using ExecutionFrame = std::variant<ActionRun, HandlerRun>;
-ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &, react::State &,
-                                  const react::ValueRead &, const ObjectState &,
+ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &, react::State &, const ObjectState &,
                                   const catalog::State &, record::Journal &);
 std::optional<std::pair<InputOrder, ActionOutcome>> return_action(std::deque<ExecutionFrame> &,
                                                                   react::Vm &, IdentityRead,
@@ -62,14 +61,12 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
                                  std::size_t mailbox_max, react::ExchangeAction operation,
                                  const NativeCall &call);
 NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
-                                    const react::ValueRead &values,
                                     const amber::react::State &react_state,
                                     amber::perm::State &perm_state,
                                     amber::ObjectState &objects_state, bool architect,
                                     react::PermissionAction operation, const NativeCall &call);
 NativeCompletion native_scripts(amber::catalog::State &catalog_state,
-                                const react::ValueRead &values, amber::react::State &react_state,
-                                amber::perm::State &perm_state,
+                                amber::react::State &react_state, amber::perm::State &perm_state,
                                 const amber::ObjectState &objects_state, TermId start_event,
                                 std::span<const std::string> roles, react::ScriptAction operation,
                                 const NativeCall &call);

@@ -1,7 +1,7 @@
 #include "action_private.hpp"
 namespace amber::step {
 ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &execution, react::State &react_state,
-                                  const react::ValueRead &values, const ObjectState &objects_state,
+                                  const ObjectState &objects_state,
                                   const catalog::State &catalog_state, record::Journal &journal) {
   while (!execution.empty()) {
     if (auto *action = std::get_if<ActionRun>(&execution.back())) {
@@ -15,14 +15,14 @@ ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &execution, react::
     auto &handler = std::get<HandlerRun>(execution.back());
     if (!handler.started) {
       handler.started = true;
-      if (!react::start_invocation(react_state, values, objects_state, 0, catalog_state, journal,
+      if (!react::start_invocation(react_state, objects_state, 0, catalog_state, journal,
                                    handler.plan.handler, std::move(handler.plan.input),
                                    handler.invocation, handler.completed)) {
         execution.pop_back();
         continue;
       }
     }
-    react::finish_invocation(values.identity, attribution(objects_state.objects),
+    react::finish_invocation(identity(objects_state.objects), attribution(objects_state.objects),
                              catalog_state.models, catalog_state.scripts, journal,
                              handler.invocation, handler.completed);
     return &execution.back();

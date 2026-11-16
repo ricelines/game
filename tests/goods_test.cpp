@@ -27,22 +27,12 @@ struct Fixture {
   std::vector<sp::RelationChange> changes;
   catalog::Models &models = catalog_state.models;
   re::Terms &terms = react_state.terms;
-  re::Materials &materials = react_state.materials;
   re::InstanceScripts &installed = react_state.installations;
-  re::MeterRows &meters = react_state.meters;
   catalog::ParameterBlocks &parameters = catalog_state.parameters;
   catalog::Assets &assets = catalog_state.assets;
   Handle controller, root, child, body;
   react::AssetMeasurements &measurements = catalog_state.baked_measurements;
-  react::InstanceSettings &instance_settings = react_state.instance_settings;
-  react::ModelSettings &model_settings = react_state.model_settings;
-  react::PlotSettings &plot_settings = react_state.plot_settings;
-  react::WorldSettings &world_settings = react_state.world_settings;
-  react::SharedColumns &shared = react_state.shared;
-  react::RelationsRead &relations = react_state.relations;
   react::RuntimeMeasurements &runtime = react_state.runtime_measurements;
-  react::Properties &properties = react_state.properties;
-  react::Processes &processes = react_state.processes;
   re::Vm &vm = react_state.vm;
   re::ScriptState state;
   re::DeferredEffects effects;
@@ -84,24 +74,7 @@ struct Fixture {
         sp::attach(scene.objects_state, scene.space_state, {child, root, {{0, 0, .5f}, {}}, false})
                 .status == sp::Status::Ok,
         "fixture declared child attachment");
-    const react::ValueRead values{terms,
-                                  identity(scene.objects),
-                                  scene.objects.plot,
-                                  scene.objects.params,
-                                  materials,
-                                  measurements,
-                                  properties,
-                                  processes,
-                                  instance_settings,
-                                  model_settings,
-                                  plot_settings,
-                                  world_settings,
-                                  shared,
-                                  relations,
-                                  runtime,
-                                  0,
-                                  0};
-    step::bind_metadata(values, scene.objects_state, catalog_state, react_state, plots);
+    step::bind_metadata(scene.objects_state, catalog_state, react_state, plots);
     st::declare_hold_goods_action(terms, declarations);
     action = terms.by_name.at("engine.hold_goods");
     auto code = re::compile_script(R"(

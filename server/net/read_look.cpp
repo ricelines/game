@@ -159,8 +159,7 @@ void refresh_view(const amber::catalog::State &catalog_state,
   const auto session = recipient.session;
   const auto &principal = recipient.principal;
 
-  const auto values =
-      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   const auto now = clock.step;
   const auto hz = clock.hz;

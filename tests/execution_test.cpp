@@ -121,7 +121,7 @@ struct Fixture {
     input.action_caller = PlayerId{7};
     react::Invocation invocation;
     react::CompletedInvocation completed;
-    react::start_invocation(react_state, values, objects_state, 971, catalog_state, journal,
+    react::start_invocation(react_state, objects_state, 971, catalog_state, journal,
                             {script, terms.rows[term].name, script + 10, 1, true}, std::move(input),
                             invocation, completed);
     react::finish_invocation(identity(objects), attribution(objects), definitions, scripts, journal,

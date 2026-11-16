@@ -109,7 +109,7 @@ struct Fixture {
     f.assets.rows[1].volume = 1;
     f.assets.rows[2].volume = .016;
     step::declare_construction_actions(f.terms, declarations);
-    step::bind_metadata(f.values(), f.objects_state, f.catalog_state, f.react_state, plots);
+    step::bind_metadata(f.objects_state, f.catalog_state, f.react_state, plots);
     f.objects.position[f.a.slot()] = {0, -2, 0};
     f.state(f.a, 1, 10);
   }

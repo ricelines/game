@@ -49,22 +49,14 @@ struct Fixture {
     a = create(objects, init);
     b = create(objects, init);
     c = create(objects, init);
+    catalog_state.mechanical.values["measurements"] = {{"density", 1}};
     terms.rows.resize(10);
     for (TermId i = 1; i < 10; ++i) {
       terms.rows[i] = term(i, ("x." + std::to_string(i)).c_str());
       terms.by_name[terms.rows[i].name] = i;
     }
   }
-  ValueRead values() {
-    return {terms,        identity(objects),
-            objects.plot, objects.params,
-            materials,    assets,
-            properties,   processes,
-            instance,     models,
-            plots,        world,
-            shared,       relations,
-            runtime,      1};
-  }
+  ValueRead values() { return value_read(objects_state, catalog_state, react_state); }
 };
 void source_resolution() {
   Fixture f;
@@ -97,6 +89,28 @@ void source_resolution() {
   DeferredEffects effects;
   apply_derived_fact(f.runtime, {{f.a, 5}, Value(25.0), {}}, effects);
   near(read(f.values(), f.a, 5, 0, 20).value.numeric(), 25, "derived runtime fact");
+}
+void owner_value_view_reads_bound_relations() {
+  Fixture f;
+  Relation physical;
+  f.relations.columns[9] = &physical;
+  f.terms.rows[9].kind = Kind::Relation;
+  f.terms.rows[4].combine = Combine::Sum;
+  f.terms.rows[4].along = 9;
+  f.shared.resize(5);
+  f.shared[4].set(f.b.slot(), Shared{7, {{f.b, 7}}});
+  f.shared[4].set(f.c.slot(), Shared{11, {{f.c, 11}}});
+  const auto values = value_read(f.objects_state, f.catalog_state, f.react_state);
+  require(!read(values, f.a, 4, 0, 20).present,
+          "an owner value view starts without an unbound physical edge");
+  DeferredEffects effects;
+  set_relation(physical, 9, f.a, f.b, true, effects);
+  near(read(values, f.a, 4, 0, 20).value.numeric(), 7,
+       "the view follows the prebound physical table without a physics world");
+  set_relation(physical, 9, f.a, f.b, false, effects);
+  set_relation(physical, 9, f.a, f.c, true, effects);
+  near(read(values, f.a, 4, 0, 20).value.numeric(), 11,
+       "the same view observes later relation changes without rebuilding or copying tables");
 }
 void process_thresholds_and_transfer() {
   Fixture f;
@@ -683,8 +697,8 @@ void candidate_start_uses_current_installation() {
     input.receiver = f.a;
     input.trigger = 6;
     input.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-    return start_invocation(f.react_state, f.values(), objects_state, 7, f.catalog_state, journal,
-                            handler, std::move(input), inv, done);
+    return start_invocation(f.react_state, objects_state, 7, f.catalog_state, journal, handler,
+                            std::move(input), inv, done);
   };
   Invocation broad;
   CompletedInvocation broad_result;
@@ -743,7 +757,7 @@ void suspended_handler_sees_replaced_parts() {
   CompletedInvocation completed;
   record::Journal journal(8, {});
   const auto handlers = dispatch(f.triggers, f.values(), root, 6, 0, 20);
-  require(start_invocation(f.react_state, f.values(), objects_state, 7, f.catalog_state, journal,
+  require(start_invocation(f.react_state, objects_state, 7, f.catalog_state, journal,
                            handlers.front(), std::move(input), invocation, completed) &&
               completed.outcome.status == RunOutcome::Status::Action,
           "actual script suspends while its assembly still has the old part");
@@ -766,6 +780,7 @@ void suspended_handler_sees_replaced_parts() {
 } // namespace
 int main() {
   source_resolution();
+  owner_value_view_reads_bound_relations();
   process_thresholds_and_transfer();
   subscription_rebind_and_relations();
   allocation_rows_track_current_nonzero_shares_only();

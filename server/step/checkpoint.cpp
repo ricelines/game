@@ -532,13 +532,14 @@ bool save_snapshot(snap::Writer &writer, const snap::Header &header,
   progress.last_step = header.step;
   return true;
 }
-CaptureSelection capture_selection(const GapDraft &gap, const react::ValueRead &values,
-                                   const amber::ObjectState &objects_state,
+CaptureSelection capture_selection(const GapDraft &gap, const amber::ObjectState &objects_state,
                                    const amber::catalog::State &catalog_state,
                                    const amber::react::State &react_state,
                                    const amber::perm::State &perm_state,
                                    const amber::net::State &net_state, const space::Space &space,
                                    float radius_m) {
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
+
   auto &objects = objects_state.objects;
   auto &parts = objects_state.parts;
   auto &models = catalog_state.models;
@@ -588,8 +589,7 @@ void flush_gaps(amber::step::State &step_state, record::Journal &journal,
                 const amber::react::State &react_state, const amber::ObjectState &objects_state,
                 const amber::space::State &space_state, const amber::catalog::State &catalog_state,
                 const amber::perm::State &perm_state, amber::elaborate::State &elaborate_state) {
-  const auto values =
-      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   auto &space = space_state.space;
   const auto capture_limit = settings.gap_captures;
@@ -624,9 +624,8 @@ void flush_gaps(amber::step::State &step_state, record::Journal &journal,
         {"count", noted.count}, {"term", gap.term}, {"material", key.material}, {"agent", false}};
     if (noted.capture_required) {
       try {
-        const auto selected =
-            capture_selection(gap, values, objects_state, catalog_state, react_state, perm_state,
-                              net_state, space, radius_m);
+        const auto selected = capture_selection(gap, objects_state, catalog_state, react_state,
+                                                perm_state, net_state, space, radius_m);
         std::vector<space::MotionRow> motion;
         std::vector<BodyCauseRow> causes;
         sample_motion(space, mechanical_causes, id, &selected, motion, causes);

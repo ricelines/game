@@ -404,16 +404,15 @@ Reply read_look(const amber::catalog::State &catalog_state, const amber::react::
                 const amber::ObjectState &objects_state, const amber::step::State &step_state,
                 observe::Settings settings, double world_ambient_lux, const Invocation &call);
 Reply read_actions(const amber::catalog::State &catalog_state,
-                   const amber::react::State &react_state, const react::ValueRead &values,
+                   const amber::react::State &react_state, const amber::ObjectState &objects_state,
                    SessionViews &sessions, observe::Hearing &hearing,
-                   const amber::Settings &settings, AuthorityRead authority,
-                   const amber::perm::State &perm_state, Step now, const Invocation &call);
-Reply read_inspect(const amber::catalog::State &catalog_state,
-                   const amber::react::State &react_state, const react::ValueRead &values,
-                   SessionViews &sessions, observe::Hearing &hearing,
-                   const amber::ObjectState &objects_state, const amber::perm::State &perm_state,
-                   const amber::step::Clock &clock, std::size_t events_per_response,
+                   const amber::Settings &settings, const amber::perm::State &perm_state, Step now,
                    const Invocation &call);
+Reply read_inspect(const amber::catalog::State &catalog_state,
+                   const amber::react::State &react_state, SessionViews &sessions,
+                   observe::Hearing &hearing, const amber::ObjectState &objects_state,
+                   const amber::perm::State &perm_state, const amber::step::Clock &clock,
+                   std::size_t events_per_response, const Invocation &call);
 void append_records(RecordFeed &feed, std::span<const Json> records, IdentityRead identity,
                     TransformRead transforms);
 Reply read_events(const RecordFeed &feed, const SessionViews &sessions, float radius_m,

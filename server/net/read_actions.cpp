@@ -96,11 +96,14 @@ bool available(const amber::catalog::State &catalog_state, const amber::react::S
 }
 } // namespace
 net::Reply read_actions(const amber::catalog::State &catalog_state,
-                        const amber::react::State &react_state, const react::ValueRead &values,
-                        SessionViews &sessions, observe::Hearing &hearing,
-                        const amber::Settings &settings, AuthorityRead authority,
+                        const amber::react::State &react_state,
+                        const amber::ObjectState &objects_state, SessionViews &sessions,
+                        observe::Hearing &hearing, const amber::Settings &settings,
                         const amber::perm::State &perm_state, Step now,
                         const net::Invocation &call) {
+  const auto values = react::value_read(objects_state, catalog_state, react_state);
+  const auto authority = amber::authority(objects_state.objects);
+
   const auto page_size = settings.actions_page;
   const auto events_per_response = settings.perception.events_per_response;
 

@@ -87,7 +87,7 @@ int main() {
              {"expires_s", 20}});
       const auto install_call =
           call(1, f.b, {{"script", "s:" + std::to_string(body_controls)}, {"choices", choices}});
-      const auto grouped = ed::install_script(install_call, f.react_state, values, f.catalog_state,
+      const auto grouped = ed::install_script(install_call, f.react_state, f.catalog_state,
                                               f.objects_state, perm_state, no_roles, 6);
       require(grouped.reply.at("ok") && grouped.reply.at("grants").size() == 5 &&
                   grouped.reply.at("unfilled_slots").empty(),
@@ -111,7 +111,7 @@ int main() {
       const auto rejected = ed::install_script(
           call(1, f.b,
                {{"script", "s:" + std::to_string(body_controls)}, {"choices", conflicting}}),
-          f.react_state, values, f.catalog_state, f.objects_state, perm_state, no_roles, 6);
+          f.react_state, f.catalog_state, f.objects_state, perm_state, no_roles, 6);
       require(!rejected.reply.at("ok").get<bool>() && grants.rows.size() == before,
               "conflicting limits on one grant scope were silently changed");
       perm::revoke(grants, players, object_grant);
@@ -130,8 +130,8 @@ int main() {
       ['novel.touch']=function(self) self:set('novel.result',77) end}})");
     const auto sid = "s:" + std::to_string(script);
     auto install = [&](step::NativeCall input) {
-      return ed::install_script(input, f.react_state, values, f.catalog_state, f.objects_state,
-                                perm_state, no_roles, 6);
+      return ed::install_script(input, f.react_state, f.catalog_state, f.objects_state, perm_state,
+                                no_roles, 6);
     };
     auto default_script = [&](Json selected) {
       return ed::model_script(call(1, {}, {{"model", "m:1"}, {"script", selected}}), f.react_state,

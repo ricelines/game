@@ -6,10 +6,6 @@ namespace amber::react {
 struct State;
 }
 
-namespace amber::space {
-struct State;
-}
-
 #include "record/record.hpp"
 #include "snap/snap.hpp"
 #include "store/store.hpp"
@@ -30,8 +26,7 @@ struct Scripts;
 
 namespace amber::react {
 
-ValueRead value_read(const ObjectState &, const catalog::State &, const State &,
-                     const space::State &);
+ValueRead value_read(const ObjectState &, const catalog::State &, const State &);
 
 Answer read_intrinsic(const Materials &, TermId material, const Term &);
 Answer read_baked(const AssetMeasurements &, ModelId, const Term &, std::uint32_t params = 0);
@@ -107,10 +102,10 @@ void consult_object(const Invocation &, Handle);
 
 class Vm;
 // Direct VM execution.
-bool start_invocation(amber::react::State &react_state, const ValueRead &,
-                      const amber::ObjectState &objects_state, std::uint64_t initial_seed,
-                      const amber::catalog::State &catalog_state, record::Journal &,
-                      const HandlerRef &, InvocationInput, Invocation &, CompletedInvocation &);
+bool start_invocation(amber::react::State &react_state, const amber::ObjectState &objects_state,
+                      std::uint64_t initial_seed, const amber::catalog::State &catalog_state,
+                      record::Journal &, const HandlerRef &, InvocationInput, Invocation &,
+                      CompletedInvocation &);
 void finish_invocation(IdentityRead, AttributionRead, const catalog::Models &,
                        const catalog::Scripts &, record::Journal &, Invocation &,
                        CompletedInvocation &);

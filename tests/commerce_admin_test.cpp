@@ -34,7 +34,6 @@ int main() {
     f.objects.plot[f.a.slot()] = 1;
     f.objects.plot[f.b.slot()] = 1;
     f.objects.plot[f.c.slot()] = 1;
-    const auto values = f.values();
     react::NativeActions native;
     const auto ids = ad::declare_admin(f.terms, native);
     const auto count = f.terms.rows.size();
@@ -45,7 +44,7 @@ int main() {
       const auto *player = std::get_if<PlayerId>(&input.request.caller);
       const bool architect = player && *player == 4;
       return step::native_permissions(
-          f.catalog_state, values, f.react_state, perm_state, f.objects_state, architect,
+          f.catalog_state, f.react_state, perm_state, f.objects_state, architect,
           std::get<react::PermissionAction>(native.rows.at(input.request.action).operation), input);
     };
     auto run = [&](PlayerId player, TermId action, Handle object, Json input) {

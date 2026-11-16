@@ -75,24 +75,7 @@ struct Fixture {
     bind_values(vm, *projection, react_state);
     bind_events(vm, terms);
   }
-  ValueRead values() {
-    return {terms,
-            identity(objects),
-            objects.plot,
-            objects.params,
-            materials,
-            assets,
-            properties,
-            processes,
-            instance_settings,
-            model_settings,
-            plots,
-            world,
-            shared,
-            relation_view,
-            runtime,
-            0};
-  }
+  ValueRead values() { return value_read(objects_state, catalog_state, react_state); }
   ScriptId add(std::string_view source, PlayerId author = 1,
                RightsDeclaration rights = {{"use", "edit"}}) {
     auto prepared =

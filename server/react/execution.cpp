@@ -33,11 +33,13 @@ void refresh_parts(Invocation &invocation, IdentityRead identity, const Relation
   for (std::size_t i = 0; i < invocation.parts.size(); ++i)
     append(invocation.parts[i]);
 }
-bool start_invocation(amber::react::State &react_state, const ValueRead &values,
-                      const amber::ObjectState &objects_state, std::uint64_t initial_seed,
-                      const amber::catalog::State &catalog_state, record::Journal &journal,
-                      const react::HandlerRef &handler, InvocationInput input,
-                      react::Invocation &invocation, CompletedInvocation &result) {
+bool start_invocation(amber::react::State &react_state, const amber::ObjectState &objects_state,
+                      std::uint64_t initial_seed, const amber::catalog::State &catalog_state,
+                      record::Journal &journal, const react::HandlerRef &handler,
+                      InvocationInput input, react::Invocation &invocation,
+                      CompletedInvocation &result) {
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
+
   auto &vm = react_state.vm;
 
   auto &states = react_state.states;

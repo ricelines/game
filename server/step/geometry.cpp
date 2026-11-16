@@ -191,7 +191,7 @@ initialize_physics(amber::step::State &step_state, const amber::catalog::State &
                    const perm::Players &players, amber::space::State &space_state,
                    std::span<const Handle> initial, const checkpoint::Decoded &decoded,
                    PhysicsDefaults defaults, bool restored) {
-  const auto values = react::value_read(objects_state, catalog_state, react_state, space_state);
+  const auto values = react::value_read(objects_state, catalog_state, react_state);
   const auto &clock = step_state.clock;
   const auto &restored_motion = decoded.motion;
   const auto &restored_causes = decoded.causes;

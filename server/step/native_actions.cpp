@@ -60,8 +60,7 @@ NativeCompletion native_construction(amber::ObjectState &objects_state,
   const catalog::MeasurementBindings measurement_roles{measurements.at("volume").get<TermId>(),
                                                        measurements.at("capacity").get<TermId>()};
 
-  const auto values =
-      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   auto &objects = objects_state.objects;
   auto &parts = objects_state.parts;
@@ -215,7 +214,6 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
   return out;
 }
 NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
-                                    const react::ValueRead &values,
                                     const amber::react::State &react_state,
                                     amber::perm::State &perm_state,
                                     amber::ObjectState &objects_state, bool architect,
@@ -233,7 +231,7 @@ NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
   case react::PermissionAction::Grant: {
     if (const auto error = validate_grant(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = grant(perm_state, objects_state, catalog_state, react_state, values, architect, call);
+    out = grant(perm_state, objects_state, catalog_state, react_state, architect, call);
     break;
   }
   case react::PermissionAction::Revoke: {
@@ -276,19 +274,19 @@ NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
   return out;
 }
 NativeCompletion native_scripts(amber::catalog::State &catalog_state,
-                                const react::ValueRead &values, amber::react::State &react_state,
-                                amber::perm::State &perm_state,
+                                amber::react::State &react_state, amber::perm::State &perm_state,
                                 const amber::ObjectState &objects_state, TermId start_event,
                                 std::span<const std::string> roles, react::ScriptAction operation,
                                 const NativeCall &call) {
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   NativeCompletion out;
   switch (operation) {
   case react::ScriptAction::Install: {
     if (const auto error = editing::validate_install(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = editing::install_script(call, react_state, values, catalog_state, objects_state,
-                                  perm_state, roles, start_event);
+    out = editing::install_script(call, react_state, catalog_state, objects_state, perm_state,
+                                  roles, start_event);
     break;
   }
   case react::ScriptAction::Uninstall: {

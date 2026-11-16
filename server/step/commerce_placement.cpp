@@ -19,8 +19,7 @@ place_existing(amber::ObjectState &objects_state, amber::space::State &space_sta
                const GeometryAssets &geometry, const amber::catalog::State &catalog_state,
                PhysicsRoles roles, PhysicsDefaults defaults, amber::react::State &react_state,
                const step::NativeCall &call) {
-  const auto values =
-      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   auto &space = space_state.space;
 

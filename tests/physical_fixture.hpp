@@ -81,7 +81,7 @@ struct Fixture {
     step::declare_physical_actions(f.terms, declarations);
     step::bind_physical(f.vm, f.objects_state, step_state, perm_state, 1024, space_state,
                         catalog_state);
-    step::bind_metadata(f.values(), f.objects_state, f.catalog_state, f.react_state, plots);
+    step::bind_metadata(f.objects_state, f.catalog_state, f.react_state, plots);
     add_body(f.a, {.6f, .6f, 1.8f}, space::Motion::Character);
     add_body(f.b, {.4f, .4f, .4f}, item);
     add_body(f.c, {.5f, .5f, .5f}, space::Motion::Dynamic);
@@ -205,7 +205,7 @@ struct Fixture {
     const auto handlers = react::dispatch(f.triggers, f.values(), f.a, 7, clock.step, 20);
     test_runtime::require(handlers.size() == 1 && handlers.front().script == script,
                           "actual current fixture handler is installed");
-    react::start_invocation(f.react_state, f.values(), objects_state, 7, f.catalog_state, journal,
+    react::start_invocation(f.react_state, objects_state, 7, f.catalog_state, journal,
                             handlers.front(), std::move(input), invocation, completed);
     test_runtime::require(completed.outcome.status != react::RunOutcome::Status::Action,
                           "nested checked actions belong in the actual server process tests");

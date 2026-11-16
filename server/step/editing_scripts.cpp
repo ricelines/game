@@ -221,11 +221,14 @@ Json preview(const catalog::Script &source, Handle object, IdentityRead identity
   return slots;
 }
 } // namespace
-step::NativeCompletion
-install_script(const step::NativeCall &call, amber::react::State &react_state,
-               const react::ValueRead &values, const amber::catalog::State &catalog_state,
-               const amber::ObjectState &objects_state, amber::perm::State &perm_state,
-               std::span<const std::string> roles, TermId start_event) {
+step::NativeCompletion install_script(const step::NativeCall &call,
+                                      amber::react::State &react_state,
+                                      const amber::catalog::State &catalog_state,
+                                      const amber::ObjectState &objects_state,
+                                      amber::perm::State &perm_state,
+                                      std::span<const std::string> roles, TermId start_event) {
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
+
   auto &instances = react_state.installations;
   auto &triggers = react_state.triggers;
 

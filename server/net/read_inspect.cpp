@@ -125,10 +125,11 @@ Json state_record(const react::ScriptState &state) {
   return result;
 }
 Json object_record(const amber::catalog::State &catalog_state,
-                   const amber::react::State &react_state, const react::ValueRead &values,
-                   SessionViews &sessions, const amber::ObjectState &objects_state,
-                   const amber::perm::State &perm_state, const amber::step::Clock &clock,
-                   Handle object, const net::Invocation &call) {
+                   const amber::react::State &react_state, SessionViews &sessions,
+                   const amber::ObjectState &objects_state, const amber::perm::State &perm_state,
+                   const amber::step::Clock &clock, Handle object, const net::Invocation &call) {
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
+
   const auto now = clock.step;
   const auto hz = clock.hz;
 
@@ -220,11 +221,12 @@ Json object_record(const amber::catalog::State &catalog_state,
 }
 } // namespace
 net::Reply read_inspect(const amber::catalog::State &catalog_state,
-                        const amber::react::State &react_state, const react::ValueRead &values,
-                        SessionViews &sessions, observe::Hearing &hearing,
-                        const amber::ObjectState &objects_state,
+                        const amber::react::State &react_state, SessionViews &sessions,
+                        observe::Hearing &hearing, const amber::ObjectState &objects_state,
                         const amber::perm::State &perm_state, const amber::step::Clock &clock,
                         std::size_t events_per_response, const net::Invocation &call) {
+  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
+
   const auto now = clock.step;
   const auto hz = clock.hz;
 
@@ -254,11 +256,11 @@ net::Reply read_inspect(const amber::catalog::State &catalog_state,
       const auto &player = players.rows.at(call.principal.player);
       for (const auto h : player.inventory)
         if (values.identity.valid(h))
-          result["inventory"].push_back(object_record(catalog_state, react_state, values, sessions,
+          result["inventory"].push_back(object_record(catalog_state, react_state, sessions,
                                                       objects_state, perm_state, clock, h, call));
       for (const auto h : player.mailbox)
         if (values.identity.valid(h))
-          result["mailbox"].push_back(object_record(catalog_state, react_state, values, sessions,
+          result["mailbox"].push_back(object_record(catalog_state, react_state, sessions,
                                                     objects_state, perm_state, clock, h, call));
       result["balance"] = perm::balance(ledger, perm::Account::player(call.principal.player));
     } else if (name == "grants") {
@@ -297,8 +299,8 @@ net::Reply read_inspect(const amber::catalog::State &catalog_state,
         result = {{"plot", plot_record(*found)}};
     } else {
       const auto object = view_detail::target(values.identity, call);
-      result = object_record(catalog_state, react_state, values, sessions, objects_state,
-                             perm_state, clock, object, call);
+      result = object_record(catalog_state, react_state, sessions, objects_state, perm_state, clock,
+                             object, call);
       if (name == "self")
         result["balance"] = perm::balance(ledger, perm::Account::player(call.principal.player));
     }

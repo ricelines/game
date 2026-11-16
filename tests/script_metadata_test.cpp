@@ -32,12 +32,6 @@ struct Fixture {
   perm::Grants &grants = perm_state.grants;
   // This fixture verifies metadata behavior under sanitizers, not production timing.
   react::AssetMeasurements &measurements = catalog_state.baked_measurements;
-  react::InstanceSettings &instance_settings = react_state.instance_settings;
-  react::ModelSettings &model_settings = react_state.model_settings;
-  react::PlotSettings &plot_settings = react_state.plot_settings;
-  react::WorldSettings &world_settings = react_state.world_settings;
-  react::SharedColumns &shared = react_state.shared;
-  react::RelationsRead &relations = react_state.relations;
   react::RuntimeMeasurements &runtime = react_state.runtime_measurements;
   react::Vm &vm = react_state.vm;
   react::ScriptState state;
@@ -112,24 +106,8 @@ struct Fixture {
     meters[{root, part, 2, false}] = {2, 0, 3};
     players.rows.resize(4);
     plots.rows.push_back({1, 2, 0, 7, {-5, -4, 30, 40}, {}});
-    const react::ValueRead values{terms,
-                                  identity(objects),
-                                  objects.plot,
-                                  objects.params,
-                                  materials,
-                                  measurements,
-                                  properties,
-                                  processes,
-                                  instance_settings,
-                                  model_settings,
-                                  plot_settings,
-                                  world_settings,
-                                  shared,
-                                  relations,
-                                  runtime,
-                                  1,
-                                  6};
-    step::bind_metadata(values, objects_state, catalog_state, react_state, plots);
+    catalog_state.mechanical.values["measurements"] = {{"density", 1}, {"capacity", 6}};
+    step::bind_metadata(objects_state, catalog_state, react_state, plots);
   }
   react::RunOutcome run(std::string_view body) {
     const auto source = "return {on={run=function(self,from,args) " + std::string(body) + " end}}";

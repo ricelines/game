@@ -236,7 +236,7 @@ void bind_physical(react::Vm &, amber::ObjectState &objects_state, amber::step::
                    amber::space::State &space_state, const amber::catalog::State &catalog_state);
 void declare_physical_actions(react::Terms &, react::NativeActions &);
 
-void bind_metadata(const react::ValueRead &, const amber::ObjectState &objects_state,
+void bind_metadata(const amber::ObjectState &objects_state,
                    const amber::catalog::State &catalog_state, amber::react::State &react_state,
                    const perm::Plots &);
 
@@ -341,8 +341,8 @@ std::string validate_plot_permissions(const Json &);
 step::NativeCompletion grant(amber::perm::State &perm_state,
                              const amber::ObjectState &objects_state,
                              const amber::catalog::State &catalog_state,
-                             const amber::react::State &react_state, const react::ValueRead &values,
-                             bool issuer_is_architect, const step::NativeCall &call);
+                             const amber::react::State &react_state, bool issuer_is_architect,
+                             const step::NativeCall &call);
 step::NativeCompletion revoke(amber::perm::State &perm_state,
                               const amber::ObjectState &objects_state, bool issuer_is_architect,
                               const step::NativeCall &call);
@@ -477,11 +477,12 @@ define_material(const step::NativeCall &call, std::span<const std::string> roles
                 amber::catalog::State &catalog_state, const GeometryAssets &geometry,
                 space::Space &space, PhysicsRoles physical_roles, PhysicsDefaults defaults,
                 const std::filesystem::path &directory);
-step::NativeCompletion
-install_script(const step::NativeCall &call, amber::react::State &react_state,
-               const react::ValueRead &values, const amber::catalog::State &catalog_state,
-               const amber::ObjectState &objects_state, amber::perm::State &perm_state,
-               std::span<const std::string> roles, TermId start_event);
+step::NativeCompletion install_script(const step::NativeCall &call,
+                                      amber::react::State &react_state,
+                                      const amber::catalog::State &catalog_state,
+                                      const amber::ObjectState &objects_state,
+                                      amber::perm::State &perm_state,
+                                      std::span<const std::string> roles, TermId start_event);
 step::NativeCompletion uninstall_script(const step::NativeCall &call,
                                         amber::react::State &react_state,
                                         const react::ValueRead &values,
@@ -556,8 +557,7 @@ void flush_gaps(amber::step::State &step_state, record::Journal &journal,
                 const amber::react::State &react_state, const amber::ObjectState &objects_state,
                 const amber::space::State &space_state, const amber::catalog::State &catalog_state,
                 const amber::perm::State &perm_state, amber::elaborate::State &elaborate_state);
-CaptureSelection capture_selection(const GapDraft &gap, const react::ValueRead &values,
-                                   const amber::ObjectState &objects_state,
+CaptureSelection capture_selection(const GapDraft &gap, const amber::ObjectState &objects_state,
                                    const amber::catalog::State &catalog_state,
                                    const amber::react::State &react_state,
                                    const amber::perm::State &perm_state,
@@ -735,7 +735,7 @@ void install_profiles(const Json &, const Symbols &, net::Profiles &, perm::Play
 void install_land(const Json &, perm::Plots &, perm::Groups &, perm::Players &);
 void install_money(const Json &, const Symbols &, IdentityRead, AuthorityRead,
                    const perm::Players &, const perm::Groups &, perm::Ledger &);
-void install_grants(const Json &, const Symbols &, const react::ValueRead &, AuthorityRead,
+void install_grants(const Json &, const Symbols &, const amber::ObjectState &objects_state,
                     amber::perm::State &perm_state, const amber::catalog::State &catalog_state,
                     const amber::react::State &react_state, const net::Profiles &,
                     const amber::step::Clock &clock);
