@@ -109,7 +109,7 @@ void restore_scripts(Scripts &scripts, react::Vm &vm, react::RuleVersions &rules
   load_rules(registry, scripts, rules);
   const react::RightsDeclaration rights{
       {"use", "take", "move", "edit", "copy", "transfer", "destroy"},
-      {"spend", "build", "enter", "run_scripts", "animate", "camera"}};
+      {"spend", "build", "enter", "run_scripts", "return", "animate", "camera"}};
   for (auto &script : scripts.rows) {
     if (!script.id)
       continue;

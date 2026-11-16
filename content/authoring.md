@@ -91,6 +91,8 @@ The starting native operations include:
 
 Land actions are `engine.offer_plot {plot, price, buyer?, expires_s?}`, `engine.set_offer_price {offer, price}`, `engine.accept {offer, max_price, payer?, beneficiary?}`, `engine.return` on an item, `engine.abandon_plot {plot}`, `engine.split_plot {plot, x}` or `{plot, y}`, and `engine.join_plots {plots={a,b}}`. Buying land can be remote. Acceptance never pays more than `max_price`. Return requires the plot's Return right; a live Build grant protects the item's owner until revoked. Returned goods bypass the mailbox gift cap.
 
+The supplied instance lease requests `build`, `enter`, `run_scripts` and `return` on its object's plot. The plot owner sets `base.lease_terms {tenant, rent, grace_days}`. The tenant gives that installed lease a capped `spend` grant on their wallet, then calls `base.lease_sign {}`. The lease delegates land rights, charges the tenant, and revokes those rights and returns their things after unpaid grace. The owner continues paying land rent.
+
 Native action poses use `{position={x,y,z}, rotation={x,y,z,w}}`, with both inner values arrays. Luau vectors also work for positions/velocities. `local_pose` is relative to its parent. Other action families cover scoped grants/revocation, money, ownership/trade, installation and elaboration. Their signatures appear in ordinary action listings; a known action needs no extra schema-discovery step.
 
 ## Physical primitives and exact reads

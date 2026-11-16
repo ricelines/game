@@ -204,7 +204,7 @@ Json preview(const catalog::Script &source, Handle object, IdentityRead identity
       selected_scope = body && identity.valid(body) && (identity.flags[body.slot()] & Body)
                            ? Json{{"avatar", to_string(body)}}
                            : Json(nullptr);
-    } else if (name == "build" || name == "enter" || name == "run_scripts") {
+    } else if (name == "build" || name == "enter" || name == "run_scripts" || name == "return") {
       const auto plot = authority.plot[object.slot()];
       selected_scope = plot ? Json{{"plot", plot}} : Json(nullptr);
     }

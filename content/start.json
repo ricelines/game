@@ -92,6 +92,12 @@
       "file": "scripts/land.luau",
       "author": 1,
       "world_rule": false
+    },
+    {
+      "key": "lease",
+      "file": "scripts/lease.luau",
+      "author": 1,
+      "world_rule": false
     }
   ],
   "models": [

@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
     load_terms({registry_pin, registry}, terms);
     const react::RightsDeclaration rights{
         {"use", "take", "move", "edit", "copy", "transfer", "destroy"},
-        {"spend", "build", "enter", "run_scripts", "animate", "camera"}};
+        {"spend", "build", "enter", "run_scripts", "return", "animate", "camera"}};
     const auto &limits = request.at("limits");
     const react::VmSettings settings{
         limits.at("script_kb").get<std::size_t>(), limits.at("declaration_ms").get<double>(),

@@ -612,6 +612,157 @@ return {kind='model',on={['base.start']=check,['base.land_tick']=check}}
     assert post["values"]["base.charge"] == 1
 
 
+def lease_fixture(plan, *, cap=1000, rent=100, grace=0.3, probe=""):
+    lease = next(row for row in plan["scripts"] if row["key"] == "lease")
+    lease["source"] = (
+        "local rule=(function()\n"
+        + lease["source"]
+        + "\nend)()\n"
+        + """
+local original_start=rule.on['base.start']
+local original_tick=rule.on['base.lease_tick']
+rule.on['base.start']=function(self)
+    local terms={tenant='p:3',rent=RENT,grace_days=GRACE}
+    assert(not pcall(rule.on['base.lease_terms'],self,nil,terms,'p:3'),
+        'tenant set owner terms')
+    rule.on['base.lease_terms'](self,nil,terms,'p:2')
+    assert(not pcall(rule.on['base.lease_sign'],self,nil,{},'p:4'),
+        'wrong tenant signed')
+    rule.on['base.lease_sign'](self,nil,{},'p:3')
+    original_start(self)
+end
+rule.on['base.lease_tick']=function(self)
+    original_tick(self)
+PROBE
+end
+return rule
+""".replace("RENT", str(rent))
+        .replace("GRACE", str(grace))
+        .replace("PROBE", probe)
+    )
+    model = next(row for row in plan["models"] if row["key"] == "land_post").copy()
+    model.update(key="test_lease", script="lease", author=2)
+    plan["models"].append(model)
+    obj = next(row for row in plan["objects"] if row["key"] == "public.land_post").copy()
+    obj.update(key="test.lease", model="test_lease", owner=2, at=[30, 78, 0])
+    plan["objects"].append(obj)
+    goods = obj.copy()
+    goods.update(key="test.tenant_goods", model="chair", owner=3, at=[32, 78, 0])
+    plan["objects"].append(goods)
+    holder = {"script": "lease", "on": "test.lease"}
+    plan["grants"].extend(
+        [
+            {
+                "issuer": 2,
+                "holder": holder,
+                "scope": {"plot_at": [24, 50]},
+                "rights": ["build", "enter", "run_scripts", "return"],
+                "cap": 0,
+                "period_s": 0,
+                "expires_s": 31536000,
+            },
+            {
+                "issuer": 3,
+                "holder": holder,
+                "scope": {"account": "p:3"},
+                "rights": ["spend"],
+                "cap": cap,
+                "period_s": 86400,
+                "expires_s": 31536000,
+            },
+        ]
+    )
+    plan["bootstrap"].append({"target": "test.lease", "event": "base.start", "payload": None})
+
+
+def test_lease_paid_rights_caller_checks_and_separate_land_rent(tmp_path, baked_plan):
+    probe = """
+    if self:now()>=0.8 then
+        assert(self.state.signed,'paid lease ended')
+        local given=self:act('engine.list_grants',nil,{}).given
+        local rights=false
+        for _, grant in given do
+            if grant.holder=='p:3' and grant.scope.plot==self.state.plot then
+                rights=#grant.rights==3 and grant.parent~=nil
+            end
+        end
+        assert(rights,'tenant lacks delegated build/entry/scripts')
+        local tenant=self:act('engine.balance',nil,{account='p:3'}).balance
+        local owner=self:act('engine.balance',nil,{account='p:2'}).balance
+        assert(tenant<1000 and owner>1000,'lease rent did not reach owner')
+        assert(owner<2000-tenant,'owner stopped paying land rent')
+        self:set('base.charge',1)
+    end
+"""
+    state = land_world(
+        tmp_path,
+        baked_plan,
+        steps=30,
+        probe="return {kind='model',on={['base.start']=tick,['base.land_tick']=tick}}",
+        edit=lambda plan: lease_fixture(plan, probe=probe),
+    )
+    lease = next(row for row in state["objects"] if row["position"] == [30, 78, 0])
+    assert lease["values"]["base.charge"] == 1
+
+
+def test_lease_unpaid_revokes_build_and_returns_tenant_goods(tmp_path, baked_plan):
+    probe = """
+    if self:now()>=1 then
+        assert(not self.state.signed,'unpaid lease did not end')
+        assert(self:plot().owner=='p:2','eviction changed plot ownership')
+        for _, grant in self:act('engine.list_grants',nil,{}).given do
+            assert(grant.holder~='p:3','evicted tenant retains land grant')
+        end
+        for _, object in self:plot_objects(self.state.plot) do
+            assert(self:object(object).owner~='p:3','tenant goods were not returned')
+        end
+        self:set('base.charge',1)
+    end
+"""
+    state = land_world(
+        tmp_path,
+        baked_plan,
+        steps=30,
+        probe="return {kind='model',on={['base.start']=tick,['base.land_tick']=tick}}",
+        edit=lambda plan: lease_fixture(plan, cap=1, probe=probe),
+    )
+    lease = next(row for row in state["objects"] if row["position"] == [30, 78, 0])
+    assert lease["values"]["base.charge"] == 1
+
+
+def test_lease_ends_cleanly_when_land_returns_to_pool(tmp_path, baked_plan):
+    land_probe = """
+local function abandon(self)
+    tick(self)
+    if self:now()>=0.4 and not self.state.abandoned then
+        for _, id in self:plots() do
+            local plot=self:plot(id)
+            if plot.bounds[1]==24 and plot.bounds[2]==50 then
+                assert(self:act('engine.abandon_plot',nil,{plot=id}).ok,'abandon lease plot')
+                self.state.abandoned=true
+            end
+        end
+    end
+end
+return {kind='model',on={['base.start']=abandon,['base.land_tick']=abandon}}
+"""
+    lease_probe = """
+    if self:now()>=0.6 then
+        assert(not self.state.signed,'pool lease remained signed')
+        self:set('base.charge',1)
+    end
+"""
+    state = land_world(
+        tmp_path,
+        baked_plan,
+        steps=20,
+        probe=land_probe,
+        edit=lambda plan: lease_fixture(plan, probe=lease_probe),
+    )
+    lease = next(row for row in state["objects"] if row["position"] == [30, 78, 0])
+    assert lease["values"]["base.charge"] == 1
+
+
 def test_land_delinquency_holds_salvages_and_returns_third_party(tmp_path, baked_plan):
     def unpaid(plan):
         plan["grants"] = [

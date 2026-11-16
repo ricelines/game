@@ -2260,5 +2260,35 @@
     "name": "base.land_tick",
     "kind": "event",
     "description": "Settle land rent and update pool offers."
+  },
+  {
+    "name": "base.lease_tick",
+    "kind": "event",
+    "description": "Settle a signed lease."
+  },
+  {
+    "name": "base.lease_terms",
+    "kind": "action",
+    "description": "Set a named tenant, rent per day and unpaid grace days as plot owner.",
+    "inputs": [
+      {
+        "name": "tenant",
+        "type": "string"
+      },
+      {
+        "name": "rent",
+        "type": "number"
+      },
+      {
+        "name": "grace_days",
+        "type": "number"
+      }
+    ]
+  },
+  {
+    "name": "base.lease_sign",
+    "kind": "action",
+    "description": "Sign as the named tenant after giving the lease a capped wallet Spend grant.",
+    "inputs": []
   }
 ]
