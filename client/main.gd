@@ -428,6 +428,8 @@ func _text(message: Dictionary) -> void:
 				assets.root_url = server_base + assets.root_url
 			gateway_url = str(message.get("agent_gateway", gateway_url))
 			_send({"t": "view", "pos": _server_array(target)})
+		"terrain":
+			world.add_terrain(message)
 		"catalog":
 			for term in message.get("terms", []):
 				terms[str(int(term.id))] = term
@@ -436,7 +438,7 @@ func _text(message: Dictionary) -> void:
 				materials[int(material.id)] = material
 			for model in message.get("models", []):
 				models[int(model.id)] = model
-			world.world_ambient_lux = float(message.get("world", {}).get("ambient_lux", 1))
+			world.world_ambient_lux = float(message.get("world", {}).get("ambient_lux", world.world_ambient_lux))
 			world.invalidate_model_data()
 		"metadata":
 			for row in message.get("objects", []):

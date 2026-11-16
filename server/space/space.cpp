@@ -489,6 +489,10 @@ Space::Native::~Native() {
   }
   for (auto &volume : volumes)
     destroy_rigid(*this, volume.body);
+  JPH::BodyIDVector remaining;
+  physics.GetBodies(remaining);
+  for (auto id : remaining)
+    destroy_rigid(*this, id);
   dtFreeCrowd(crowd);
   dtFreeNavMeshQuery(query);
   dtFreeNavMesh(mesh);
@@ -502,6 +506,36 @@ Space::Space(const Settings &s) {
   native = std::make_unique<Native>(s);
 }
 Space::~Space() = default;
+void add_terrain(State &state, std::int32_t i, std::int32_t j) {
+  if (state.terrain.contains({i, j}))
+    return;
+  auto &n = *state.space.native;
+  const auto size = n.settings.terrain_tile_m;
+  if (!n.terrain_geometry) {
+    n.terrain_geometry = std::make_shared<Geometry>();
+    n.terrain_geometry->vertices = {{0, 0, 0}, {size, 0, 0}, {size, size, 0}, {0, size, 0}};
+    n.terrain_geometry->indices = {0, 1, 2, 0, 2, 3};
+    n.terrain_geometry->bounds = {{0, 0, 0}, {size, size, 0}};
+  }
+  JPH::BodyCreationSettings body(new JPH::BoxShape({size / 2, size / 2, .5f}),
+      jv({(i + .5f) * size, (j + .5f) * size, -.5f}), JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0);
+  body.mUserData = 0;
+  const auto id = n.physics.GetBodyInterface().CreateAndAddBody(body, JPH::EActivation::DontActivate);
+  if (id.IsInvalid())
+    throw std::runtime_error("terrain body capacity exhausted");
+  state.terrain.emplace(i, j);
+  n.dirty_navigation({{i * size, j * size, 0}, {(i + 1) * size, (j + 1) * size, 0}});
+}
+void ensure_terrain(State &state, const std::array<float, 4> &bounds) {
+  const auto size = state.space.native->settings.terrain_tile_m;
+  const auto x0 = int(std::floor(bounds[0] / size));
+  const auto y0 = int(std::floor(bounds[1] / size));
+  const auto x1 = int(std::ceil(bounds[2] / size));
+  const auto y1 = int(std::ceil(bounds[3] / size));
+  for (auto i = x0; i < x1; ++i)
+    for (auto j = y0; j < y1; ++j)
+      add_terrain(state, i, j);
+}
 void Space::Native::Listener::OnContactAdded(const JPH::Body &a, const JPH::Body &b,
                                              const JPH::ContactManifold &m,
                                              JPH::ContactSettings &) {
@@ -526,6 +560,8 @@ bool has_sensor_contact(const Space::Native &n, const CachedContact &contact) {
 }
 void Space::Native::Listener::add(const JPH::Body &a, const JPH::Body &b,
                                   const JPH::ContactManifold &m, bool started) {
+  if (!a.GetUserData() || !b.GetUserData())
+    return;
   const JPH::SubShapeIDPair key{a.GetID(), m.mSubShapeID1, b.GetID(), m.mSubShapeID2};
   if (a.IsSensor() || b.IsSensor()) {
     const auto &sensor = a.IsSensor() ? a : b;

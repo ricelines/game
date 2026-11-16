@@ -96,6 +96,8 @@ connection_notice(const net::SessionNotice &notice, amber::net::State &net_state
                                            {"cell_m", cell_m},
                                            {"repl_delay_ms", repl_delay_ms},
                                            {"assets", "/assets/"}});
+          sessions.send(value.session, {{"t", "terrain"}, {"tile_m", settings.space.terrain_tile_m},
+                                         {"tiles", space_state.terrain}});
           sessions.send(value.session,
                         initial_catalog(models, model_text, terms, materials, appearance));
           auto &row = views.rows[value.session];

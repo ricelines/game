@@ -3,6 +3,7 @@ extends Node3D
 
 const Protocol = preload("res://protocol.gd")
 const PROXY_MATERIAL = {"color": [0.4, 0.7, 0.8, 0.25], "roughness": 1.0}
+var terrain_tiles: Dictionary = {}
 var protocol
 var assets
 var models: Dictionary = {}
@@ -34,6 +35,25 @@ var _line_material: StandardMaterial3D
 var _line_timer = 0.0
 var _lod_timer = 0.0
 var _proxy_mesh: BoxMesh
+
+
+func add_terrain(message: Dictionary) -> void:
+	var size = float(message.tile_m)
+	for tile in message.tiles:
+		var key = Vector2i(int(tile[0]), int(tile[1]))
+		if terrain_tiles.has(key):
+			continue
+		var ground = MeshInstance3D.new()
+		var plane = PlaneMesh.new()
+		plane.size = Vector2(size, size)
+		ground.mesh = plane
+		ground.position = Protocol.to_view(Vector3((key.x + 0.5) * size, (key.y + 0.5) * size, 0))
+		var material = StandardMaterial3D.new()
+		material.albedo_color = Color(0.34, 0.36, 0.32)
+		material.roughness = 1.0
+		ground.material_override = material
+		add_child(ground)
+		terrain_tiles[key] = ground
 
 
 func setup(stream, asset_cache) -> void:

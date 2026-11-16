@@ -1,4 +1,5 @@
 #include "private.hpp"
+#include <Jolt/Physics/Body/BodyLock.h>
 
 #include <DetourNavMeshBuilder.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseQuery.h>
@@ -307,7 +308,18 @@ NavigationInstall install_ready_navigation(Space &space) {
     std::set<std::uint64_t> copied;
     for (auto id : candidates.mHits) {
       auto owner = n.handles.find(id.GetIndexAndSequenceNumber());
-      if (owner == n.handles.end() || !copied.insert(owner->second.bits).second)
+      if (owner == n.handles.end()) {
+        JPH::BodyLockRead lock(n.physics.GetBodyLockInterface(), id);
+        if (lock.Succeeded() && lock.GetBody().GetUserData() == 0 && n.terrain_geometry) {
+          const auto center = av(lock.GetBody().GetPosition());
+          const auto size = n.settings.terrain_tile_m;
+          NavInstance tile{n.terrain_geometry, {{center.x - size / 2, center.y - size / 2, 0}, {}}, true};
+          if (overlaps(instance_bounds(tile), region))
+            job.instances.push_back(std::move(tile));
+        }
+        continue;
+      }
+      if (!copied.insert(owner->second.bits).second)
         continue;
       auto found = n.bodies.find(owner->second.bits);
       if (found == n.bodies.end())

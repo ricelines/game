@@ -141,6 +141,7 @@ struct Space::Native {
   JPH::JobSystemSingleThreaded jobs;
   JPH::CharacterVsCharacterCollisionSimple characters;
   std::vector<std::shared_ptr<Geometry>> geometries{nullptr};
+  std::shared_ptr<Geometry> terrain_geometry;
   std::map<std::uint64_t, Mirror> bodies;
   std::set<std::uint64_t> character_handles, logical_roots;
   std::vector<Volume> volumes;
