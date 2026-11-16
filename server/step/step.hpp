@@ -445,14 +445,16 @@ step::NativeCompletion edit_text(const step::NativeCall &call,
                                  catalog::InstanceTexts &instance_texts,
                                  const catalog::ModelTexts &model_texts, IdentityRead identity);
 step::NativeCompletion model_text(const step::NativeCall &call, catalog::ModelTexts &model_texts,
-                                  const catalog::Models &models, IdentityRead identity);
+                                  const catalog::Models &models, IdentityRead identity,
+                                  const perm::Players &players);
 step::NativeCompletion edit_detail(const step::NativeCall &call, catalog::AuthoredTexts &details);
 step::NativeCompletion set_setting(const step::NativeCall &call,
                                    react::InstanceSettings &instance_settings,
                                    const react::ValueRead &values);
 step::NativeCompletion model_setting(const step::NativeCall &call,
                                      react::ModelSettings &model_settings,
-                                     const react::ValueRead &values, const catalog::Models &models);
+                                     const react::ValueRead &values, const catalog::Models &models,
+                                     const perm::Players &players);
 step::NativeCompletion patch_state(const step::NativeCall &call, react::Properties &properties,
                                    react::Processes &processes, const react::ValueRead &values,
                                    std::span<const std::string> roles);

@@ -327,7 +327,7 @@ step::NativeCompletion model_script(const step::NativeCall &call, amber::react::
   auto &scripts = catalog_state.scripts;
 
   try {
-    const auto model = detail::model(models, call);
+    const auto model = detail::model(models, perm_state.players, call);
     const auto replacement = call.arguments.at("script").is_null()
                                  ? ScriptId{}
                                  : script(scripts, call.arguments.at("script")).id;

@@ -47,14 +47,19 @@ inline std::uint32_t identifier(const Json &value, std::string_view prefix) {
 inline Handle handle(const Json &value, IdentityRead identity) {
   return step::live_handle(value, identity);
 }
-inline ModelId model(const catalog::Models &models, const step::NativeCall &call) {
+inline ModelId model(const catalog::Models &models, const perm::Players &players,
+                     const step::NativeCall &call) {
   const auto id = identifier(call.arguments.at("model"), "m:");
   if (id >= models.rows.size() || models.rows[id].id != id)
     throw std::invalid_argument("unknown model");
   const auto *author = std::get_if<PlayerId>(&call.request.caller);
-  if (!author || models.rows[id].author != *author)
+  const auto group = models.rows[id].group;
+  if (!author || !*author ||
+      (models.rows[id].author != *author &&
+       (!group || !std::binary_search(players.rows[*author].groups.begin(),
+                                      players.rows[*author].groups.end(), group))))
     throw PolicyDenied("model_author", "m:" + std::to_string(id),
-                       "only the model's actual author may edit its defaults",
+                       "only the model author or a model group member may edit its defaults",
                        "ask p:" + std::to_string(models.rows[id].author) +
                            " to edit these defaults");
   return id;

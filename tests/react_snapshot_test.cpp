@@ -136,6 +136,7 @@ void catalog_roundtrip_and_capture() {
   const std::array<std::uint32_t, 1> selected_params{1};
   snap::Buffer bytes;
   snap::Output out{bytes};
+  models.rows[1].group = 7;
   write_models(out, models, std::span<const ModelId>(selected_models));
   write_parameters(out, params, std::span<const std::uint32_t>(selected_params));
   scripts.rows[1].tests = nlohmann::json::array(
@@ -154,6 +155,7 @@ void catalog_roundtrip_and_capture() {
   InstanceTexts loaded_instances;
   snap::Input in{bytes.data(), bytes.size()};
   read_models(in, loaded_models);
+  require(loaded_models.rows[1].group == 7, "model groups survive snapshots");
   read_parameters(in, loaded_params);
   read_scripts(in, loaded_scripts);
   require(loaded_scripts.rows[1].tests == scripts.rows[1].tests,

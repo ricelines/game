@@ -301,9 +301,20 @@ void benchmark() {
          "no physics/navigation step or VM queue drain), ms: p50="
       << samples[9] << " p95=" << samples[18] << " max=" << samples.back() << '\n';
 }
+void model_group_can_revise_definition() {
+  Fixture x;
+  x.proposal();
+  x.f.models.rows[1].group = 1;
+  require(!x.revise(PlayerId{2}).reply.at("ok").get<bool>(),
+          "a nonmember cannot revise a group model");
+  x.players.rows[2].groups = {1};
+  require(x.revise(PlayerId{2}).reply.at("ok").get<bool>() && x.f.models.rows[1].group == 1,
+          "another architect-group member can revise the definition and keep the model group");
+}
 } // namespace
 int main(int argc, char **argv) {
   try {
+    model_group_can_revise_definition();
     two_owners_and_hidden_goods();
     capacity_rejection_preserves_definition_but_cancels_offer();
     invalid_geometry_is_checked_before_catalog_mutation();

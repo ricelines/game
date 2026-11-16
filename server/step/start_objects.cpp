@@ -24,7 +24,8 @@ std::vector<Handle> install_objects(const Json &plan, Symbols &symbols,
     init.created_step = now;
     init.plot = row.at("plot").get<PlotId>();
     init.group = row.value("group", GroupId{});
-    init.preset = detail::rights(row.value("preset", Json::array()));
+    init.preset = detail::rights(row.value("preset", Json::array())) |
+                  (detail::rights(row.value("group_rights", Json::array())) << 8);
     init.flags = 0;
     for (const auto &flag : row.at("flags")) {
       const auto name = flag.get<std::string>();

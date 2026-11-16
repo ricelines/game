@@ -125,10 +125,16 @@ revise_model(amber::ObjectState &objects_state, amber::catalog::State &catalog_s
   const auto author = std::get_if<PlayerId>(&call.request.caller);
   if (!target || target >= models.rows.size() || models.rows[target].id != target)
     throw std::invalid_argument("unknown model");
-  if (!author || models.rows[target].author != *author)
-    return structural_denied("edit", call.arguments.at("model").get<std::string>(),
-                             "only the model author can edit its definition",
-                             "ask the model author to edit this definition");
+  const auto group = models.rows[target].group;
+  const auto &players = perm_state.players;
+  if (!author || !*author ||
+      (models.rows[target].author != *author &&
+       (!group || !std::binary_search(players.rows[*author].groups.begin(),
+                                      players.rows[*author].groups.end(), group))))
+    return structural_denied(
+        "edit", call.arguments.at("model").get<std::string>(),
+        "only the model author or a model group member can edit its definition",
+        "ask the model author to edit this definition");
   const auto identity = values.identity;
   const auto &params = values.params;
   const auto mappings =

@@ -70,12 +70,13 @@ NativeCompletion native_scripts(amber::catalog::State &catalog_state,
                                 const amber::ObjectState &objects_state, TermId start_event,
                                 std::span<const std::string> roles, react::ScriptAction operation,
                                 const NativeCall &call);
-NativeCompletion native_values(const catalog::Models &models, const react::ValueRead &values,
-                               amber::react::State &react_state,
+NativeCompletion native_values(const perm::Players &players, const catalog::Models &models,
+                               const react::ValueRead &values, amber::react::State &react_state,
                                std::array<TermId, 4> relation_terms,
                                std::span<const std::string> roles, react::ValueAction operation,
                                const NativeCall &call);
-NativeCompletion native_writing(const catalog::Models &models, catalog::ModelTexts &model_text,
+NativeCompletion native_writing(const perm::Players &players, const catalog::Models &models,
+                                catalog::ModelTexts &model_text,
                                 catalog::InstanceTexts &instance_text,
                                 catalog::AuthoredTexts &authored_text, IdentityRead identity,
                                 react::WritingAction operation, const NativeCall &call);

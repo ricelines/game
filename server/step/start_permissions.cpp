@@ -44,6 +44,8 @@ void install_land(const Json &plan, perm::Plots &plots, perm::Groups &groups,
       players.rows[player].groups.push_back(id);
     }
   }
+  for (auto &player : players.rows)
+    std::sort(player.groups.begin(), player.groups.end());
   for (const auto &row : plan.at("plots")) {
     const auto id = row.at("id").get<PlotId>();
     plots.rows.resize(std::max(plots.rows.size(), std::size_t(id) + 1));

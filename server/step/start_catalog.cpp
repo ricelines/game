@@ -114,6 +114,10 @@ void install_models(const Json &plan, const catalog::Assets &assets,
       submission.settings.emplace(detail::term(terms, name), detail::scalar(value, symbols));
     const auto result =
         catalog::submit_model(models, texts, settings, assets, scripts, terms, submission);
+    const auto group = row.value("group", GroupId{});
+    models.rows[result.root].group = group;
+    for (const auto &[name, part] : result.parts)
+      models.rows[part].group = group;
     if (!symbols.models.emplace(row.at("key").get<std::string>(), result.root).second)
       throw std::invalid_argument("duplicate initial model symbol");
   }

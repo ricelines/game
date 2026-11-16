@@ -299,8 +299,8 @@ NativeCompletion native_scripts(amber::catalog::State &catalog_state,
   }
   return out;
 }
-NativeCompletion native_values(const catalog::Models &models, const react::ValueRead &values,
-                               amber::react::State &react_state,
+NativeCompletion native_values(const perm::Players &players, const catalog::Models &models,
+                               const react::ValueRead &values, amber::react::State &react_state,
                                std::array<TermId, 4> relation_terms,
                                std::span<const std::string> roles, react::ValueAction operation,
                                const NativeCall &call) {
@@ -322,7 +322,7 @@ NativeCompletion native_values(const catalog::Models &models, const react::Value
   case react::ValueAction::ModelSetting: {
     if (const auto error = editing::validate_model_setting(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = editing::model_setting(call, model_settings, values, models);
+    out = editing::model_setting(call, model_settings, values, models, players);
     break;
   }
   case react::ValueAction::PatchState: {
@@ -340,7 +340,8 @@ NativeCompletion native_values(const catalog::Models &models, const react::Value
   }
   return out;
 }
-NativeCompletion native_writing(const catalog::Models &models, catalog::ModelTexts &model_text,
+NativeCompletion native_writing(const perm::Players &players, const catalog::Models &models,
+                                catalog::ModelTexts &model_text,
                                 catalog::InstanceTexts &instance_text,
                                 catalog::AuthoredTexts &authored_text, IdentityRead identity,
                                 react::WritingAction operation, const NativeCall &call) {
@@ -355,7 +356,7 @@ NativeCompletion native_writing(const catalog::Models &models, catalog::ModelTex
   case react::WritingAction::ModelText: {
     if (const auto error = editing::validate_model_text(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = editing::model_text(call, model_text, models, identity);
+    out = editing::model_text(call, model_text, models, identity, players);
     break;
   }
   case react::WritingAction::EditDetail: {

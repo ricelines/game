@@ -57,10 +57,10 @@ step::NativeCompletion set_setting(const step::NativeCall &call,
 }
 step::NativeCompletion model_setting(const step::NativeCall &call,
                                      react::ModelSettings &model_settings,
-                                     const react::ValueRead &values,
-                                     const catalog::Models &models) {
+                                     const react::ValueRead &values, const catalog::Models &models,
+                                     const perm::Players &players) {
   try {
-    const auto model = detail::model(models, call);
+    const auto model = detail::model(models, players, call);
     const auto changes = settings(values.terms, call.arguments.at("values"));
     const auto instances = detail::instances(values.identity, model);
     auto out = detail::result(false);

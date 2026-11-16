@@ -28,6 +28,7 @@ template <class S> void model(S &s, Model &value) {
   snap::field(s, value.canonical_params);
   snap::field(s, value.material);
   snap::field(s, value.author);
+  snap::field(s, value.group);
   snap::field(s, value.created_s);
   snap::field(s, value.script);
   std::vector<std::pair<std::string, ModelId>> parts;

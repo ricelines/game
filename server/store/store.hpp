@@ -1016,6 +1016,7 @@ struct Model {
   double created_s = 0;
   ScriptId script = 0;
   std::map<std::string, ModelId> parts;
+  GroupId group = 0;
 };
 struct Models {
   std::vector<Model> rows{Model{}};

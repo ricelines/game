@@ -36,9 +36,10 @@ step::NativeCompletion edit_text(const step::NativeCall &call,
   }
 }
 step::NativeCompletion model_text(const step::NativeCall &call, catalog::ModelTexts &model_texts,
-                                  const catalog::Models &models, IdentityRead identity) {
+                                  const catalog::Models &models, IdentityRead identity,
+                                  const perm::Players &players) {
   try {
-    const auto model = detail::model(models, call);
+    const auto model = detail::model(models, players, call);
     const auto existing = model_texts.rows.find(model);
     const auto before = existing == model_texts.rows.end() ? catalog::Text{} : existing->second;
     const auto after = patch(before, call.arguments.at("text"));

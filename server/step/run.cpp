@@ -592,11 +592,11 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                             role("events", "start"), roles, operation,
                                             action->call);
                     } else if constexpr (std::is_same_v<Operation, react::ValueAction>) {
-                      return native_values(models, values, react_state, relation_terms, roles,
-                                           operation, action->call);
+                      return native_values(players, models, values, react_state, relation_terms,
+                                           roles, operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::WritingAction>) {
-                      return native_writing(models, model_text, instance_text, authored_text, ids,
-                                            operation, action->call);
+                      return native_writing(players, models, model_text, instance_text,
+                                            authored_text, ids, operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::RegistryAction>) {
                       return native_registry(catalog_state, react_state, registry_directory, values,
                                              geometry, space_state, physics_defaults, roles,

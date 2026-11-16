@@ -172,7 +172,7 @@ int main() {
     (void)default_script(sid);
     const auto setting =
         ed::model_setting(call(1, {}, {{"model", "m:1"}, {"values", {{"novel.gain", 2}}}}),
-                          f.model_settings, values, f.models);
+                          f.model_settings, values, f.models, players);
     require(setting.changed && dirty(setting, f.a, gain) && dirty(setting, f.b, gain) &&
                 !dirty(setting, f.c, gain) && setting.changed_models == std::vector<ModelId>{1},
             "model setting did not report exact current facts and model delta");
@@ -197,10 +197,20 @@ int main() {
                 text.rows.at(f.a.bits).description == "Description",
             "partial text edit dropped inherited fields or could not clear text");
     require(!ed::model_text(call(2, {}, {{"model", "m:1"}, {"text", {{"name", "Foreign"}}}}),
-                            model_text, f.models, identity(f.objects))
+                            model_text, f.models, identity(f.objects), players)
                  .reply.at("ok")
                  .get<bool>(),
             "model metadata ignored actual authorship");
+    f.models.rows[1].group = 1;
+    players.rows[2].groups = {1};
+    require(ed::model_text(call(2, {}, {{"model", "m:1"}, {"text", {{"name", "Shared"}}}}),
+                           model_text, f.models, identity(f.objects), players)
+                    .changed &&
+                !ed::model_text(call(3, {}, {{"model", "m:1"}, {"text", {{"name", "Denied"}}}}),
+                                model_text, f.models, identity(f.objects), players)
+                     .reply.at("ok")
+                     .get<bool>(),
+            "model group members can edit defaults and nonmembers cannot");
     const auto id = catalog::append_authored_text(details, f.a, 3, 4.5,
                                                   catalog::AuthoredTextKind::Detail, "Original");
     const auto detail = ed::edit_detail(call(1, f.a, {{"id", id}, {"text", "Revised"}}), details);
