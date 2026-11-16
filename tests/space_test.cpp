@@ -11,7 +11,7 @@ void expired_native_queries_stop() {
   const auto object = scene.box({1, 1, 1}, {0, 0, 0});
   sp::QueryFilter filter;
   filter.deadline = {std::chrono::steady_clock::now(), {}};
-  std::vector<Handle> found;
+  std::vector<sp::Nearby> found;
   sp::near(scene.space, identity(scene.objects), {0, 0, 0}, 5, filter, found);
   require(found.empty(), "near stops on an exhausted CPU deadline");
   require(!sp::raycast(scene.space, identity(scene.objects), {-3, 0, .5f}, {3, 0, .5f}, filter),

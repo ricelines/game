@@ -438,7 +438,9 @@ func _text(message: Dictionary) -> void:
 				materials[int(material.id)] = material
 			for model in message.get("models", []):
 				models[int(model.id)] = model
-			world.world_ambient_lux = float(message.get("world", {}).get("ambient_lux", world.world_ambient_lux))
+			world.world_ambient_lux = float(
+				message.get("world", {}).get("ambient_lux", world.world_ambient_lux)
+			)
 			world.invalidate_model_data()
 		"metadata":
 			for row in message.get("objects", []):

@@ -12,7 +12,10 @@ func _initialize() -> void:
 	world.add_terrain({"t": "terrain", "tile_m": 256, "tiles": [[0, 0], [-1, 0]]})
 	world.add_terrain({"t": "terrain", "tile_m": 256, "tiles": [[0, 0]]})
 	check(world.terrain_tiles.size() == 2, "terrain messages add each tile once")
-	check(world.terrain_tiles[Vector2i(-1, 0)].position == Vector3(-128, 0, -128), "terrain coordinates")
+	check(
+		world.terrain_tiles[Vector2i(-1, 0)].position == Vector3(-128, 0, -128),
+		"terrain coordinates"
+	)
 	world.free()
 	var decoder = Decoder.new()
 	data = PackedByteArray()
