@@ -559,7 +559,22 @@ int handler_entry(lua_State *L) {
   lua_setreadonly(L, -1, 1);
   push_handle(L, inv.sender);
   push_payload(L, inv.payload);
-  return lua_callyieldable(L, 3, 0);
+  if (!inv.action_caller) {
+    lua_pushnil(L);
+  } else if (const auto *player = std::get_if<PlayerId>(&*inv.action_caller)) {
+    const auto name = "p:" + std::to_string(*player);
+    lua_pushlstring(L, name.data(), name.size());
+  } else {
+    const auto &script = std::get<ScriptHolder>(*inv.action_caller);
+    lua_createtable(L, 0, 2);
+    const auto name = "s:" + std::to_string(script.script);
+    lua_pushlstring(L, name.data(), name.size());
+    lua_setfield(L, -2, "script");
+    push_handle(L, script.object);
+    lua_setfield(L, -2, "on");
+    lua_setreadonly(L, -1, 1);
+  }
+  return lua_callyieldable(L, 4, 0);
 }
 struct WriteCheck : Luau::AstVisitor {
   std::vector<std::string> &errors;

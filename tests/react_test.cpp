@@ -327,6 +327,50 @@ RunOutcome execute(Vm &vm, ScriptState &state, DeferredEffects &effects, Handle 
   inv.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
   return run_handler(vm, {id, std::move(function)}, inv);
 }
+void action_handlers_receive_the_actual_caller() {
+  test_runtime::Fixture f(1000);
+  const auto script = f.add(R"(return {kind='model',on={
+    ['novel.cue']=function(self) self:act('novel.touch',self.handle,{}) end,
+    ['novel.touch']=function(self,sender,args,caller)
+      if type(caller)=='string' then assert(caller=='p:2');self.state.kind='player'
+      elseif caller then
+        assert(caller.script=='s:'..self.script and caller.on==sender)
+        assert(not pcall(function()caller.script='s:999'end))
+        self.state.kind='script'
+      else self.state.kind='event' end
+    end}})");
+  ScriptState state, parent_state;
+  DeferredEffects effects;
+  std::uint64_t random = 7;
+  Invocation child;
+  child.self = {f.b, script};
+  child.sender = f.a;
+  child.state = &state;
+  child.effects = &effects;
+  child.random = &random;
+  child.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  child.action_caller = PlayerId{2};
+  require(run_handler(f.vm, {script, "novel.touch"}, child).status == RunOutcome::Status::Ok &&
+              std::get<std::string>(state.at(std::string("kind"))) == "player",
+          "player action exposes its actual player caller");
+  child.action_caller.reset();
+  require(run_handler(f.vm, {script, "novel.touch"}, child).status == RunOutcome::Status::Ok &&
+              std::get<std::string>(state.at(std::string("kind"))) == "event",
+          "events have no action caller");
+  Invocation parent = child;
+  parent.self = {f.a, script};
+  parent.state = &parent_state;
+  const auto action = run_handler(f.vm, {script, "novel.cue"}, parent);
+  require(action.status == RunOutcome::Status::Action && action.action,
+          "real self.act yields its script caller");
+  child.action_caller = action.action->request.caller;
+  require(run_handler(f.vm, {script, "novel.touch"}, child).status == RunOutcome::Status::Ok &&
+              std::get<std::string>(state.at(std::string("kind"))) == "script",
+          "self.act exposes the script and its installed object as readonly caller metadata");
+  require(resume_handler(f.vm, parent, {{"ok", true}}).status == RunOutcome::Status::Ok,
+          "caller metadata does not alter action suspension and return");
+}
+
 void luau_state_and_limits() {
   const auto object = Handle::make(7, 9000001);
   Vm vm({4096, 50, 5, 64});
@@ -786,6 +830,7 @@ int main() {
   allocation_rows_track_current_nonzero_shares_only();
   contribution_and_metering();
   dispatch_order();
+  action_handlers_receive_the_actual_caller();
   luau_state_and_limits();
   live_activation_and_dispatch_authority();
   luau_bound_values_and_events();
