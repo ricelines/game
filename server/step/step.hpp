@@ -343,7 +343,7 @@ step::NativeCompletion grant(amber::perm::State &perm_state,
                              const amber::catalog::State &catalog_state,
                              const amber::react::State &react_state, const step::NativeCall &call);
 step::NativeCompletion revoke(amber::perm::State &perm_state,
-                              const amber::ObjectState &objects_state, bool issuer_is_architect,
+                              const amber::ObjectState &objects_state, bool architect,
                               const step::NativeCall &call);
 step::NativeCompletion list_grants(const perm::Grants &grants, const perm::Players &players,
                                    const step::NativeCall &call);

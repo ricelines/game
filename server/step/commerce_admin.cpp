@@ -296,7 +296,7 @@ step::NativeCompletion grant(amber::perm::State &perm_state,
   }
 }
 step::NativeCompletion revoke(amber::perm::State &perm_state,
-                              const amber::ObjectState &objects_state, bool issuer_is_architect,
+                              const amber::ObjectState &objects_state, bool architect,
                               const step::NativeCall &call) {
   auto &grants = perm_state.grants;
   auto &players = perm_state.players;
@@ -318,7 +318,7 @@ step::NativeCompletion revoke(amber::perm::State &perm_state,
     }
     const auto allowed = [&](const perm::Grant &grant) {
       if (issuer.kind == perm::HolderKind::Player)
-        return grant.issuer != 0 && (grant.issuer == who || issuer_is_architect);
+        return grant.issuer != 0 && (grant.issuer == who || architect);
       return grant.holder == issuer || (grant.parent && grants.rows[grant.parent].holder == issuer);
     };
     std::vector<GrantId> ids;
@@ -345,7 +345,7 @@ step::NativeCompletion revoke(amber::perm::State &perm_state,
                           "have its issuer revoke it, or relinquish a grant held by this caller");
           ids.push_back(found->second);
         }
-      } else if (issuer.kind == perm::HolderKind::Player && !issuer_is_architect) {
+      } else if (issuer.kind == perm::HolderKind::Player && !architect) {
         for (auto id : players.rows[who].grants_given)
           if (grants.rows[id].holder == selected)
             ids.push_back(id);

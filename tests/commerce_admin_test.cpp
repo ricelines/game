@@ -431,6 +431,18 @@ int main() {
         ordinary && run(4, ids.revoke, {}, {{"holder", "p:2"}}).changed &&
             !grants.rows[ordinary.grant].live && grants.rows[root_grant.grant].live,
         "architect holder revocation removes another issuer's grants while preserving root grants");
+    require(
+        !run(0, ids.grant, {},
+             {{"holder", "p:2"}, {"scope", {{"object", to_string(f.a)}}}, {"rights", {"use"}}})
+                .reply["ok"] &&
+            !ad::validate_grant(
+                 {{"holder", "p:0"}, {"scope", {{"object", to_string(f.a)}}}, {"rights", {"use"}}})
+                 .empty(),
+        "the native boundary refuses root as an actor and as a grant holder");
+    require(step::rights(Json::array({"use", "land_transfer", "land_return"}),
+                         perm::ScopeKind::AllLand) ==
+                (perm::bit(perm::Verb::Use) | (perm::Rights{24} << 8)),
+            "all-land JSON rights use object bits and shifted land bits");
     const auto root_notices = ad::advance_grants(grants, players, 200, 20, 20, 1000);
     require(std::none_of(root_notices.notices.begin(), root_notices.notices.end(),
                          [](const auto &notice) { return notice.recipient == 0; }),
