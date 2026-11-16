@@ -216,8 +216,19 @@ async def navigation(evidence, mira):
         manifest=baked["measured"],
     )
     require(registered.get("ok"), "actual newly baked model registration failed")
+    plots = (await mira.request("inspect", target="land"))["land"]
+    bounds = next(
+        plot["bounds"]
+        for plot in plots
+        if plot["owner"] == mira.welcome["player"]
+        and plot["bounds"][0] <= 10 < plot["bounds"][2]
+        and plot["bounds"][1] <= 80 < plot["bounds"][3]
+    )
     placed = await mira.act(
-        "base.place", model=registered["model"], position=[-4, -7, 3], material="base.wood"
+        "base.place",
+        model=registered["model"],
+        position=[bounds[0] + 2, bounds[3] - 2, 3],
+        material="base.wood",
     )
     require(
         placed.get("ok") and placed.get("effect") == "applied" and placed.get("created"),

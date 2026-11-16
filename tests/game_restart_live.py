@@ -156,9 +156,9 @@ async def run(args, evidence, artifacts, summary):
                 rule_before["approved"] and rule_before["active"],
                 "source snapshot must contain fixture-approved active immutable rule",
             )
-            moved = await mira.act("base.move_to", point=[-2, -2.7, 0])
+            moved = await mira.act("base.move_to", point=[22, 50.3, 0])
             require(moved.get("effect") == "started", "authored body navigation failed to start")
-            await wait_arrival(mira, [-2, -2.7, 0])
+            await wait_arrival(mira, [22, 50.3, 0])
             held = await mira.act("base.hold", door)
             require(held.get("effect") == "applied", "actual two-part entrance grasp failed")
             door_before = await mira.request("inspect", target=door)
@@ -190,7 +190,7 @@ async def run(args, evidence, artifacts, summary):
             )
             escrow_before = await mira.request("inspect", target=traded_item)
             require(escrow_before["flags"] & 128, "pending trade did not mark real goods escrow")
-            walking = await mira.act("base.move_to", point=[40, -4, 0])
+            walking = await mira.act("base.move_to", point=[64, 49, 0])
             require(walking.get("effect") == "started", "ongoing held-load navigation failed")
             before = await mira.request("look", limit=1)
             require(
@@ -252,13 +252,13 @@ async def run(args, evidence, artifacts, summary):
                 and not sold["flags"] & 128,
                 "resumed trade lost actual ownership/custody",
             )
-            revealed = await mira.act("engine.place_existing", inventory_item, position=[-8, -4, 0])
+            revealed = await mira.act("engine.place_existing", inventory_item, position=[10, 53, 0])
             require(
                 revealed.get("effect") == "applied", "restored hidden geometry failed actual reveal"
             )
             placed = await mira.request("inspect", target=inventory_item)
             require(
-                placed["parent"] is None and math.dist(placed["position"], [-8, -4, 0]) < 0.01,
+                placed["parent"] is None and math.dist(placed["position"], [10, 53, 0]) < 0.01,
                 "inventory reveal did not restore geometry at supplied world pose",
             )
             await asyncio.sleep(0.6)
@@ -276,10 +276,10 @@ async def run(args, evidence, artifacts, summary):
                 "owned released assembly could not enter inventory to clear the café approach",
             )
             require(
-                (await mira.act("base.move_to", point=[0, 4, 0])).get("effect") == "started",
+                (await mira.act("base.move_to", point=[24, 57, 0])).get("effect") == "started",
                 "normal return to the restored rule target failed to start",
             )
-            arrived = await wait_arrival(mira, [0, 4, 0])
+            arrived = await wait_arrival(mira, [24, 57, 0])
             require(
                 (await mira.act("base.switch", floor, on=False)).get("effect") == "applied",
                 "restored approved world rule did not execute through actual dispatch",

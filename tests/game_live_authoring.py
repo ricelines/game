@@ -89,7 +89,7 @@ class Watcher:
                 }
             )
         )
-        await self.socket.send(json.dumps({"t": "view", "pos": [0, 0, 5]}))
+        await self.socket.send(json.dumps({"t": "view", "pos": [24, 53, 5]}))
         self.reader = asyncio.create_task(self.receive())
         return self
 
@@ -219,7 +219,7 @@ class Journey:
             if row.get("says", {}).get("name") == "Sliding entrance"
         ]
         require(len(doors) == 1, "actual LOOK did not expose the seed entrance")
-        await self.approach("author", doors[0], [0, -2.7, 0])
+        await self.approach("author", doors[0], [24, 50.3, 0])
         opened = await self.act("author", "base.open", target=doors[0])
         require(not opened.get("script_errors"), "normal entrance opening failed")
         until = time.monotonic() + 10
@@ -255,7 +255,14 @@ class Journey:
     async def place(self, actor, model, params=None):
         plots = (await self.tool(actor, "inspect", target="land"))["land"]
         owner = (await self.tool(actor, "inspect", target="self"))["owner"]
-        bounds = next(plot["bounds"] for plot in plots if plot["owner"] == owner)
+        point = [10, 53] if actor == "author" else [42, 53]
+        bounds = next(
+            plot["bounds"]
+            for plot in plots
+            if plot["owner"] == owner
+            and plot["bounds"][0] <= point[0] < plot["bounds"][2]
+            and plot["bounds"][1] <= point[1] < plot["bounds"][3]
+        )
         position = [bounds[0] + 0.6, bounds[1] + 0.6, 0.05]
         arguments = {"model": model, "position": position}
         if params is not None:

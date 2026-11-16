@@ -85,18 +85,20 @@ class World:
 
 async def stairs(world, mira):
     door = await world.find(mira, "Sliding entrance")
-    observed, intent = await world.motion(mira, [0, 4, 0], "closed entrance blocks navigation", 10)
-    require(observed["self"]["at"][1] < -2.3, "avatar passed through closed physical glass leaf")
+    observed, intent = await world.motion(
+        mira, [24, 57, 0], "closed entrance blocks navigation", 10
+    )
+    require(observed["self"]["at"][1] < 50.7, "avatar passed through closed physical glass leaf")
     world.terminal_event(mira, intent, "blocked", "closed entrance blocks navigation")
-    await world.move(mira, [-2, -2.7, 0], "entrance approach")
+    await world.move(mira, [22, 50.3, 0], "entrance approach")
     require((await mira.act("base.open", door)).get("ok"), "actual entrance open denied")
     await world.fraction(mira, door, lambda x: x >= 0.99, "entrance opening")
-    await world.move(mira, [0, 4, 0], "enter through actual doorway")
+    await world.move(mira, [24, 57, 0], "enter through actual doorway")
     stair = await world.find(mira, "Mezzanine stair")
     stair_row = await mira.request("inspect", target=stair)
     model = await mira.request("inspect", target=stair_row["model"])
     bounds = model["manifest"]["bounds"]
-    await world.move(mira, [0, 12, 3.2], "ascend stairs onto mezzanine")
+    await world.move(mira, [24, 65, 3.2], "ascend stairs onto mezzanine")
     trace = world.traces["ascend stairs onto mezzanine"]
     elevated = [row["position"] for row in trace if 0.4 < row["position"][2] < 2.8]
     require(len(elevated) >= 5, "stair ascent lacks physically sampled intermediate heights")
@@ -111,7 +113,7 @@ async def stairs(world, mira):
         "avatar ascended outside the actual baked stair footprint",
     )
     mezzanine = await world.find(mira, "Mezzanine deck")
-    await world.move(mira, [0, 4, 0], "descend actual stairs")
+    await world.move(mira, [24, 57, 0], "descend actual stairs")
     world.summary["stairs"] = {
         "passed": True,
         "stair": stair,
@@ -160,7 +162,7 @@ async def power(world, mira, sol, ivo, architect):
             "author": metadata["author"],
             "hash": metadata["hash"],
         }
-    await world.move(sol, [6.6, 3, 0], "engineer approaches actual breaker")
+    await world.move(sol, [30.6, 56, 0], "engineer approaches actual breaker")
     require((await sol.act("base.switch", breaker, on=True)).get("ok"), "breaker on denied")
     before = await ivo.request("inspect", target=tank)
     require(before["values"]["aq.aeration"] > 0, "powered authored pump has no actual aeration")
@@ -207,7 +209,7 @@ async def power(world, mira, sol, ivo, architect):
 
 
 async def optics(world, mira, door, mezzanine):
-    await world.move(mira, [0, -3.2, 0], "outside glass entrance")
+    await world.move(mira, [24, 49.8, 0], "outside glass entrance")
     require((await mira.act("base.close", door)).get("ok"), "close for glass observation denied")
     await world.fraction(mira, door, lambda x: x <= 0.01, "glass leaf closed")
     leaf = (await mira.request("inspect", target=door))["relations"]["base.attached_to"]["in"][0]
@@ -235,7 +237,7 @@ async def optics(world, mira, door, mezzanine):
     placed = await mira.act(
         "engine.place_existing",
         mezzanine,
-        position=[0, -2.6, 0],
+        position=[24, 50.4, 0],
         rotation=[math.sqrt(0.5), 0, 0, math.sqrt(0.5)],
     )
     require(placed.get("effect") == "applied", "ordinary existing-item opaque placement failed")
@@ -274,7 +276,7 @@ async def optics(world, mira, door, mezzanine):
 
 
 async def obstruction(world, mira, door):
-    await world.move(mira, [-2, -2.7, 0], "door sweep approach")
+    await world.move(mira, [22, 50.3, 0], "door sweep approach")
     require((await mira.act("base.open", door)).get("ok"), "door opening before obstruction denied")
     await world.fraction(mira, door, lambda x: x >= 0.99, "door opens before obstruction")
     chair = await world.find(mira, "Café chair")
@@ -283,7 +285,7 @@ async def obstruction(world, mira, door):
         "own chair collection failed",
     )
     require(
-        (await mira.act("engine.place_existing", chair, position=[0, -1.85, 0])).get("ok"),
+        (await mira.act("engine.place_existing", chair, position=[24, 51.15, 0])).get("ok"),
         "actual chair placement failed",
     )
     require((await mira.act("base.close", door)).get("ok"), "authored close action denied")
@@ -339,7 +341,7 @@ async def run(args, artifacts, evidence, summary):
                 mezzanine = None
             if "power" in args.gates:
                 if "stairs" not in args.gates:
-                    await world.move(mira, [-2, -2.7, 0], "power entrance approach")
+                    await world.move(mira, [22, 50.3, 0], "power entrance approach")
                     require(
                         (await mira.act("base.open", door)).get("ok"),
                         "actual entrance open for power gate denied",

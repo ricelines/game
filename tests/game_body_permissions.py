@@ -30,12 +30,12 @@ def make_plan(args, directory):
         row["key_file"] = str((directory / "keys" / f"{row['id']}.key").resolve())
     player = max(row["id"] for row in plan["profiles"]) + 1
     body = copy.deepcopy(next(row for row in plan["objects"] if row["key"] == "resident.mira"))
-    body.update(key="test.new_player", owner=player, maker=player, seed=False, at=[-15, -4, 0])
+    body.update(key="test.new_player", owner=player, maker=player, seed=False, at=[9, 49, 0])
     plan["objects"].append(body)
     original = next(row for row in plan["objects"] if row["model"] == "cup")
     for label, position, amount in (
-        ("source", [-14.5, -3.4, 0.01], 0.0001),
-        ("receiver", [-15.3, -3.4, 0.01], 0),
+        ("source", [9.5, 49.6, 0.01], 0.0001),
+        ("receiver", [8.7, 49.6, 0.01], 0),
     ):
         item = copy.deepcopy(original)
         item.update(
@@ -43,7 +43,6 @@ def make_plan(args, directory):
             owner=player,
             maker=player,
             seed=False,
-            plot=3,
             at=position,
             preset=[],
             state={"base.liquid": amount},

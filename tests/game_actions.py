@@ -41,7 +41,7 @@ SOURCE = """return {
   self.state.tokens=self.state.tokens or 10
   self.state.initial_charge=self.state.initial_charge or self:get('base.charge')
   local made=self:act('engine.create',nil,{
-   model='m:'..tostring(self:object().model),position=vector.create(0,6,0)})
+   model='m:'..tostring(self:object().model),position=vector.create(24,59,0)})
   if not made.ok then self.state.build_denied=true;return end
   self.state.created=made.created[1]
   self.state.created_mass=self:measure_instance(made.created[1]).mass_kg
@@ -115,7 +115,7 @@ def prepare_plan(source, directory):
         owner=player,
         maker=player,
         seed=False,
-        at=[-15, -6, 0],
+        at=[9, 47, 0],
         preset=[],
     )
     plan["objects"].append(body)
@@ -291,10 +291,18 @@ async def exercise(args, evidence, player_id, key):
         async with Player(
             "plot owner", f"ws://127.0.0.1:{args.port}/ws", key.parent / "2.key", evidence
         ) as landlord:
+            plots = (await landlord.request("inspect", target="land"))["land"]
+            owned_plot = next(
+                plot
+                for plot in plots
+                if plot["owner"] == landlord.welcome["player"]
+                and plot["bounds"][0] <= 24 < plot["bounds"][2]
+                and plot["bounds"][1] <= 59 < plot["bounds"][3]
+            )
             build = await landlord.act(
                 "engine.grant",
                 holder=dict(script=script, on=body),
-                scope=dict(plot=1),
+                scope=dict(plot=owned_plot["plot"]),
                 rights=["build"],
                 expires_s=60,
             )

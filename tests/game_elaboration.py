@@ -182,7 +182,7 @@ async def enter_cafe(player, observation, evidence):
             await asyncio.sleep(0.05)
         raise AssertionError("ordinary navigation did not finish the S12 approach")
 
-    await move([-2, -2.7, 0])
+    await move([22, 50.3, 0])
     require((await player.act("base.open", door)).get("ok"), "actual entrance open denied")
     until = time.perf_counter() + 10
     while time.perf_counter() < until:
@@ -191,7 +191,7 @@ async def enter_cafe(player, observation, evidence):
         await asyncio.sleep(0.05)
     else:
         raise AssertionError("actual entrance did not open for the S12 approach")
-    await move([0, 4, 0])
+    await move([24, 57, 0])
     evidence.checks["target_approach"] = {"door": door, "arrivals": arrivals}
 
 
