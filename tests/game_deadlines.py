@@ -71,44 +71,23 @@ async def deadline_records(architect, evidence, offer, grant):
     evidence.checks["s7"] = {name: next(iter(rows.values())) for name, rows in selected.items()}
 
 
-async def settle_sale_item(player, handle, step_hz, evidence):
-    # Compare exact poses across expiry only after the dynamic item has settled.
-    # Wait for a full simulation second of stability, rather than a wall-time delay.
-    until = time.perf_counter() + 15
-    previous, stable_since = None, None
-    while time.perf_counter() < until:
-        pose = (await player.request("inspect", target=handle))["position"]
-        step = (await player.request("look", limit=1))["step"]
-        if pose != previous:
-            previous, stable_since = pose, step
-        elif step - stable_since >= step_hz:
-            evidence.checks["sale_item_settled"] = {
-                "handle": handle,
-                "position": pose,
-                "stable_since": stable_since,
-                "step": step,
-            }
-            return
-        await asyncio.sleep(0.025)
-    raise AssertionError("sale fixture did not reach a stable world pose")
-
-
 async def deadlines(args, evidence, mira, sol, architect):
     observed = await mira.request("look", limit=1000)
-    chairs = [
+    floors = [
         row["h"]
         for row in observed.get("things", []) + observed.get("far", [])
-        if row.get("says", {}).get("name") == "Café chair"
+        if row.get("says", {}).get("name") == "Café floor"
     ]
     item = None
-    for handle in chairs:
+    for handle in floors:
         candidate = await mira.request("inspect", target=handle)
         if candidate["owner"] == mira.welcome["player"]:
             item = candidate
             break
-    require(item is not None, "fresh live perception needs an owned ordinary sale item")
+    require(item is not None, "fresh live perception needs the owned café floor")
+    require(item["flags"] & 1, "deadline fixture must be static to isolate expiry from physics")
     handle = item["h"]
-    await settle_sale_item(mira, handle, configuration(args)["step_hz"], evidence)
+    evidence.checks["sale_item"] = {"handle": handle, "static": True}
     offered = await mira.act("engine.offer", handle, price=40, expires_s=args.offer_lifetime_s)
     require(offered.get("ok") and offered.get("effect") == "applied", "real offer failed")
     offer = offered["offer"]

@@ -1,5 +1,6 @@
 """Checks over the authored package and real bake/validator artifacts."""
 
+import io
 import json
 import runpy
 import subprocess
@@ -7,6 +8,7 @@ import sys
 import tomllib
 
 import pytest
+import zstandard
 
 from content.prepare import ROOT, prepare, registry, select, validate_symbols
 
@@ -284,6 +286,8 @@ def test_all_sources_pass_actual_luau_declaration_worker(tmp_path, baked_plan):
     native = subprocess.run(
         [
             str(ROOT / ".build/release/amb-server"),
+            "--profile",
+            "development",
             "--plan",
             str(plan_file),
             "--config",
@@ -408,6 +412,8 @@ return rule
     result = subprocess.run(
         [
             str(ROOT / ".build/release/amb-server"),
+            "--profile",
+            "development",
             "--plan",
             str(path),
             "--config",
@@ -498,6 +504,8 @@ return body
     result = subprocess.run(
         [
             str(ROOT / ".build/release/amb-server"),
+            "--profile",
+            "development",
             "--plan",
             str(plan_path),
             "--config",
@@ -545,12 +553,12 @@ def land_world(tmp_path, baked_plan, *, probe, steps=40, settings=None, edit=Non
     native = subprocess.run(
         [
             str(ROOT / ".build/release/amb-server"),
+            "--profile",
+            "development",
             "--plan",
             str(path),
             "--config",
             str(ROOT / "config.toml"),
-            "--profile",
-            "development",
             "--assets",
             str(ROOT / "assets"),
             "--data",
@@ -610,6 +618,16 @@ return {kind='model',on={['base.start']=check,['base.land_tick']=check}}
     state = land_world(tmp_path, baked_plan, probe=probe)
     post = next(row for row in state["objects"] if row["position"] == [12, 49, 0])
     assert post["values"]["base.charge"] == 1
+    with (tmp_path / "world/events.jsonl.zst").open("rb") as stream:
+        with zstandard.ZstdDecompressor().stream_reader(stream) as reader:
+            postings = [
+                json.loads(line)
+                for line in io.TextIOWrapper(reader)
+                if '"engine.edit_text"' in line
+            ]
+    assert postings and all(row["response"]["ok"] for row in postings)
+    assert "rent " in postings[-1]["args"]["text"]["writing"]
+    assert "for sale at" in postings[-1]["args"]["text"]["writing"]
 
 
 def lease_fixture(plan, *, cap=1000, rent=100, grace=0.3, probe=""):
@@ -817,7 +835,8 @@ return {kind='model',on={['base.start']=check,['base.land_tick']=check}}
     )
     post = next(row for row in state["objects"] if row["position"] == [12, 49, 0])
     assert post["values"]["base.charge"] == 1
-    third = next(row for row in state["objects"] if row["position"] == [10, 80, 0])
+    # This extra item is appended last; settlement creates no object instances.
+    third = max(state["objects"], key=lambda row: int(row["handle"][2:].split(".")[0]))
     assert third["values"]["base.mass"] > 0  # Returned goods remain live, not salvaged.
 
 
@@ -826,6 +845,23 @@ def test_land_sale_resets_debt_replenishes_offers_and_charges_remote_owner(tmp_p
 local function check(self)
     tick(self)
     if not self.state.bought then
+        local live={}
+        for _, offer in self:act('engine.offers',nil,{}).offers do
+            if offer.plot then live[offer.plot]=true end
+        end
+        local total,pool=0,0
+        for _, id in self:plots() do
+            local p=self:plot(id)
+            if p.kind=='lot' and p.fronts=='street' then
+                local v=value(self,p)
+                total+=v
+                if p.owner=='p:0' then
+                    pool+=v
+                    if not live[id] and not self.state.next then self.state.next=id end
+                end
+            end
+        end
+        self.state.k=1+self:setting('base.land_scarcity')*(1-pool/total)
         for _, offer in self:act('engine.offers',nil,{}).offers do
             if offer.plot and self:plot(offer.plot).fronts=='street' then
                 assert(self:act('engine.set_offer_price',nil,{offer=offer.id,price=0}).ok)
@@ -838,11 +874,28 @@ local function check(self)
         end
     elseif not self.state.reset then
         assert(self.state['debt:'..self.state.bought]==0,'new owner inherited debt')
-        local street=0
-        for _, offer in self:act('engine.offers',nil,{}).offers do
-            if offer.plot and self:plot(offer.plot).fronts=='street' then street+=1 end
+        local total,pool=0,0
+        for _, id in self:plots() do
+            local p=self:plot(id)
+            if p.kind=='lot' and p.fronts=='street' then
+                total+=value(self,p)
+                if p.owner=='p:0' then pool+=value(self,p) end
+            end
         end
-        assert(street==2,'sold lot was not replaced on offer')
+        local k=1+self:setting('base.land_scarcity')*(1-pool/total)
+        assert(k>self.state.k,'sale did not raise class scarcity')
+        local street,next_offer=0,false
+        for _, offer in self:act('engine.offers',nil,{}).offers do
+            if offer.plot and self:plot(offer.plot).fronts=='street' then
+                street+=1
+                if offer.plot==self.state.next then
+                    next_offer=true
+                    assert(offer.price==math.ceil(3*value(self,self:plot(offer.plot))*k),
+                        'replacement offer did not use increased scarcity')
+                end
+            end
+        end
+        assert(street==2 and next_offer,'next lowest lot was not offered')
         self.state.reset=true
     elseif self:now()>=0.8 then
         assert(self:act('engine.balance',nil,{account='p:3'}).balance<self.state.balance,
@@ -892,3 +945,34 @@ return {kind='model',on={['base.start']=check,['base.land_tick']=check}}
         post = next(row for row in state["objects"] if row["position"] == [12, 49, 0])
         paid.append(post["values"]["base.charge"])
     assert paid[0] > paid[1] > 0
+
+
+def test_forage_land_offers_reach_floor_on_schedule(tmp_path):
+    plan = prepare(
+        ROOT / "content/start.json", ROOT / "assets", mode="forage", stakes=True, restricted=True
+    )
+    probe = """
+local function check(self)
+    tick(self)
+    local street,back=0,0
+    for _, offer in self:act('engine.offers',nil,{}).offers do
+        if offer.plot then
+            local plot=self:plot(offer.plot)
+            if plot.fronts=='street' then street+=1 else back+=1 end
+            local floor=value(self,plot)
+            local age=self:now()-self.state['offer_age:'..plot.plot]
+            if age==0 then
+                assert(offer.price==math.ceil(3*floor),'wrong auction start')
+            elseif age>=1.8 then
+                assert(offer.price==math.ceil(floor),'auction missed its floor')
+                self:set('base.charge',1)
+            end
+        end
+    end
+    assert(street==2 and back==2,'forage class offer counts')
+end
+return {kind='model',on={['base.start']=check,['base.land_tick']=check}}
+"""
+    state = land_world(tmp_path, plan, steps=44, probe=probe)
+    post = next(row for row in state["objects"] if row["position"] == [12, 49, 0])
+    assert post["values"]["base.charge"] == 1
