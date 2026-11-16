@@ -1,10 +1,14 @@
 #include "elaborate/elaborate.hpp"
 #include "snap/snap.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <fcntl.h>
 #include <iostream>
 #include <stdexcept>
+#include <sys/stat.h>
 #include <thread>
+#include <unistd.h>
 
 using namespace amber;
 using namespace amber::elaborate;
@@ -27,29 +31,44 @@ FixtureJob job(JobId id, std::string mode) {
   return result;
 }
 void worker(const std::filesystem::path &executable, const std::filesystem::path &directory) {
+  std::filesystem::create_directories(directory);
+  const auto gate_path = directory / "blocked";
+  require(mkfifo(gate_path.c_str(), 0600) == 0, "create fixture release pipe");
+  const int gate = open(gate_path.c_str(), O_RDWR | O_NONBLOCK);
+  require(gate >= 0, "open fixture release pipe");
   FixtureWorker pool(executable, directory, 2);
-  auto slow = job(1, "slow");
-  slow.limits.timeout_ms = 2000;
-  pool.submit(slow);
+  auto blocked = job(1, gate_path.string());
+  // A failure ceiling, not a delay: release this job as soon as the others complete.
+  blocked.limits.timeout_ms = 10000;
+  pool.submit(blocked);
   pool.submit(job(2, "normal"));
   pool.submit(job(3, "wrong"));
   pool.submit(job(4, "malformed"));
   std::vector<FixtureResult> results;
   const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (results.size() < 4 && std::chrono::steady_clock::now() < until) {
+  const auto started = std::filesystem::path(gate_path.string() + ".started");
+  while ((results.size() < 3 || !std::filesystem::exists(started)) &&
+         std::chrono::steady_clock::now() < until) {
     auto batch = pool.take();
     for (auto &result : batch)
       results.push_back(std::move(result));
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
+  const bool independent =
+      results.size() == 3 && std::filesystem::exists(started) &&
+      std::ranges::none_of(results, [](const FixtureResult &result) { return result.job == 1; });
+  const auto released = write(gate, "x", 1);
   pool.finish();
+  close(gate);
+  for (auto &result : pool.take())
+    results.push_back(std::move(result));
+  require(released == 1, "release blocked fixture");
+  require(independent, "blocked fixture does not block other sessions");
   require(results.size() == 4, "all subprocess outcomes returned");
-  require(results.front().job != 1, "slow fixture does not block other sessions");
   for (const auto &result : results) {
     require(result.diagnostics.size() <= 32, "diagnostics bounded");
     if (result.job == 1)
-      require(result.status == FixtureStatus::Error && result.error == "fixture timed out",
-              "timeout terminates process group");
+      require(result.status == FixtureStatus::Completed, "blocked fixture completes after release");
     if (result.job == 2)
       require(result.status == FixtureStatus::Completed && result.tests[0].candidate.passed &&
                   !result.tests[0].baseline.passed,
@@ -62,8 +81,17 @@ void worker(const std::filesystem::path &executable, const std::filesystem::path
       require(result.status == FixtureStatus::Error && !result.error.empty(),
               "malformed result is not acceptance");
   }
+  FixtureWorker timeout(executable, directory / "timeout", 1);
+  auto overdue = job(5, "timeout");
+  overdue.limits.timeout_ms = 50;
+  timeout.submit(overdue);
+  timeout.finish();
+  const auto timed = timeout.take();
+  require(timed.size() == 1 && timed[0].status == FixtureStatus::Error &&
+              timed[0].error == "fixture timed out",
+          "timeout terminates process group");
   FixtureWorker missing(directory / "no-such-executable", directory / "missing", 1);
-  missing.submit(job(5, "normal"));
+  missing.submit(job(6, "normal"));
   missing.finish();
   const auto unavailable = missing.take();
   require(unavailable.size() == 1 && unavailable[0].status == FixtureStatus::Unavailable,

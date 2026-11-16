@@ -3,7 +3,7 @@
 
 #include <fstream>
 #include <iostream>
-#include <thread>
+#include <unistd.h>
 
 using namespace amber::elaborate;
 int main(int argc, char **argv) {
@@ -12,8 +12,16 @@ int main(int argc, char **argv) {
   std::ifstream input(argv[4]);
   auto job = nlohmann::json::parse(input);
   const auto mode = std::filesystem::path(argv[2]).filename().string();
-  if (mode == "slow")
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  if (mode == "blocked") {
+    std::ofstream(std::string(argv[2]) + ".started") << "ready";
+    std::ifstream gate(argv[2]);
+    char released;
+    if (!gate.get(released))
+      return 3;
+  }
+  if (mode == "timeout")
+    for (;;)
+      pause();
   FixtureResult result;
   result.job = job.at("job").get<JobId>();
   result.request = job.at("request").get<RequestId>();
