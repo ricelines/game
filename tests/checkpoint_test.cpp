@@ -10,12 +10,27 @@ void round_trip_and_real_vm_continuation() {
   original.populate();
   require(step::timers(original.timers).size() == 1 && step::timers(original.timers)[0].due == 41,
           "snapshot fixture includes an actual pending process-threshold timer");
+  original.plots.rows[1].kind = perm::PlotKind::Street;
+  const auto root_grant = perm::create_root_grant(
+      original.grants, original.players,
+      {0, perm::Holder::player(1), perm::Scope::account(perm::Account::player(0)), 1, 10, 100, 200},
+      {}, 0);
+  require(root_grant && perm::pay(original.ledger, original.grants, perm::Holder::player(1),
+                                  perm::AccountTarget::player(0), perm::Account::player(3), 3, 5),
+          "snapshot fixture spends part of an actual root allowance");
   snap::Buffer bytes;
   original.write(bytes);
   const std::array<std::string_view, 1> versions{"checkpoint-fixture"};
   auto view = snap::parse(bytes, versions);
   Fixture loaded;
   loaded.read(view);
+  require(loaded.plots.rows[1].kind == perm::PlotKind::Street &&
+              loaded.players.rows[0].grants_given == std::vector<GrantId>{root_grant.grant} &&
+              perm::allowance(loaded.grants, root_grant.grant, 12) == 7 &&
+              !loaded.ledger.balance.contains(perm::Account::player(0)) &&
+              !perm::pay(loaded.ledger, loaded.grants, perm::Holder::player(1),
+                         perm::AccountTarget::player(0), perm::Account::player(3), 8, 12),
+          "plot kinds, root grant ownership and consumed root budget survive a snapshot");
   require(view.sections.size() == 13 && loaded.next_record == 31 &&
               loaded.inputs.rows.size() == 1 && loaded.motion.size() == 2 &&
               loaded.parts.get(original.f.b.slot()),

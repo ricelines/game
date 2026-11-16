@@ -383,6 +383,22 @@ void owned_and_all_land_cover_only_their_declared_scopes() {
       !check_land(Holder::player(1), LandVerb::Transfer, plots.rows[1], f.players, f.grants, 2) &&
           !check_land(Holder::player(1), LandVerb::Return, plots.rows[1], f.players, f.grants, 2),
       "presets never authorize land transfer or return");
+  const auto delegated_plot =
+      create_grant(f.grants, f.players, land, {1, Holder::player(5), Scope::plot(1), 17, 0, 0, 100},
+                   {Scope::plot(1), 2, 31, 1, true}, {}, 2);
+  require(delegated_plot && check_land(Holder::player(5), LandVerb::Return, plots.rows[1],
+                                       f.players, f.grants, 2),
+          "all-land delegation translates land bits into a plot's verbs");
+  const auto owned_plot = Scope::owned_on_plot(2, 1);
+  require(bool(create_grant(f.grants, f.players, body,
+                            {2, Holder::player(3), owned_plot, bit(Verb::Move), 0, 0, 100},
+                            {owned_plot, 2, all_rights, 1}, {}, 2)),
+          "an owned grant can narrow to the owner's objects on one plot");
+  require(
+      bool(create_grant(f.grants, f.players, body,
+                        {2, Holder::player(4), Scope::object(first), bit(Verb::Move), 0, 0, 100},
+                        {Scope::object(first), 2, all_rights, 1, true}, {}, 2)),
+      "an owned grant can narrow to one of the owner's objects");
   const auto child = Holder::script(9, Handle::make(32, 1));
   const auto delegated = create_grant(
       f.grants, f.players, land, {1, child, Scope::object(first), bit(Verb::Destroy), 0, 0, 100},
@@ -443,6 +459,20 @@ void wallets_and_root_require_explicit_authority() {
                                          {script, 2, true}, 0);
   require(bool(created), "root start grant is accepted");
   const auto id = created.grant;
+  require(
+      bool(pay(f.ledger, f.grants, script, AccountTarget::player(0), Account::player(2), 40, 2)) &&
+          balance(f.ledger, Account::player(2)) == 140 &&
+          !f.ledger.balance.contains(Account::player(0)),
+      "root creates money without keeping a balance");
+  require(
+      pay(f.ledger, f.grants, script, AccountTarget::player(0), Account::player(2), 11, 3).reason ==
+              Reason::Allowance &&
+          f.grants.rows[id].spent == 40,
+      "root spending is capped without consuming a failed payment");
+  require(
+      bool(pay(f.ledger, f.grants, script, AccountTarget::player(0), Account::player(0), 7, 3)) &&
+          f.grants.rows[id].spent == 40 && !f.ledger.balance.contains(Account::player(0)),
+      "root paying itself changes neither circulation nor allowance");
   require(bool(pay(f.ledger, f.grants, Holder::player(2), AccountTarget::player(2),
                    Account::player(0), 5, 4)) &&
               balance(f.ledger, Account::player(2)) == 135 &&
