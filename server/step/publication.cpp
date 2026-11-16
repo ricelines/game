@@ -39,7 +39,7 @@ void record_send_overflow(record::Journal &journal, const net::SendOverflow &not
                   {"action", notice.closed ? "closed" : "stale"}};
   journal.append(std::move(event));
 }
-void publish_effects(react::DeferredEffects &&effects, const record::Origin &origin, Step now,
+void publish_effects(react::DeferredEffects &&effects, const amber::Origin &origin, Step now,
                      step::WorkQueues &queues, step::TimerWheel &wheel, record::Journal &journal,
                      std::size_t event_limit) {
   auto overflow = [&]() {
@@ -57,15 +57,15 @@ void publish_effects(react::DeferredEffects &&effects, const record::Origin &ori
     std::visit(
         [&](auto &item) {
           using T = std::decay_t<decltype(item)>;
-          if constexpr (std::is_same_v<T, step::EventWork>) {
+          if constexpr (std::is_same_v<T, react::EventWork>) {
             item.origin = origin;
             if (step::enqueue_event(queues, std::move(item), event_limit) ==
                 step::PushResult::Overflow)
               overflow();
-          } else if constexpr (std::is_same_v<T, step::WatchWork>) {
+          } else if constexpr (std::is_same_v<T, react::WatchWork>) {
             item.origin = origin;
             step::enqueue_watch(queues, std::move(item));
-          } else if constexpr (std::is_same_v<T, step::Timer>) {
+          } else if constexpr (std::is_same_v<T, react::Timer>) {
             item.event.origin = origin;
             step::schedule(wheel, std::move(item));
           } else if constexpr (std::is_same_v<T, react::Diagnostic>) {
@@ -84,9 +84,9 @@ void publish_effects(react::DeferredEffects &&effects, const record::Origin &ori
         },
         effect);
 }
-record::Origin publish_invocation(record::Journal &journal, step::WorkQueues &queues,
-                                  step::TimerWheel &timers, react::CompletedInvocation &&invocation,
-                                  const record::Origin &parent, std::size_t event_limit) {
+amber::Origin publish_invocation(record::Journal &journal, step::WorkQueues &queues,
+                                 step::TimerWheel &timers, react::CompletedInvocation &&invocation,
+                                 const amber::Origin &parent, std::size_t event_limit) {
   if (!invocation.origin.cause)
     return parent;
   auto origin = invocation.origin;

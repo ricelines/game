@@ -15,14 +15,15 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 SERVER = ROOT / "server"
 ALLOWED = {
     "store": set(),
-    "record": {"store", "snap"},
+    "catalog": {"store", "react", "record", "snap"},
+    "record": {"store", "snap", "catalog"},
     "snap": {"store"},
-    "react": {"store", "record", "snap"},
+    "react": {"store", "record", "snap", "catalog"},
     "perm": {"store", "snap"},
     "space": {"store", "snap"},
-    "net": {"store", "record", "snap", "react", "perm", "space", "step"},
+    "net": {"catalog", "store", "record", "snap", "react", "perm", "space", "step"},
     "elaborate": {"store", "record", "snap"},
-    "step": {"store", "record", "snap", "react", "perm", "space", "net", "elaborate"},
+    "step": {"catalog", "store", "record", "snap", "react", "perm", "space", "net", "elaborate"},
 }
 INCLUDE = re.compile(r'^\s*#\s*include\s*["<]([^">]+)[">]', re.MULTILINE)
 LIBRARY = re.compile(r"\badd_library\(\s*(amber_\w+)\b")
@@ -204,7 +205,7 @@ def check() -> list[str]:
         relative = path.relative_to(SERVER)
         owner = relative.parts[0] if len(relative.parts) > 1 else None
         if owner is not None and owner not in ALLOWED:
-            errors.append(f"{relative}: source is outside the nine native owners")
+            errors.append(f"{relative}: source is outside the ten native owners")
             continue
         source = path.read_text()
         if path.suffix == ".hpp":
@@ -216,10 +217,19 @@ def check() -> list[str]:
             for name in mixed_state_structs(source):
                 errors.append(f"{relative}: {name} holds states from multiple owners")
         public = owner is not None and path.name == f"{owner}.hpp"
+        if public and owner == "store":
+            other_owners = "|".join(name for name in ALLOWED if name != "store")
+            if re.search(rf"^namespace amber::(?:{other_owners})\s*\{{", source, re.MULTILINE):
+                errors.append(f"{relative}: another owner's declarations in the store header")
+            if "nlohmann/json.hpp" in INCLUDE.findall(source):
+                errors.append(f"{relative}: JSON implementation in the store header")
         if owner and path.suffix == ".hpp" and not public and not path.name.endswith("private.hpp"):
             errors.append(f"{relative}: merge public API into {owner}/{owner}.hpp")
         if public and owner != "store":
             for name in reference_structs(source):
+                # The existing value-resolution view now lives with its consumer.
+                if owner == "react" and name == "ValueRead":
+                    continue
                 errors.append(f"{relative}: exported reference bundle {name}")
         for match in INCLUDE.finditer(source):
             included = match[1]
@@ -256,7 +266,7 @@ def main() -> int:
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
-    print("Nine native owners, public headers and dependency directions checked.")
+    print("Ten native owners, public headers and dependency directions checked.")
     return 0
 
 

@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "react.hpp"
 
 #include <algorithm>
@@ -5,13 +6,10 @@
 
 namespace amber::react {
 bool update_rule(catalog::Scripts &scripts, amber::react::State &react_state,
-                 step::WorkQueues &queues, const ValueRead &values, ScriptId id, RuleMode mode,
-                 const amber::step::Clock &clock, const record::Origin &origin,
+                 std::deque<BackgroundItem> &background, const ValueRead &values, ScriptId id,
+                 RuleMode mode, Step now, double hz, const amber::Origin &origin,
                  DeferredEffects &effects) {
   auto &vm = react_state.vm;
-
-  const auto now = clock.step;
-  const auto hz = clock.hz;
 
   auto &rules = react_state.rules;
   auto &triggers = react_state.triggers;
@@ -56,7 +54,7 @@ bool update_rule(catalog::Scripts &scripts, amber::react::State &react_state,
   react::project_rules(triggers, rules);
   std::unordered_set<ScriptId> affected;
   for (const auto &retired : change.retired) {
-    react::cancel_catch_up(queues, retired);
+    react::cancel_catch_up(background, retired);
     affected.insert(retired.handler.script);
   }
   affected.insert(id);
@@ -84,7 +82,7 @@ bool update_rule(catalog::Scripts &scripts, amber::react::State &react_state,
         continue;
       }
       auto changes = react::sync_watches(react_state, values, consumer,
-                                         scripts.rows.at(script).declaration, clock, origin,
+                                         scripts.rows.at(script).declaration, now, hz, origin,
                                          react::SyncMode::Change, std::span<const TermId>(allowed));
       for (auto &dirty : changes.dirty)
         effects.ordered.emplace_back(std::move(dirty));

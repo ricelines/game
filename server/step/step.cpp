@@ -4,10 +4,10 @@
 
 namespace amber::step {
 namespace {
-ThresholdKey key(const ThresholdToken &token) {
+ThresholdKey key(const react::ThresholdToken &token) {
   return {token.source, token.consumer, token.script, token.watch_index};
 }
-void put_timer(TimerWheel &wheel, Timer timer) {
+void put_timer(TimerWheel &wheel, react::Timer timer) {
   const Step delta = timer.due - wheel.now;
   const unsigned level = delta < (Step{1} << 8)    ? 0
                          : delta < (Step{1} << 16) ? 1
@@ -29,7 +29,7 @@ void remove_timer(TimerWheel &wheel, TimerLocation location) {
   }
   bucket.pop_back();
 }
-std::vector<Timer> take_bucket(TimerWheel &wheel, unsigned level, unsigned index) {
+std::vector<react::Timer> take_bucket(TimerWheel &wheel, unsigned level, unsigned index) {
   auto rows = std::move(wheel.levels[level][index]);
   wheel.levels[level][index].clear();
   for (const auto &timer : rows)
@@ -47,7 +47,7 @@ void append_inputs(WorkQueues &queues, std::vector<Work> inputs) {
   for (auto &input : inputs)
     queues.turns.push_back({std::move(input), {}});
 }
-void schedule(TimerWheel &wheel, Timer timer) {
+void schedule(TimerWheel &wheel, react::Timer timer) {
   if (timer.threshold) {
     const auto found = wheel.thresholds.find(key(*timer.threshold));
     if (found != wheel.thresholds.end()) {
@@ -92,58 +92,58 @@ std::optional<ForegroundItem> pop_foreground(WorkQueues &queues) {
     return {};
   auto work = std::move(source.front());
   source.pop_front();
-  if (const auto *watch = std::get_if<WatchWork>(&work.work))
+  if (const auto *watch = std::get_if<react::WatchWork>(&work.work))
     queues.watch_queued.erase(watch->source);
   else if (&source == &queues.causal)
     --queues.emitted_events;
   return work;
 }
-std::optional<BackgroundItem> pop_background(WorkQueues &queues) {
+std::optional<react::BackgroundItem> pop_background(WorkQueues &queues) {
   if (queues.background.empty())
     return {};
   auto item = std::move(queues.background.front());
   queues.background.pop_front();
   return item;
 }
-PushResult enqueue_event(WorkQueues &q, EventWork w, std::size_t limit) {
+PushResult enqueue_event(WorkQueues &q, react::EventWork w, std::size_t limit) {
   if (q.emitted_events >= limit)
     return PushResult::Overflow;
   q.causal.push_back({std::move(w), {}});
   ++q.emitted_events;
   return PushResult::Queued;
 }
-PushResult enqueue_watch(WorkQueues &q, WatchWork w) {
+PushResult enqueue_watch(WorkQueues &q, react::WatchWork w) {
   if (!q.watch_queued.insert(w.source).second)
     return PushResult::Coalesced;
   q.causal.push_back({std::move(w), {}});
   return PushResult::Queued;
 }
-void enqueue_background(WorkQueues &q, BackgroundItem w) {
+void enqueue_background(WorkQueues &q, react::BackgroundItem w) {
   q.background.push_back(std::move(w));
 }
 void rebuild_queue_index(WorkQueues &q) {
   q.watch_queued.clear();
   q.emitted_events = 0;
   for (const auto &item : q.causal) {
-    if (const auto *watch = std::get_if<WatchWork>(&item.work))
+    if (const auto *watch = std::get_if<react::WatchWork>(&item.work))
       q.watch_queued.insert(watch->source);
     else
       ++q.emitted_events;
   }
   for (const auto &item : q.turns)
-    if (const auto *watch = std::get_if<WatchWork>(&item.work))
+    if (const auto *watch = std::get_if<react::WatchWork>(&item.work))
       q.watch_queued.insert(watch->source);
 }
-std::vector<Timer> timers(const TimerWheel &wheel) {
-  std::vector<Timer> result;
+std::vector<react::Timer> timers(const TimerWheel &wheel) {
+  std::vector<react::Timer> result;
   for (const auto &level : wheel.levels)
     for (const auto &bucket : level)
       result.insert(result.end(), bucket.begin(), bucket.end());
   std::stable_sort(result.begin(), result.end(),
-                   [](const Timer &a, const Timer &b) { return a.due < b.due; });
+                   [](const react::Timer &a, const react::Timer &b) { return a.due < b.due; });
   return result;
 }
-IntentStart start_move(Intents &intents, Handle body, MoveGoal goal, record::Origin origin,
+IntentStart start_move(Intents &intents, Handle body, MoveGoal goal, amber::Origin origin,
                        std::optional<float> speed_m_s) {
   auto replaced = finish_move(intents, body, IntentEnd::Replaced);
   const auto id = intents.next_id++;

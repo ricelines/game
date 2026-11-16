@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "elaboration_private.hpp"
 
 namespace amber::step {
@@ -103,9 +104,9 @@ step::NativeCompletion rule_activation(catalog::Scripts &scripts, amber::react::
   auto out = elaboration_detail::result(false);
   const auto before = elaboration_detail::activation_state(scripts);
   const auto changed = react::update_rule(
-      scripts, react_state, queues, values, id,
+      scripts, react_state, queues.background, values, id,
       call.arguments.at("active").get<bool>() ? react::RuleMode::Enable : react::RuleMode::Disable,
-      amber::step::Clock{.step = call.step, .hz = call.hz}, call.origin, out.effects);
+      call.step, call.hz, call.origin, out.effects);
   if (changed)
     out.changed_scripts = elaboration_detail::changed_activations(scripts, before);
   out.changed = out.effects.changed;

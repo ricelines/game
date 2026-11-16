@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "step.hpp"
 
 #include <algorithm>
@@ -90,7 +91,7 @@ step::NativeCompletion hold_goods(amber::perm::State &perm_state, amber::ObjectS
   return out;
 }
 void declare_hold_goods_action(react::Terms &terms, react::NativeActions &declarations) {
-  react::declare_native(
+  catalog::declare_native(
       declarations, terms, "engine.hold_goods",
       "Store the selected item for its existing owner, using Transfer permission.", "transfer",
       false,

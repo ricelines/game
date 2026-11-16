@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "step.hpp"
 #include <lua.h>
 #include <lualib.h>
@@ -782,13 +783,13 @@ void declare_physical_actions(react::Terms &terms, react::NativeActions &declara
   const Json handle = {{"type", "string"}};
   const auto add = [&](std::string name, std::string description, std::string right, bool reach,
                        Json properties, Json required, react::NativeOperation operation) {
-    const auto id = react::declare_native(declarations, terms, std::move(name),
-                                          std::move(description), std::move(right), reach,
-                                          {{"type", "object"},
-                                           {"properties", std::move(properties)},
-                                           {"required", std::move(required)},
-                                           {"additionalProperties", false}},
-                                          operation);
+    const auto id = catalog::declare_native(declarations, terms, std::move(name),
+                                            std::move(description), std::move(right), reach,
+                                            {{"type", "object"},
+                                             {"properties", std::move(properties)},
+                                             {"required", std::move(required)},
+                                             {"additionalProperties", false}},
+                                            operation);
     (void)id;
   };
   add("engine.grasp", "Attach the selected item to the caller's body or script installation.",

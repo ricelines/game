@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "step/start_private.hpp"
 
 #include <chrono>

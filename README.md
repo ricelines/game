@@ -2,27 +2,28 @@
 
 An authorable simulation: one C++20 server owns world state, ordinary Luau scripts own behavior, build123d sources produce measured geometry, and a Godot web client watches the same world that agents use through the gateway.
 
-The prototype is under correction and does not yet satisfy the design or all acceptance gates. Read the [current status](docs/implementation-status.md) before relying on its behavior. The original [Technicals](docs/02-t.0.md) and [Specs](docs/04-t.de137kjm03j.md) are the requirements; implementation documentation cannot change them.
+The prototype is under correction and does not yet satisfy the design or all acceptance gates. The [Technicals](design/technicals.md) and [Specs](design/specs.md) are generated copies of the design doc, which holds the requirements.
 
 ## Build
 
-The supported setup is Linux x86_64 with Python 3.12, a C++20 compiler, Make,
+The supported setup is Linux x86_64 with Python 3.12,
 `uv`, and Nix with `nix build`, flakes and the `nixpkgs` registry enabled.
 The bake sandbox needs unprivileged user namespaces, Landlock ABI 3 or newer,
 and seccomp. `bake.setup` installs public CAD runtime libraries and bubblewrap
 through the host's Nix store; it writes their paths under `.cache`. The pinned
 toolchain archives, native sources, Python environment, build outputs and game
-assets stay inside this checkout. The host's `nixpkgs` registry selects those
-runtime libraries; it is separate from the checked-in toolchain and Python locks.
+assets stay inside this checkout. The compiler and runtime libraries use the
+same Nixpkgs revision recorded in the checked-in toolchain lock.
 
 ```sh
-python3 tools/bootstrap.py --build --godot --jobs 4
+python3 tools/bootstrap.py --build --godot
 UV_CACHE_DIR="$PWD/.cache/uv" uv sync --python 3.12
 .venv/bin/python -m bake.setup
-.tools/bin/cmake -S bake/native -B .build/bake -DCMAKE_BUILD_TYPE=Release
-.tools/bin/cmake --build .build/bake -j 4
-.tools/bin/cmake -S . -B .build/release -DCMAKE_BUILD_TYPE=Release
-.tools/bin/cmake --build .build/release -j 4
+.tools/bin/cmake -S bake/native -B .build/bake -G Ninja \
+  --toolchain "$PWD/cmake/NativeToolchain.cmake" -DCMAKE_BUILD_TYPE=Debug
+.tools/bin/cmake --build .build/bake
+.tools/bin/cmake --preset debug
+.tools/bin/cmake --build --preset debug
 client/build.sh
 ```
 
@@ -35,7 +36,7 @@ Prepare the authored world once. Cached geometry is reused; a cache hit still pe
 ```sh
 python3 bake/run.py -m content.prepare --mode seeded --stakes on --restricted-host-bake \
   --output .cache/content/seeded-plan.json
-.build/release/amb-server run --plan .cache/content/seeded-plan.json --data .runtime
+.build/debug/amb-server run --plan .cache/content/seeded-plan.json --data .runtime
 ```
 
 Use `--mode forage` for the sparse start and `--stakes off` for the authored alternative.
@@ -52,13 +53,13 @@ bin/amb --key-file .runtime/keys/mira.key actions
 bin/amb --key-file .runtime/keys/mira.key do base.move_to --args '{"point":[0,8,0]}'
 ```
 
-For an actual model-driven population, add `--residents content/residents.json` and `--resident-report .runtime/resident-report.json`. Supply the model credential through the existing credential wrapper or your process supervisor. The harness accepts purposes and personas; it has no hidden CAD designs or purpose-keyword policy. [Gateway documentation](docs/gateway-api.md) covers CLI, HTTP, MCP, authoring jobs and model evidence.
+For an actual model-driven population, add `--residents content/residents.json` and `--resident-report .runtime/resident-report.json`. Supply the model credential through the existing credential wrapper or your process supervisor. The harness accepts purposes and personas; it has no hidden CAD designs or purpose-keyword policy.
 
 Once the gateway is running, open `http://127.0.0.1:8080/?gateway=http://127.0.0.1:8081` and enter the spectator key to see residents and give them purposes. The URL supplies the separate agent service's address; it contains no credential. The bare `http://127.0.0.1:8080` page remains a spectator view without an agent-service connection.
 
 Native administrative actions use the same `do` operation. Known actions can be called directly from their listed signatures; `actions --name NAME` optionally explains their exact inputs. These include wallets, inventory, gifts, offers, bilateral trades, grants, groups, land, script installation, model defaults, settings, registry definitions and elaboration. The original technical design defines the authority boundaries.
 
-The authoring service also supports ready parameter variants and live definition edits. `amb variant MODEL --params JSON --wait` bakes a parameter block for an existing model. `amb edit-model MODEL source.py --wait` bakes a proposed definition and returns the arguments for the ordinary `base.revise_model` action. Applying that action updates the model's current instances together, preserving ownership and matching named-part identities. See [live authoring](docs/live-authoring-api.md) for defaults, variants and failure behavior.
+The authoring service also supports ready parameter variants and live definition edits. `amb variant MODEL --params JSON --wait` bakes a parameter block for an existing model. `amb edit-model MODEL source.py --wait` bakes a proposed definition and returns the arguments for the ordinary `base.revise_model` action. Applying that action updates the model's current instances together, preserving ownership and matching named-part identities.
 
 ## Records, checkpoints and fixtures
 
@@ -73,7 +74,7 @@ bin/amb log --file .runtime/events.jsonl.zst --kind handler --thing o:36.1
 Snapshots are written under the selected data directory. Starting again with the same `--data` directory automatically restores its latest completed snapshot and archives the preceding compressed record. A clean stop completes a final snapshot. To restore a particular checkpoint into a separate output directory:
 
 ```sh
-.build/release/amb-server run --restore .runtime/snapshots/snap-1200.amb.zst \
+.build/debug/amb-server run --restore .runtime/snapshots/snap-1200.amb.zst \
   --catalog .runtime --data .runtime-resumed
 ```
 
@@ -90,7 +91,7 @@ world at its saved boundary without advancing it.
 ## Verify
 
 ```sh
-.tools/bin/ctest --test-dir .build/release --output-on-failure
+.tools/bin/ctest --preset debug
 python3 bake/run.py -m pytest
 .venv/bin/ruff check bake content gateway harness measure tests
 .venv/bin/ruff format --check bake content gateway harness measure tests
@@ -99,11 +100,10 @@ python3 bake/run.py -m pytest
 The content-dependent importer and authoring checks require the prepared plan and actual assets; run them separately from CTest:
 
 ```sh
-.build/release/tests/start_test "$PWD/.cache/content/seeded-plan.json" "$PWD/assets" /path/to/current-world/registry/HASH.json
-.build/release/tests/authoring_test "$PWD/.cache/content/seeded-plan.json" "$PWD/assets"
+.build/debug/tests/start_test "$PWD/.cache/content/seeded-plan.json" "$PWD/assets" /path/to/current-world/registry/HASH.json
+.build/debug/tests/authoring_test "$PWD/.cache/content/seeded-plan.json" "$PWD/assets"
 ```
 
 The native suites use real Luau, Jolt and Recast/Detour. Performance records distinguish module benchmarks, live server/socket tests, model-driven world events and the browser hardware used. An unavailable dataset or failed hardware gate remains reported as such.
 
-[Native profiling](docs/profiling.md) documents the optional Tracy timeline build
-and headless capture. Ordinary JSON timing reports are always available.
+Ordinary JSON timing reports are always available.

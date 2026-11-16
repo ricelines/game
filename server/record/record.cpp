@@ -1,4 +1,5 @@
 #include "record.hpp"
+#include "catalog/catalog.hpp"
 
 #include <algorithm>
 #include <condition_variable>

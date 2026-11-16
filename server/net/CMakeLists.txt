@@ -15,4 +15,4 @@ add_library(amber_net STATIC
 )
 target_include_directories(amber_net PUBLIC ${PROJECT_SOURCE_DIR}/server)
 target_compile_features(amber_net PUBLIC cxx_std_20)
-target_link_libraries(amber_net PUBLIC amber_store amber_snap amber_react amber_perm amber_space PRIVATE Ambergris::WebSockets Ambergris::bitsery Ambergris::picosha2 Ambergris::TracyClient Threads::Threads)
+target_link_libraries(amber_net PUBLIC amber_catalog amber_store amber_snap amber_react amber_perm amber_space PRIVATE Ambergris::WebSockets Ambergris::bitsery Ambergris::picosha2 Ambergris::TracyClient Threads::Threads)

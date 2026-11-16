@@ -8,10 +8,12 @@ from bake.config import ROOT
 
 
 def main():
+    native = json.loads((ROOT / "tools/dependencies.lock.json").read_text())["tools"]["native"]
+    source = f"github:NixOS/nixpkgs/{native['revision']}"
     packages = [
         "libGL",
         "libx11",
-        "stdenv.cc.cc.lib",
+        "gcc16.cc.lib",
         "zlib",
         "expat",
         "libseccomp.lib",
@@ -21,7 +23,7 @@ def main():
         [
             "nix",
             "build",
-            *[f"nixpkgs#{name}" for name in packages],
+            *[f"{source}#{name}" for name in packages],
             "--no-link",
             "--print-out-paths",
         ],
@@ -37,7 +39,8 @@ def main():
     cache = ROOT / ".cache"
     cache.mkdir(exist_ok=True)
     subprocess.run(
-        ["nix", "build", "nixpkgs#bubblewrap", "--out-link", str(cache / "bubblewrap")], check=True
+        ["nix", "build", f"{source}#bubblewrap", "--out-link", str(cache / "bubblewrap")],
+        check=True,
     )
     data = {"library_paths": libraries, "bwrap": str(cache / "bubblewrap/bin/bwrap")}
     data["loader"] = next(

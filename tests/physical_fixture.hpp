@@ -127,7 +127,7 @@ struct Fixture {
     return script;
   }
   step::ActionRun begin_as(Caller caller, std::string_view name, Handle target, nlohmann::json args,
-                           record::Origin parent = {}) {
+                           amber::Origin parent = {}) {
     step::NativeCall call;
     call.request = {caller, f.terms.by_name.at(std::string(name)), target, {}};
     call.arguments = std::move(args);
@@ -139,7 +139,7 @@ struct Fixture {
                               space_state, intents, journal, reach_m, std::move(call));
   }
   step::ActionRun begin(std::string_view name, Handle target, nlohmann::json args,
-                        record::Origin parent = {}) {
+                        amber::Origin parent = {}) {
     return begin_as(ScriptHolder{script, f.a}, name, target, std::move(args), std::move(parent));
   }
   step::ActionOutcome finish(step::ActionRun &run, step::NativeCompletion completion) {
@@ -156,7 +156,7 @@ struct Fixture {
     return finish(run, step::transfer_action(f.react_state, f.objects_state, perm_state, run.call));
   }
   step::ActionOutcome grasp(Handle target, nlohmann::json args = nlohmann::json::object(),
-                            record::Origin parent = {}) {
+                            amber::Origin parent = {}) {
     auto run = begin("engine.grasp", target, std::move(args), parent);
     if (run.outcome)
       return *run.outcome;
@@ -164,7 +164,7 @@ struct Fixture {
                                           causes, plots, run.call));
   }
   step::ActionOutcome release(Handle target, nlohmann::json args = nlohmann::json::object(),
-                              record::Origin parent = {}) {
+                              amber::Origin parent = {}) {
     auto run = begin("engine.release", target, std::move(args), parent);
     if (run.outcome)
       return *run.outcome;
@@ -178,7 +178,7 @@ struct Fixture {
     return finish(run, step::attach_action(f.objects_state, space_state, {20, 21, 22, 23},
                                            perm_state, reach_m, causes, run.call));
   }
-  step::ActionOutcome impulse(Handle target, nlohmann::json args, record::Origin parent = {}) {
+  step::ActionOutcome impulse(Handle target, nlohmann::json args, amber::Origin parent = {}) {
     auto run = begin("engine.impulse", target, std::move(args), parent);
     if (run.outcome)
       return *run.outcome;
@@ -186,10 +186,10 @@ struct Fixture {
   }
   struct HandlerResult {
     react::RunOutcome outcome;
-    record::Origin origin;
+    amber::Origin origin;
     bool changed;
   };
-  HandlerResult invoke(EventPayload payload = {}, Handle sender = {}, record::Origin parent = {}) {
+  HandlerResult invoke(EventPayload payload = {}, Handle sender = {}, amber::Origin parent = {}) {
     react::InvocationInput input;
     input.receiver = f.a;
     input.sender = sender;

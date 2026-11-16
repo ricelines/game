@@ -66,10 +66,9 @@ void round_trip_and_real_vm_continuation() {
             "fresh VM loads the same immutable compiled fixture artifacts");
   }
   const auto before = loaded.f.subscriptions.rows.at({original.f.a, 1}).front().last;
-  auto changes =
-      react::sync_watches(loaded.f.react_state, loaded.f.values(), {original.f.a, original.script},
-                          loaded.f.scripts.rows[original.script].declaration,
-                          amber::step::Clock{.step = 12, .hz = 20}, {}, react::SyncMode::Restore);
+  auto changes = react::sync_watches(
+      loaded.f.react_state, loaded.f.values(), {original.f.a, original.script},
+      loaded.f.scripts.rows[original.script].declaration, 12, 20, {}, react::SyncMode::Restore);
   require(changes.dirty.empty() && changes.timers.empty() &&
               loaded.f.subscriptions.rows.at({original.f.a, 1}).front().last == before,
           "runtime watch rehydration preserves saved last answers and does not duplicate timers");
@@ -83,8 +82,8 @@ void round_trip_and_real_vm_continuation() {
           "actual Luau continuation produces identical persistent state and next random draw after "
           "restore");
   auto queued = step::pop_foreground(loaded.queues);
-  require(queued && std::get<step::EventWork>(queued->work).origin ==
-                        record::Origin{9, 4, {1, 2}, 1.5, false},
+  require(queued && std::get<react::EventWork>(queued->work).origin ==
+                        amber::Origin{9, 4, {1, 2}, 1.5, false},
           "restored causal work retains full carried provenance");
 }
 void local_capture_filters_authority_and_runtime_rows() {

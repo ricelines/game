@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "react/react.hpp"
 #include "runtime_fixture.hpp"
 #include "step/step.hpp"
@@ -111,7 +112,7 @@ struct Fixture {
     require(loaded.status == react::RunOutcome::Status::Ok, loaded.error.c_str());
   }
   react::CompletedInvocation run(ScriptId script, TermId term = 1, Handle receiver = {},
-                                 const record::Origin &origin = {}) {
+                                 const amber::Origin &origin = {}) {
     react::InvocationInput input;
     input.receiver = receiver ? receiver : object;
     input.sender = other;
@@ -160,13 +161,13 @@ void live_effects_and_causal_finalization() {
               logs[4]["kind"] == "system" && logs[4]["cause"] == logs[3]["id"],
           "action precedes completed handlers and their diagnostics retain direct cause");
   auto watch = step::pop_foreground(queues);
-  require(watch && std::holds_alternative<step::WatchWork>(watch->work),
+  require(watch && std::holds_alternative<react::WatchWork>(watch->work),
           "changed fact enters foreground");
   auto event = step::pop_foreground(queues);
-  require(event && std::get<step::EventWork>(event->work).origin.cause == logs[1]["id"],
+  require(event && std::get<react::EventWork>(event->work).origin.cause == logs[1]["id"],
           "emitted event uses completed first-handler origin");
   auto failed_event = step::pop_foreground(queues);
-  require(failed_event && std::holds_alternative<step::EventWork>(failed_event->work) &&
+  require(failed_event && std::holds_alternative<react::EventWork>(failed_event->work) &&
               queues.causal.empty(),
           "partial-error emissions are retained without a deferred action lane");
 }
@@ -264,7 +265,7 @@ void model_rebind_retires_only_removed_installations() {
   std::size_t starts = 0;
   bool withdrew = false;
   for (const auto &effect : effects.ordered) {
-    if (const auto *event = std::get_if<step::EventWork>(&effect)) {
+    if (const auto *event = std::get_if<react::EventWork>(&effect)) {
       ++starts;
       require(event->recipient_script == replacement,
               "existing scripts must not receive a replacement startup replay");

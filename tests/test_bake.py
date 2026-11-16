@@ -5,6 +5,7 @@ import json
 import math
 import struct
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -16,6 +17,22 @@ from bake.parameters import asset_hash, resolve
 from bake.pipeline import BakeError, author, load_native, measure
 from bake.pool import BakePool
 from bake.sandbox import SandboxUnavailable, cgroup_probe
+
+
+def test_repository_python_launcher_supports_python_subprocesses():
+    code = (
+        "import ctypes, subprocess, sys; "
+        "ctypes.CDLL('.build/bake/libamb_bake_geometry.so'); "
+        "subprocess.run([sys.executable, '-c', \"print('child-ok')\"], check=True)"
+    )
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "bake/run.py"), "-c", code],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "child-ok"
 
 
 @pytest.fixture(scope="module")

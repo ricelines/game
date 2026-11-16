@@ -1,4 +1,7 @@
+#include "catalog/catalog.hpp"
 #include "elaboration_private.hpp"
+
+#include <algorithm>
 
 namespace amber::step {
 step::NativeCompletion answer_rule(amber::elaborate::State &elaborate_state,
@@ -90,8 +93,9 @@ FixtureCompletion complete_fixture(amber::elaborate::State &elaborate_state,
       throw std::invalid_argument("immutable candidate identity or tests changed");
     if (error.empty()) {
       const auto before = elaboration_detail::activation_state(scripts);
-      if (react::update_rule(scripts, react_state, queues, values, script.id,
-                             react::RuleMode::Validated, clock, out.origin, out.effects))
+      if (react::update_rule(scripts, react_state, queues.background, values, script.id,
+                             react::RuleMode::Validated, clock.step, clock.hz, out.origin,
+                             out.effects))
         out.changed_scripts = elaboration_detail::changed_activations(scripts, before);
       out.notification = elaborate::close_rule_answer(requests, pending, check, now);
       out.effects.changed = true;

@@ -62,7 +62,7 @@ void test_mass_provider() {
   bi::validate_mass_roles(terms, {2, 3});
   bi::AssemblyMasses masses{{2, 3}, {}, {}};
   re::DeferredEffects effects;
-  record::Origin origin{19, 7, {3}, 2.5, false};
+  amber::Origin origin{19, 7, {3}, 2.5, false};
   bi::invalidate_mass(masses, identity(objects), parts, std::span(&root, 1));
   bi::refresh_mass(masses, values, parts, runtime, 0, 20, origin, effects);
   auto read = [&](Handle h, TermId term) {
@@ -89,7 +89,7 @@ void test_mass_provider() {
   record::Journal journal(8, {});
   step::publish_effects(std::move(pending), origin, 20, queues, timers, journal, 10);
   while (auto next = step::pop_foreground(queues)) {
-    const auto &watch = std::get<step::WatchWork>(next->work);
+    const auto &watch = std::get<react::WatchWork>(next->work);
     require(watch.origin.root == origin.root && watch.origin.cause == origin.cause,
             "mass reaction publishes with its originating native/action causal root");
   }

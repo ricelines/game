@@ -1,19 +1,73 @@
 Toolchain bootstrap stays separate from application CMake and subsystem design.
 
 ```sh
-python3 tools/bootstrap.py --build --godot --jobs 6
+python3 tools/bootstrap.py --build --godot
 ```
 
-The host must supply Python 3.12 or newer, a C++20 compiler, and Make. The bootstrap
-checks the compiler and exposes it through `.tools/bin/c++` and `.tools/bin/cc`.
-It installs pinned CMake, clang-format, Godot, and Godot web templates in `.tools`.
-All downloads and builds remain in this checkout. Source URLs, versions, and
+The host must supply Python 3.12 or newer, Nix, `nice` and `ionice`. Bootstrap installs the pinned
+GCC 16.2, Ninja, ccache and mold from Nix's binary cache, and exposes them in `.tools/bin`.
+It also installs pinned CMake, clang-format, Godot, and Godot web templates.
+Tool archives and build outputs remain in this checkout; Nix supplies compiler
+packages from its store. The Nixpkgs revision, source URLs, versions, and archive
 SHA256 checksums are recorded in `dependencies.lock.json`. uSockets uses the exact
 submodule commit selected by the pinned uWebSockets release.
 
-Native libraries compile once in `.build/third-party`. Application CMake can
-include `cmake/Dependencies.cmake`, then link the individual imported targets it
-needs. There is no aggregate runtime target.
+Native libraries compile once in `.build/third-party`. Jolt builds without its
+precompiled header so ccache can reuse its object files after a clean. Its first
+build takes longer; ordinary application edits do not rebuild these libraries.
+Application CMake can include `cmake/Dependencies.cmake`, then link the individual
+imported targets it needs. There is no aggregate runtime target.
+
+The native toolchain requires CMake 3.29 or newer and uses the pinned mold linker.
+Application static libraries use thin archives referencing objects in the same
+build tree; keep those objects alongside the archives. Imported third-party
+libraries retain ordinary self-contained archives.
+
+Both CMake presets use Ninja and ccache. `dev` is for the edit/build/test loop:
+Debug code with assertions, `-g1` line information, and no sanitizers. `debug`
+keeps full debug information and ASan/UBSan for sanitizer validation and
+debugging local variables. Use `debug` for final native validation after
+substantial changes. The local Ninja launcher uses Ninja's default parallelism,
+CPU nice level 19 and idle I/O priority. An explicit `--parallel N` overrides the
+worker default. Bootstrap's `--jobs N` controls tool/source setup concurrency.
+Compiler results stay
+in `.cache/ccache`; normal incremental builds retain `.build` outputs. Release
+application builds are reserved for benchmarks or an explicit runtime need.
+
+During an edit cycle, keep the build directory and queue the server, required
+workers and affected tests in one build invocation. Both build presets without
+explicit targets build all validation binaries. For example:
+
+```sh
+.tools/bin/cmake --preset dev
+.tools/bin/cmake --build --preset dev --target amb-server amb_script_validate commerce_test perm_test
+.tools/bin/ctest --preset dev -R '^(commerce|perm)$'
+
+.tools/bin/cmake --preset debug
+.tools/bin/cmake --build --preset debug
+.tools/bin/ctest --preset debug
+```
+
+If Ninja repeatedly reports `premature end of file; recovering` and rebuilds
+unchanged outputs, compact its dependency log, then build once to restore any
+missing dependency records:
+
+```sh
+.tools/bin/ninja -C .build/debug -t recompact
+.tools/bin/cmake --build --preset debug
+```
+
+Ninja records command durations automatically. To separate compiler work,
+archiving and executable/shared-library linking:
+
+```sh
+python3 tools/build_times.py .build/third-party .build/debug .build/bake
+.tools/bin/ccache --dir "$PWD/.cache/ccache" --show-stats
+```
+
+The report uses the latest recorded action for each output. Parallel action
+durations are work totals, not elapsed build time; record elapsed time separately
+when comparing builds.
 
 | Imported target | Public include |
 | --- | --- |

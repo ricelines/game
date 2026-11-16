@@ -1,4 +1,5 @@
 #include "action_private.hpp"
+#include "catalog/catalog.hpp"
 #include "recovery.hpp"
 #include "run_private.hpp"
 #include "settings.hpp"
@@ -303,7 +304,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &sessions = net_state.sessions;
   elaborate::FixtureWorker fixture_worker(std::filesystem::canonical("/proc/self/exe"),
                                           launch.data / "fixtures", settings.fixture_workers);
-  react::authoring::Worker authoring({launch.assets, settings.pins, settings.scripts});
+  step::authoring::Worker authoring({launch.assets, settings.pins, settings.scripts});
   auto &mutated = step_state.mutated;
   auto &gaps = step_state.gaps;
   auto &inspection_terms = react_state.inspection_terms;
@@ -345,7 +346,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     fixture_action = fixture::prepare_action(*fixture_case, terms, native_declarations, ids, auth,
                                              profiles, clock.step, hz);
   std::deque<net::Input> incoming;
-  std::deque<react::authoring::Completion> authored;
+  std::deque<step::authoring::Completion> authored;
   std::deque<elaborate::FixtureResult> fixture_results;
   std::size_t script_errors = 0, phase_cursor = 0;
   std::vector<double> phase_ms;
@@ -410,7 +411,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                              values, delivered, settings.light_source_radius_m, clock);
           publish_object_changes(sessions, session_views, ids, auth, parent, model_text,
                                  instance_text, delivered.changed_objects);
-          record::Origin delivery_origin;
+          amber::Origin delivery_origin;
           for (auto &record : delivered.records)
             delivery_origin = journal.append(std::move(record));
           reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
@@ -514,7 +515,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             sessions.complete(completed.input->session, completed.input->sequence,
                               std::move(completed.input->fields));
           continue;
-        } else if (auto *completion = std::get_if<react::authoring::Completion>(&*admitted)) {
+        } else if (auto *completion = std::get_if<step::authoring::Completion>(&*admitted)) {
           const auto found = inputs.rows.find(completion->input_id);
           if (found == inputs.rows.end()) {
             --frame.foreground;
@@ -533,7 +534,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                         input.id, {std::move(installed.reply), origin});
           continue;
         } else {
-          auto &background = std::get<BackgroundItem>(*admitted);
+          auto &background = std::get<react::BackgroundItem>(*admitted);
           if (!react::catch_up_valid(background, rules, values, clock.step, hz)) {
             --frame.background;
             continue;
@@ -678,7 +679,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                 inspection_terms.push_back(term);
             for (auto object : completed.created_objects)
               completed.effects.ordered.emplace_back(
-                  EventWork{object, {}, role("events", "start"), {}, action->call.origin});
+                  react::EventWork{object, {}, role("events", "start"), {}, action->call.origin});
             const auto first_changed = mutated.size();
             reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
                               completed.effects, action->call.origin);
@@ -739,7 +740,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       react::DeferredEffects effects;
       for (const auto &term : terms.rows)
         if (term.source == react::Source::Setting)
-          effects.ordered.emplace_back(step::WatchWork{{object, term.id}, origin});
+          effects.ordered.emplace_back(react::WatchWork{{object, term.id}, origin});
       reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock, effects,
                         origin);
       publish_effects(std::move(effects), origin, clock.step, queues, timers, journal,

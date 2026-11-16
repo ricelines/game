@@ -2,10 +2,9 @@
 
 ## Source of truth
 
-Read the original [Technicals](docs/02-t.0.md) and the relevant
-[Specs](docs/04-t.de137kjm03j.md) before changing a subsystem. Technicals wins
-where they disagree. Generated architecture, API and status documents describe
-an implementation; they cannot amend these requirements or authorize exceptions.
+Read the original [Technicals](design/technicals.md) and the relevant
+[Specs](design/specs.md) before changing a subsystem. Technicals wins where
+they disagree. Both are generated copies of the design doc; never edit them.
 The user requires a playable, maintainable modular monolith without unnecessary
 machinery. A passing implementation test is not proof of design compliance.
 
@@ -38,9 +37,14 @@ do not justify versions on ordinary mutable rows.
 
 ## Boundaries and gameplay
 
-- Follow S0.2's cohesive modules and direct calls. Pass the specific tables a
-  function uses, with const reads. Never pass a whole server, store, world,
-  service locator, or universal host context.
+- Follow S0.2's cohesive modules and direct calls. Each owner (store, catalog,
+  react, perm, space, net, record, snap, elaborate, step) keeps its tables in
+  one plain `State` struct declared in its own public header. A function takes
+  the owner states it actually uses, `const` when it only reads, plus scalars.
+  Pass a single table instead only when that is all the function touches.
+  Never define or pass a struct that holds several owners' states, a service
+  locator, or a host context. More than about eight parameters is a review
+  flag: pass the owner state instead of listing its tables one by one.
 - Do not simulate module boundaries with callback/interface tables. Keep C
   callbacks required by Luau or another library local to that integration.
 - A handler changes its own object and parts. Foreign effects use a declared
@@ -79,7 +83,32 @@ do not justify versions on ordinary mutable rows.
 - Run appropriate formatting, lint, tests and focused benchmarks after source
   changes. Benchmarks must name workload and exclusions. Small tests, software
   rendering and unavailable data cannot stand in for unmet acceptance gates.
-- Keep documentation proportional to the implementation. Generated benchmark
-  outputs and public-data projections belong in .cache, not source directories.
+- Use the `dev` CMake preset for ordinary edit/build/test iterations. It keeps
+  assertions and line information, uses `-g1`, and disables ASan/UBSan. Use
+  `debug` for sanitizer checks, memory/undefined-behavior investigations, and
+  interactive debugging that needs local variables. After substantial native
+  changes, build `check-binaries` and run the full CTest suite with `debug`;
+  passing `dev` tests does not replace sanitizer validation. Use optimized
+  Release builds for performance measurements and gameplay checks whose real
+  handler deadlines require optimized code; neither Debug profile establishes
+  performance acceptance. Check the executable paths before integration runs:
+  gameplay/content tools and the harness default to `.build/release`, regardless
+  of the selected CMake preset. Build the actual binaries a test will launch.
+- Keep native types in their owner's public header rather than collecting them
+  in `store.hpp`. Put changeable non-template helper bodies in `.cpp` files;
+  reserve header definitions for templates and small, stable value operations.
+- Keep build directories between iterations. Queue every target needed for the
+  current batch in one build invocation so Ninja can schedule their work
+  together, for example `cmake --build --preset dev --target amb-server
+  amb_script_validate commerce_test perm_test` using `.tools/bin/cmake`.
+  Include required worker/probe executables in that same invocation before
+  running the selected tests. Do not build targets one at a time or run multiple
+  build processes against the same build directory. The build presets without
+  explicit targets queue all validation binaries through `check-binaries`.
+  Run all builds and tests needed for final validation after substantial batches.
+- Do not add documentation files: no API, architecture, status, report or
+  profiling documents. README.md says only how to build, run and test.
+  content/authoring.md is game content that agents read, not documentation.
+  Generated benchmark outputs and public-data projections belong in .cache.
 - State failures, ambiguities and remaining work plainly. Do not call the
   prototype complete while required behavior or acceptance work remains.

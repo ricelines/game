@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "settings.hpp"
 #include "view_private.hpp"
 

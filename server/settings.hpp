@@ -1,5 +1,7 @@
 #pragma once
 
+#include "catalog/catalog.hpp"
+
 #include "elaborate/elaborate.hpp"
 #include "net/net.hpp"
 #include "space/space.hpp"

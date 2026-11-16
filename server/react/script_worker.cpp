@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "react.hpp"
 
 #include <fstream>

@@ -268,7 +268,7 @@ def main():
     parser.add_argument("--server", type=Path, default=Path(".build/release/amb-server"))
     parser.add_argument("--plan", type=Path, default=Path(".cache/content/seeded-plan.json"))
     parser.add_argument("--residents", type=Path, default=Path("content/residents.json"))
-    parser.add_argument("--reference", type=Path, default=Path("docs/agent-authoring.md"))
+    parser.add_argument("--reference", type=Path, default=Path("content/authoring.md"))
     parser.add_argument("--assets", type=Path, default=Path("assets"))
     parser.add_argument("--port", type=int, default=18082)
     parser.add_argument("--gateway-port", type=int, default=18882)

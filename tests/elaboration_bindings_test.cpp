@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "runtime_fixture.hpp"
 #include "step/step.hpp"
 

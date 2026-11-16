@@ -1,9 +1,10 @@
-#include "react.hpp"
+#include "catalog/catalog.hpp"
+#include "step.hpp"
 
 #include <algorithm>
 #include <set>
 
-namespace amber::react::authoring {
+namespace amber::step::authoring {
 Json failure(std::string error) {
   return {{"ok", false}, {"errors", Json::array({std::move(error)})}};
 }
@@ -184,4 +185,4 @@ step::NativeCompletion install_variant(PreparedVariant prepared,
     return out;
   }
 }
-} // namespace amber::react::authoring
+} // namespace amber::step::authoring

@@ -1,7 +1,10 @@
 #pragma once
+
+#include "catalog/catalog.hpp"
 namespace amber::step {
+struct Clock;
 struct State;
-}
+} // namespace amber::step
 namespace amber {
 struct Settings;
 }
@@ -24,6 +27,23 @@ struct State;
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
+
+namespace amber::net {
+enum class ControlKind : std::uint8_t {
+  Look,
+  Inspect,
+  Actions,
+  Do,
+  Cancel,
+  RegisterModel,
+  RegisterVariant,
+  RegisterScript,
+  AuthoringFailed,
+  Events,
+  Debug,
+  View
+};
+}
 
 namespace amber::net {
 using SessionId = std::uint64_t;
@@ -454,9 +474,7 @@ void view_interest(ReplicationIndex &, SessionId, Vec3);
 void remove_view_interest(ReplicationIndex &, SessionId);
 Publication publication(ReplicationIndex &, IdentityRead, TransformRead, const react::ValueRead &,
                         Step, double hz);
-} // namespace amber::net
 
-namespace amber::net {
 struct State {
   Profiles profiles;
   Sessions sessions;

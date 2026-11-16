@@ -1,4 +1,5 @@
 #include "action_private.hpp"
+#include "catalog/catalog.hpp"
 namespace amber::step {
 ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &execution, react::State &react_state,
                                   const ObjectState &objects_state,
@@ -101,7 +102,7 @@ void invalidate_execution(std::deque<ExecutionFrame> &execution, IdentityRead id
 void reconcile_effects(const react::ValueRead &values, amber::react::State &react_state,
                        amber::step::State &step_state, const Relation &declared_parts,
                        const catalog::Scripts &scripts, const amber::step::Clock &clock,
-                       react::DeferredEffects &effects, const record::Origin &origin) {
+                       react::DeferredEffects &effects, const amber::Origin &origin) {
   const auto now = clock.step;
   const auto hz = clock.hz;
 
@@ -113,7 +114,7 @@ void reconcile_effects(const react::ValueRead &values, amber::react::State &reac
   react::reconcile_allocations(values, react_state, effects, now, hz);
   std::vector<FactKey> facts;
   for (const auto &effect : effects.ordered)
-    if (const auto *watch = std::get_if<WatchWork>(&effect))
+    if (const auto *watch = std::get_if<react::WatchWork>(&effect))
       facts.push_back(watch->source);
   reconcile_mass(masses, values, declared_parts, runtime_measurements, facts, clock, origin,
                  effects);
@@ -124,7 +125,7 @@ void reconcile_effects(const react::ValueRead &values, amber::react::State &reac
   for (auto &timer : changes.timers)
     effects.ordered.emplace_back(std::move(timer));
   for (const auto &effect : effects.ordered)
-    if (const auto *watch = std::get_if<WatchWork>(&effect))
+    if (const auto *watch = std::get_if<react::WatchWork>(&effect))
       mutated.push_back(watch->source);
 }
 } // namespace amber::step

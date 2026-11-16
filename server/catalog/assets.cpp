@@ -1,8 +1,9 @@
-#include "store.hpp"
+#include "catalog.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <picosha2.h>
+#include <set>
 #include <stdexcept>
 
 namespace amber::catalog {

@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "step.hpp"
 
 #include <algorithm>
@@ -18,7 +19,7 @@ MechanicalCauses::MechanicalCauses(std::size_t authors_max) : data(std::make_uni
   data->authors_max = authors_max;
 }
 MechanicalCauses::~MechanicalCauses() = default;
-space::CauseToken MechanicalCauses::intern(const record::Origin &origin,
+space::CauseToken MechanicalCauses::intern(const amber::Origin &origin,
                                            space::CauseToken previous) {
   if (previous)
     return restore(combine(lookup(previous), {origin, false}));
@@ -86,10 +87,10 @@ TermId relation_term(const PhysicalRelationTerms &terms, space::RelationKind kin
   }
   std::terminate();
 }
-record::Origin published_origin(record::Journal &journal, const amber::ObjectState &objects_state,
-                                const amber::catalog::State &catalog_state, double hz,
-                                const CauseSummary &summary, Step step,
-                                std::span<const Handle> things) {
+amber::Origin published_origin(record::Journal &journal, const amber::ObjectState &objects_state,
+                               const amber::catalog::State &catalog_state, double hz,
+                               const CauseSummary &summary, Step step,
+                               std::span<const Handle> things) {
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto attribution = amber::attribution(std::as_const(objects_state.objects));
   auto &models = catalog_state.models;
@@ -117,8 +118,8 @@ void relation_effects(react::DeferredEffects &effects, const PhysicalRelationTer
                       std::span<const space::RelationChange> changes) {
   for (const auto &change : changes) {
     const auto term = relation_term(terms, change.kind);
-    effects.ordered.emplace_back(step::WatchWork{{change.from, term}, {}});
-    effects.ordered.emplace_back(step::WatchWork{{change.to, term}, {}});
+    effects.ordered.emplace_back(react::WatchWork{{change.from, term}, {}});
+    effects.ordered.emplace_back(react::WatchWork{{change.to, term}, {}});
   }
 }
 void publish_physical(amber::step::State &step_state, record::Journal &journal,

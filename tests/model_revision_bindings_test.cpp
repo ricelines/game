@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "structural_fixture.hpp"
 
 #include <algorithm>

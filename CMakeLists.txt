@@ -7,6 +7,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(AMBER_SANITIZE "Enable address and undefined-behavior sanitizers" OFF)
 
+# Application archives stay in their build tree alongside their object files.
+set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> qc --thin <TARGET> <LINK_FLAGS> <OBJECTS>")
+set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> q --thin <TARGET> <LINK_FLAGS> <OBJECTS>")
+
 include(CTest)
 include(cmake/Dependencies.cmake)
 add_compile_options(-Wall -Wextra -Wpedantic -Werror)
@@ -19,6 +23,7 @@ add_subdirectory(server/store)
 add_subdirectory(server/record)
 add_subdirectory(server/snap)
 add_subdirectory(server/react)
+add_subdirectory(server/catalog)
 add_subdirectory(server/perm)
 add_subdirectory(server/space)
 add_subdirectory(server/net)

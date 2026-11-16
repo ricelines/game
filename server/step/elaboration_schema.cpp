@@ -1,4 +1,7 @@
+#include "catalog/catalog.hpp"
 #include "elaboration_private.hpp"
+
+#include <algorithm>
 
 namespace amber::step {
 namespace {
@@ -126,8 +129,8 @@ ElaborationDeclarations declare_elaboration(react::Terms &terms, react::NativeAc
              positive = {{"type", "integer"}, {"minimum", 1}, {"maximum", UINT32_MAX}};
   auto add = [&](react::NativeOperation operation, std::string name, std::string description,
                  Json schema) {
-    return react::declare_native(native, terms, std::move(name), std::move(description), "", false,
-                                 std::move(schema), operation);
+    return catalog::declare_native(native, terms, std::move(name), std::move(description), "",
+                                   false, std::move(schema), operation);
   };
   ids.request_model =
       add(react::ElaborationAction::RequestModel, "engine.request_model",

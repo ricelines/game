@@ -1,5 +1,7 @@
 #pragma once
 
+#include "catalog/catalog.hpp"
+
 #include "settings.hpp"
 #include "step.hpp"
 
@@ -44,9 +46,7 @@ void sample_motion(std::vector<observe::MotionSample> &motion,
                    SparseColumn<std::pair<Handle, Vec3>> &previous_positions,
                    std::span<const Handle> moved, const space::Space &space, IdentityRead ids,
                    TransformRead poses, double hz);
-} // namespace amber::step
 
-namespace amber::step {
 void write_state_report(const std::filesystem::path &path, const react::ValueRead &values,
                         std::span<const TermId> inspection_terms, TransformRead poses,
                         const amber::step::Clock &clock, std::size_t script_errors,
@@ -55,18 +55,14 @@ void publish_value_changes(net::ReplicationIndex &, net::SessionViews &, const r
                            std::span<const FactKey>);
 void record_frame(record::Journal &journal, record::Writer &writer, net::RecordFeed &feed,
                   IdentityRead ids, TransformRead poses, std::size_t &script_errors);
-} // namespace amber::step
 
-namespace amber::step {
 void advance_permission_deadlines(amber::perm::State &perm_state, TravelAccess &travel_access,
                                   net::Sessions &sessions, record::Journal &journal, Step now,
                                   double hz, double reminder_seconds, std::size_t limit);
 void expire_sale_offers(perm::State &perm_state, IdentityRead ids, PermissionFlags flags,
                         net::SessionViews &session_views, net::Sessions &sessions,
                         record::Journal &journal, Step now, std::size_t limit);
-} // namespace amber::step
 
-namespace amber::step {
 std::optional<net::Authenticated>
 connection_notice(const net::SessionNotice &notice, amber::net::State &net_state,
                   amber::space::State &space_state, DeliveryTargets &delivery,
@@ -132,7 +128,7 @@ prepare_reactive(amber::react::State &react_state, const react::ValueRead &value
                  ForegroundItem item, Step now, double hz);
 
 std::variant<NativeCall, InputReply>
-prepare_input(react::authoring::Worker &worker, const amber::react::State &react_state,
+prepare_input(step::authoring::Worker &worker, const amber::react::State &react_state,
               const catalog::RegistryDocument &registry, amber::step::State &step_state,
               record::Journal &journal, Input &input, Step now, double hz);
 

@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "step.hpp"
 
 #include <algorithm>
@@ -12,12 +13,12 @@ template <class T> void unique(std::vector<T> &rows) {
 }
 void changed_relations(react::DeferredEffects &effects,
                        std::span<const space::RelationChange> changes,
-                       const std::array<TermId, 4> &terms, const record::Origin &origin) {
+                       const std::array<TermId, 4> &terms, const amber::Origin &origin) {
   for (const auto &change : changes) {
     const auto term = terms.at(static_cast<std::size_t>(change.kind));
     if (term) {
-      effects.ordered.emplace_back(WatchWork{{change.from, term}, origin});
-      effects.ordered.emplace_back(WatchWork{{change.to, term}, origin});
+      effects.ordered.emplace_back(react::WatchWork{{change.from, term}, origin});
+      effects.ordered.emplace_back(react::WatchWork{{change.to, term}, origin});
     }
   }
 }
@@ -164,7 +165,7 @@ void retire_commerce(amber::perm::State &perm_state, amber::ObjectState &objects
 void retire_physics(space::Space &space, amber::ObjectState &objects_state,
                     space::PhysicalRelations &physical, amber::step::State &step_state,
                     std::span<const Handle> removed, std::array<TermId, 4> terms,
-                    const record::Origin &origin, NativeCompletion &out) {
+                    const amber::Origin &origin, NativeCompletion &out) {
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto parents = amber::parents(objects_state.objects);
   auto flags = amber::space_flags(objects_state.objects);
@@ -195,7 +196,7 @@ void retire_publication(net::ReplicationIndex &replication, net::SessionViews &v
 
 void refresh_object_plots(const space::Space &space, amber::ObjectState &objects_state,
                           const perm::Plots &plots, const amber::react::State &react_state,
-                          const record::Origin &origin, NativeCompletion &out) {
+                          const amber::Origin &origin, NativeCompletion &out) {
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(std::as_const(objects_state.objects));
   auto membership = amber::plot_membership(objects_state.objects);
@@ -230,7 +231,7 @@ void refresh_object_plots(const space::Space &space, amber::ObjectState &objects
     });
     dirty.erase(std::unique(dirty.begin(), dirty.end()), dirty.end());
     for (auto source : dirty)
-      out.effects.ordered.emplace_back(WatchWork{source, origin});
+      out.effects.ordered.emplace_back(react::WatchWork{source, origin});
   }
 }
 

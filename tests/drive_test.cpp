@@ -31,7 +31,7 @@ void clock_budget_and_background_progress() {
   step::WorkQueues pending;
   step::TimerWheel due;
   std::deque<elaborate::FixtureResult> fixtures;
-  std::deque<authoring::Completion> authored;
+  std::deque<step::authoring::Completion> authored;
   std::vector<std::string> trace;
   step::enqueue_event(pending, {{}, {}, 1, {}, {}}, 100);
   step::append_inputs(pending, {step::InputWork{9}});
@@ -48,14 +48,14 @@ void clock_budget_and_background_progress() {
     require(admitted && std::holds_alternative<step::ForegroundItem>(*admitted),
             "prediction starved the oldest foreground item");
     const auto &item = std::get<step::ForegroundItem>(*admitted);
-    if (const auto *event = std::get_if<step::EventWork>(&item.work)) {
+    if (const auto *event = std::get_if<react::EventWork>(&item.work)) {
       trace.push_back("event" + std::to_string(event->event));
       if (event->event == 1)
         step::enqueue_event(pending, {{}, {}, 3, {}, {}}, 100);
     } else
       trace.push_back("input" + std::to_string(std::get<step::InputWork>(item.work).id));
     const auto background = step::next_work(pending, current, fixtures, authored, started);
-    require(background && std::holds_alternative<step::BackgroundItem>(*background),
+    require(background && std::holds_alternative<react::BackgroundItem>(*background),
             "expired foreground allowance starved the background minimum");
     trace.push_back("background");
     require(!step::next_work(pending, current, fixtures, authored, started),
@@ -76,14 +76,14 @@ void clock_budget_and_background_progress() {
 void completion_priority_and_stale_admission_refunds() {
   step::WorkQueues queues;
   std::deque<elaborate::FixtureResult> fixtures;
-  std::deque<authoring::Completion> authored;
+  std::deque<step::authoring::Completion> authored;
   elaborate::FixtureResult fixture;
   fixture.job = 11;
   fixtures.push_back(fixture);
   fixture.job = 12;
   fixtures.push_back(fixture);
-  authored.push_back({21, authoring::Failure{"first completed submission"}});
-  authored.push_back({22, authoring::Failure{"second completed submission"}});
+  authored.push_back({21, step::authoring::Failure{"first completed submission"}});
+  authored.push_back({22, step::authoring::Failure{"second completed submission"}});
   step::enqueue_event(queues, {{}, {}, 7, {}, {}}, 100);
   step::append_inputs(queues, {step::InputWork{9}});
   step::enqueue_background(queues, {{}, 31, 0, {}, 0});
@@ -94,16 +94,17 @@ void completion_priority_and_stale_admission_refunds() {
   std::vector<std::string> trace;
   while (auto work = step::next_work(queues, open, fixtures, authored, now)) {
     if (const auto *item = std::get_if<step::ForegroundItem>(&*work)) {
-      if (const auto *event = std::get_if<step::EventWork>(&item->work))
+      if (const auto *event = std::get_if<react::EventWork>(&item->work))
         trace.push_back("event" + std::to_string(event->event));
       else
         trace.push_back("input" + std::to_string(std::get<step::InputWork>(item->work).id));
     } else if (const auto *result = std::get_if<elaborate::FixtureResult>(&*work))
       trace.push_back("fixture" + std::to_string(result->job));
-    else if (const auto *result = std::get_if<authoring::Completion>(&*work))
+    else if (const auto *result = std::get_if<step::authoring::Completion>(&*work))
       trace.push_back("authoring" + std::to_string(result->input_id));
     else
-      trace.push_back("background" + std::to_string(std::get<step::BackgroundItem>(*work).trigger));
+      trace.push_back("background" +
+                      std::to_string(std::get<react::BackgroundItem>(*work).trigger));
   }
   require(trace == std::vector<std::string>{"event7", "input9", "fixture11", "fixture12",
                                             "authoring21", "authoring22", "background31",
@@ -114,7 +115,7 @@ void completion_priority_and_stale_admission_refunds() {
   closed.handler_deadline = now;
   step::append_inputs(queues, {step::InputWork{40}, step::InputWork{41}});
   fixtures.push_back(fixture);
-  authored.push_back({42, authoring::Failure{"awaiting writer admission"}});
+  authored.push_back({42, step::authoring::Failure{"awaiting writer admission"}});
   step::enqueue_background(queues, {{}, 43, 0, {}, 0});
   auto first = step::next_work(queues, closed, fixtures, authored, now);
   require(first && std::get<step::InputWork>(std::get<step::ForegroundItem>(*first).work).id == 40,
@@ -124,7 +125,7 @@ void completion_priority_and_stale_admission_refunds() {
   require(retry && std::get<step::InputWork>(std::get<step::ForegroundItem>(*retry).work).id == 41,
           "a stale input consumed the only foreground admission");
   const auto background = step::next_work(queues, closed, fixtures, authored, now);
-  require(background && std::holds_alternative<step::BackgroundItem>(*background) &&
+  require(background && std::holds_alternative<react::BackgroundItem>(*background) &&
               !step::next_work(queues, closed, fixtures, authored, now),
           "pending completions bypassed exhausted foreground allowance or starved background");
 
@@ -135,17 +136,17 @@ void completion_priority_and_stale_admission_refunds() {
           "fixture completion lost its foreground minimum when ordinary work was empty");
   --next.foreground; // The caller discarded an already-closed fixture job.
   const auto submission = step::next_work(queues, next, fixtures, authored, now);
-  require(submission && std::get<authoring::Completion>(*submission).input_id == 42 &&
+  require(submission && std::get<step::authoring::Completion>(*submission).input_id == 42 &&
               !step::next_work(queues, next, fixtures, authored, now),
           "stale fixture refund failed or completion sources gained separate minima");
   step::enqueue_background(queues, {{}, 44, 0, {}, 0});
   step::enqueue_background(queues, {{}, 45, 0, {}, 0});
   const auto stale_background = step::next_work(queues, next, fixtures, authored, now);
-  require(stale_background && std::get<step::BackgroundItem>(*stale_background).trigger == 44,
+  require(stale_background && std::get<react::BackgroundItem>(*stale_background).trigger == 44,
           "background minimum skipped the oldest catch-up item");
   --next.background; // The caller discarded invalid catch-up work.
   const auto catch_up = step::next_work(queues, next, fixtures, authored, now);
-  require(catch_up && std::get<step::BackgroundItem>(*catch_up).trigger == 45 &&
+  require(catch_up && std::get<react::BackgroundItem>(*catch_up).trigger == 45 &&
               !step::next_work(queues, next, fixtures, authored, now),
           "a stale catch-up item consumed the background minimum");
 }

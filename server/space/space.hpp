@@ -466,7 +466,7 @@ struct Sound {
   float radius_m;
   EventPayload payload;
   PlayerId speaker;
-  record::Origin origin;
+  amber::Origin origin;
   std::string name{};
   bool speech = false;
 };

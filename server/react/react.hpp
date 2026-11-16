@@ -1,7 +1,9 @@
 #pragma once
 namespace amber::catalog {
 struct State;
-}
+struct Models;
+struct Scripts;
+} // namespace amber::catalog
 namespace amber::react {
 struct State;
 }
@@ -11,9 +13,11 @@ struct State;
 #include "store/store.hpp"
 
 #include <chrono>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <span>
 #include <unordered_map>
 
@@ -25,6 +29,532 @@ struct Scripts;
 } // namespace amber::catalog
 
 namespace amber::react {
+struct EventWork {
+  Handle receiver, sender;
+  TermId event = 0;
+  EventPayload payload;
+  amber::Origin origin;
+  ScriptId recipient_script = 0; // internal targeted delivery; zero broadcasts normally
+};
+struct WatchWork {
+  FactKey source;
+  amber::Origin origin;
+};
+struct BackgroundItem {
+  Handle receiver;
+  TermId trigger = 0;
+  ScriptId script = 0;
+  amber::Origin origin;
+  std::uint32_t version = 0;
+};
+struct ThresholdToken {
+  FactKey source;
+  Handle consumer;
+  ScriptId script = 0;
+  std::uint32_t watch_index = 0;
+};
+struct Timer {
+  Step due = 0;
+  react::EventWork event;
+  std::optional<react::ThresholdToken> threshold;
+};
+
+enum class Kind { Quantity, Flag, Event, Relation, Action, Material };
+
+enum class Source { Intrinsic, Measured, State, Setting };
+
+enum class Combine { None, Sum, Max, Any, ShareEqual, SharePriority };
+
+enum class MeasurementRole { Baked, Volume, Mass, Runtime };
+
+enum class InputType { Number, Integer, Boolean, Handle, Vector, String, Term };
+
+struct Input {
+  std::string name;
+  InputType type = InputType::Number;
+  TermId term = 0;
+  bool optional = false;
+};
+
+struct Term {
+  TermId id = 0;
+  std::string name;
+  Kind kind = Kind::Quantity;
+  Source source = Source::State;
+  std::array<std::int8_t, 8> dimensions{};
+  bool conserved = false;
+  Combine combine = Combine::None;
+  TermId along = 0, paired = 0, priority = 0;
+  PlayerId owner = 0;
+  std::string description;
+  std::vector<Input> inputs;
+  MeasurementRole measurement = MeasurementRole::Baked;
+  std::vector<TermId> compared;
+  std::string distinction;
+};
+
+struct Terms {
+  std::vector<Term> rows{Term{}};
+  std::unordered_map<std::string, TermId> by_name;
+};
+
+using Values = std::map<TermId, Value>;
+
+struct Materials {
+  std::unordered_map<TermId, Values> rows;
+};
+
+struct AssetMeasurements {
+  struct Row {
+    double volume = 0;
+    Values values;
+  };
+  std::unordered_map<ModelId, Row> rows;
+  std::unordered_map<std::uint32_t, Row> parameter_rows;
+};
+
+using Properties = std::vector<SparseColumn<Value>>;
+
+struct Process {
+  double v0 = 0;
+  Step step0 = 0;
+  double rate = 0, lo = 0, hi = 0;
+};
+
+using Processes = std::vector<SparseColumn<Process>>;
+
+struct InstanceSettings {
+  Properties columns;
+};
+
+struct ModelSettings {
+  std::unordered_map<ModelId, Values> rows;
+};
+
+struct PlotSettings {
+  std::unordered_map<PlotId, Values> rows;
+};
+
+struct WorldSettings {
+  Values values;
+};
+
+struct Contribution {
+  Handle from;
+  double amount = 0;
+};
+
+struct Shared {
+  double total = 0;
+  std::vector<Contribution> parts;
+};
+
+using SharedColumns = std::vector<SparseColumn<Shared>>;
+
+struct SubjectTerm {
+  Handle subject;
+  TermId term = 0;
+  bool operator==(const SubjectTerm &) const = default;
+};
+
+using GivesTo = SparseColumn<std::vector<SubjectTerm>>;
+
+using AuthoredRelations = std::unordered_map<TermId, Relation>;
+
+struct RelationsRead {
+  std::unordered_map<TermId, const Relation *> columns;
+};
+
+struct Answer {
+  bool present = false;
+  Value value;
+  bool operator==(const Answer &) const = default;
+};
+
+struct RuntimeMeasurements {
+  std::unordered_map<FactKey, Value, FactKeyHash> values;
+};
+
+struct DerivedFactInput {
+  FactKey source;
+  Value value;
+  amber::Origin origin;
+};
+
+struct ValueRead {
+  const Terms &terms;
+  IdentityRead identity;
+  const std::vector<PlotId> &plots;
+  const std::vector<std::uint32_t> &params;
+  const Materials &materials;
+  const AssetMeasurements &assets;
+  const Properties &properties;
+  const Processes &processes;
+  const InstanceSettings &instance_settings;
+  const ModelSettings &model_settings;
+  const PlotSettings &plot_settings;
+  const WorldSettings &world_settings;
+  const SharedColumns &shared;
+  const RelationsRead &relations;
+  const RuntimeMeasurements &runtime;
+  TermId density = 0, capacity_term = 0;
+};
+
+struct HandlerRef {
+  ScriptId script = 0;
+  std::string function;
+  PlayerId author = 0;
+  std::uint32_t version = 0;
+  bool enabled = true;
+};
+
+struct Trigger {
+  std::unordered_map<TermId, HandlerRef> by_material;
+  std::vector<std::pair<TermId, HandlerRef>> by_flag;
+  std::unordered_map<ModelId, HandlerRef> by_model;
+  std::unordered_map<std::uint64_t, std::vector<HandlerRef>> by_instance;
+};
+
+using Triggers = std::unordered_map<TermId, Trigger>;
+
+struct RuleVersion {
+  HandlerRef handler;
+  TermId trigger = 0, selector = 0;
+  bool flag_selector = false;
+};
+
+struct RuleVersions {
+  std::vector<RuleVersion> history;
+};
+
+struct Threshold {
+  enum class Predicate { Above, AtLeast, Below, AtMost } predicate = Predicate::Above;
+  double value = 0;
+  bool test(double current) const;
+};
+
+struct RelationAnswer {
+  std::vector<Handle> out, in;
+  bool operator==(const RelationAnswer &) const = default;
+};
+
+struct SharedWatchAnswer {
+  Answer aggregate;
+  double own_allocation = 0;
+  bool operator==(const SharedWatchAnswer &) const = default;
+};
+
+using WatchAnswer = std::variant<Answer, RelationAnswer, SharedWatchAnswer>;
+
+struct RelationDelta {
+  Handle other;
+  bool added = false, incoming = false;
+};
+
+struct WatchDeclaration {
+  TermId term = 0;
+  std::vector<Threshold> thresholds;
+};
+
+struct WatchBinding {
+  ScriptKey consumer;
+  std::uint32_t index = 0;
+  WatchAnswer last = Answer{};
+  WatchDeclaration declaration;
+  std::vector<FactKey> dependencies;
+};
+
+struct Subscriptions {
+  std::unordered_map<FactKey, std::vector<WatchBinding>, FactKeyHash> rows;
+};
+
+struct CurrentAnswers {
+  std::unordered_map<FactKey, WatchAnswer, FactKeyHash> values;
+  std::unordered_map<ScriptKey, WatchAnswer, ScriptKeyHash> by_consumer;
+};
+
+struct WatchDelivery {
+  ScriptKey consumer;
+  std::uint32_t index;
+  WatchAnswer value;
+  std::vector<RelationDelta> relations;
+};
+
+struct Meter {
+  double amount0 = 0;
+  Step step0 = 0;
+  double rate = 0;
+};
+
+struct AllocationKey {
+  Handle subject, contributor;
+  TermId term = 0;
+  bool supplier = false;
+  bool operator==(const AllocationKey &) const = default;
+};
+
+struct AllocationKeyHash {
+  std::size_t operator()(const AllocationKey &) const;
+};
+
+struct AllocationRows {
+  std::unordered_map<AllocationKey, double, AllocationKeyHash> values;
+};
+
+using MeterRows = std::unordered_map<AllocationKey, Meter, AllocationKeyHash>;
+
+struct PriorityValues {
+  std::unordered_map<std::uint64_t, double> values;
+};
+
+struct SettingKey {
+  enum class Scope { Instance, Model, Plot, World } scope = Scope::Instance;
+  std::uint64_t subject = 0;
+  TermId term = 0;
+  bool operator==(const SettingKey &) const = default;
+};
+
+using StateKey = std::variant<std::string, std::int64_t>;
+
+using StateAtom = std::variant<double, bool, std::string, Handle>;
+
+struct StateKeyHash {
+  std::size_t operator()(const StateKey &) const;
+};
+
+using ScriptState = std::unordered_map<StateKey, StateAtom, StateKeyHash>;
+
+using ScriptStates = std::unordered_map<ScriptKey, ScriptState, ScriptKeyHash>;
+
+using RandomStates = std::unordered_map<std::uint64_t, std::uint64_t>;
+
+struct Diagnostic {
+  std::string name, message;
+};
+
+struct ContributionChange {
+  FactKey source;
+};
+
+using Effect = std::variant<react::EventWork, react::WatchWork, react::Timer, Diagnostic,
+                            record::Event, ContributionChange>;
+
+struct DeferredEffects {
+  std::vector<Effect> ordered;
+  bool changed = false;
+  std::vector<Handle> consulted_handles{};
+  std::vector<react::BackgroundItem> background{};
+};
+
+struct ActionDeclaration {
+  TermId action = 0;
+  std::string right, function;
+  bool reach = false;
+};
+
+struct ScriptDeclaration {
+  enum class Kind { Model, Instance, Rule } kind = Kind::Model;
+  ScriptId id = 0;
+  PlayerId author = 0;
+  std::uint32_t version = 1;
+  bool approved = false, active = true;
+  std::vector<WatchDeclaration> watches;
+  std::vector<TermId> contributes, sets, events;
+  std::vector<std::string> slots;
+  std::vector<ActionDeclaration> actions;
+  std::string selector;
+  std::size_t tests = 0;
+  std::vector<TermId> handlers;
+};
+
+struct RightsDeclaration {
+  std::vector<std::string> names;
+  std::vector<std::string> slot_names{};
+};
+
+struct ScriptValidation {
+  std::vector<std::string> errors;
+  explicit operator bool() const { return errors.empty(); }
+};
+
+struct CompiledScript {
+  std::string bytecode;
+  std::vector<std::string> errors;
+};
+
+struct Invocation {
+  ScriptKey self;
+  Step step = 0;
+  double hz = 20;
+  TermId trigger = 0;
+  Handle sender;
+  EventPayload payload;
+  std::vector<Handle> acquired, event_targets, parts;
+  // Descriptive action identity; it never confers permission on the script.
+  std::optional<Caller> action_caller;
+  Handle action_body, action_target;
+  amber::Origin origin;
+  ScriptState *state = nullptr;
+  std::uint64_t *random = nullptr;
+  DeferredEffects *effects = nullptr;
+  std::chrono::steady_clock::time_point deadline;
+  const ScriptDeclaration *declaration = nullptr;
+};
+
+struct RunOutcome {
+  enum class Status { Ok, Error, Cutoff, Missing, Action } status = Status::Missing;
+  std::string error;
+  std::size_t memory_bytes = 0;
+  struct Action {
+    ActionRequest request;
+    nlohmann::json arguments;
+  };
+  std::optional<Action> action{};
+};
+
+struct WatchRun {
+  FactKey source;
+  std::uint32_t index;
+  WatchAnswer value;
+};
+
+struct InvocationInput {
+  Handle receiver, sender;
+  TermId trigger = 0;
+  EventPayload payload;
+  Step step = 0;
+  double hz = 20;
+  amber::Origin origin;
+  std::vector<Handle> acquired;
+  std::optional<Caller> action_caller;
+  Handle action_body, action_target;
+  std::chrono::steady_clock::time_point deadline{};
+  std::optional<WatchRun> watch;
+};
+
+struct CompletedInvocation {
+  HandlerRef handler;
+  Handle receiver;
+  TermId trigger = 0;
+  Step step = 0;
+  RunOutcome outcome;
+  DeferredEffects effects;
+  std::vector<Handle> things{};
+  std::vector<record::Credit> object_credits{}, script_credits{};
+  amber::Origin origin{};
+};
+
+struct VmSettings {
+  std::size_t script_kb;
+  double declaration_ms, handler_ms;
+  std::size_t event_fields_max;
+};
+
+struct ScriptAnalysis {
+  CompiledScript compiled;
+  ScriptDeclaration declaration;
+  nlohmann::json metadata = nlohmann::json::object();
+  std::vector<std::string> errors;
+};
+
+using InstanceScripts = SparseColumn<std::vector<ScriptId>>;
+
+struct RuleKey {
+  TermId trigger = 0, selector = 0;
+  bool flag = false;
+  auto operator<=>(const RuleKey &) const = default;
+};
+
+struct RuleChange {
+  std::vector<RuleVersion> active, retired;
+};
+
+enum class SyncMode { Initial, Change, Restore };
+
+struct WatchChanges {
+  std::vector<react::WatchWork> dirty;
+  std::vector<react::Timer> timers;
+};
+
+struct WatchResult {
+  FactKey source;
+  std::vector<WatchDelivery> deliveries;
+  std::vector<react::Timer> timers;
+};
+
+struct InvocationPlan {
+  HandlerRef handler;
+  Handle receiver, sender;
+  TermId trigger = 0;
+  EventPayload payload;
+  std::vector<Handle> acquired;
+  std::optional<WatchRun> watch{};
+};
+
+using ObjectSelection = std::optional<std::span<const Handle>>;
+
+enum class RuleMode { Validated, Enable, Disable };
+
+enum class MechanicAction { Grasp, Release, Attach, Impulse, Transfer };
+enum class ConstructionAction { Create, Destroy, Reconfigure, ReviseModel, PlaceExisting };
+enum class ExchangeAction {
+  HoldGoods,
+  Pay,
+  Balance,
+  Inventory,
+  Give,
+  Offer,
+  Offers,
+  Accept,
+  CancelOffer,
+  TradeOpen,
+  TradeChange,
+  TradeConfirm,
+  TradeCancel
+};
+enum class PermissionAction {
+  Grant,
+  Revoke,
+  ListGrants,
+  Preset,
+  GroupCreate,
+  GroupMember,
+  PlotPermissions
+};
+enum class ScriptAction { Install, Uninstall, ModelScript };
+enum class WritingAction { EditText, ModelText, EditDetail };
+enum class ValueAction { SetSetting, ModelSetting, PatchState, Relate };
+enum class RegistryAction { DefineTerm, DefineMaterial };
+enum class ElaborationAction { RequestModel, Requests, Claim, Answer, Refuse, RuleActivation };
+using NativeOperation =
+    std::variant<MechanicAction, ConstructionAction, ExchangeAction, PermissionAction, ScriptAction,
+                 ValueAction, WritingAction, RegistryAction, ElaborationAction>;
+struct NativeDeclaration {
+  TermId action = 0;
+  std::string right;
+  bool reach = false;
+  nlohmann::json inputs_schema = nlohmann::json::object();
+  NativeOperation operation;
+};
+struct NativeActions {
+  std::unordered_map<TermId, NativeDeclaration> rows;
+};
+using InstalledScripts = SparseColumn<std::vector<ScriptId>>;
+enum class Route { Native, Body, Selected, Fallback };
+enum class Failure { None, UnknownAction, StaleTarget, MissingTarget };
+struct Resolution {
+  Failure failure = Failure::None;
+  Route route = Route::Fallback;
+  Handle receiver, permission_target;
+  std::string right;
+  bool reach = false;
+  ScriptId declaration_script = 0;
+  NativeOperation native_operation;
+  explicit operator bool() const { return failure == Failure::None; }
+};
+struct ArgumentError {
+  std::string input, problem;
+};
 
 ValueRead value_read(const ObjectState &, const catalog::State &, const State &);
 
@@ -53,7 +583,7 @@ RelationAnswer read_relation(const Relation &, Handle);
 std::vector<WatchDelivery> check_watch(Subscriptions &, FactKey, const CurrentAnswers &,
                                        ScriptId recipient = 0);
 std::optional<Step> next_crossing(const Process &, const Threshold &, Step now, double hz);
-bool valid_threshold(const step::ThresholdToken &, IdentityRead, const Processes &,
+bool valid_threshold(const react::ThresholdToken &, IdentityRead, const Processes &,
                      const Subscriptions &, Step now, double hz);
 void bind_watch(Subscriptions &, FactKey, WatchBinding);
 void unbind_watch(Subscriptions &, ScriptKey, std::uint32_t index);
@@ -61,8 +591,8 @@ void retire_subscriptions(Subscriptions &, Handle);
 std::vector<FactKey> watch_sources(const Subscriptions &, ScriptKey);
 std::vector<FactKey> watch_sources(const Subscriptions &, Handle subject);
 std::vector<ScriptKey> watch_consumers(const Subscriptions &, Handle object);
-std::vector<step::Timer> threshold_timers(const Subscriptions &, const Processes &, FactKey,
-                                          Step now, double hz, const record::Origin &);
+std::vector<react::Timer> threshold_timers(const Subscriptions &, const Processes &, FactKey,
+                                           Step now, double hz, const amber::Origin &);
 
 void validate_shared_terms(const Terms &);
 std::vector<FactKey> allocation_inputs(const Terms &, FactKey);
@@ -73,8 +603,8 @@ bool reconcile_allocation(const ValueRead &, amber::react::State &react_state, F
 double metered(const Meter &, Step now, double hz);
 std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, Combine,
                                     const PriorityValues &, Handle subject, TermId supply_term,
-                                    TermId demand_term, amber::react::State &react_state,
-                                    const amber::step::Clock &clock);
+                                    TermId demand_term, amber::react::State &react_state, Step now,
+                                    double hz);
 double get_share(const AllocationRows &, Handle subject, TermId demand_term, Handle contributor);
 double live_share(const ValueRead &, Handle subject, TermId demand_term, Handle contributor,
                   Step now, double hz);
@@ -83,7 +613,7 @@ void retire_allocations(AllocationRows &, MeterRows &, Handle);
 bool set_state(Properties &, Processes &, const Term &, Handle, Value, Step, double hz,
                DeferredEffects &);
 bool set_rate(amber::react::State &react_state, const Term &, Handle, double rate, double lo,
-              double hi, const amber::step::Clock &clock, DeferredEffects &);
+              double hi, Step now, double hz, DeferredEffects &);
 bool transfer_state(amber::react::State &react_state, const Term &, Handle from, Handle to,
                     double amount, Step, double hz, DeferredEffects &);
 bool set_contribution(SharedColumns &, GivesTo &, const Term &, Handle from, Handle subject,
@@ -166,30 +696,29 @@ std::vector<TermId> rule_watch_terms(const RuleVersions &, const ValueRead &, Ha
                                      Step, double hz);
 
 WatchChanges sync_watches(amber::react::State &react_state, const ValueRead &, ScriptKey,
-                          const ScriptDeclaration &, const amber::step::Clock &clock,
-                          const record::Origin &, SyncMode,
-                          std::optional<std::span<const TermId>> allowed_terms = {});
+                          const ScriptDeclaration &, Step now, double hz, const amber::Origin &,
+                          SyncMode, std::optional<std::span<const TermId>> allowed_terms = {});
 void remove_watches(Subscriptions &, ScriptKey);
 WatchChanges refresh_dependencies(Subscriptions &, const ValueRead &, FactKey changed, Step,
-                                  double hz, const record::Origin &);
+                                  double hz, const amber::Origin &);
 WatchChanges sync_rule_watches(amber::react::State &react_state, const ValueRead &,
                                const catalog::Scripts &, std::span<const Effect>, Step, double hz,
-                               const record::Origin &);
+                               const amber::Origin &);
 std::vector<Handle> source_consumers(const ValueRead &, FactKey, const WatchDeclaration &);
 WatchResult check_changed(Subscriptions &, const ValueRead &, const AllocationRows &, FactKey, Step,
-                          double hz, const record::Origin &, ScriptId recipient = 0);
+                          double hz, const amber::Origin &, ScriptId recipient = 0);
 
 std::vector<InvocationPlan> plan_deliveries(const WatchResult &, const Triggers &,
                                             const catalog::Scripts &, const ValueRead &, Step,
                                             double hz);
 bool has_applicable_watch(const Subscriptions &, const Triggers &, const catalog::Scripts &,
                           const ValueRead &, FactKey, Step, double hz);
-std::vector<step::BackgroundItem> catch_up(const SharedColumns &, IdentityRead,
-                                           const catalog::Scripts &, const Terms &,
-                                           const RuleVersion &, const record::Origin &);
-bool catch_up_valid(const step::BackgroundItem &, const RuleVersions &, const ValueRead &, Step,
+std::vector<react::BackgroundItem> catch_up(const SharedColumns &, IdentityRead,
+                                            const catalog::Scripts &, const Terms &,
+                                            const RuleVersion &, const amber::Origin &);
+bool catch_up_valid(const react::BackgroundItem &, const RuleVersions &, const ValueRead &, Step,
                     double hz);
-void cancel_catch_up(step::WorkQueues &, const RuleVersion &);
+void cancel_catch_up(std::deque<BackgroundItem> &, const RuleVersion &);
 
 void write_instances(snap::Output &, const InstanceScripts &, IdentityRead, ObjectSelection = {});
 void read_instances(snap::Input &, InstanceScripts &, std::size_t slots);
@@ -197,10 +726,10 @@ void read_instances(snap::Input &, InstanceScripts &, std::size_t slots);
 // Direct reactive installation and cleanup. No lifecycle-owned references are retained.
 void install_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
                        const ValueRead &, std::span<const Handle>, Step, double hz,
-                       const record::Origin &, DeferredEffects &);
+                       const amber::Origin &, DeferredEffects &);
 void restore_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
                        const ValueRead &, std::span<const Handle>, Step, double hz,
-                       const record::Origin &, DeferredEffects &);
+                       const amber::Origin &, DeferredEffects &);
 void initialize_reactions(const amber::catalog::State &catalog_state,
                           amber::react::State &react_state, const ValueRead &values,
                           std::span<const Handle> initial, Step now, double hz, bool restored,
@@ -208,15 +737,15 @@ void initialize_reactions(const amber::catalog::State &catalog_state,
 
 void rebind_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
                       const ValueRead &, std::span<const Handle>, Step, double hz,
-                      const record::Origin &, DeferredEffects &);
+                      const amber::Origin &, DeferredEffects &);
 void retire_reactions(const catalog::Models &, const ValueRead &, amber::react::State &react_state,
-                      std::span<const Handle>, Step, double hz, const record::Origin &,
+                      std::span<const Handle>, Step, double hz, const amber::Origin &,
                       DeferredEffects &);
 
 // True means cached rule state changed and the caller must persist its registry pin.
-bool update_rule(catalog::Scripts &, amber::react::State &react_state, step::WorkQueues &,
-                 const ValueRead &, ScriptId, RuleMode, const amber::step::Clock &clock,
-                 const record::Origin &, DeferredEffects &);
+bool update_rule(catalog::Scripts &, amber::react::State &react_state, std::deque<BackgroundItem> &,
+                 const ValueRead &, ScriptId, RuleMode, Step now, double hz, const amber::Origin &,
+                 DeferredEffects &);
 void reconcile_allocations(const ValueRead &, amber::react::State &react_state, DeferredEffects &,
                            Step, double hz);
 void reconcile_priority(const ValueRead &, amber::react::State &react_state, SettingKey,
@@ -246,138 +775,6 @@ void write_settings(snap::Output &, const InstanceSettings &, const ModelSetting
 void read_settings(snap::Input &, InstanceSettings &, ModelSettings &, PlotSettings &,
                    WorldSettings &, std::size_t slots);
 
-} // namespace amber::react
-
-namespace amber::catalog {
-void resolve_manifest_terms(Asset &, const react::Terms &);
-PreparedScript prepare_script(std::string_view source, const react::Terms &,
-                              const react::RightsDeclaration &, Hash registry_pin,
-                              const RuntimePins &, react::VmSettings);
-void write_script(const std::filesystem::path &directory, const PreparedScript &);
-PreparedScript read_script(const std::filesystem::path &root, Hash expected, const RuntimePins &,
-                           Hash registry_pin, const react::Terms &,
-                           const react::RightsDeclaration &);
-ScriptId import_script(Scripts &, PreparedScript, PlayerId author, double created_s);
-void restore_scripts(Scripts &, react::Vm &, react::RuleVersions &, const RegistryDocument &,
-                     const react::Terms &, const RuntimePins &,
-                     const std::filesystem::path &source_root,
-                     const std::filesystem::path &destination_root);
-void restore_assets(Assets &, const Models &, const ParameterBlocks &, const react::Terms &,
-                    const RuntimePins &, const std::filesystem::path &asset_root);
-ModelRegistration submit_model(Models &, ModelTexts &, react::ModelSettings &, const Assets &,
-                               const Scripts &, const react::Terms &, const ModelSubmission &);
-std::uint32_t add_variant(State &family, const State &catalog_state, react::ModelSettings &,
-                          const react::Terms &, ModelId, Hash asset, std::string canonical_params);
-void project_measurements(react::AssetMeasurements &, ModelId, std::uint32_t, const Asset &,
-                          const MeasurementBindings &);
-void project_settings(react::ModelSettings &, const react::Terms &, ModelId, const react::Values &);
-TermId append_term(react::Terms &, const TermProposal &, const DuplicateChoice &);
-void set_material(react::Materials &, const react::Terms &, TermId, const react::Values &);
-Hash save_registry(const std::filesystem::path &, const react::Terms &, const react::Materials &,
-                   const react::RuleVersions &, const MechanicalBindings &);
-RegistryDocument read_registry(const std::filesystem::path &, Hash);
-void load_terms(const RegistryDocument &, react::Terms &);
-void load_materials(const RegistryDocument &, const react::Terms &, react::Materials &);
-void load_rules(const RegistryDocument &, const Scripts &, react::RuleVersions &);
-nlohmann::json term_json(const react::Term &);
-react::Term term_from_json(const nlohmann::json &);
-nlohmann::json declaration_json(const react::ScriptDeclaration &);
-react::ScriptDeclaration declaration_from_json(const nlohmann::json &);
-void inherit_definition_settings(react::ModelSettings &, const ModelUpdate &);
-void project_definition_measurements(react::AssetMeasurements &, const Models &,
-                                     const ParameterBlocks &, const Assets &, const ModelUpdate &,
-                                     MeasurementBindings);
-
-using ScriptSelection = std::optional<std::span<const ScriptId>>;
-void write_scripts(snap::Output &, const Scripts &, ScriptSelection = {});
-void read_scripts(snap::Input &, Scripts &);
-} // namespace amber::catalog
-
-namespace amber::react::authoring {
-using Json = nlohmann::json;
-struct AssetRequest {
-  catalog::Hash asset;
-  std::string canonical_params;
-};
-struct ModelRequest {
-  catalog::Hash asset;
-  std::string canonical_params;
-  TermId material = 0;
-  catalog::Text text;
-  std::vector<AssetRequest> variants;
-};
-struct ScriptRequest {
-  std::string source;
-};
-struct VariantRequest {
-  ModelId model = 0;
-  catalog::Hash asset;
-  std::string canonical_params;
-};
-ModelRequest model_request(const Json &, const react::Terms &);
-VariantRequest variant_request(const Json &);
-ScriptRequest script_request(const Json &);
-struct RegistrySnapshot {
-  react::Terms terms;
-  catalog::Hash pin;
-};
-struct WorkerSettings {
-  std::filesystem::path asset_root;
-  catalog::RuntimePins pins;
-  react::VmSettings limits;
-};
-struct PreparedModel {
-  std::vector<catalog::Asset> assets; // root first, then its real declared parts
-  TermId material = 0;
-  catalog::Text text;
-  std::vector<std::vector<catalog::Asset>> variants;
-};
-struct PreparedVariant {
-  ModelId model = 0;
-  std::vector<catalog::Asset> assets;
-};
-struct Failure {
-  std::string error;
-};
-struct Completion {
-  std::uint64_t input_id = 0;
-  std::variant<PreparedModel, PreparedVariant, catalog::PreparedScript, Failure> result;
-};
-class Worker {
-public:
-  explicit Worker(WorkerSettings);
-  ~Worker();
-  Worker(const Worker &) = delete;
-  Worker &operator=(const Worker &) = delete;
-  void submit(std::uint64_t input_id, ModelRequest, RegistrySnapshot);
-  void submit(std::uint64_t input_id, VariantRequest, RegistrySnapshot);
-  void submit(std::uint64_t input_id, ScriptRequest, RegistrySnapshot);
-  std::vector<Completion> poll();
-
-private:
-  struct Impl;
-  std::unique_ptr<Impl> impl_;
-};
-// These writer functions install only validated immutable submissions. Geometry
-// preparation and record/publication policy belong to step's direct caller.
-step::NativeCompletion install_model(PreparedModel, PlayerId author, double created_s,
-                                     amber::catalog::State &catalog_state,
-                                     amber::react::State &react_state,
-                                     catalog::MeasurementBindings);
-step::NativeCompletion install_variant(PreparedVariant, amber::catalog::State &catalog_state,
-                                       amber::react::State &react_state,
-                                       catalog::MeasurementBindings);
-step::NativeCompletion install_script(catalog::PreparedScript, PlayerId author, double created_s,
-                                      catalog::Scripts &, react::Vm &, const react::NativeActions &,
-                                      const std::filesystem::path &script_root);
-Json failure(std::string);
-} // namespace amber::react::authoring
-
-namespace amber::react {
-
-TermId declare_native(NativeActions &, react::Terms &, std::string name, std::string description,
-                      std::string right, bool reach, nlohmann::json inputs_schema, NativeOperation);
-
 Resolution resolve(const NativeActions &, const react::Terms &, const catalog::Models &,
                    const catalog::Scripts &, const InstalledScripts &, IdentityRead,
                    const ActionRequest &, Handle authenticated_body);
@@ -387,24 +784,7 @@ std::vector<ArgumentError> validate_arguments(const react::Terms &, const react:
                                               const EventPayload &);
 std::string format_unit(const std::array<std::int8_t, 8> &dimensions);
 std::string action_signature(const react::Terms &, const NativeActions &, TermId action);
-} // namespace amber::react
 
-namespace amber::catalog {
-struct State {
-  Assets assets;
-  Models models;
-  Scripts scripts;
-  ParameterBlocks parameters;
-  ModelTexts model_text;
-  InstanceTexts instance_text;
-  AuthoredTexts authored_text;
-  react::AssetMeasurements baked_measurements;
-  MechanicalBindings mechanical;
-  RegistryDocument registry;
-};
-} // namespace amber::catalog
-
-namespace amber::react {
 struct State {
   explicit State(VmSettings settings) : vm(settings) {}
   Terms terms;

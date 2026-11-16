@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "replacement_private.hpp"
 
 #include <algorithm>
@@ -219,7 +220,7 @@ revise_model(amber::ObjectState &objects_state, amber::catalog::State &catalog_s
   return out;
 }
 TermId declare_model_edit(react::Terms &terms, react::NativeActions &declarations) {
-  return react::declare_native(
+  return catalog::declare_native(
       declarations, terms, "base.revise_model",
       "Replace a model definition with a baked proposal, updating its live instances. Only its "
       "author may do this.",

@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "editing_private.hpp"
 
 namespace amber::step::editing {

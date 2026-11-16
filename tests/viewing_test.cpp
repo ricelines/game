@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "settings.hpp"
 #include "space_fixture.hpp"
 #include "step/step.hpp"
@@ -252,7 +253,7 @@ int main(int argc, char **argv) {
             "real VM module load");
 
     react::NativeActions &native = react_state.native_declarations;
-    react::declare_native(
+    catalog::declare_native(
         native, terms, "engine.example", "An actual native descriptor", "", false,
         {{"type", "object"},
          {"required", {"amount"}},

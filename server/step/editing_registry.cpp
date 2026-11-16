@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "editing_private.hpp"
 
 #include <cstdio>
@@ -163,7 +164,7 @@ define_material(const step::NativeCall &call, std::span<const std::string> roles
     out.effects.changed = true;
     for (const auto &[fact, old] : old_values)
       if (!(old == react::read(values, fact.subject, fact.term, call.step, call.hz)))
-        out.effects.ordered.emplace_back(step::WatchWork{fact, {}});
+        out.effects.ordered.emplace_back(react::WatchWork{fact, {}});
     out.changed_objects = std::move(objects);
     out.changed_materials.push_back(material);
     return out;
@@ -175,7 +176,7 @@ define_material(const step::NativeCall &call, std::span<const std::string> roles
       out.changed_objects = std::move(changed_objects);
       for (const auto &[fact, before] : old_values) {
         (void)before;
-        out.effects.ordered.emplace_back(step::WatchWork{fact, {}});
+        out.effects.ordered.emplace_back(react::WatchWork{fact, {}});
       }
     }
     return out;

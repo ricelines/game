@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "step.hpp"
 namespace amber::step {
 using Json = nlohmann::json;
@@ -11,13 +12,13 @@ void declare_construction_actions(react::Terms &terms, react::NativeActions &dec
   const Json params = {{"type", "integer"}, {"minimum", 0}};
   const auto add = [&](std::string name, std::string description, std::string right, bool reach,
                        Json properties, Json required, react::NativeOperation operation) {
-    react::declare_native(declarations, terms, std::move(name), std::move(description),
-                          std::move(right), reach,
-                          {{"type", "object"},
-                           {"properties", std::move(properties)},
-                           {"required", std::move(required)},
-                           {"additionalProperties", false}},
-                          operation);
+    catalog::declare_native(declarations, terms, std::move(name), std::move(description),
+                            std::move(right), reach,
+                            {{"type", "object"},
+                             {"properties", std::move(properties)},
+                             {"required", std::move(required)},
+                             {"additionalProperties", false}},
+                            operation);
   };
   add("engine.create", "Place a model with the caller's Build permission on its destination plot.",
       "", false,

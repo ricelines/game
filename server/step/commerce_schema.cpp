@@ -1,4 +1,7 @@
+#include "catalog/catalog.hpp"
 #include "commerce_private.hpp"
+
+#include <algorithm>
 
 namespace amber::step {
 namespace {
@@ -148,8 +151,8 @@ CommerceDeclarations declare_commerce(react::Terms &terms, react::NativeActions 
   const Json money = {{"type", "integer"}, {"minimum", 0}, {"maximum", INT64_MAX}};
   auto add = [&](react::NativeOperation operation, std::string name, std::string description,
                  std::string right, Json input) {
-    return react::declare_native(native, terms, std::move(name), std::move(description),
-                                 std::move(right), false, std::move(input), operation);
+    return catalog::declare_native(native, terms, std::move(name), std::move(description),
+                                   std::move(right), false, std::move(input), operation);
   };
   ids.pay =
       add(react::ExchangeAction::Pay, "engine.pay",

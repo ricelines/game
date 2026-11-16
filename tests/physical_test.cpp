@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "physical_fixture.hpp"
 
 using namespace amber;
@@ -41,8 +42,8 @@ void registry_actions_record_the_actual_player() {
       std::pair{react::NativeOperation{react::ElaborationAction::RuleActivation},
                 "engine.rule_activation"}};
   for (const auto &[operation, name] : operations) {
-    react::declare_native(f.declarations, f.f.terms, name, "Registry record classification", "",
-                          false, {{"type", "object"}}, operation);
+    catalog::declare_native(f.declarations, f.f.terms, name, "Registry record classification", "",
+                            false, {{"type", "object"}}, operation);
     auto run = f.begin_as(PlayerId{1}, name, {}, nlohmann::json::object());
     require(!run.outcome, "valid player registry action is admitted");
     step::NativeCompletion completion;

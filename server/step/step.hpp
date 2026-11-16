@@ -6,6 +6,7 @@ namespace amber::step {
 struct State;
 }
 
+#include "catalog/catalog.hpp"
 #include "elaborate/elaborate.hpp"
 #include "net/net.hpp"
 #include "perm/perm.hpp"
@@ -19,6 +20,255 @@ struct State;
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
+
+namespace amber::step {
+
+struct InputWork {
+  std::uint64_t id = 0;
+};
+using Work = std::variant<react::EventWork, react::WatchWork, InputWork>;
+
+struct ForegroundItem {
+  Work work;
+  std::optional<react::ThresholdToken> threshold;
+};
+struct WorkQueues {
+  std::deque<ForegroundItem> causal, turns;
+  std::deque<react::BackgroundItem> background;
+  std::unordered_set<FactKey, FactKeyHash> watch_queued;
+  std::size_t emitted_events = 0;
+};
+struct ThresholdKey {
+  FactKey source;
+  Handle consumer;
+  ScriptId script = 0;
+  std::uint32_t watch_index = 0;
+  bool operator==(const ThresholdKey &) const = default;
+};
+struct ThresholdKeyHash {
+  std::size_t operator()(const ThresholdKey &key) const {
+    return FactKeyHash{}(key.source) ^ (ScriptKeyHash{}({key.consumer, key.script}) << 1) ^
+           (static_cast<std::size_t>(key.watch_index) << 2);
+  }
+};
+struct TimerLocation {
+  unsigned level = 0, bucket = 0;
+  std::size_t index = 0;
+};
+struct TimerWheel {
+  Step now = 0;
+  std::array<std::array<std::vector<react::Timer>, 256>, 4> levels;
+  // Derived from pending threshold rows, never serialized. Ordinary timers
+  // retain independent entries, including multiple events on the same target.
+  std::unordered_map<ThresholdKey, TimerLocation, ThresholdKeyHash> thresholds;
+};
+enum class PushResult { Queued, Coalesced, Overflow };
+using IntentId = std::uint64_t;
+using MoveGoal = std::variant<Vec3, Handle>;
+enum class IntentEnd { Arrived, Blocked, Cancelled, Replaced };
+struct Intent {
+  IntentId id = 0;
+  MoveGoal goal;
+  amber::Origin origin;
+  std::optional<float> speed_m_s;
+};
+struct IntentEnding {
+  Handle body;
+  Intent intent;
+  IntentEnd reason;
+};
+struct Intents {
+  IntentId next_id = 1;
+  std::unordered_map<std::uint64_t, Intent> moving;
+};
+struct IntentStart {
+  IntentId id;
+  std::optional<IntentEnding> replaced;
+};
+
+using Monotonic = std::chrono::steady_clock;
+struct Settings {
+  double step_hz = 0, margin_ms = 0;
+  std::size_t average_steps = 0;
+};
+struct Clock {
+  Step step = 0;
+  double hz = 0;
+  Monotonic::time_point next_start{};
+  std::uint64_t overruns = 0;
+};
+struct Frame {
+  Step step = 0;
+  Monotonic::time_point started, handler_deadline, boundary;
+  std::size_t foreground = 0, background = 0;
+};
+struct EventTurn {
+  react::EventWork event;
+  std::optional<react::ThresholdToken> threshold;
+};
+struct Input {
+  std::uint64_t id = 0;
+  net::ControlKind kind;
+  Caller caller = PlayerId{0};
+  Handle body;
+  std::uint64_t session = 0, sequence = 0, request = 0;
+  nlohmann::json fields = nlohmann::json::object();
+  amber::Origin origin;
+  bool awaiting = false;
+};
+struct Inputs {
+  std::uint64_t next_id = 1;
+  std::map<std::uint64_t, Input> rows;
+};
+struct InputReply {
+  bool deferred = false;
+  nlohmann::json fields = nlohmann::json::object();
+  std::optional<amber::Origin> origin{};
+};
+struct InputCompletion {
+  std::uint64_t id = 0, session = 0, sequence = 0, request = 0;
+  nlohmann::json fields;
+};
+struct Bounds {
+  Vec3 minimum, maximum;
+};
+struct PlannedInvocation {
+  react::HandlerRef handler;
+  react::InvocationInput input;
+};
+struct WatchPlan {
+  bool modeled = false;
+  std::optional<FactKey> shared_gap;
+  std::vector<PlannedInvocation> invocations;
+  react::WatchChanges changes;
+};
+struct InputOrder {
+  std::uint64_t input = 0, session = 0, sequence = 0, request = 0;
+};
+struct GapDraft {
+  Handle target;
+  TermId term, action;
+  PlayerId requester;
+  amber::Origin origin;
+};
+struct NativeCall {
+  ActionRequest request;
+  nlohmann::json arguments;
+  Handle body;
+  Step step = 0;
+  double hz = 0;
+  amber::Origin origin;
+  std::optional<InputOrder> order{};
+  Monotonic::time_point deadline{};
+};
+struct NativeCompletion {
+  record::Result result = record::Result::NoEffect;
+  bool changed = false;
+  nlohmann::json reply = nlohmann::json::object();
+  react::DeferredEffects effects;
+  std::vector<record::Event> records;
+  std::vector<std::pair<PlayerId, nlohmann::json>> notices;
+  bool deferred = false;
+  std::vector<Handle> changed_objects;
+  std::vector<ModelId> changed_models;
+  std::vector<ScriptId> changed_scripts;
+  std::vector<TermId> changed_terms, changed_materials;
+  bool permissions_changed = false;
+  std::vector<perm::CustodyChange> custody;
+  std::vector<Handle> created_objects, removed_objects, visible_objects, hidden_objects;
+  std::vector<lifecycle::Rebinding> rebound_objects;
+};
+
+struct DeliveryTargets {
+  std::unordered_map<PlayerId, Handle> present_bodies;
+};
+
+struct ActionOutcome {
+  nlohmann::json reply;
+  amber::Origin origin;
+  bool deferred = false;
+};
+} // namespace amber::step
+
+namespace amber::step::authoring {
+using Json = nlohmann::json;
+struct AssetRequest {
+  catalog::Hash asset;
+  std::string canonical_params;
+};
+struct ModelRequest {
+  catalog::Hash asset;
+  std::string canonical_params;
+  TermId material = 0;
+  catalog::Text text;
+  std::vector<AssetRequest> variants;
+};
+struct ScriptRequest {
+  std::string source;
+};
+struct VariantRequest {
+  ModelId model = 0;
+  catalog::Hash asset;
+  std::string canonical_params;
+};
+ModelRequest model_request(const Json &, const react::Terms &);
+VariantRequest variant_request(const Json &);
+ScriptRequest script_request(const Json &);
+struct RegistrySnapshot {
+  react::Terms terms;
+  catalog::Hash pin;
+};
+struct WorkerSettings {
+  std::filesystem::path asset_root;
+  catalog::RuntimePins pins;
+  react::VmSettings limits;
+};
+struct PreparedModel {
+  std::vector<catalog::Asset> assets; // root first, then its real declared parts
+  TermId material = 0;
+  catalog::Text text;
+  std::vector<std::vector<catalog::Asset>> variants;
+};
+struct PreparedVariant {
+  ModelId model = 0;
+  std::vector<catalog::Asset> assets;
+};
+struct Failure {
+  std::string error;
+};
+struct Completion {
+  std::uint64_t input_id = 0;
+  std::variant<PreparedModel, PreparedVariant, catalog::PreparedScript, Failure> result;
+};
+class Worker {
+public:
+  explicit Worker(WorkerSettings);
+  ~Worker();
+  Worker(const Worker &) = delete;
+  Worker &operator=(const Worker &) = delete;
+  void submit(std::uint64_t input_id, ModelRequest, RegistrySnapshot);
+  void submit(std::uint64_t input_id, VariantRequest, RegistrySnapshot);
+  void submit(std::uint64_t input_id, ScriptRequest, RegistrySnapshot);
+  std::vector<Completion> poll();
+
+private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
+// These writer functions install only validated immutable submissions. Geometry
+// preparation and record/publication policy belong to step's direct caller.
+step::NativeCompletion install_model(PreparedModel, PlayerId author, double created_s,
+                                     amber::catalog::State &catalog_state,
+                                     amber::react::State &react_state,
+                                     catalog::MeasurementBindings);
+step::NativeCompletion install_variant(PreparedVariant, amber::catalog::State &catalog_state,
+                                       amber::react::State &react_state,
+                                       catalog::MeasurementBindings);
+step::NativeCompletion install_script(catalog::PreparedScript, PlayerId author, double created_s,
+                                      catalog::Scripts &, react::Vm &, const react::NativeActions &,
+                                      const std::filesystem::path &script_root);
+Json failure(std::string);
+} // namespace amber::step::authoring
 
 namespace amber::step {
 inline constexpr char runtime_version[] = "ambergris-0.4";
@@ -59,17 +309,17 @@ std::span<const space::TravelBoundary> travel_boundaries(TravelAccess &, Identit
 void append_inputs(WorkQueues &, std::vector<Work>);
 void promote_due(TimerWheel &, Step now, WorkQueues &);
 std::optional<ForegroundItem> pop_foreground(WorkQueues &);
-std::optional<BackgroundItem> pop_background(WorkQueues &);
-PushResult enqueue_event(WorkQueues &, EventWork, std::size_t limit);
-PushResult enqueue_watch(WorkQueues &, WatchWork);
-void enqueue_background(WorkQueues &, BackgroundItem);
-void schedule(TimerWheel &, Timer);
+std::optional<react::BackgroundItem> pop_background(WorkQueues &);
+PushResult enqueue_event(WorkQueues &, react::EventWork, std::size_t limit);
+PushResult enqueue_watch(WorkQueues &, react::WatchWork);
+void enqueue_background(WorkQueues &, react::BackgroundItem);
+void schedule(TimerWheel &, react::Timer);
 void cancel_threshold(TimerWheel &, const ThresholdKey &);
 void cancel_source_thresholds(TimerWheel &, const react::Subscriptions &, FactKey);
 void rebuild_queue_index(WorkQueues &);
-std::vector<Timer> timers(const TimerWheel &);
+std::vector<react::Timer> timers(const TimerWheel &);
 
-IntentStart start_move(Intents &, Handle, MoveGoal, record::Origin,
+IntentStart start_move(Intents &, Handle, MoveGoal, amber::Origin,
                        std::optional<float> speed_m_s = {});
 std::optional<IntentEnding> cancel_move(Intents &, Handle);
 std::optional<IntentEnding> finish_move(Intents &, Handle, IntentEnd);
@@ -104,17 +354,17 @@ bool valid_event(const EventTurn &, IdentityRead, const react::Processes &,
                  const react::Subscriptions &, Step now, double hz);
 EventPayload normalize_arguments(const react::Terms &, TermId action, EventPayload);
 std::vector<PlannedInvocation> plan_event(const react::Triggers &, const react::ValueRead &,
-                                          const step::EventWork &, Step, double hz);
+                                          const react::EventWork &, Step, double hz);
 std::vector<PlannedInvocation> plan_action(const react::Triggers &, const react::ValueRead &,
                                            const react::Resolution &, const ActionRequest &,
-                                           Handle authenticated_body, const record::Origin &, Step,
+                                           Handle authenticated_body, const amber::Origin &, Step,
                                            double hz);
 
 WatchPlan plan_watch(react::Subscriptions &, const react::ValueRead &,
                      const react::AllocationRows &, const react::Triggers &,
-                     const catalog::Scripts &, const step::WatchWork &, Step, double hz);
+                     const catalog::Scripts &, const react::WatchWork &, Step, double hz);
 WatchPlan plan_background(amber::react::State &react_state, const react::ValueRead &,
-                          const catalog::Scripts &, const step::BackgroundItem &, Step, double hz);
+                          const catalog::Scripts &, const react::BackgroundItem &, Step, double hz);
 
 struct VolumeGeometry {
   space::GeometryId geometry;
@@ -164,7 +414,7 @@ void refresh_material(space::Space &, const GeometryAssets &,
                       const amber::step::Clock &clock);
 
 struct CauseSummary {
-  record::Origin origin;
+  amber::Origin origin;
   bool ambiguous = false;
 };
 class MechanicalCauses {
@@ -173,7 +423,7 @@ public:
   ~MechanicalCauses();
   MechanicalCauses(const MechanicalCauses &) = delete;
   MechanicalCauses &operator=(const MechanicalCauses &) = delete;
-  space::CauseToken intern(const record::Origin &, space::CauseToken previous = 0);
+  space::CauseToken intern(const amber::Origin &, space::CauseToken previous = 0);
   space::CauseToken restore(CauseSummary);
   CauseSummary lookup(space::CauseToken) const;
   CauseSummary combine(const CauseSummary &, const CauseSummary &) const;
@@ -371,7 +621,7 @@ struct AnswerCompletion {
 struct FixtureCompletion {
   std::optional<step::InputCompletion> input;
   std::optional<elaborate::CloseOutcome> notification;
-  record::Origin origin;
+  amber::Origin origin;
   react::DeferredEffects effects;
   std::vector<ScriptId> changed_scripts;
 };
@@ -495,7 +745,7 @@ step::NativeCompletion model_script(const step::NativeCall &call, amber::react::
                                     amber::perm::State &perm_state, TermId start_event);
 void rebind_scripts(const amber::catalog::State &catalog_state, amber::react::State &react_state,
                     const react::ValueRead &, amber::perm::State &perm_state, TermId start_event,
-                    const amber::step::Clock &clock, const record::Origin &, NativeCompletion &);
+                    const amber::step::Clock &clock, const amber::Origin &, NativeCompletion &);
 
 } // namespace amber::step::editing
 
@@ -614,12 +864,12 @@ void validate_mass_roles(const react::Terms &, MassRoles);
 void invalidate_mass(AssemblyMasses &, IdentityRead, const Relation &declared_parts,
                      std::span<const Handle> changed);
 void refresh_mass(AssemblyMasses &, const react::ValueRead &, const Relation &declared_parts,
-                  react::RuntimeMeasurements &, Step, double hz, const record::Origin &,
+                  react::RuntimeMeasurements &, Step, double hz, const amber::Origin &,
                   react::DeferredEffects &);
 void retire_mass(AssemblyMasses &, react::RuntimeMeasurements &, Handle);
 void reconcile_mass(AssemblyMasses &, const react::ValueRead &, const Relation &declared_parts,
                     react::RuntimeMeasurements &, std::span<const FactKey>,
-                    const amber::step::Clock &clock, const record::Origin &,
+                    const amber::step::Clock &clock, const amber::Origin &,
                     react::DeferredEffects &);
 
 void write_timers(snap::Output &, const TimerWheel &, const snap::ObjectSelection & = {});
@@ -660,13 +910,13 @@ void retire_commerce(amber::perm::State &perm_state, amber::ObjectState &objects
                      std::span<const Handle> removed, Step, NativeCompletion &);
 void retire_physics(space::Space &, amber::ObjectState &objects_state, space::PhysicalRelations &,
                     amber::step::State &step_state, std::span<const Handle> removed,
-                    std::array<TermId, 4> relation_terms, const record::Origin &,
+                    std::array<TermId, 4> relation_terms, const amber::Origin &,
                     NativeCompletion &);
 void retire_publication(net::ReplicationIndex &, net::SessionViews &, catalog::InstanceTexts &,
                         std::span<const Handle> removed);
 void refresh_object_plots(const space::Space &, amber::ObjectState &objects_state,
                           const perm::Plots &, const amber::react::State &react_state,
-                          const record::Origin &, NativeCompletion &);
+                          const amber::Origin &, NativeCompletion &);
 void publish_catalog_changes(net::Sessions &, net::SessionViews &, const catalog::Models &,
                              const catalog::ModelTexts &, const react::Terms &,
                              const react::Materials &, net::MaterialAppearanceRoles,
@@ -678,17 +928,17 @@ void publish_object_changes(net::Sessions &, net::SessionViews &, IdentityRead, 
 void reconcile_effects(const react::ValueRead &values, amber::react::State &react_state,
                        amber::step::State &step_state, const Relation &declared_parts,
                        const catalog::Scripts &scripts, const amber::step::Clock &clock,
-                       react::DeferredEffects &effects, const record::Origin &origin);
+                       react::DeferredEffects &effects, const amber::Origin &origin);
 void record_send_overflow(record::Journal &, const net::SendOverflow &, Step);
-void publish_effects(react::DeferredEffects &&, const record::Origin &, Step, WorkQueues &,
+void publish_effects(react::DeferredEffects &&, const amber::Origin &, Step, WorkQueues &,
                      TimerWheel &, record::Journal &, std::size_t event_limit);
-record::Origin publish_invocation(record::Journal &, WorkQueues &, TimerWheel &,
-                                  react::CompletedInvocation &&, const record::Origin &,
-                                  std::size_t event_limit);
-using AdmittedWork = std::variant<ForegroundItem, BackgroundItem, elaborate::FixtureResult,
-                                  react::authoring::Completion>;
+amber::Origin publish_invocation(record::Journal &, WorkQueues &, TimerWheel &,
+                                 react::CompletedInvocation &&, const amber::Origin &,
+                                 std::size_t event_limit);
+using AdmittedWork = std::variant<ForegroundItem, react::BackgroundItem, elaborate::FixtureResult,
+                                  step::authoring::Completion>;
 std::optional<AdmittedWork> next_work(WorkQueues &, Frame &, std::deque<elaborate::FixtureResult> &,
-                                      std::deque<react::authoring::Completion> &,
+                                      std::deque<step::authoring::Completion> &,
                                       Monotonic::time_point now);
 } // namespace amber::step
 
@@ -778,14 +1028,14 @@ std::variant<NativeCall, InputReply> parse_action_input(const Input &, const rea
                                                         record::Journal &, Step, double hz);
 ActionOutcome cancel_input(Intents &, std::vector<IntentEnding> &, record::Journal &, const Input &,
                            Step);
-InputReply submit_authoring(react::authoring::Worker &, const react::Terms &,
+InputReply submit_authoring(step::authoring::Worker &, const react::Terms &,
                             const catalog::RegistryDocument &, Input &);
 void deliver_input(Inputs &, net::Sessions &, observe::Hearing &, std::uint32_t event_limit,
                    std::uint64_t input, ActionOutcome);
-std::pair<NativeCompletion, record::Origin>
+std::pair<NativeCompletion, amber::Origin>
 complete_authoring(amber::catalog::State &catalog_state, amber::react::State &react_state,
                    amber::step::State &step_state, space::Space &space, record::Journal &journal,
-                   const Input &input, react::authoring::Completion completion, bool session_live,
+                   const Input &input, step::authoring::Completion completion, bool session_live,
                    const std::filesystem::path &asset_root,
                    const std::filesystem::path &script_root);
 
@@ -807,9 +1057,7 @@ step::NativeCompletion hold_goods(amber::perm::State &perm_state, amber::ObjectS
                                   std::size_t mailbox_max, const step::NativeCall &call);
 void declare_hold_goods_action(react::Terms &terms, react::NativeActions &declarations);
 std::string validate_hold_goods(const nlohmann::json &input);
-} // namespace amber::step
 
-namespace amber::step {
 struct State {
   WorkQueues queues;
   TimerWheel timers;

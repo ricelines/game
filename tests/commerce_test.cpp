@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "space_fixture.hpp"
 #include <toml++/toml.hpp>
 
@@ -588,7 +589,7 @@ void rebind_invalidates_only_affected_sales_with_actual_new_parts() {
               f.ledger.balance == balances && cancellation.changed,
           "definition invalidation used stale parts, moved goods, or cancelled unrelated sale");
   record::Journal journal(100, {});
-  record::Origin origin;
+  amber::Origin origin;
   origin.cause = 91;
   for (auto &row : cancellation.records)
     journal.append(std::move(row), origin);
@@ -795,7 +796,7 @@ void login_delivers_complete_mailbox_without_native_capacity_or_identity_changes
   const auto model = f.f.objects.model[first.root.slot()];
   const auto created = f.f.objects.created_step[first.root.slot()];
   const auto flags = f.f.objects.flags[first.root.slot()];
-  record::Origin origin;
+  amber::Origin origin;
   origin.cause = 81;
   require(deliver(f.bodies[1], 22) == 2 && f.players.rows[2].mailbox.empty() &&
               f.players.rows[2].inventory == mailbox &&

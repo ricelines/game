@@ -466,7 +466,7 @@ int emit_method(lua_State *L) {
       std::ranges::find(inv.event_targets, target) == inv.event_targets.end())
     luaL_error(L, "event target must be self, a declared part, related, or from this event");
   inv.effects->ordered.push_back(
-      step::EventWork{target, inv.self.object, event, check_payload(L, 4), {}});
+      react::EventWork{target, inv.self.object, event, check_payload(L, 4), {}});
   return 0;
 }
 int after_method(lua_State *L) {
@@ -481,7 +481,7 @@ int after_method(lua_State *L) {
   const auto event = term_arg(L, 3, *terms);
   if (terms->rows[event].kind != Kind::Event)
     luaL_error(L, "after needs an event term");
-  step::Timer timer;
+  react::Timer timer;
   timer.due = inv.step + std::max<Step>(1, static_cast<Step>(std::ceil(seconds * inv.hz)));
   timer.event = {inv.self.object, inv.self.object, event, check_payload(L, 4), {}};
   inv.effects->ordered.push_back(std::move(timer));
@@ -1351,8 +1351,7 @@ int rate_binding(lua_State *L) {
     luaL_error(L, "stale process target");
   try {
     set_rate(binding.react_state, binding.terms.rows[id], target, luaL_checknumber(L, 3),
-             luaL_checknumber(L, 4), luaL_checknumber(L, 5),
-             amber::step::Clock{.step = inv.step, .hz = inv.hz}, *inv.effects);
+             luaL_checknumber(L, 4), luaL_checknumber(L, 5), inv.step, inv.hz, *inv.effects);
   } catch (const std::exception &e) {
     luaL_error(L, "%s", e.what());
   }

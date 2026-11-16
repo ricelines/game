@@ -1,6 +1,9 @@
+#include "catalog/catalog.hpp"
 #include "editing_private.hpp"
 
 #include <limits>
+
+#include <algorithm>
 
 namespace amber::step::editing {
 namespace {
@@ -51,7 +54,7 @@ bool synchronize(amber::react::State &react_state, const react::ValueRead &value
                  const catalog::Scripts &scripts, amber::perm::State &perm_state,
                  TermId start_event, Handle object, std::span<const ScriptId> before,
                  std::span<const ScriptId> after, const amber::step::Clock &clock,
-                 const record::Origin &origin, react::DeferredEffects &effects) {
+                 const amber::Origin &origin, react::DeferredEffects &effects) {
   const auto now = clock.step;
   const auto hz = clock.hz;
 
@@ -86,13 +89,12 @@ bool synchronize(amber::react::State &react_state, const react::ValueRead &value
     if (std::find(before.begin(), before.end(), added) == before.end()) {
       const auto &declaration = scripts.rows[added].declaration;
       detail::watches(effects,
-                      react::sync_watches(react_state, values, {object, added}, declaration,
-                                          amber::step::Clock{.step = now, .hz = hz}, origin,
-                                          react::SyncMode::Change));
+                      react::sync_watches(react_state, values, {object, added}, declaration, now,
+                                          hz, origin, react::SyncMode::Change));
       if (start_event && declaration.active &&
           std::find(declaration.handlers.begin(), declaration.handlers.end(), start_event) !=
               declaration.handlers.end())
-        effects.ordered.emplace_back(step::EventWork{object, {}, start_event, {}, origin, added});
+        effects.ordered.emplace_back(react::EventWork{object, {}, start_event, {}, origin, added});
     }
   return permissions_changed;
 }
@@ -358,7 +360,7 @@ step::NativeCompletion model_script(const step::NativeCall &call, amber::react::
 void rebind_scripts(const amber::catalog::State &catalog_state, amber::react::State &react_state,
                     const react::ValueRead &values, amber::perm::State &perm_state,
                     TermId start_event, const amber::step::Clock &clock,
-                    const record::Origin &origin, NativeCompletion &out) {
+                    const amber::Origin &origin, NativeCompletion &out) {
   const auto now = clock.step;
   const auto hz = clock.hz;
 

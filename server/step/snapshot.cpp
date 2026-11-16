@@ -2,8 +2,8 @@
 #include "step.hpp"
 #include <algorithm>
 
-namespace amber::step {
-template <class S> void serialize(S &s, EventWork &v) {
+namespace amber::react {
+template <class S> void serialize(S &s, react::EventWork &v) {
   s.object(v.receiver);
   s.object(v.sender);
   s.value4b(v.event);
@@ -11,31 +11,36 @@ template <class S> void serialize(S &s, EventWork &v) {
   s.object(v.origin);
   s.value4b(v.recipient_script);
 }
-template <class S> void serialize(S &s, WatchWork &v) {
+template <class S> void serialize(S &s, react::WatchWork &v) {
   s.object(v.source);
   s.object(v.origin);
 }
-template <class S> void serialize(S &s, InputWork &v) {
-  s.value8b(v.id);
-}
-template <class S> void serialize(S &s, BackgroundItem &v) {
+template <class S> void serialize(S &s, react::BackgroundItem &v) {
   s.object(v.receiver);
   s.value4b(v.trigger);
   s.value4b(v.script);
   s.object(v.origin);
   s.value4b(v.version);
 }
-template <class S> void serialize(S &s, ThresholdToken &v) {
+template <class S> void serialize(S &s, react::ThresholdToken &v) {
   s.object(v.source);
   s.object(v.consumer);
   s.value4b(v.script);
   s.value4b(v.watch_index);
 }
-template <class S> void serialize(S &s, Timer &v) {
+template <class S> void serialize(S &s, react::Timer &v) {
   s.value8b(v.due);
   s.object(v.event);
   snap::field(s, v.threshold);
 }
+} // namespace amber::react
+
+namespace amber::step {
+
+template <class S> void serialize(S &s, InputWork &v) {
+  s.value8b(v.id);
+}
+
 template <class S> void serialize(S &s, ForegroundItem &v) {
   snap::field(s, v.work);
   snap::field(s, v.threshold);
@@ -51,7 +56,7 @@ void write_timers(snap::Output &out, const TimerWheel &wheel,
   out.value8b(wheel.now);
   auto rows = timers(wheel);
   if (!selected.all)
-    std::erase_if(rows, [&](const Timer &timer) {
+    std::erase_if(rows, [&](const react::Timer &timer) {
       return !selected.contains(timer.event.receiver) ||
              (timer.threshold && !selected.contains(timer.threshold->consumer));
     });
@@ -60,7 +65,7 @@ void write_timers(snap::Output &out, const TimerWheel &wheel,
 void read_timers(snap::Input &in, TimerWheel &wheel) {
   wheel = TimerWheel{};
   in.value8b(wheel.now);
-  std::vector<Timer> saved;
+  std::vector<react::Timer> saved;
   snap::field(in, saved);
   for (auto &timer : saved)
     schedule(wheel, std::move(timer));
@@ -79,9 +84,9 @@ void write_queues(snap::Output &out, const WorkQueues &q, const Intents &intents
       const bool include = std::visit(
           [&](const auto &work) {
             using T = std::decay_t<decltype(work)>;
-            if constexpr (std::is_same_v<T, EventWork>)
+            if constexpr (std::is_same_v<T, react::EventWork>)
               return selected.contains(work.receiver);
-            else if constexpr (std::is_same_v<T, WatchWork>)
+            else if constexpr (std::is_same_v<T, react::WatchWork>)
               return selected.contains(work.source.subject);
             else
               return std::find(selected_inputs.begin(), selected_inputs.end(), work.id) !=
@@ -95,7 +100,7 @@ void write_queues(snap::Output &out, const WorkQueues &q, const Intents &intents
   };
   write_lane(q.causal);
   write_lane(q.turns);
-  auto background = selected.all ? std::deque<BackgroundItem>{} : q.background;
+  auto background = selected.all ? std::deque<react::BackgroundItem>{} : q.background;
   if (!selected.all)
     std::erase_if(background, [&](const auto &item) { return !selected.contains(item.receiver); });
   out.container(selected.all ? q.background : background, snap::max_collection());

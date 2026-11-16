@@ -33,7 +33,7 @@ void invalidate_mass(AssemblyMasses &masses, IdentityRead identity, const Relati
 }
 void refresh_mass(AssemblyMasses &masses, const react::ValueRead &values, const Relation &parts,
                   react::RuntimeMeasurements &measurements, Step now, double hz,
-                  const record::Origin &origin, react::DeferredEffects &effects) {
+                  const amber::Origin &origin, react::DeferredEffects &effects) {
   if (masses.dirty.empty())
     return;
   std::vector<std::uint64_t> dirty(masses.dirty.begin(), masses.dirty.end());
@@ -78,7 +78,7 @@ void retire_mass(AssemblyMasses &masses, react::RuntimeMeasurements &measurement
 void reconcile_mass(AssemblyMasses &masses, const react::ValueRead &values,
                     const Relation &declared_parts, react::RuntimeMeasurements &measurements,
                     std::span<const FactKey> facts, const amber::step::Clock &clock,
-                    const record::Origin &origin, react::DeferredEffects &effects) {
+                    const amber::Origin &origin, react::DeferredEffects &effects) {
   const auto now = clock.step;
   const auto hz = clock.hz;
 

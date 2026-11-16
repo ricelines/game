@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "react.hpp"
 
 #include <algorithm>
@@ -43,7 +44,7 @@ const T *column(const std::vector<SparseColumn<T>> &cols, TermId term, Handle h)
   return term < cols.size() ? cols[term].get(h.slot()) : nullptr;
 }
 void dirty(DeferredEffects &effects, Handle subject, TermId term) {
-  effects.ordered.push_back(step::WatchWork{{subject, term}, {}});
+  effects.ordered.push_back(react::WatchWork{{subject, term}, {}});
   effects.changed = true;
 }
 void state_term(const Term &term) {
@@ -190,9 +191,7 @@ bool set_state(Properties &props, Processes &processes, const Term &term, Handle
   return changed;
 }
 bool set_rate(amber::react::State &react_state, const Term &term, Handle self, double rate,
-              double lo, double hi, const amber::step::Clock &clock, DeferredEffects &effects) {
-  const auto now = clock.step;
-  const auto hz = clock.hz;
+              double lo, double hi, Step now, double hz, DeferredEffects &effects) {
 
   auto &props = react_state.properties;
   auto &processes = react_state.processes;
@@ -211,7 +210,7 @@ bool set_rate(amber::react::State &react_state, const Term &term, Handle self, d
   const double initial = std::clamp(current, lo, hi);
   processes[term.id].set(self.slot(), Process{initial, now, rate, lo, hi});
   // Rate changes also re-arm subscribed threshold timers even if the current answer is equal.
-  effects.ordered.push_back(step::WatchWork{{self, term.id}, {}});
+  effects.ordered.push_back(react::WatchWork{{self, term.id}, {}});
   const bool changed = !before.present || current != initial || dynamics_changed;
   effects.changed |= changed;
   return changed;
@@ -415,10 +414,7 @@ std::vector<Demand> divide(const Shared &supply, const Shared &demand, Combine c
 std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, Combine combine,
                                     const PriorityValues &priority, Handle subject,
                                     TermId supply_term, TermId demand_term,
-                                    amber::react::State &react_state,
-                                    const amber::step::Clock &clock) {
-  const auto now = clock.step;
-  const auto hz = clock.hz;
+                                    amber::react::State &react_state, Step now, double hz) {
 
   auto &allocations = react_state.allocations;
   auto &meters = react_state.meters;

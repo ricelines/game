@@ -49,7 +49,7 @@ struct LastGap {
   Handle target;
   Step step = 0;
   Hash capture;
-  record::Origin origin;
+  amber::Origin origin;
 };
 struct LastGaps {
   std::unordered_map<PlayerId, LastGap> rows;
@@ -75,7 +75,7 @@ struct GapInput {
   PlayerId originating_player = 0;
   Step step = 0;
   Hash capture;
-  record::Origin origin;
+  amber::Origin origin;
 };
 struct GapOutcome {
   std::uint64_t count = 0;
@@ -203,9 +203,7 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 void complete_capture(CaptureRefs &, const CaptureWrite &);
-} // namespace amber::elaborate
 
-namespace amber::elaborate {
 using ObjectSelection = std::optional<std::span<const Handle>>;
 using GapSelection = std::optional<std::span<const GapKey>>;
 using HashSelection = std::optional<std::span<const Hash>>;

@@ -350,8 +350,7 @@ void canonical_results_and_actual_bounds() {
 void threshold_plans_use_current_subscriptions(bool benchmark) {
   test_runtime::Fixture f(250);
   f.state(f.a, 1, 0);
-  react::set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 20,
-                  amber::step::Clock{.step = 0, .hz = 20}, f.effects);
+  react::set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 20, 0, 20, f.effects);
   const auto direct = f.add(R"(return {kind='instance',watches={{term='novel.heat',thresholds={
     {predicate='above',value=1},{predicate='above',value=2},{predicate='above',value=3}}}},on={
     ['novel.heat']=function(self,source,value)
@@ -378,7 +377,7 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
 
   record::Journal journal(8, {});
   journal.restore_next_id(10);
-  const record::Origin origin{9, 3, {1, 2}, 1.5, false};
+  const amber::Origin origin{9, 3, {1, 2}, 1.5, false};
   auto due = react::threshold_timers(f.subscriptions, f.processes, {f.a, 1}, 0, 20, origin);
   require(due.size() == 2 && due[0].due == 21 && due[1].due == 21,
           "both subscriptions arm the actual process crossing");
@@ -388,14 +387,14 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
   const auto crossing = [&](Step now) {
     step::promote_due(timers, now, queues);
     while (auto item = step::pop_foreground(queues)) {
-      if (auto *event = std::get_if<step::EventWork>(&item->work)) {
+      if (auto *event = std::get_if<react::EventWork>(&item->work)) {
         const step::EventTurn turn{*event, item->threshold};
         if (step::valid_event(turn, identity(f.objects), f.processes, f.subscriptions, now, 20)) {
           require(turn.threshold.has_value(), "crossing fixture produces threshold events only");
           step::enqueue_watch(queues, {turn.threshold->source, turn.event.origin});
         }
       } else {
-        const auto &watch = std::get<step::WatchWork>(item->work);
+        const auto &watch = std::get<react::WatchWork>(item->work);
         step::cancel_source_thresholds(timers, f.subscriptions, watch.source);
         auto planned = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
                                         f.scripts, watch, now, 20);
@@ -468,7 +467,7 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
     step::publish_invocation(journal, queues, timers, std::move(completed), origin, 1000);
     // The explicit source evaluation above already consumed this handler's dirty fact.
     while (auto item = step::pop_foreground(queues))
-      require(std::holds_alternative<step::WatchWork>(item->work),
+      require(std::holds_alternative<react::WatchWork>(item->work),
               "rate-only handler produces dirty source work, never extra action callbacks");
     require(timers.thresholds.size() == 2,
             "actual repeated Lua rates retain one pending token per subscribed script");
@@ -516,8 +515,8 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
           "zero rate cancels current bindings' tokens and preserves unrelated ordinary timers");
   step::publish_invocation(journal, queues, timers, std::move(completed), origin, 1000);
   while (auto item = step::pop_foreground(queues))
-    require(std::holds_alternative<step::WatchWork>(item->work) &&
-                std::get<step::WatchWork>(item->work).source == FactKey{f.a, 1},
+    require(std::holds_alternative<react::WatchWork>(item->work) &&
+                std::get<react::WatchWork>(item->work).source == FactKey{f.a, 1},
             "stopping a process publishes only its actual dirty source");
   if (benchmark)
     std::cout

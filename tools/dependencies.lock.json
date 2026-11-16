@@ -116,6 +116,13 @@
       "url": "https://files.pythonhosted.org/packages/0e/cc/06adcfb7dfaea4d2c1929202021d4afcdc26915dc75fc0c72d63855da553/clang_format-23.1.5-py2.py3-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
       "archive": "clang_format-23.1.5-linux-x86_64.whl",
       "sha256": "d97ce49911ba8c89ef3f3c0735a9c7818e4780ab4812c67d1c5fcd829d16ae52"
+    },
+    "native": {
+      "revision": "5d2b81a7a3be3e2f832879028e4d60abbf58e9a0",
+      "gcc": "16.2.0",
+      "ninja": "1.13.2",
+      "ccache": "4.14.3",
+      "mold": "3.0.0"
     }
   }
 }

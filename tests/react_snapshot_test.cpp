@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "react/react.hpp"
 #include "snap/snap.hpp"
 

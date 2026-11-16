@@ -1,4 +1,7 @@
+#include "catalog/catalog.hpp"
 #include "editing_private.hpp"
+
+#include <algorithm>
 
 namespace amber::step::editing {
 namespace {
@@ -18,7 +21,7 @@ Changes settings(const react::Terms &terms, const Json &values) {
   return changed;
 }
 void dirty(step::NativeCompletion &out, Handle object, TermId term) {
-  out.effects.ordered.emplace_back(step::WatchWork{{object, term}, {}});
+  out.effects.ordered.emplace_back(react::WatchWork{{object, term}, {}});
 }
 } // namespace
 step::NativeCompletion set_setting(const step::NativeCall &call,

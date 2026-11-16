@@ -8,8 +8,12 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 runtime = root / ".cache/bake-runtime.json"
 environment = os.environ.copy()
+python = str(root / ".venv/bin/python")
+arguments = [python, *sys.argv[1:]]
+executable = python
 if runtime.exists():
     data = json.loads(runtime.read_text())
-    environment["LD_LIBRARY_PATH"] = ":".join(data["library_paths"])
+    executable = data["loader"]
+    arguments = [executable, "--library-path", ":".join(data["library_paths"]), *arguments]
 os.chdir(root)
-os.execve(root / ".venv/bin/python", [str(root / ".venv/bin/python"), *sys.argv[1:]], environment)
+os.execve(executable, arguments, environment)

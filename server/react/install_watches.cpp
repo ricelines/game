@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "react.hpp"
 #include "snap/snap.hpp"
 
@@ -80,7 +81,7 @@ existing(const react::Subscriptions &subscriptions, WatchKey key) {
 }
 void arm(WatchChanges &result, const react::Subscriptions &subscriptions,
          const react::ValueRead &values, FactKey source, Step now, double hz,
-         const record::Origin &origin) {
+         const amber::Origin &origin) {
   if (!values.identity.valid(source.subject))
     return;
   auto timers = react::threshold_timers(subscriptions, values.processes, source, now, hz, origin);
@@ -109,11 +110,9 @@ void remove_watches(Subscriptions &subscriptions, ScriptKey consumer) {
   }
 }
 WatchChanges sync_watches(amber::react::State &react_state, const react::ValueRead &values,
-                          ScriptKey consumer, const react::ScriptDeclaration &declaration,
-                          const amber::step::Clock &clock, const record::Origin &origin,
-                          SyncMode mode, std::optional<std::span<const TermId>> allowed_terms) {
-  const auto now = clock.step;
-  const auto hz = clock.hz;
+                          ScriptKey consumer, const react::ScriptDeclaration &declaration, Step now,
+                          double hz, const amber::Origin &origin, SyncMode mode,
+                          std::optional<std::span<const TermId>> allowed_terms) {
 
   auto &subscriptions = react_state.subscriptions;
   auto &allocations = react_state.allocations;
@@ -201,14 +200,14 @@ std::vector<Handle> source_consumers(const react::ValueRead &values, FactKey sou
 WatchChanges sync_rule_watches(amber::react::State &react_state, const react::ValueRead &values,
                                const catalog::Scripts &scripts,
                                std::span<const react::Effect> outputs, Step now, double hz,
-                               const record::Origin &origin) {
+                               const amber::Origin &origin) {
   auto &subscriptions = react_state.subscriptions;
 
   auto &rules = react_state.rules;
 
   std::unordered_set<FactKey, FactKeyHash> changed;
   for (const auto &effect : outputs)
-    if (const auto *work = std::get_if<step::WatchWork>(&effect);
+    if (const auto *work = std::get_if<react::WatchWork>(&effect);
         work && values.identity.valid(work->source.subject))
       changed.insert(work->source);
   std::unordered_set<ScriptKey, ScriptKeyHash> consumers;
@@ -244,8 +243,7 @@ WatchChanges sync_rule_watches(amber::react::State &react_state, const react::Va
     }
     auto changes =
         sync_watches(react_state, values, consumer, scripts.rows.at(consumer.script).declaration,
-                     amber::step::Clock{.step = now, .hz = hz}, origin, SyncMode::Change,
-                     std::span<const TermId>(allowed));
+                     now, hz, origin, SyncMode::Change, std::span<const TermId>(allowed));
     result.dirty.insert(result.dirty.end(), std::make_move_iterator(changes.dirty.begin()),
                         std::make_move_iterator(changes.dirty.end()));
     result.timers.insert(result.timers.end(), std::make_move_iterator(changes.timers.begin()),
@@ -255,7 +253,7 @@ WatchChanges sync_rule_watches(amber::react::State &react_state, const react::Va
 }
 WatchChanges refresh_dependencies(react::Subscriptions &subscriptions,
                                   const react::ValueRead &values, FactKey changed, Step now,
-                                  double hz, const record::Origin &origin) {
+                                  double hz, const amber::Origin &origin) {
   WatchChanges result;
   std::vector<WatchKey> keys;
   for (const auto &[source, bindings] : subscriptions.rows) {
@@ -286,7 +284,7 @@ WatchChanges refresh_dependencies(react::Subscriptions &subscriptions,
 }
 WatchResult check_changed(react::Subscriptions &subscriptions, const react::ValueRead &values,
                           const react::AllocationRows &allocations, FactKey source, Step now,
-                          double hz, const record::Origin &origin, ScriptId recipient) {
+                          double hz, const amber::Origin &origin, ScriptId recipient) {
   react::CurrentAnswers current;
   current.values.emplace(source, answer(values, allocations, source, {}, now, hz));
   const auto combine = values.terms.rows.at(source.term).combine;

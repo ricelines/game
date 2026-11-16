@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "step.hpp"
 
 #include <algorithm>
@@ -179,8 +180,8 @@ AdminDeclarations declare_admin(react::Terms &terms, react::NativeActions &nativ
       {"description", "p:N or an actually installed {script:'s:N',on:'o:SLOT.GENERATION'}"}};
   auto add = [&](react::NativeOperation operation, const char *name, const char *description,
                  Json inputs) {
-    return react::declare_native(native, terms, name, description, "", false, std::move(inputs),
-                                 operation);
+    return catalog::declare_native(native, terms, name, description, "", false, std::move(inputs),
+                                   operation);
   };
   AdminDeclarations ids;
   ids.grant =

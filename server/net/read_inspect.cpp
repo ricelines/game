@@ -1,3 +1,5 @@
+#include "catalog/catalog.hpp"
+#include "step/step.hpp"
 #include "view_private.hpp"
 
 namespace amber::net {

@@ -1,5 +1,7 @@
 add_library(amber_step STATIC
   step.cpp
+  authoring_worker.cpp
+  authoring_install.cpp
   actions.cpp
   handlers.cpp
   native_actions.cpp
@@ -21,6 +23,9 @@ add_library(amber_step STATIC
   authority.cpp
   authoring_failures.cpp
   checkpoint.cpp
+  commerce_helpers.cpp
+  editing_helpers.cpp
+  elaboration_helpers.cpp
   commerce_admin.cpp
   commerce_custody.cpp
   commerce_mailbox.cpp
@@ -54,4 +59,4 @@ add_library(amber_step STATIC
 )
 target_include_directories(amber_step PUBLIC ${PROJECT_SOURCE_DIR}/server)
 target_compile_features(amber_step PUBLIC cxx_std_20)
-target_link_libraries(amber_step PUBLIC amber_store amber_record amber_snap amber_react amber_perm amber_space amber_net amber_elaborate PRIVATE Ambergris::Luau.VM Ambergris::TracyClient Threads::Threads)
+target_link_libraries(amber_step PUBLIC amber_store amber_catalog amber_record amber_snap amber_react amber_perm amber_space amber_net amber_elaborate PRIVATE Ambergris::Luau.VM Ambergris::TracyClient Threads::Threads)

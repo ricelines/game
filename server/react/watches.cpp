@@ -195,7 +195,7 @@ std::optional<std::pair<HandlerRef, std::size_t>> find_handler(const Triggers &t
     }
   return {};
 }
-bool valid_threshold(const step::ThresholdToken &token, IdentityRead identity,
+bool valid_threshold(const react::ThresholdToken &token, IdentityRead identity,
                      const Processes &processes, const Subscriptions &subscriptions, Step now,
                      double hz) {
   if (!identity.valid(token.source.subject) || !identity.valid(token.consumer) ||
@@ -281,10 +281,10 @@ void retire_subscriptions(Subscriptions &subscriptions, Handle object) {
       ++row;
   }
 }
-std::vector<step::Timer> threshold_timers(const Subscriptions &subscriptions,
-                                          const Processes &processes, FactKey source, Step now,
-                                          double hz, const record::Origin &origin) {
-  std::vector<step::Timer> timers;
+std::vector<react::Timer> threshold_timers(const Subscriptions &subscriptions,
+                                           const Processes &processes, FactKey source, Step now,
+                                           double hz, const amber::Origin &origin) {
+  std::vector<react::Timer> timers;
   if (source.term >= processes.size())
     return timers;
   const auto *process = processes[source.term].get(source.subject.slot());
@@ -303,8 +303,8 @@ std::vector<step::Timer> threshold_timers(const Subscriptions &subscriptions,
     if (first)
       timers.push_back({*first,
                         {binding.consumer.object, source.subject, source.term, Value{}, origin},
-                        step::ThresholdToken{source, binding.consumer.object,
-                                             binding.consumer.script, binding.index}});
+                        react::ThresholdToken{source, binding.consumer.object,
+                                              binding.consumer.script, binding.index}});
   }
   return timers;
 }

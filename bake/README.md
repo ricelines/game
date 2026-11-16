@@ -1,14 +1,14 @@
 # Bake worker
 
-This module compiles submitted build123d source into real immutable geometry assets. It has no access to the simulation's tables. Formats are specified in [bake-api.md](../docs/bake-api.md); the running HTTP registration adapter is documented in [gateway-api.md](../docs/gateway-api.md).
+This module compiles submitted build123d source into real immutable geometry assets. It has no access to the simulation's tables.
 
 On this Nix host, install Python packages and public CAD runtime libraries, then compile the pinned native geometry helper:
 
 ```sh
 UV_CACHE_DIR="$PWD/.cache/uv" uv sync --python 3.12
 .venv/bin/python -m bake.setup
-.tools/bin/cmake -S bake/native -B .build/bake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="$PWD/.tools/bin/c++"
-.tools/bin/cmake --build .build/bake -j 4
+.tools/bin/cmake -S bake/native -B .build/bake -G Ninja --toolchain "$PWD/cmake/NativeToolchain.cmake" -DCMAKE_BUILD_TYPE=Debug
+.tools/bin/cmake --build .build/bake
 python3 bake/run.py -m pytest tests/test_bake.py
 ```
 

@@ -30,6 +30,20 @@ template <> struct BufferAdapterTraits<std::span<const std::uint8_t>> {
 } // namespace bitsery::traits
 
 namespace amber::snap {
+struct ObjectSelection {
+  bool all = true;
+  std::unordered_set<std::uint64_t> objects;
+  std::unordered_set<std::uint32_t> slots;
+  ObjectSelection() = default;
+  explicit ObjectSelection(std::span<const Handle> selected) : all(false) {
+    for (auto object : selected) {
+      objects.insert(object.bits);
+      slots.insert(object.slot());
+    }
+  }
+  bool contains(Handle object) const { return all || objects.contains(object.bits); }
+};
+
 using Buffer = std::vector<std::uint8_t>;
 using Output = bitsery::Serializer<bitsery::OutputBufferAdapter<Buffer>>;
 using Input = bitsery::Deserializer<bitsery::InputBufferAdapter<std::span<const std::uint8_t>>>;
@@ -236,28 +250,14 @@ void write_objects(Output &, const Objects &,
                    std::optional<std::span<const Handle>> selection = std::nullopt);
 void read_objects(Input &, Objects &);
 } // namespace amber::snap
-namespace amber::catalog {
-// nullopt means full snapshot; an explicitly empty span means empty capture.
-using ModelSelection = std::optional<std::span<const ModelId>>;
-using ParameterSelection = std::optional<std::span<const std::uint32_t>>;
-using ObjectSelection = std::optional<std::span<const Handle>>;
-void write_models(snap::Output &, const Models &, ModelSelection = {});
-void read_models(snap::Input &, Models &);
-void write_parameters(snap::Output &, const ParameterBlocks &, ParameterSelection = {});
-void read_parameters(snap::Input &, ParameterBlocks &);
-void write_text(snap::Output &, const ModelTexts &, const InstanceTexts &, ModelSelection = {},
-                ObjectSelection = {});
-void read_text(snap::Input &, ModelTexts &, InstanceTexts &);
-void write_authored_texts(snap::Output &, const AuthoredTexts &, ObjectSelection = {});
-void read_authored_texts(snap::Input &, AuthoredTexts &);
-} // namespace amber::catalog
 
 namespace amber::lifecycle {
 void write_parts(snap::Output &, const Parts &, IdentityRead,
                  std::optional<std::span<const Handle>> selected = {});
 void read_parts(snap::Input &, Parts &, IdentityRead, Relation &declared_parts);
 } // namespace amber::lifecycle
-namespace amber::record {
+
+namespace amber {
 template <class S> void serialize(S &s, Origin &v) {
   s.value8b(v.cause);
   s.value8b(v.root);
@@ -265,4 +265,4 @@ template <class S> void serialize(S &s, Origin &v) {
   snap::field(s, v.oldest);
   s.boolValue(v.more);
 }
-} // namespace amber::record
+} // namespace amber

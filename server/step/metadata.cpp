@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "perm/perm.hpp"
 #include "react/react.hpp"
 #include "step/step.hpp"

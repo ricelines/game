@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "physical_fixture.hpp"
 #include "space_fixture.hpp"
 #include "step/step.hpp"
@@ -34,14 +35,13 @@ struct Fixture : test_physical::Fixture {
     grant(object, pe::bit(pe::Verb::Take) | pe::bit(pe::Verb::Move));
     reach_m = 10;
   }
-  HandlerResult run(const char *name, const record::Origin &parent = {},
-                    bool expect_error = false) {
+  HandlerResult run(const char *name, const amber::Origin &parent = {}, bool expect_error = false) {
     auto result = invoke(std::vector<EventField>{{"mode", std::string(name)}}, object, parent);
     require((result.outcome.status == re::RunOutcome::Status::Error) == expect_error,
             "actual Lua primitive handler status");
     return result;
   }
-  bi::ActionOutcome push(const record::Origin &parent = {}, double momentum = 60) {
+  bi::ActionOutcome push(const amber::Origin &parent = {}, double momentum = 60) {
     const auto p = f.objects.position[object.slot()];
     return impulse(object, {{"momentum", {momentum, 0, 0}}, {"point", {p.x, p.y, p.z}}}, parent);
   }
@@ -72,7 +72,7 @@ void final_navigation_and_immediate_relations() {
           "real grasp updates native attachment and authoritative parent");
   bool found = false;
   while (auto item = step::pop_foreground(f.queues))
-    if (auto *watch = std::get_if<step::WatchWork>(&item->work)) {
+    if (auto *watch = std::get_if<react::WatchWork>(&item->work)) {
       require(watch->origin.root == held.origin.root && watch->origin.cause == held.origin.cause,
               "immediate attachment relation watches carry the accepted native action origin");
       found |= watch->source.subject == f.object && watch->source.term == 22;
@@ -94,7 +94,7 @@ void final_navigation_and_immediate_relations() {
         contact = true;
       }
     while (auto item = step::pop_foreground(f.queues))
-      if (auto *event = std::get_if<step::EventWork>(&item->work);
+      if (auto *event = std::get_if<react::EventWork>(&item->work);
           event && event->receiver == f.wall && event->sender == f.object)
         require(event->origin.root == released.origin.root &&
                     event->origin.cause == released.origin.cause &&
@@ -263,7 +263,7 @@ void pose_sleep_lifecycle_and_capture() {
   for (int i = 0; i < 20 && !resumed; ++i) {
     restarted.tick();
     while (auto item = step::pop_foreground(restarted.queues))
-      if (auto *event = std::get_if<step::EventWork>(&item->work);
+      if (auto *event = std::get_if<react::EventWork>(&item->work);
           event && event->receiver == restarted.wall && event->sender == restarted.object) {
         resumed = true;
         require(event->origin == impact_origin,
@@ -306,7 +306,7 @@ void copied_pose_callbacks_and_compound_scope() {
   auto cargo = scene.box({1, 1, 1}, {1.5f, 0, 2}, sp::Motion::Dynamic, 0, false);
   amber::step::State step_state{3};
   bi::MechanicalCauses &causes = step_state.mechanical_causes;
-  const record::Origin old{81, 80, {2}, 1., false}, newer{83, 82, {3}, 2., false};
+  const amber::Origin old{81, 80, {2}, 1., false}, newer{83, 82, {3}, 2., false};
   const auto previous = causes.intern(old);
   require(sp::set_pose(scene.space, identity(scene.objects), transforms(scene.objects), pusher,
                        {{.8f, 0, 2}, {}}, previous)
@@ -334,7 +334,7 @@ void copied_pose_callbacks_and_compound_scope() {
                        amber::step::Clock{.step = scene.clock, .hz = 20});
   bool captured = false;
   while (auto item = step::pop_foreground(queues))
-    if (auto *event = std::get_if<step::EventWork>(&item->work);
+    if (auto *event = std::get_if<react::EventWork>(&item->work);
         event && event->receiver == cargo && event->sender == pusher) {
       captured = true;
       require(event->origin.cause == old.cause && event->origin.root == old.root &&
@@ -393,7 +393,7 @@ void character_contacts_and_fact_reduction() {
   scene.wait_navigation();
   amber::step::State step_state{3};
   bi::MechanicalCauses &causes = step_state.mechanical_causes;
-  record::Origin origin{91, 90, {2}, 8.5, false};
+  amber::Origin origin{91, 90, {2}, 8.5, false};
   auto token = causes.intern(origin);
   sp::MoveRequest move{body, 1, sp::PointGoal{{3, 0, 0}, .1f}, {}, {}, token};
   bool contact = false;
@@ -428,7 +428,7 @@ void character_contacts_and_fact_reduction() {
                        catalog_state, physical, amber::step::Clock{.step = scene.clock, .hz = 20});
   bool reduced = false;
   while (auto item = step::pop_foreground(queues))
-    if (auto *watch = std::get_if<step::WatchWork>(&item->work);
+    if (auto *watch = std::get_if<react::WatchWork>(&item->work);
         watch && watch->source.subject == body) {
       reduced = true;
       require(watch->origin.root != origin.root && watch->origin.root != 92 &&
@@ -441,7 +441,7 @@ void character_contacts_and_fact_reduction() {
   bi::publish_physical(step_state, journal, {14, {10, 11, 12, 13}}, 100, scene.objects_state,
                        catalog_state, physical, amber::step::Clock{.step = scene.clock, .hz = 20});
   auto first = step::pop_foreground(queues);
-  require(std::get<step::WatchWork>(first->work).origin == origin,
+  require(std::get<react::WatchWork>(first->work).origin == origin,
           "already queued watch retains its first scheduling cause by documented convention");
 }
 void contact_overflow_is_recorded() {

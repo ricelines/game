@@ -1,5 +1,6 @@
 #pragma once
 
+#include "catalog/catalog.hpp"
 #include "react/react.hpp"
 #include <stdexcept>
 
@@ -95,8 +96,8 @@ struct Fixture {
     set_state(properties, processes, terms.rows[term], object, Value(value), now, 20, effects);
   }
   void bind(ScriptId id, Handle object, SyncMode mode = SyncMode::Initial) {
-    (void)sync_watches(react_state, values(), {object, id}, scripts.rows[id].declaration,
-                       amber::step::Clock{.step = 0, .hz = 20}, {}, mode);
+    (void)sync_watches(react_state, values(), {object, id}, scripts.rows[id].declaration, 0, 20, {},
+                       mode);
   }
   std::vector<InvocationPlan> changed(FactKey fact, Step now = 0) {
     auto changes = refresh_dependencies(subscriptions, values(), fact, now, 20, {});

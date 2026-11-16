@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "commerce_private.hpp"
 
 namespace amber::step {
@@ -163,12 +164,12 @@ place_existing(amber::ObjectState &objects_state, amber::space::State &space_sta
     react::reconcile_object_priorities(values, react_state, h, out.effects, call.step, call.hz);
   for (const auto &[key, before] : settings)
     if (before != react::read(values, key.subject, key.term, call.step, call.hz))
-      out.effects.ordered.emplace_back(step::WatchWork{key, {}});
+      out.effects.ordered.emplace_back(react::WatchWork{key, {}});
   for (const auto &row : std::span(space_state.relation_changes).subspan(changes_begin)) {
     const auto term = relation_terms.at(static_cast<std::size_t>(row.kind));
     if (term) {
-      out.effects.ordered.emplace_back(step::WatchWork{{row.from, term}, {}});
-      out.effects.ordered.emplace_back(step::WatchWork{{row.to, term}, {}});
+      out.effects.ordered.emplace_back(react::WatchWork{{row.from, term}, {}});
+      out.effects.ordered.emplace_back(react::WatchWork{{row.to, term}, {}});
     }
   }
   space_state.relation_changes.resize(changes_begin);

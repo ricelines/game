@@ -96,16 +96,45 @@ def link(destination: Path, target: Path) -> None:
 
 
 def compiler() -> None:
-    # The host supplies GCC and its Nix runtime; local links keep all build commands uniform.
-    candidates_by_name = {"cc": ("cc", "gcc"), "c++": ("g++", "c++"), "make": ("make",)}
-    for name, candidates in candidates_by_name.items():
-        selected = next(
-            (shutil.which(candidate) for candidate in candidates if shutil.which(candidate)), None
-        )
-        if not selected:
-            raise RuntimeError(f"The host needs {name} before bootstrap can run")
-        link(LOCAL / "bin" / name, Path(selected).resolve())
-    link(LOCAL / "bin/g++", LOCAL / "bin/c++")
+    entry = LOCK["tools"]["native"]
+    flake = f"github:NixOS/nixpkgs/{entry['revision']}"
+    packages = ("gcc16", "ninja", "ccache", "mold")
+    result = subprocess.run(
+        [
+            "nix",
+            "build",
+            *[f"{flake}#{name}^out" for name in packages],
+            "--out-link",
+            str(LOCAL / "native"),
+            "--print-out-paths",
+            "--max-jobs",
+            "0",
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    paths = dict(zip(packages, map(Path, result.stdout.splitlines()), strict=True))
+    for name, package, binary in (
+        ("cc", "gcc16", "gcc"),
+        ("gcc", "gcc16", "gcc"),
+        ("c++", "gcc16", "g++"),
+        ("g++", "gcc16", "g++"),
+        ("ccache", "ccache", "ccache"),
+        ("mold", "mold", "mold"),
+        ("ld.mold", "mold", "ld.mold"),
+    ):
+        link(LOCAL / "bin" / name, paths[package] / "bin" / binary)
+    ninja = LOCAL / "bin/ninja"
+    ninja.unlink(missing_ok=True)
+    ninja.write_text(f'#!/bin/sh\nexec nice -n 19 ionice -c 3 "{paths["ninja"]}/bin/ninja" "$@"\n')
+    ninja.chmod(0o755)
+    for name in ("gcc", "ninja", "ccache", "mold"):
+        actual = subprocess.check_output(
+            [str(LOCAL / "bin" / name), "--version"], text=True
+        ).splitlines()[0]
+        if entry[name] not in actual:
+            raise RuntimeError(f"Expected {name} {entry[name]}, got {actual}")
     probe = LOCAL / "check"
     probe.mkdir(parents=True, exist_ok=True)
     (probe / "cpp20.cpp").write_text(
@@ -115,6 +144,8 @@ def compiler() -> None:
     subprocess.run(
         [
             str(LOCAL / "bin/c++"),
+            f"-B{LOCAL / 'bin'}",
+            "-fuse-ld=mold",
             "-std=c++20",
             str(probe / "cpp20.cpp"),
             "-o",
@@ -176,8 +207,10 @@ def main() -> None:
     parser.add_argument(
         "--tracy", action="store_true", help="enable Tracy profiling in the dependency build"
     )
-    parser.add_argument("--jobs", type=int, default=min(os.cpu_count() or 2, 8))
+    parser.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error("--jobs must be positive")
     jobs = [
         lambda name=name, entry=entry: source(name, entry)
         for name, entry in LOCK["sources"].items()
@@ -197,23 +230,23 @@ def main() -> None:
                 str(ROOT / "cmake/third-party"),
                 "-B",
                 str(build),
+                "-G",
+                "Ninja",
                 "-DCMAKE_BUILD_TYPE=Release",
-                f"-DCMAKE_C_COMPILER={LOCAL / 'bin/cc'}",
-                f"-DCMAKE_CXX_COMPILER={LOCAL / 'bin/c++'}",
-                f"-DCMAKE_MAKE_PROGRAM={LOCAL / 'bin/make'}",
+                f"-DCMAKE_TOOLCHAIN_FILE={ROOT / 'cmake/NativeToolchain.cmake'}",
                 f"-DAMBERGRIS_TRACY={'ON' if args.tracy else 'OFF'}",
             ],
             check=True,
         )
         subprocess.run(
-            [str(LOCAL / "bin/cmake"), "--build", str(build), "--parallel", str(args.jobs)],
+            [str(LOCAL / "bin/cmake"), "--build", str(build)],
             check=True,
         )
     manifest = {
         name: subprocess.check_output(
             [str(LOCAL / "bin" / name), "--version"], text=True
         ).splitlines()[0]
-        for name in ("c++", "cmake", "clang-format")
+        for name in ("c++", "cmake", "ninja", "ccache", "mold", "clang-format")
     }
     (LOCAL / "toolchain.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print("Local toolchain ready in .tools/bin", flush=True)

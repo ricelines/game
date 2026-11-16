@@ -1,4 +1,5 @@
-#include "react.hpp"
+#include "catalog/catalog.hpp"
+#include "step.hpp"
 
 #include <charconv>
 #include <condition_variable>
@@ -7,7 +8,7 @@
 #include <set>
 #include <thread>
 
-namespace amber::react::authoring {
+namespace amber::step::authoring {
 namespace {
 AssetRequest asset_request(const Json &row) {
   AssetRequest request;
@@ -205,4 +206,4 @@ std::vector<Completion> Worker::poll() {
   result.swap(impl_->completed);
   return result;
 }
-} // namespace amber::react::authoring
+} // namespace amber::step::authoring

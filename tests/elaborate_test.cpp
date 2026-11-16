@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "elaborate/elaborate.hpp"
 #include "react/react.hpp"
 

@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "step.hpp"
 
 #include <algorithm>
@@ -36,7 +37,7 @@ EventPayload normalize_arguments(const react::Terms &terms, TermId action, Event
 }
 std::vector<PlannedInvocation> plan_event(const react::Triggers &triggers,
                                           const react::ValueRead &values,
-                                          const step::EventWork &event, Step now, double hz) {
+                                          const react::EventWork &event, Step now, double hz) {
   std::vector<PlannedInvocation> plans;
   for (const auto &handler :
        react::dispatch(triggers, values, event.receiver, event.event, now, hz)) {
@@ -58,7 +59,7 @@ std::vector<PlannedInvocation> plan_action(const react::Triggers &triggers,
                                            const react::ValueRead &values,
                                            const react::Resolution &resolution,
                                            const ActionRequest &request, Handle body,
-                                           const record::Origin &origin, Step now, double hz) {
+                                           const amber::Origin &origin, Step now, double hz) {
   std::vector<PlannedInvocation> plans;
   if (!resolution || resolution.route == react::Route::Native)
     return plans;
@@ -87,7 +88,7 @@ std::vector<PlannedInvocation> plan_action(const react::Triggers &triggers,
 }
 WatchPlan plan_watch(react::Subscriptions &subscriptions, const react::ValueRead &values,
                      const react::AllocationRows &allocations, const react::Triggers &triggers,
-                     const catalog::Scripts &scripts, const step::WatchWork &work, Step now,
+                     const catalog::Scripts &scripts, const react::WatchWork &work, Step now,
                      double hz) {
   WatchPlan plan;
   plan.changes =
@@ -121,7 +122,7 @@ WatchPlan plan_watch(react::Subscriptions &subscriptions, const react::ValueRead
   return plan;
 }
 WatchPlan plan_background(amber::react::State &react_state, const react::ValueRead &values,
-                          const catalog::Scripts &scripts, const step::BackgroundItem &item,
+                          const catalog::Scripts &scripts, const react::BackgroundItem &item,
                           Step now, double hz) {
   auto &subscriptions = react_state.subscriptions;
   auto &allocations = react_state.allocations;
@@ -138,10 +139,9 @@ WatchPlan plan_background(amber::react::State &react_state, const react::ValueRe
         const auto allowed = react::rule_watch_terms(rules, values, consumer, item.script, now, hz);
         if (std::find(allowed.begin(), allowed.end(), item.trigger) == allowed.end())
           continue;
-        auto changes =
-            react::sync_watches(react_state, values, {consumer, item.script}, declaration,
-                                amber::step::Clock{.step = now, .hz = hz}, item.origin,
-                                react::SyncMode::Change, std::span<const TermId>(allowed));
+        auto changes = react::sync_watches(
+            react_state, values, {consumer, item.script}, declaration, now, hz, item.origin,
+            react::SyncMode::Change, std::span<const TermId>(allowed));
         result.changes.dirty.insert(result.changes.dirty.end(), changes.dirty.begin(),
                                     changes.dirty.end());
         result.changes.timers.insert(result.changes.timers.end(), changes.timers.begin(),
@@ -178,7 +178,7 @@ prepare_reactive(amber::react::State &react_state, const react::ValueRead &value
   auto &timers = step_state.timers;
   auto &gaps = step_state.gaps;
 
-  if (auto *event = std::get_if<EventWork>(&item.work)) {
+  if (auto *event = std::get_if<react::EventWork>(&item.work)) {
     EventTurn turn{std::move(*event), std::move(item.threshold)};
     if (!valid_event(turn, values.identity, values.processes, subscriptions, now, hz))
       return {};
@@ -188,7 +188,7 @@ prepare_reactive(amber::react::State &react_state, const react::ValueRead &value
     }
     return plan_event(triggers, values, turn.event, now, hz);
   }
-  const auto &watch = std::get<WatchWork>(item.work);
+  const auto &watch = std::get<react::WatchWork>(item.work);
   if (!values.identity.valid(watch.source.subject))
     return {};
   cancel_source_thresholds(timers, subscriptions, watch.source);

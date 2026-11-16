@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "step.hpp"
 #include <algorithm>
 
@@ -123,19 +124,19 @@ ActionOutcome cancel_input(Intents &intents, std::vector<IntentEnding> &endings,
           origin};
 }
 
-InputReply submit_authoring(react::authoring::Worker &worker, const react::Terms &terms,
+InputReply submit_authoring(step::authoring::Worker &worker, const react::Terms &terms,
                             const catalog::RegistryDocument &registry, Input &input) {
   try {
-    const react::authoring::RegistrySnapshot snapshot{terms, registry.hash};
+    const step::authoring::RegistrySnapshot snapshot{terms, registry.hash};
     switch (input.kind) {
     case net::ControlKind::RegisterModel:
-      worker.submit(input.id, react::authoring::model_request(input.fields, terms), snapshot);
+      worker.submit(input.id, step::authoring::model_request(input.fields, terms), snapshot);
       break;
     case net::ControlKind::RegisterVariant:
-      worker.submit(input.id, react::authoring::variant_request(input.fields), snapshot);
+      worker.submit(input.id, step::authoring::variant_request(input.fields), snapshot);
       break;
     case net::ControlKind::RegisterScript:
-      worker.submit(input.id, react::authoring::script_request(input.fields), snapshot);
+      worker.submit(input.id, step::authoring::script_request(input.fields), snapshot);
       break;
     default:
       throw std::logic_error("non-authoring input reached the authoring worker");
@@ -164,10 +165,10 @@ void deliver_input(Inputs &inputs, net::Sessions &sessions, observe::Hearing &he
     sessions.complete(completed.session, completed.sequence, completed.fields);
 }
 
-std::pair<NativeCompletion, record::Origin>
+std::pair<NativeCompletion, amber::Origin>
 complete_authoring(amber::catalog::State &catalog_state, amber::react::State &react_state,
                    amber::step::State &step_state, space::Space &space, record::Journal &journal,
-                   const Input &input, react::authoring::Completion completion, bool session_live,
+                   const Input &input, step::authoring::Completion completion, bool session_live,
                    const std::filesystem::path &asset_root,
                    const std::filesystem::path &script_root) {
   auto &geometry = step_state.geometry;
@@ -191,7 +192,7 @@ complete_authoring(amber::catalog::State &catalog_state, amber::react::State &re
   try {
     if (input.session && !session_live)
       throw std::invalid_argument("session_closed");
-    if (const auto *failure = std::get_if<react::authoring::Failure>(&completion.result))
+    if (const auto *failure = std::get_if<step::authoring::Failure>(&completion.result))
       throw std::invalid_argument(failure->error);
     const auto role = [&](const char *group, const char *name) {
       return mechanical.values.at(group).at(name).get<TermId>();
@@ -202,25 +203,24 @@ complete_authoring(amber::catalog::State &catalog_state, amber::react::State &re
       for (const auto &asset : rows)
         import_geometry_asset(geometry, space, asset, asset_root);
     };
-    if (auto *prepared = std::get_if<react::authoring::PreparedModel>(&completion.result)) {
+    if (auto *prepared = std::get_if<step::authoring::PreparedModel>(&completion.result)) {
       geometry_ready(prepared->assets);
       for (const auto &rows : prepared->variants)
         geometry_ready(rows);
-      installed = react::authoring::install_model(std::move(*prepared), player, now / hz,
-                                                  catalog_state, react_state, measured);
-    } else if (auto *prepared =
-                   std::get_if<react::authoring::PreparedVariant>(&completion.result)) {
+      installed = step::authoring::install_model(std::move(*prepared), player, now / hz,
+                                                 catalog_state, react_state, measured);
+    } else if (auto *prepared = std::get_if<step::authoring::PreparedVariant>(&completion.result)) {
       geometry_ready(prepared->assets);
-      installed = react::authoring::install_variant(std::move(*prepared), catalog_state,
-                                                    react_state, measured);
+      installed = step::authoring::install_variant(std::move(*prepared), catalog_state, react_state,
+                                                   measured);
     } else {
-      installed = react::authoring::install_script(
+      installed = step::authoring::install_script(
           std::move(std::get<catalog::PreparedScript>(completion.result)), player, now / hz,
           scripts, vm, native_declarations, script_root);
     }
   } catch (const std::exception &error) {
     installed.result = record::Result::Denied;
-    installed.reply = react::authoring::failure(error.what());
+    installed.reply = step::authoring::failure(error.what());
   }
   record::Event event;
   event.step = now;
@@ -254,7 +254,7 @@ complete_authoring(amber::catalog::State &catalog_state, amber::react::State &re
   return {std::move(installed), origin};
 }
 std::variant<NativeCall, InputReply>
-prepare_input(react::authoring::Worker &worker, const amber::react::State &react_state,
+prepare_input(step::authoring::Worker &worker, const amber::react::State &react_state,
               const catalog::RegistryDocument &registry, amber::step::State &step_state,
               record::Journal &journal, Input &input, Step now, double hz) {
   auto &terms = react_state.terms;

@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "snap/snap.hpp"
 #include "store/store.hpp"
 

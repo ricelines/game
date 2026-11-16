@@ -53,7 +53,7 @@ def parser():
         type=Path,
         help="Checkpoint actual model/tool transcripts and token/latency evidence after each call",
     )
-    root.add_argument("--authoring-reference", type=Path, default=Path("docs/agent-authoring.md"))
+    root.add_argument("--authoring-reference", type=Path, default=Path("content/authoring.md"))
     return root
 
 

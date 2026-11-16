@@ -1,4 +1,5 @@
 #include "action_private.hpp"
+#include "catalog/catalog.hpp"
 #include <stdexcept>
 
 namespace amber::step {

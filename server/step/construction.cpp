@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "replacement_private.hpp"
 #include "step.hpp"
 

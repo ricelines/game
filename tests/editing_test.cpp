@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "runtime_fixture.hpp"
 #include "space_fixture.hpp"
 #include "step/step.hpp"
@@ -19,7 +20,7 @@ step::NativeCall call(PlayerId player, Handle target, Json arguments) {
 }
 bool dirty(const step::NativeCompletion &out, Handle object, TermId term) {
   return std::any_of(out.effects.ordered.begin(), out.effects.ordered.end(), [&](const auto &row) {
-    const auto *work = std::get_if<step::WatchWork>(&row);
+    const auto *work = std::get_if<react::WatchWork>(&row);
     return work && work->source == FactKey{object, term};
   });
 }
@@ -155,7 +156,7 @@ int main() {
             "slot grant lost its actual holder or bounded expiry");
     require(std::any_of(installed.effects.ordered.begin(), installed.effects.ordered.end(),
                         [&](const auto &row) {
-                          const auto *event = std::get_if<step::EventWork>(&row);
+                          const auto *event = std::get_if<react::EventWork>(&row);
                           return event && event->event == 6 && event->recipient_script == script;
                         }),
             "installation did not return a targeted ordinary startup event");

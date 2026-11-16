@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "editing_private.hpp"
 #include "start_private.hpp"
 

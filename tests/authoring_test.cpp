@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "react/react.hpp"
 #include "step/step.hpp"
 
@@ -7,7 +8,7 @@
 #include <thread>
 
 using namespace amber;
-using namespace amber::react::authoring;
+using namespace amber::step::authoring;
 namespace {
 void require(bool condition, const char *message) {
   if (!condition)

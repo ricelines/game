@@ -81,3 +81,17 @@ def test_parameter_exceptions_are_limited_to_snapshot_composition(tmp_path, monk
     monkeypatch.setattr(architecture, "SERVER", tmp_path)
     errors = [error for error in architecture.check() if "declares 11 parameters" in error]
     assert len(errors) == 1 and "other declares 11 parameters" in errors[0]
+
+
+def test_store_header_rejects_foreign_declarations_and_json(tmp_path, monkeypatch):
+    from tools import check_architecture as architecture
+
+    directory = tmp_path / "store"
+    directory.mkdir()
+    (directory / "store.hpp").write_text(
+        "#include <nlohmann/json.hpp>\nnamespace amber::catalog { struct Asset {}; }\n"
+    )
+    monkeypatch.setattr(architecture, "SERVER", tmp_path)
+    errors = architecture.check()
+    assert any("another owner's declarations in the store header" in error for error in errors)
+    assert any("JSON implementation in the store header" in error for error in errors)

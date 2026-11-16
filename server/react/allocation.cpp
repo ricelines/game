@@ -93,9 +93,8 @@ bool reconcile_allocation(const ValueRead &values, amber::react::State &react_st
       if (value.present && value.value.is_numeric())
         priority.values.emplace(part.from.bits, value.value.numeric());
     }
-  const auto changed =
-      allocate(row(term.paired), demand, term.combine, priority, pair.subject, term.paired, term.id,
-               react_state, amber::step::Clock{.step = now, .hz = hz});
+  const auto changed = allocate(row(term.paired), demand, term.combine, priority, pair.subject,
+                                term.paired, term.id, react_state, now, hz);
   return std::any_of(changed.begin(), changed.end(), [](const auto &key) { return !key.supplier; });
 }
 } // namespace amber::react
@@ -111,7 +110,7 @@ void reconcile(const ValueRead &values, amber::react::State &react_state, const 
 
   for (const auto pair : pairs)
     if (react::reconcile_allocation(values, react_state, pair, now, hz))
-      effects.ordered.emplace_back(step::WatchWork{pair, {}});
+      effects.ordered.emplace_back(react::WatchWork{pair, {}});
 }
 } // namespace
 void reconcile_allocations(const ValueRead &values, amber::react::State &react_state,
@@ -121,7 +120,7 @@ void reconcile_allocations(const ValueRead &values, amber::react::State &react_s
   for (const auto &effect : effects.ordered)
     if (const auto *changed = std::get_if<react::ContributionChange>(&effect))
       add(pairs, react::allocation_inputs(values.terms, changed->source));
-    else if (const auto *dirty = std::get_if<step::WatchWork>(&effect))
+    else if (const auto *dirty = std::get_if<react::WatchWork>(&effect))
       add(pairs, react::priority_inputs(values, {react::SettingKey::Scope::Instance,
                                                  dirty->source.subject.bits, dirty->source.term}));
   std::erase_if(effects.ordered, [](const auto &effect) {

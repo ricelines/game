@@ -59,10 +59,10 @@ Monotonic::time_point finish_frame(Clock &clock, PhaseCosts &costs, const Frame 
     clock.next_start = frame.boundary;
   return clock.next_start;
 }
-std::optional<std::variant<ForegroundItem, BackgroundItem, elaborate::FixtureResult,
-                           react::authoring::Completion>>
+std::optional<std::variant<ForegroundItem, react::BackgroundItem, elaborate::FixtureResult,
+                           step::authoring::Completion>>
 next_work(WorkQueues &queues, Frame &frame, std::deque<elaborate::FixtureResult> &fixtures,
-          std::deque<react::authoring::Completion> &authored, Monotonic::time_point now) {
+          std::deque<step::authoring::Completion> &authored, Monotonic::time_point now) {
   if (!frame.foreground || admits(frame, now)) {
     if (auto item = pop_foreground(queues)) {
       ++frame.foreground;

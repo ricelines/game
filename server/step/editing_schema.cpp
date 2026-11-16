@@ -1,4 +1,7 @@
+#include "catalog/catalog.hpp"
 #include "editing_private.hpp"
+
+#include <algorithm>
 
 namespace amber::step::editing {
 namespace {
@@ -196,8 +199,8 @@ Declarations declare_editing(react::Terms &terms, react::NativeActions &native) 
                         {"expires_s", {{"type", "number"}, {"exclusiveMinimum", 0}}}};
   auto add = [&](react::NativeOperation operation, const char *name, const char *description,
                  const char *right, Json inputs) {
-    return react::declare_native(native, terms, name, description, right, false, std::move(inputs),
-                                 operation);
+    return catalog::declare_native(native, terms, name, description, right, false,
+                                   std::move(inputs), operation);
   };
   Declarations ids;
   ids.install = add(

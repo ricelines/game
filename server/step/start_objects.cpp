@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "start_private.hpp"
 
 namespace amber::step::start {

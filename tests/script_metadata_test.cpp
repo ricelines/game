@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "step/step.hpp"
 
 #include <iostream>

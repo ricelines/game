@@ -62,7 +62,7 @@ struct Fixture {
     reconcile_allocations(f.values(), f.react_state, f.effects, now, 20);
     std::vector<FactKey> facts;
     for (const auto &effect : f.effects.ordered)
-      if (const auto *work = std::get_if<step::WatchWork>(&effect);
+      if (const auto *work = std::get_if<react::WatchWork>(&effect);
           work && std::find(facts.begin(), facts.end(), work->source) == facts.end())
         facts.push_back(work->source);
     f.effects = {};

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "catalog/catalog.hpp"
+
 #include "step.hpp"
 
 namespace amber::step {

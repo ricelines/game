@@ -96,11 +96,10 @@ struct Fixture {
     physical.attached_to.in.set(f.b.slot(), std::vector<Handle>{part});
     f.state(f.a, 1, 0);
     f.state(f.c, 1, 20);
-    set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 100,
-             amber::step::Clock{.step = 0, .hz = 20}, f.effects);
-    auto armed = react::sync_watches(
-        f.react_state, f.values(), {f.a, script}, f.scripts.rows[script].declaration,
-        amber::step::Clock{.step = 0, .hz = 20}, {}, react::SyncMode::Initial);
+    set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 100, 0, 20, f.effects);
+    auto armed = react::sync_watches(f.react_state, f.values(), {f.a, script},
+                                     f.scripts.rows[script].declaration, 0, 20, {},
+                                     react::SyncMode::Initial);
     for (auto &timer : armed.timers)
       step::schedule(timers, std::move(timer));
     f.bind(unrelated, f.c);
@@ -198,7 +197,7 @@ struct Fixture {
                      id == 1 ? std::vector<std::string>{"elaborator"} : std::vector<std::string>{},
                      net::all_modes,
                      {std::string(64, char('a' + id))}});
-    const record::Origin origin{9, 4, {1, 2}, 1.5, false};
+    const amber::Origin origin{9, 4, {1, 2}, 1.5, false};
     step::enqueue_event(queues, {f.a, f.b, 6, Value(true), origin}, 1000);
     step::enqueue_event(queues, {f.c, f.b, 6, Value(false), origin}, 1000);
     step::enqueue_background(queues, {f.a, 4, script, origin, 2});

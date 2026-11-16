@@ -1,3 +1,4 @@
+#include "catalog/catalog.hpp"
 #include "react.hpp"
 #include "snap/snap.hpp"
 
@@ -180,10 +181,10 @@ std::vector<TermId> rule_watch_terms(const react::RuleVersions &versions,
       terms.push_back(rule.trigger);
   return terms;
 }
-std::vector<step::BackgroundItem>
+std::vector<react::BackgroundItem>
 catch_up(const react::SharedColumns &shared, IdentityRead identity, const catalog::Scripts &scripts,
-         const react::Terms &terms, const react::RuleVersion &rule, const record::Origin &origin) {
-  std::vector<step::BackgroundItem> items;
+         const react::Terms &terms, const react::RuleVersion &rule, const amber::Origin &origin) {
+  std::vector<react::BackgroundItem> items;
   const auto &declaration = scripts.rows.at(rule.handler.script).declaration;
   const bool watched = std::any_of(declaration.watches.begin(), declaration.watches.end(),
                                    [&](const auto &watch) { return watch.term == rule.trigger; });
@@ -197,7 +198,7 @@ catch_up(const react::SharedColumns &shared, IdentityRead identity, const catalo
   }
   return items;
 }
-bool catch_up_valid(const step::BackgroundItem &item, const react::RuleVersions &versions,
+bool catch_up_valid(const react::BackgroundItem &item, const react::RuleVersions &versions,
                     const react::ValueRead &values, Step now, double hz) {
   (void)now;
   (void)hz;
@@ -215,8 +216,8 @@ bool catch_up_valid(const step::BackgroundItem &item, const react::RuleVersions 
     }
   return false;
 }
-void cancel_catch_up(step::WorkQueues &queues, const react::RuleVersion &rule) {
-  std::erase_if(queues.background, [&](const auto &item) {
+void cancel_catch_up(std::deque<BackgroundItem> &background, const react::RuleVersion &rule) {
+  std::erase_if(background, [&](const auto &item) {
     return item.trigger == rule.trigger && item.script == rule.handler.script &&
            item.version == rule.handler.version;
   });

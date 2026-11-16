@@ -1,4 +1,6 @@
 #pragma once
+
+#include "catalog/catalog.hpp"
 #include "net.hpp"
 #include "react/react.hpp"
 
