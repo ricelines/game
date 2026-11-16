@@ -97,11 +97,15 @@ class Native:
         return state
 
 
-async def wait_arrival(player):
+async def wait_arrival(player, point):
     until = time.perf_counter() + 15
     while time.perf_counter() < until:
         observed = await player.request("look", limit=1)
         if observed["self"]["intent"] is None:
+            require(
+                math.dist(observed["self"]["at"], point) < 0.65,
+                "navigation ended before reaching its approach point",
+            )
             return observed
         await asyncio.sleep(0.1)
     raise AssertionError("normal navigation did not reach entrance approach point")
@@ -154,7 +158,7 @@ async def run(args, evidence, artifacts, summary):
             )
             moved = await mira.act("base.move_to", point=[-2, -2.7, 0])
             require(moved.get("effect") == "started", "authored body navigation failed to start")
-            await wait_arrival(mira)
+            await wait_arrival(mira, [-2, -2.7, 0])
             held = await mira.act("base.hold", door)
             require(held.get("effect") == "applied", "actual two-part entrance grasp failed")
             door_before = await mira.request("inspect", target=door)
@@ -236,10 +240,6 @@ async def run(args, evidence, artifacts, summary):
                 rule_after == rule_before, "approved immutable rule metadata changed on restore"
             )
             floor = json.loads(args.elaboration_report.read_text())["checks"]["target"]
-            require(
-                (await mira.act("base.switch", floor, on=False)).get("effect") == "applied",
-                "restored approved world rule did not execute through actual dispatch",
-            )
             settled = await sol.act("engine.trade_confirm", trade=trade)
             require(
                 settled.get("ok") and settled.get("completed"),
@@ -267,9 +267,27 @@ async def run(args, evidence, artifacts, summary):
                 math.dist(after["self"]["at"], continued["self"]["at"]) > 0.001,
                 "persisted navigation did not continue through actual post-restart physics",
             )
+            # The restored walk heads away from the café. First prove it continued,
+            # then approach the rule target through ordinary navigation before acting.
+            # The held load has already survived restore and continued movement.
+            require((await mira.act("base.release"))["ok"], "restored held load could not release")
+            require(
+                (await mira.act("engine.give", door, recipient="p:2")).get("ok"),
+                "owned released assembly could not enter inventory to clear the café approach",
+            )
+            require(
+                (await mira.act("base.move_to", point=[0, 4, 0])).get("effect") == "started",
+                "normal return to the restored rule target failed to start",
+            )
+            arrived = await wait_arrival(mira, [0, 4, 0])
+            require(
+                (await mira.act("base.switch", floor, on=False)).get("effect") == "applied",
+                "restored approved world rule did not execute through actual dispatch",
+            )
             summary["after"] = {
                 "self": after["self"],
                 "continued_self": continued["self"],
+                "rule_approach_self": arrived["self"],
                 "settled_trade": settled,
                 "sold": stable(sold),
                 "revealed": stable(placed),
