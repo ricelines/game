@@ -448,8 +448,12 @@ void luau_state_and_limits() {
   require(load_script(cutoff, spin, d).status == RunOutcome::Status::Ok, "load infinite handler");
   ScriptState cs;
   DeferredEffects ce;
-  require(execute(cutoff, cs, ce, object, 3, "run", 2).status == RunOutcome::Status::Cutoff,
-          "VM interrupt deadline");
+  Invocation runaway;
+  runaway.self = {object, 3};
+  runaway.state = &cs;
+  runaway.effects = &ce;
+  require(run_handler(cutoff, {3, "run"}, runaway).status == RunOutcome::Status::Cutoff,
+          "VM interrupt applies the configured handler CPU limit");
   require(cs.contains(StateKey{std::string("before")}), "write before cutoff stays");
   Vm nested({4096, 50, 5, 64});
   d.id = 4;
