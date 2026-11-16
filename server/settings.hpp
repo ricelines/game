@@ -31,5 +31,5 @@ struct Settings {
   std::size_t fixture_workers;
   float default_friction, default_restitution, goal_tolerance_m;
 };
-Settings read_settings(const std::filesystem::path &);
+Settings read_settings(const std::filesystem::path &, std::string_view profile = "production");
 } // namespace amber

@@ -170,7 +170,7 @@ nlohmann::json result_json(const FixtureResult &);
 class FixtureWorker {
 public:
   FixtureWorker(std::filesystem::path executable, std::filesystem::path directory,
-                std::size_t concurrency);
+                std::size_t concurrency, std::filesystem::path config, std::string profile);
   ~FixtureWorker();
   FixtureWorker(const FixtureWorker &) = delete;
   FixtureWorker &operator=(const FixtureWorker &) = delete;
@@ -221,6 +221,8 @@ namespace amber::fixture {
 struct Run {
   std::filesystem::path executable, catalog, work_directory;
   elaborate::FixtureJob job;
+  std::filesystem::path config = "config.toml";
+  std::string profile = "production";
 };
 // Composition only: every TestRun is reported by a fresh real simulation child.
 elaborate::FixtureResult evaluate(const Run &);

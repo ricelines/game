@@ -7,7 +7,7 @@
 
 using namespace amber::elaborate;
 int main(int argc, char **argv) {
-  if (argc != 7 || std::string_view(argv[1]) != "fixture")
+  if (argc != 11 || std::string_view(argv[1]) != "fixture")
     return 2;
   std::ifstream input(argv[4]);
   auto job = nlohmann::json::parse(input);

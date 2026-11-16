@@ -42,7 +42,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       throw std::invalid_argument("fixture child requires restore, no network, unpaced and report");
     fixture_case = fixture::read_case(launch.fixture_case);
   }
-  auto settings = read_settings(launch.config);
+  auto settings = read_settings(launch.config, launch.profile);
   const auto hz = settings.clock.step_hz;
   ObjectState objects_state;
   catalog::State catalog_state;
@@ -304,7 +304,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &server = net_state.server;
   auto &sessions = net_state.sessions;
   elaborate::FixtureWorker fixture_worker(std::filesystem::canonical("/proc/self/exe"),
-                                          launch.data / "fixtures", settings.fixture_workers);
+                                          launch.data / "fixtures", settings.fixture_workers,
+                                          launch.config, launch.profile);
   step::authoring::Worker authoring({launch.assets, settings.pins, settings.scripts});
   auto &mutated = step_state.mutated;
   auto &gaps = step_state.gaps;
@@ -834,14 +835,21 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   if (fixture_case)
     fixture::write_report(launch.report, values, *fixture_case, clock.step, hz, script_errors);
   else if (!launch.report.empty()) {
-    write_state_report(launch.report, values, inspection_terms, poses, clock, script_errors, timers,
-                       allocations);
+    auto report =
+        state_report(values, inspection_terms, poses, clock, script_errors, timers, allocations);
+    report["configuration"] = {{"profile", launch.profile},
+                               {"handler_ms", settings.scripts.handler_ms}};
+    std::ofstream output(launch.report);
+    output.exceptions(std::ios::failbit | std::ios::badbit);
+    output << report.dump(2) << '\n';
   }
   std::sort(phase_ms.begin(), phase_ms.end());
   const auto percentile = [&](double p) {
     return phase_ms.empty() ? 0 : phase_ms[static_cast<std::size_t>((phase_ms.size() - 1) * p)];
   };
   std::cout << Json{{"status", "stopped"},
+                    {"profile", launch.profile},
+                    {"handler_ms", settings.scripts.handler_ms},
                     {"step", clock.step},
                     {"elapsed_s", elapsed},
                     {"overruns", clock.overruns},

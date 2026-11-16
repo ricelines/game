@@ -13,6 +13,7 @@ import math
 import pathlib
 import time
 
+from game_config import add_arguments, configuration
 from game_elaboration import Evidence, Player, require
 from game_restart_live import Native
 
@@ -275,7 +276,7 @@ async def optics(world, mira, door, mezzanine):
     }
 
 
-async def obstruction(world, mira, door):
+async def obstruction(world, mira, door, step_hz):
     await world.move(mira, [22, 50.3, 0], "door sweep approach")
     require((await mira.act("base.open", door)).get("ok"), "door opening before obstruction denied")
     await world.fraction(mira, door, lambda x: x >= 0.99, "door opens before obstruction")
@@ -289,19 +290,41 @@ async def obstruction(world, mira, door):
         "actual chair placement failed",
     )
     require((await mira.act("base.close", door)).get("ok"), "authored close action denied")
-    await asyncio.sleep(2.5)
-    first = await mira.request("inspect", target=door)
+    heard = []
+    until = time.perf_counter() + 15
+    while time.perf_counter() < until:
+        first = await mira.request("inspect", target=door)
+        heard.extend(first.get("events", []))
+        moving = next(
+            entry["value"]
+            for state in first["script_states"]
+            for entry in state["state"]
+            if entry["key"] == "moving"
+        )
+        if not moving:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise AssertionError("authored door did not finish its obstructed closing motion")
     fraction = first["values"]["base.open_fraction"]
     require(
         0.05 < fraction < 0.95, "actual chair did not stop sliding leaf at an intermediate pose"
     )
-    await asyncio.sleep(0.6)
+    observed = await world.look(mira, 1)
+    heard.extend(observed.get("events", []))
+    hold_until = observed["step"] + math.ceil(0.6 * step_hz)
+    until = time.perf_counter() + 15
+    while observed["step"] < hold_until and time.perf_counter() < until:
+        await asyncio.sleep(0.025)
+        observed = await world.look(mira, 1)
+        heard.extend(observed.get("events", []))
+    require(observed["step"] >= hold_until, "world did not advance through door hold check")
     second = await mira.request("inspect", target=door)
     require(
         abs(second["values"]["base.open_fraction"] - fraction) < 1e-6,
         "authored door kept moving after physical sweep obstruction",
     )
-    heard = first.get("events", []) + second.get("events", [])
+    heard.extend(second.get("events", []))
     heard += (await world.look(mira, 1)).get("events", [])
     require(
         "obstruct" in json.dumps(heard).lower(),
@@ -352,7 +375,7 @@ async def run(args, artifacts, evidence, summary):
                 mezzanine = mezzanine or await world.find(mira, "Mezzanine deck")
                 await optics(world, mira, door, mezzanine)
             if "door" in args.gates:
-                await obstruction(world, mira, door)
+                await obstruction(world, mira, door, configuration(args)["step_hz"])
         state = await native.stop()
         summary.update({"passed": True, "final_step": state["step"], "script_errors": 0})
     finally:
@@ -363,6 +386,7 @@ async def run(args, artifacts, evidence, summary):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    add_arguments(parser)
     parser.add_argument(
         "--server", type=pathlib.Path, default=pathlib.Path(".build/release/amb-server")
     )
@@ -393,6 +417,7 @@ def main():
     summary = {
         "passed": False,
         "artifacts": str(artifacts),
+        "configuration": configuration(args),
         "terminal_pushes_required": args.require_terminal_events,
         "gates": args.gates,
     }

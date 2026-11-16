@@ -1019,6 +1019,7 @@ elaborate::TestRun observe(const react::ValueRead &, const Case &, Step, double)
 
 namespace amber::step {
 struct RunOptions {
+  std::string profile = "production";
   std::filesystem::path config = "config.toml", plan = ".cache/content/seeded-plan.json";
   std::filesystem::path assets = "assets", data = ".runtime", client = "client/dist";
   std::filesystem::path report;

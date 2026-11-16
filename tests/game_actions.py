@@ -17,6 +17,7 @@ import pathlib
 import time
 
 import zstandard
+from game_config import add_arguments, configuration
 from game_elaboration import Evidence, Player, require
 from game_restart_live import Native
 
@@ -478,6 +479,7 @@ async def run(args, evidence):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    add_arguments(parser)
     parser.add_argument(
         "--server", type=pathlib.Path, default=pathlib.Path(".build/release/amb-server")
     )
@@ -496,6 +498,7 @@ def main():
         artifacts=str(directory),
         executable_sha256=digest(args.server),
         source_plan_sha256=digest(args.plan),
+        configuration=configuration(args),
     )
     try:
         asyncio.run(run(args, evidence))

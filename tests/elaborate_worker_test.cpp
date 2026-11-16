@@ -36,7 +36,7 @@ void worker(const std::filesystem::path &executable, const std::filesystem::path
   require(mkfifo(gate_path.c_str(), 0600) == 0, "create fixture release pipe");
   const int gate = open(gate_path.c_str(), O_RDWR | O_NONBLOCK);
   require(gate >= 0, "open fixture release pipe");
-  FixtureWorker pool(executable, directory, 2);
+  FixtureWorker pool(executable, directory, 2, AMBER_CONFIG_PATH, "production");
   auto blocked = job(1, gate_path.string());
   // A failure ceiling, not a delay: release this job as soon as the others complete.
   blocked.limits.timeout_ms = 10000;
@@ -81,7 +81,7 @@ void worker(const std::filesystem::path &executable, const std::filesystem::path
       require(result.status == FixtureStatus::Error && !result.error.empty(),
               "malformed result is not acceptance");
   }
-  FixtureWorker timeout(executable, directory / "timeout", 1);
+  FixtureWorker timeout(executable, directory / "timeout", 1, AMBER_CONFIG_PATH, "production");
   auto overdue = job(5, "timeout");
   overdue.limits.timeout_ms = 50;
   timeout.submit(overdue);
@@ -90,7 +90,8 @@ void worker(const std::filesystem::path &executable, const std::filesystem::path
   require(timed.size() == 1 && timed[0].status == FixtureStatus::Error &&
               timed[0].error == "fixture timed out",
           "timeout terminates process group");
-  FixtureWorker missing(directory / "no-such-executable", directory / "missing", 1);
+  FixtureWorker missing(directory / "no-such-executable", directory / "missing", 1,
+                        AMBER_CONFIG_PATH, "production");
   missing.submit(job(6, "normal"));
   missing.finish();
   const auto unavailable = missing.take();

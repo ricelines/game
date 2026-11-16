@@ -172,7 +172,7 @@ void async_submission(const std::filesystem::path &executable, const std::filesy
   Fixture f;
   const auto id = f.request();
   f.claim(id);
-  elaborate::FixtureWorker worker(executable, dir, 1);
+  elaborate::FixtureWorker worker(executable, dir, 1, AMBER_CONFIG_PATH, "production");
   auto call = f.call(2, {{"request", "request:1"}, {"kind", "rule"}, {"script", "s:1"}});
   const auto answer = [&] {
     return step::answer_rule(f.elaborate_state, f.reactive.scripts, worker, "transport-probe",

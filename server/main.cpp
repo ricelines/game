@@ -27,6 +27,8 @@ amber::step::RunOptions arguments(int argc, char **argv) {
       const std::string value = argv[i];
       if (name == "--config")
         launch.config = value;
+      else if (name == "--profile")
+        launch.profile = value;
       else if (name == "--plan")
         launch.plan = value;
       else if (name == "--assets")

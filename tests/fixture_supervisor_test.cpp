@@ -72,7 +72,8 @@ int main(int argc, char **argv) {
         {directory / "missing-executable", directory, directory / "runs", job(capture, 0)});
     require(missing.status == elaborate::FixtureStatus::Unavailable,
             "unavailable child remains explicit");
-    elaborate::FixtureWorker nested(argv[1], directory / "worker", 1);
+    elaborate::FixtureWorker nested(argv[1], directory / "worker", 1, directory / "selected.toml",
+                                    "development");
     nested.submit(job(capture, 0));
     nested.finish();
     const auto completed = nested.take();
@@ -81,6 +82,15 @@ int main(int argc, char **argv) {
                 completed.front().tests.front().candidate.observed == 2 &&
                 completed.front().tests.front().baseline.observed == 1,
             "actual worker-to-supervisor-to-child CLI roundtrip");
+    for (const auto &entry : std::filesystem::recursive_directory_iterator(directory / "worker")) {
+      if (entry.path().filename() != "used")
+        continue;
+      std::ifstream used(entry.path());
+      const auto launch = nlohmann::json::parse(used);
+      require(launch.at("config") == (directory / "selected.toml").string() &&
+                  launch.at("profile") == "development",
+              "worker and supervisor preserve selected configuration in candidate and baseline");
+    }
     std::filesystem::remove_all(directory);
     std::cout << "Fixture supervisor/process protocol checks passed (not gameplay assertions).\n";
   } catch (const std::exception &error) {

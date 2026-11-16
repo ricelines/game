@@ -18,6 +18,7 @@ import socket
 import subprocess
 import time
 
+from game_config import add_arguments, check_configuration, configuration, launch_arguments
 from game_elaboration import Evidence, Player, inspect_rule, require
 
 
@@ -53,8 +54,9 @@ class Native:
             "--report",
             str(self.report.resolve()),
         ]
+        command.extend(launch_arguments(self.args))
         (self.directory / "command.json").write_text(json.dumps(command, indent=2) + "\n")
-        provenance = {}
+        provenance = configuration(self.args)
         for name, source in (("executable", self.args.server), ("plan", self.args.plan)):
             with source.open("rb") as stream:
                 provenance[name] = hashlib.file_digest(stream, "sha256").hexdigest()
@@ -89,6 +91,7 @@ class Native:
         require(self.process.returncode == 0, f"{self.label} native exit failed; logs retained")
         require(self.report.exists(), f"{self.label} native did not retain its final state report")
         state = json.loads(self.report.read_text())
+        check_configuration(state, self.args)
         require(
             state["script_errors"] == script_errors,
             f"{self.label} had {state['script_errors']} handler errors/cutoffs, expected "
@@ -315,6 +318,7 @@ async def run(args, evidence, artifacts, summary):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    add_arguments(parser)
     parser.add_argument(
         "--server", type=pathlib.Path, default=pathlib.Path(".build/release/amb-server")
     )
@@ -340,7 +344,7 @@ def main():
     args = parser.parse_args()
     artifacts = args.output.parent / f"restart-live-artifacts-{time.time_ns()}"
     evidence = Evidence(artifacts)
-    summary = {"passed": False, "artifacts": str(artifacts)}
+    summary = {"passed": False, "artifacts": str(artifacts), "configuration": configuration(args)}
     try:
         asyncio.run(run(args, evidence, artifacts, summary))
     except Exception as problem:

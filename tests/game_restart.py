@@ -13,6 +13,7 @@ import subprocess
 import time
 
 import zstandard
+from game_config import add_arguments, check_configuration, configuration, launch_arguments
 
 
 def require(condition, message):
@@ -34,30 +35,31 @@ def event_errors(data):
     return [row for row in event_records(data) if row.get("status") in {"error", "cutoff"}]
 
 
-def describe(invocation, command, server, plan):
+def describe(invocation, command, args):
     (invocation / "command.json").write_text(json.dumps(command, indent=2) + "\n")
-    provenance = {}
-    for name, source in (("executable", server), ("plan", plan)):
+    provenance = configuration(args)
+    for name, source in (("executable", args.server), ("plan", args.plan)):
         with source.open("rb") as stream:
             provenance[name] = hashlib.file_digest(stream, "sha256").hexdigest()
     (invocation / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
 
 
-def crash_after_saved_boundary(server, plan, data, saved_step, artifacts, results):
+def crash_after_saved_boundary(args, data, saved_step, artifacts, results):
     invocation = artifacts / "crashed"
     invocation.mkdir()
     command = [
-        str(server),
+        str(args.server.resolve()),
         "run",
         "--plan",
-        str(plan),
+        str(args.plan.resolve()),
         "--data",
         str(data),
         "--no-network",
         "--steps",
         "1000000",
     ]
-    describe(invocation, command, server, plan)
+    command.extend(launch_arguments(args))
+    describe(invocation, command, args)
     outcome = {"artifacts": str(invocation), "data": str(data), "clean_shutdown": False}
     results["crashed"] = outcome
     snapshot = data / "snapshots" / f"snap-{saved_step}.amb.zst"
@@ -115,15 +117,15 @@ def crash_after_saved_boundary(server, plan, data, saved_step, artifacts, result
             outcome["elapsed_s"] = round(time.perf_counter() - started, 3)
 
 
-def run(server, plan, data, steps, artifacts, label, results):
+def run(args, data, steps, artifacts, label, results):
     invocation = artifacts / label
     invocation.mkdir(parents=True)
     report = invocation / "state.json"
     command = [
-        str(server),
+        str(args.server.resolve()),
         "run",
         "--plan",
-        str(plan),
+        str(args.plan.resolve()),
         "--data",
         str(data),
         "--no-network",
@@ -134,7 +136,8 @@ def run(server, plan, data, steps, artifacts, label, results):
         "--report",
         str(report),
     ]
-    describe(invocation, command, server, plan)
+    command.extend(launch_arguments(args))
+    describe(invocation, command, args)
     started = time.perf_counter()
     try:
         process = subprocess.run(command, text=True, capture_output=True, timeout=120, check=False)
@@ -157,6 +160,7 @@ def run(server, plan, data, steps, artifacts, label, results):
     require(exit_code == 0, f"{label} native process failed ({exit_code}); artifacts retained")
     require(report.exists(), f"{label} did not produce a state report; logs retained")
     state = json.loads(report.read_text())
+    check_configuration(state, args)
     outcome["stats"] = json.loads(stdout.splitlines()[-1])
     outcome["script_errors"] = state["script_errors"]
     if state["script_errors"]:
@@ -164,7 +168,6 @@ def run(server, plan, data, steps, artifacts, label, results):
         (invocation / "handler-errors.json").write_text(json.dumps(errors, indent=2) + "\n")
         raise AssertionError(
             f"{label} had {state['script_errors']} handler error/cutoff(s); "
-            "production limits unchanged; "
             "state, stdout, stderr and handler records retained"
         )
     return state, outcome["stats"]
@@ -221,17 +224,17 @@ def preserved_record(data, digest):
     raise AssertionError("restart did not preserve exact prior compressed causal record")
 
 
-def reject_incompatible(server, plan, snapshot, artifacts, results):
+def reject_incompatible(args, snapshot, artifacts, results):
     invocation = artifacts / "incompatible-version"
     invocation.mkdir()
     report = invocation / "state.json"
     data = invocation / "world"
     original = snapshot.read_bytes()
     command = [
-        str(server),
+        str(args.server.resolve()),
         "run",
         "--plan",
-        str(plan),
+        str(args.plan.resolve()),
         "--data",
         str(data),
         "--restore",
@@ -243,7 +246,8 @@ def reject_incompatible(server, plan, snapshot, artifacts, results):
         "--report",
         str(report),
     ]
-    describe(invocation, command, server, plan)
+    command.extend(launch_arguments(args))
+    describe(invocation, command, args)
     process = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
     (invocation / "stdout.txt").write_text(process.stdout)
     (invocation / "stderr.txt").write_text(process.stderr)
@@ -269,6 +273,7 @@ def reject_incompatible(server, plan, snapshot, artifacts, results):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    add_arguments(parser)
     parser.add_argument(
         "--server", type=pathlib.Path, default=pathlib.Path(".build/release/amb-server")
     )
@@ -291,7 +296,7 @@ def main():
         "passed": False,
         "steps": [1200, 200],
         "artifacts": str(artifacts),
-        "production_handler_limits_unchanged": True,
+        "configuration": configuration(args),
         "contract": (
             "Exact saved boundary continuity, then valid advancement; "
             "no deterministic replay assertion"
@@ -300,8 +305,7 @@ def main():
     }
     try:
         first, _ = run(
-            args.server.resolve(),
-            args.plan.resolve(),
+            args,
             resumed_data,
             1200,
             artifacts,
@@ -314,8 +318,7 @@ def main():
             (resumed_data / "events.jsonl.zst").read_bytes()
         ).hexdigest()
         boundary, _ = run(
-            args.server.resolve(),
-            args.plan.resolve(),
+            args,
             resumed_data,
             0,
             artifacts,
@@ -325,8 +328,7 @@ def main():
         evidence["clean_boundary"] = compare_boundary(boundary, first)
         evidence["earlier_record_archive"] = preserved_record(resumed_data, previous_record)
         resumed, _ = run(
-            args.server.resolve(),
-            args.plan.resolve(),
+            args,
             resumed_data,
             200,
             artifacts,
@@ -335,8 +337,7 @@ def main():
         )
         evidence["clean_advancement"] = check_advancement(resumed, first, 200)
         crash_after_saved_boundary(
-            args.server.resolve(),
-            args.plan.resolve(),
+            args,
             crash_data,
             first["step"],
             artifacts,
@@ -348,8 +349,7 @@ def main():
         )
         abandoned_hash = hashlib.sha256(crash_log.read_bytes()).hexdigest()
         crash_boundary, _ = run(
-            args.server.resolve(),
-            args.plan.resolve(),
+            args,
             crash_data,
             0,
             artifacts,
@@ -359,8 +359,7 @@ def main():
         evidence["crash_boundary"] = compare_boundary(crash_boundary, first)
         abandoned_archive = preserved_record(crash_data, abandoned_hash)
         crash_resumed, _ = run(
-            args.server.resolve(),
-            args.plan.resolve(),
+            args,
             crash_data,
             200,
             artifacts,
@@ -379,8 +378,7 @@ def main():
         }
         if args.incompatible_snapshot:
             reject_incompatible(
-                args.server.resolve(),
-                args.plan.resolve(),
+                args,
                 args.incompatible_snapshot.resolve(),
                 artifacts,
                 results,

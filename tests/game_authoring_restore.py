@@ -10,6 +10,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from game_config import add_arguments, check_configuration, configuration, launch_arguments
 from game_live_authoring import require, script_state
 
 from gateway.credentials import read_key_file
@@ -62,7 +63,9 @@ async def run(options):
         "--report",
         str(state.resolve()),
     ]
+    command.extend(launch_arguments(options))
     report = {
+        "configuration": configuration(options),
         "kind": "Actual fresh-process restoration of socket-authored model definition/variants",
         "status": "running",
         "snapshot": str(snapshot),
@@ -165,6 +168,14 @@ async def run(options):
         report["native_exit_code"] = native.returncode
         if state.exists():
             report["native_state"] = json.loads(state.read_text())
+            try:
+                check_configuration(report["native_state"], options)
+                require(
+                    report["native_state"]["script_errors"] == 0,
+                    "restored world recorded handler errors/cutoffs",
+                )
+            except AssertionError as error:
+                report.update(status="failed", problem=str(error))
         if native.returncode != 0 or not state.exists():
             report["status"] = "failed"
         write_resident_report(options.output / "restore-report.json", report)
@@ -173,6 +184,7 @@ async def run(options):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    add_arguments(parser)
     parser.add_argument(
         "--journey", type=Path, default=Path(".cache/integration/live-authoring-report.json")
     )

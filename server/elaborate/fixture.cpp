@@ -98,6 +98,10 @@ elaborate::FixtureResult evaluate(const Run &run) {
         std::filesystem::create_directory(output);
         const auto output_report = output / "report.json";
         std::vector<std::string> arguments{"run",
+                                           "--config",
+                                           std::filesystem::absolute(run.config).string(),
+                                           "--profile",
+                                           run.profile,
                                            "--restore",
                                            job.capture_path.string(),
                                            "--catalog",
@@ -155,6 +159,8 @@ int command(int argc, char **argv, const std::filesystem::path &executable) {
       throw std::invalid_argument("fixture requires a capture path");
     const std::filesystem::path capture = argv[2];
     std::filesystem::path job_path, result_path, catalog;
+    std::filesystem::path config = "config.toml";
+    std::string profile = "production";
     for (int i = 3; i < argc; i += 2) {
       if (i + 1 == argc)
         throw std::invalid_argument("missing fixture option value");
@@ -165,13 +171,18 @@ int command(int argc, char **argv, const std::filesystem::path &executable) {
         result_path = argv[i + 1];
       else if (name == "--catalog")
         catalog = argv[i + 1];
+      else if (name == "--config")
+        config = argv[i + 1];
+      else if (name == "--profile")
+        profile = argv[i + 1];
       else
         throw std::invalid_argument("unknown fixture option: " + std::string(name));
     }
     if (job_path.empty() || result_path.empty())
       throw std::invalid_argument("fixture requires --job and --result");
     const auto job = read_job(job_path, capture);
-    auto result = evaluate({executable, catalog, job_path.parent_path() / "cases", job});
+    auto result =
+        evaluate({executable, catalog, job_path.parent_path() / "cases", job, config, profile});
     if (elaborate::result_json(result).dump().size() > job.limits.result_bytes) {
       result.status = elaborate::FixtureStatus::Error;
       result.tests.clear();

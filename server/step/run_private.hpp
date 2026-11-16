@@ -47,10 +47,11 @@ void sample_motion(std::vector<observe::MotionSample> &motion,
                    std::span<const Handle> moved, const space::Space &space, IdentityRead ids,
                    TransformRead poses, double hz);
 
-void write_state_report(const std::filesystem::path &path, const react::ValueRead &values,
-                        std::span<const TermId> inspection_terms, TransformRead poses,
-                        const amber::step::Clock &clock, std::size_t script_errors,
-                        const TimerWheel &pending_timers, const react::AllocationRows &allocations);
+nlohmann::json state_report(const react::ValueRead &values,
+                            std::span<const TermId> inspection_terms, TransformRead poses,
+                            const amber::step::Clock &clock, std::size_t script_errors,
+                            const TimerWheel &pending_timers,
+                            const react::AllocationRows &allocations);
 void publish_value_changes(net::ReplicationIndex &, net::SessionViews &, const react::Processes &,
                            std::span<const FactKey>);
 void record_frame(record::Journal &journal, record::Writer &writer, net::RecordFeed &feed,

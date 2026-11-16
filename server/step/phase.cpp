@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
 #include <stdexcept>
 
 namespace amber::step {
@@ -89,11 +88,11 @@ next_work(WorkQueues &queues, Frame &frame, std::deque<elaborate::FixtureResult>
   }
   return {};
 }
-void write_state_report(const std::filesystem::path &path, const react::ValueRead &values,
-                        std::span<const TermId> inspection_terms, TransformRead poses,
-                        const amber::step::Clock &clock, std::size_t script_errors,
-                        const TimerWheel &pending_timers,
-                        const react::AllocationRows &allocations) {
+nlohmann::json state_report(const react::ValueRead &values,
+                            std::span<const TermId> inspection_terms, TransformRead poses,
+                            const amber::step::Clock &clock, std::size_t script_errors,
+                            const TimerWheel &pending_timers,
+                            const react::AllocationRows &allocations) {
   const auto now = clock.step;
   const auto hz = clock.hz;
 
@@ -115,16 +114,11 @@ void write_state_report(const std::filesystem::path &path, const react::ValueRea
          {"position", {poses.position[slot].x, poses.position[slot].y, poses.position[slot].z}},
          {"values", std::move(quantities)}});
   }
-  std::ofstream output(path);
-  output << Json{{"step", now},
-                 {"objects", std::move(rows)},
-                 {"script_errors", script_errors},
-                 {"timers", step::timers(pending_timers).size()},
-                 {"allocations", allocations.values.size()}}
-                .dump(2)
-         << '\n';
-  if (!output)
-    throw std::runtime_error("cannot write state report");
+  return Json{{"step", now},
+              {"objects", std::move(rows)},
+              {"script_errors", script_errors},
+              {"timers", step::timers(pending_timers).size()},
+              {"allocations", allocations.values.size()}};
 }
 void record_frame(record::Journal &journal, record::Writer &writer, net::RecordFeed &feed,
                   IdentityRead ids, TransformRead poses, std::size_t &script_errors) {

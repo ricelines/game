@@ -13,6 +13,7 @@ import json
 import pathlib
 import time
 
+from game_config import add_arguments, configuration, positive_seconds
 from game_elaboration import Evidence, Player, require
 from game_restart_live import Native
 
@@ -70,6 +71,28 @@ async def deadline_records(architect, evidence, offer, grant):
     evidence.checks["s7"] = {name: next(iter(rows.values())) for name, rows in selected.items()}
 
 
+async def settle_sale_item(player, handle, step_hz, evidence):
+    # Compare exact poses across expiry only after the dynamic item has settled.
+    # Wait for a full simulation second of stability, rather than a wall-time delay.
+    until = time.perf_counter() + 15
+    previous, stable_since = None, None
+    while time.perf_counter() < until:
+        pose = (await player.request("inspect", target=handle))["position"]
+        step = (await player.request("look", limit=1))["step"]
+        if pose != previous:
+            previous, stable_since = pose, step
+        elif step - stable_since >= step_hz:
+            evidence.checks["sale_item_settled"] = {
+                "handle": handle,
+                "position": pose,
+                "stable_since": stable_since,
+                "step": step,
+            }
+            return
+        await asyncio.sleep(0.025)
+    raise AssertionError("sale fixture did not reach a stable world pose")
+
+
 async def deadlines(args, evidence, mira, sol, architect):
     observed = await mira.request("look", limit=1000)
     chairs = [
@@ -85,7 +108,8 @@ async def deadlines(args, evidence, mira, sol, architect):
             break
     require(item is not None, "fresh live perception needs an owned ordinary sale item")
     handle = item["h"]
-    offered = await mira.act("engine.offer", handle, price=40, expires_s=2)
+    await settle_sale_item(mira, handle, configuration(args)["step_hz"], evidence)
+    offered = await mira.act("engine.offer", handle, price=40, expires_s=args.offer_lifetime_s)
     require(offered.get("ok") and offered.get("effect") == "applied", "real offer failed")
     offer = offered["offer"]
     rows = await mira.act("engine.offers", handle)
@@ -103,7 +127,7 @@ async def deadlines(args, evidence, mira, sol, architect):
         rights=["spend"],
         cap=2,
         period_s=60,
-        expires_s=4,
+        expires_s=args.grant_lifetime_s,
     )
     require(created.get("ok"), "ordinary owner could not grant temporary wallet access")
     grant = created["grant"]
@@ -148,7 +172,6 @@ async def deadlines(args, evidence, mira, sol, architect):
         ),
         "expired grant remains in current held/given indices",
     )
-    await asyncio.sleep(0.15)
     await deadline_records(architect, evidence, offer, grant)
     s7 = evidence.checks["s7"]
     require(
@@ -293,6 +316,7 @@ async def run(args, evidence):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    add_arguments(parser)
     parser.add_argument(
         "--server", type=pathlib.Path, default=pathlib.Path(".build/release/amb-server")
     )
@@ -305,6 +329,18 @@ def main():
     parser.add_argument("--port", type=int, default=18081)
     parser.add_argument("--skip-navigation", action="store_true")
     parser.add_argument(
+        "--offer-lifetime-s",
+        type=positive_seconds,
+        default=0.5,
+        help="simulation seconds for the expiring sale (default: 0.5)",
+    )
+    parser.add_argument(
+        "--grant-lifetime-s",
+        type=positive_seconds,
+        default=1.0,
+        help="simulation seconds for the expiring Spend grant (default: 1)",
+    )
+    parser.add_argument(
         "--output",
         type=pathlib.Path,
         default=pathlib.Path(".cache/integration/deadlines-report.json"),
@@ -312,7 +348,11 @@ def main():
     args = parser.parse_args()
     artifacts = args.output.parent / f"deadlines-artifacts-{time.time_ns()}"
     evidence = Evidence(artifacts)
-    report = {"passed": False, "artifacts": str(artifacts)}
+    report = {"passed": False, "artifacts": str(artifacts), "configuration": configuration(args)}
+    report["durations"] = {
+        "offer_lifetime_s": args.offer_lifetime_s,
+        "grant_lifetime_s": args.grant_lifetime_s,
+    }
     try:
         asyncio.run(run(args, evidence))
         report["passed"] = True

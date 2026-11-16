@@ -133,6 +133,15 @@ class Player:
             fields["target"] = target
         return await self.request("do", **fields)
 
+    async def wait_until_step(self, step, timeout=30):
+        until = time.perf_counter() + timeout
+        while time.perf_counter() < until:
+            observed = await self.request("look", limit=1)
+            if observed["step"] >= step:
+                return observed
+            await asyncio.sleep(0.025)
+        raise AssertionError(f"world did not advance to simulation step {step}")
+
 
 def rule_source(vacuous):
     tests = []

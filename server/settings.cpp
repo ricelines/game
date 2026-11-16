@@ -1,9 +1,12 @@
 #include "settings.hpp"
 
+#include <cmath>
 #include <toml++/toml.hpp>
 
 namespace amber {
-Settings read_settings(const std::filesystem::path &path) {
+Settings read_settings(const std::filesystem::path &path, std::string_view profile) {
+  if (profile != "production" && profile != "development")
+    throw std::invalid_argument("unknown configuration profile: " + std::string(profile));
   const auto document = toml::parse_file(path.string());
   const auto get = [&]<class T>(const char *section, const char *key) {
     const auto value = document[section][key].value<T>();
@@ -33,6 +36,10 @@ Settings read_settings(const std::filesystem::path &path) {
              size("clock", "PHASE_AVERAGE_STEPS")};
   s.scripts = {size("scripts", "SCRIPT_KB"), real("scripts", "DECLARATION_MS"),
                real("scripts", "HANDLER_MS"), size("scripts", "EVENT_FIELDS_MAX")};
+  if (profile == "development")
+    s.scripts.handler_ms = real("development", "HANDLER_MS");
+  if (!std::isfinite(s.scripts.handler_ms) || s.scripts.handler_ms <= 0)
+    throw std::invalid_argument("handler allowance must be positive and finite");
   s.event_queue_max = size("scripts", "EVENT_QUEUE_MAX");
   s.authors_max = size("scripts", "AUTHORS_MAX");
   s.part_batch_max = size("scripts", "PART_BATCH_MAX");

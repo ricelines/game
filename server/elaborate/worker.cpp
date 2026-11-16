@@ -31,7 +31,8 @@ nlohmann::json test_run_json(const TestRun &run) {
   return {{"passed", run.passed}, {"observed", run.observed}, {"error", run.error}};
 }
 FixtureResult run_process(const std::filesystem::path &executable,
-                          const std::filesystem::path &directory, const FixtureJob &job) {
+                          const std::filesystem::path &directory, const FixtureJob &job,
+                          const std::filesystem::path &config, const std::string &profile) {
   const auto started = std::chrono::steady_clock::now();
   FixtureResult result;
   result.job = job.id;
@@ -47,9 +48,11 @@ FixtureResult run_process(const std::filesystem::path &executable,
     const auto input = job_json(job).dump();
     write_file(input_path, input.data(), input.size());
     std::filesystem::remove(result_path);
-    const std::array<std::string, 6> arguments{"fixture",  job.capture_path.string(),
-                                               "--job",    input_path.string(),
-                                               "--result", result_path.string()};
+    const std::array<std::string, 10> arguments{"fixture",   job.capture_path.string(),
+                                                "--job",     input_path.string(),
+                                                "--result",  result_path.string(),
+                                                "--config",  config.string(),
+                                                "--profile", profile};
     const auto child = process::run(executable, arguments,
                                     started + std::chrono::milliseconds(job.limits.timeout_ms),
                                     job.limits.diagnostic_bytes, true);
@@ -144,15 +147,18 @@ nlohmann::json result_json(const FixtureResult &result) {
           {"elapsed_ms", result.elapsed_ms}};
 }
 struct FixtureWorker::Impl {
-  std::filesystem::path executable, directory;
+  std::filesystem::path executable, directory, config;
+  std::string profile;
   std::mutex mutex;
   std::condition_variable ready;
   std::deque<FixtureJob> pending;
   std::vector<FixtureResult> completed;
   bool stopping = false;
   std::vector<std::thread> threads;
-  Impl(std::filesystem::path exe, std::filesystem::path dir, std::size_t concurrency)
-      : executable(std::filesystem::absolute(exe)), directory(std::filesystem::absolute(dir)) {
+  Impl(std::filesystem::path exe, std::filesystem::path dir, std::size_t concurrency,
+       std::filesystem::path configuration, std::string selected_profile)
+      : executable(std::filesystem::absolute(exe)), directory(std::filesystem::absolute(dir)),
+        config(std::filesystem::absolute(configuration)), profile(std::move(selected_profile)) {
     if (!concurrency)
       throw std::invalid_argument("fixture concurrency must be positive");
     for (std::size_t i = 0; i < concurrency; ++i)
@@ -167,7 +173,7 @@ struct FixtureWorker::Impl {
             job = std::move(pending.front());
             pending.pop_front();
           }
-          auto result = run_process(executable, directory, job);
+          auto result = run_process(executable, directory, job, config, profile);
           std::lock_guard lock(mutex);
           completed.push_back(std::move(result));
         }
@@ -185,8 +191,10 @@ struct FixtureWorker::Impl {
   }
 };
 FixtureWorker::FixtureWorker(std::filesystem::path executable, std::filesystem::path directory,
-                             std::size_t concurrency)
-    : impl_(std::make_unique<Impl>(std::move(executable), std::move(directory), concurrency)) {}
+                             std::size_t concurrency, std::filesystem::path config,
+                             std::string profile)
+    : impl_(std::make_unique<Impl>(std::move(executable), std::move(directory), concurrency,
+                                   std::move(config), std::move(profile))) {}
 FixtureWorker::~FixtureWorker() {
   finish();
 }

@@ -69,20 +69,30 @@ def parser():
     fixture.add_argument("--job", type=Path, required=True)
     fixture.add_argument("--result", type=Path, required=True)
     fixture.add_argument("--catalog", type=Path)
+    fixture.add_argument("--config", type=Path, default=Path("config.toml"))
+    fixture.add_argument("--profile", choices=("production", "development"), default="production")
+    fixture.add_argument(
+        "--server",
+        type=Path,
+        default=Path(__file__).resolve().parents[1] / ".build/release/amb-server",
+    )
     return root
 
 
 async def run(options):
     if options.command == "fixture":
-        executable = Path(__file__).resolve().parents[1] / ".build/release/amb-server"
         arguments = [
-            str(executable),
+            str(options.server),
             "fixture",
             str(options.capture),
             "--job",
             str(options.job),
             "--result",
             str(options.result),
+            "--config",
+            str(options.config),
+            "--profile",
+            options.profile,
         ]
         if options.catalog:
             arguments += ["--catalog", str(options.catalog)]

@@ -15,6 +15,11 @@ PART_BATCH_MAX = 1024 # one checked native transform batch; own declared-part tr
 EVENT_QUEUE_MAX = 1000000
 AUTHORS_MAX = 8
 
+# Explicit --profile development only; functional runs, never timing acceptance.
+# A finite runaway watchdog with headroom for unreported shared-host pauses.
+[development]
+HANDLER_MS = 100
+
 [network]
 # Allows authored script/control payloads while bounding one transport message.
 CONTROL_MAX = 1048576

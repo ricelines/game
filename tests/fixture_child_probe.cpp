@@ -28,13 +28,17 @@ int main(int argc, char **argv) {
   if (!no_network || !unpaced || !options.contains("--catalog") ||
       !options.contains("--candidate-registry") || !options.contains("--candidate-author"))
     return 4;
+  if (!options.contains("--config") || !options.contains("--profile"))
+    return 7;
   std::ifstream input(options.at("--fixture-case"));
   const auto data = nlohmann::json::parse(input);
   const auto mode = data.at("test").at("given").at("state").at("probe.mode").get<int>();
   const auto directory = std::filesystem::path(options.at("--data"));
   if (std::filesystem::exists(directory / "used"))
     return 5;
-  std::ofstream(directory / "used") << "fresh process";
+  std::ofstream(directory / "used") << nlohmann::json{
+      {"config", options.at("--config")},
+      {"profile", options.at("--profile")}}.dump();
   std::ifstream capture(options.at("--restore"));
   int captured = 0;
   capture >> captured;

@@ -13,6 +13,7 @@ import hashlib
 import json
 import pathlib
 
+from game_config import add_arguments, configuration, positive_seconds
 from game_elaboration import Evidence, Player, require
 from game_restart_live import Native
 
@@ -189,7 +190,7 @@ async def exercise(args, evidence, player_id, key):
             "ordinary installation lost the body's declared slots",
         )
         choices = [
-            dict(slot=slot, scope=owned_scope, rights=[slot], expires_s=6)
+            dict(slot=slot, scope=owned_scope, rights=[slot], expires_s=args.grant_lifetime_s)
             for slot in ("use", "take", "move")
         ]
         install_request, install_reply = await player.send(
@@ -219,7 +220,8 @@ async def exercise(args, evidence, player_id, key):
             "explicit renewed Take did not restore actual grasp",
         )
         require((await player.act("base.release"))["ok"], "renewed item could not be released")
-        await asyncio.sleep(6.2)
+        due = next(row["expires_step"] for row in listed["given"] if row["id"] == renewed)
+        await player.wait_until_step(due)
         expired = await player.act("base.hold", source["h"])
         require(
             expired.get("denied") or expired.get("script_errors"),
@@ -264,6 +266,8 @@ async def run(args):
     active = None
     report = dict(
         status="failed",
+        configuration=configuration(args),
+        grant_lifetime_s=args.grant_lifetime_s,
         binary_sha256=digest(args.server),
         base_plan_sha256=digest(args.plan),
         body_source_sha256=digest(args.body_source),
@@ -329,6 +333,7 @@ async def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    add_arguments(parser)
     parser.add_argument(
         "--server", type=pathlib.Path, default=pathlib.Path(".build/release/amb-server")
     )
@@ -339,5 +344,11 @@ if __name__ == "__main__":
         "--body-source", type=pathlib.Path, default=pathlib.Path("content/scripts/body.luau")
     )
     parser.add_argument("--port", type=int, default=18103)
+    parser.add_argument(
+        "--grant-lifetime-s",
+        type=positive_seconds,
+        default=0.5,
+        help="simulation seconds for the temporary Take grant (default: 0.5)",
+    )
     parser.add_argument("--output", type=pathlib.Path, required=True)
     asyncio.run(run(parser.parse_args()))

@@ -22,8 +22,8 @@ UV_CACHE_DIR="$PWD/.cache/uv" uv sync --python 3.12
 .tools/bin/cmake -S bake/native -B .build/bake -G Ninja \
   --toolchain "$PWD/cmake/NativeToolchain.cmake" -DCMAKE_BUILD_TYPE=Debug
 .tools/bin/cmake --build .build/bake
-.tools/bin/cmake --preset debug
-.tools/bin/cmake --build --preset debug
+.tools/bin/cmake --preset dev
+.tools/bin/cmake --build --preset dev
 client/build.sh
 ```
 
@@ -36,10 +36,19 @@ Prepare the authored world once. Cached geometry is reused; a cache hit still pe
 ```sh
 python3 bake/run.py -m content.prepare --mode seeded --stakes on --restricted-host-bake \
   --output .cache/content/seeded-plan.json
-.build/debug/amb-server run --plan .cache/content/seeded-plan.json --data .runtime
+.build/dev/amb-server run --profile development \
+  --plan .cache/content/seeded-plan.json --data .runtime
 ```
 
 Use `--mode forage` for the sparse start and `--stakes off` for the authored alternative.
+
+`--profile development` selects the finite 100 ms handler watchdog in
+`config.toml`, for functional development on shared hosts whose unreported VM
+pauses can be charged as script CPU time. The default profile is `production`,
+which keeps the 5 ms CPU allowance. The build type does not select a runtime
+profile. Configuration and profile are inherited by rule fixture subprocesses;
+native run reports record the selected profile and allowance. Neither profile
+retries interrupted handlers.
 
 The server serves the spectator at `http://127.0.0.1:8080`. Open that page and paste the private value from `.runtime/keys/spectator.key` into the masked spectator-key field, then select Connect. The optional debug view requires a key authorized for debug records. Profiles generate these private files at launch; no credential is embedded in exported web assets, persisted by the page, or needed in a URL. The client has camera movement, object inspection, measured facts, maker claims and resident purpose controls. Residents require the gateway below.
 
@@ -74,15 +83,15 @@ bin/amb log --file .runtime/events.jsonl.zst --kind handler --thing o:36.1
 Snapshots are written under the selected data directory. Starting again with the same `--data` directory automatically restores its latest completed snapshot and archives the preceding compressed record. A clean stop completes a final snapshot. To restore a particular checkpoint into a separate output directory:
 
 ```sh
-.build/debug/amb-server run --restore .runtime/snapshots/snap-1200.amb.zst \
+.build/dev/amb-server run --profile development --restore .runtime/snapshots/snap-1200.amb.zst \
   --catalog .runtime --data .runtime-resumed
 ```
 
-The current runtime is `ambergris-0.3`. Earlier snapshot layouts are incompatible
+The current runtime is `ambergris-0.4`. Earlier snapshot layouts are incompatible
 and are rejected before decoding. Use a fresh data directory for a new world;
 existing saves are not migrated.
 
-Restore rebuilds real VM programs, collision, navigation, attachments, watches and runtime projections. Captures use the same thirteen owner encoders with selected rows. Rule approval launches fresh instances of this server for every candidate/baseline test; a candidate must pass all tests and improve at least one baseline result. `bin/amb fixture CAPTURE --job JOB.json --result RESULT.json --catalog DATA_DIRECTORY` exposes that runner directly.
+Restore rebuilds real VM programs, collision, navigation, attachments, watches and runtime projections. Captures use the same thirteen owner encoders with selected rows. Rule approval launches fresh instances of this server for every candidate/baseline test; a candidate must pass all tests and improve at least one baseline result. `bin/amb fixture CAPTURE --job JOB.json --result RESULT.json --catalog DATA_DIRECTORY` exposes that runner directly. For development fixtures, add `--profile development --server .build/dev/amb-server`; `--config PATH` selects the same configuration used by the world.
 
 For bounded headless runs, use `--no-network --unpaced --steps N --report PATH --snapshot-at-end`. World time still advances by the fixed simulation quantum; the report contains actual resolved values.
 Omitting `--steps` runs continuously. Explicit `--steps 0` loads and reports the
@@ -91,11 +100,42 @@ world at its saved boundary without advancing it.
 ## Verify
 
 ```sh
+.tools/bin/ctest --preset dev
+.tools/bin/cmake --preset debug
+.tools/bin/cmake --build --preset debug
 .tools/bin/ctest --preset debug
 python3 bake/run.py -m pytest
 .venv/bin/ruff check bake content gateway harness measure tests
 .venv/bin/ruff format --check bake content gateway harness measure tests
 ```
+
+Native deadline tests retain their own strict limits in both build presets.
+After substantial native changes, run the full Debug suite for ASan/UBSan checks.
+
+Gameplay journeys that launch a server accept `--config PATH` and
+`--profile development|production` (default: production). Use an optimized
+server for strict timing acceptance. Build the required Release binaries together:
+
+```sh
+.tools/bin/cmake -S . -B .build/release -G Ninja \
+  --toolchain "$PWD/cmake/NativeToolchain.cmake" \
+  -DCMAKE_BUILD_TYPE=Release -DAMBER_SANITIZE=OFF
+.tools/bin/cmake --build .build/release --target check-binaries
+python3 bake/run.py tests/game_deadlines.py --profile development \
+  --output .cache/integration/development-deadlines.json
+```
+
+Development journey reports are labeled `functional`; they do not certify the
+5 ms requirement. Run the same journey with `--profile production` on a host
+with verified CPU accounting for strict timing validation. A production profile
+alone does not verify the host. Shared-host stalls can still exceed the relaxed
+watchdog; failures remain failures and must be retained and investigated.
+
+Expiry journeys wait for the grant's advertised simulation step. The body
+permission journey uses a 0.5-second grant (`--grant-lifetime-s`); the deadline
+journey uses a 0.5-second sale (`--offer-lifetime-s`) and a 1-second Spend grant
+(`--grant-lifetime-s`). These test durations are configurable independently of
+the production settings. Longer polling timeouts only bound failures.
 
 The content-dependent importer and authoring checks require the prepared plan and actual assets; run them separately from CTest:
 
