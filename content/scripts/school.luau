@@ -1,6 +1,5 @@
-local function rotate(v, q)
-    local u = vector.create(q[1], q[2], q[3])
-    return v + 2 * vector.cross(u, vector.cross(u, v) + q[4] * v)
+local function rotate(v, u, w)
+    return v + 2 * vector.cross(u, vector.cross(u, v) + w * v)
 end
 
 local function population(self)
@@ -56,13 +55,16 @@ local function swim(self)
     top = math.max(bottom, top)
     local t, rows = self:now(), {}
     local alive = not self.state.dead
+    local q = pose.rotation
+    local u = vector.create(q[1], q[2], q[3])
+    local rotation = {x=q[1],y=q[2],z=q[3],w=q[4]}
     for index, fish in self:parts() do
         local phase = index * 2.39996323
         local x = width * math.sin(t * 0.24 + phase)
         local y = depth * math.sin(t * 0.31 + phase * 0.73)
         local z = if alive then bottom + (top - bottom) * (0.5 + 0.45 * math.sin(t * 0.19 + phase)) else bottom
-        rows[index] = {object=fish,position=pose.position+rotate(vector.create(x,y,z),pose.rotation),
-            rotation={x=pose.rotation[1],y=pose.rotation[2],z=pose.rotation[3],w=pose.rotation[4]}}
+        rows[index] = {object=fish,position=pose.position+rotate(vector.create(x,y,z),u,q[4]),
+            rotation=rotation}
     end
     self:move_part(rows)
 end
