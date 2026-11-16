@@ -108,6 +108,31 @@ void plot_sales_recheck_price_authority_and_burn_pool_payments() {
               balance(f.ledger, Account::player(0)) == 0,
           "pool land payment did not burn money");
 }
+void returns_respect_build_grants_and_ignore_mailbox_limits() {
+  Fixture f;
+  auto &state = f.perm_state;
+  state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
+  const Target item{Handle::make(2, 1), 2, 0, 0, 1, Escrow};
+  state.players.rows[2].mailbox.push_back(Handle::make(90, 1));
+  const auto build = f.grant(1, Holder::player(2), Scope::plot(1), 1, 1);
+  const ReturnRequest request{Holder::player(1), item, {}, 1, {}, false, false};
+  require(return_goods(state, request, 2).reason == Reason::MissingRight,
+          "build grantee was returned");
+  revoke(state.grants, state.players, build);
+  const auto returned = return_goods(state, request, 2);
+  require(bool(returned) && returned.custody[0].stay_static &&
+              state.players.rows[2].mailbox.size() == 2,
+          "full mailbox blocked return or return did not preserve physical fallback");
+  auto own = request;
+  own.actor = Holder::player(2);
+  require(return_goods(state, own, 2).reason == Reason::NotController, "return accepted own goods");
+  auto stranger = request;
+  stranger.actor = Holder::player(3);
+  require(!return_goods(state, stranger, 2), "foreign land return succeeded");
+  stranger.forced = true;
+  require(bool(return_goods(state, stranger, 2)), "forced abandonment did not return goods");
+}
+
 void moved_goods_leave_plot_scoped_authority() {
   Fixture f;
   Objects objects;
@@ -1236,6 +1261,7 @@ int main() {
   try {
     changing_plot_owner_clears_only_old_owner_authority();
     plot_sales_recheck_price_authority_and_burn_pool_payments();
+    returns_respect_build_grants_and_ignore_mailbox_limits();
     moved_goods_leave_plot_scoped_authority();
     plot_records_show_live_land_control();
     object_checks_do_not_inherit_owner_or_groups_for_scripts();

@@ -10,7 +10,8 @@ bool member(Handle h, Handle root, std::span<const Handle> descendants) {
 }
 } // namespace
 OperationResult can_release_occupants(const Space &space, Handle root,
-                                      std::span<const Handle> descendants, bool retiring_body) {
+                                      std::span<const Handle> descendants, bool retiring_body,
+                                      bool stay_static) {
   const auto &n = *space.native;
   for (const auto &[bits, attachment] : n.attachments) {
     if (!member(attachment.parent, root, descendants) || member({bits}, root, descendants))
@@ -18,6 +19,8 @@ OperationResult can_release_occupants(const Space &space, Handle root,
     const auto body = n.bodies.find(bits);
     if (body == n.bodies.end() || body->second.character ||
         body->second.spec.motion == Motion::Dynamic)
+      continue;
+    if (stay_static)
       continue;
     if (!n.geometries[body->second.spec.geometry]->hull)
       return {Status::UnsupportedMotion, {bits}};
@@ -29,7 +32,7 @@ OperationResult can_release_occupants(const Space &space, Handle root,
 OperationResult release_occupants(Space &space, IdentityRead identity, Handle root,
                                   std::span<const Handle> descendants, ParentWrite parents,
                                   SpaceFlags flags, PhysicalRelations &relations,
-                                  std::vector<RelationChange> &changes) {
+                                  std::vector<RelationChange> &changes, bool stay_static) {
   auto &n = *space.native;
   for (auto it = n.attachments.begin(); it != n.attachments.end();) {
     const Handle h{it->first};
@@ -47,6 +50,9 @@ OperationResult release_occupants(Space &space, IdentityRead identity, Handle ro
       auto &body = found->second;
       const auto old = n.world_bounds(body);
       mode = body.character ? Motion::Character : Motion::Dynamic;
+      if (stay_static && !body.character && body.spec.motion != Motion::Dynamic &&
+          (!n.geometries[body.spec.geometry]->hull || capacity(space).native_available == 0))
+        mode = Motion::Static;
       const auto ready = update_motion(n, body, mode);
       if (ready.status != Status::Ok)
         return ready;

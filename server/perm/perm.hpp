@@ -227,6 +227,7 @@ struct Offers {
 struct CustodyChange {
   Handle goods, parent;
   bool in_world = false;
+  bool stay_static = false;
 };
 struct OfferResult {
   Reason reason = Reason::OfferGone;
@@ -353,6 +354,15 @@ SwapResult accept_plot(State &, const Buyer &, OfferId, std::int64_t max_price, 
 SwapResult give(amber::perm::State &perm_state, amber::ObjectState &objects_state, Holder sender,
                 const Target &, PlayerId recipient, Handle recipient_body, bool present,
                 std::size_t mailbox_max, Step, std::span<const Target> parts = {});
+struct ReturnRequest {
+  Holder actor;
+  Target goods;
+  std::span<const Target> parts;
+  PlotId plot = 0;
+  Handle owner_body;
+  bool present = false, forced = false;
+};
+SwapResult return_goods(State &, const ReturnRequest &, Step);
 SwapResult store_goods(amber::perm::State &perm_state, Holder, const Target &,
                        std::span<const Target> parts, PlayerId recipient, Handle recipient_body,
                        bool present, std::size_t mailbox_max, Step);

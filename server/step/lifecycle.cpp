@@ -42,9 +42,9 @@ void apply_custody(amber::ObjectState &objects_state, amber::space::State &space
                                         change.parent &&
                                             bool(identity.flags[change.parent.slot()] & Body)};
     const auto result =
-        change.in_world
-            ? space::visible_custody(objects_state, space_state, visible, descendants)
-            : space::custody(objects_state, change.goods, change.parent, space_state, descendants);
+        change.in_world ? space::visible_custody(objects_state, space_state, visible, descendants)
+                        : space::custody(objects_state, change.goods, change.parent, space_state,
+                                         descendants, change.stay_static);
     if (result.status != space::Status::Ok)
       throw std::invalid_argument(space::status_text(result.status));
     perm::update_plots(identity, transforms, membership, plots, closure, change.in_world);

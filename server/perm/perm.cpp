@@ -1022,6 +1022,44 @@ SwapResult give(amber::perm::State &perm_state, amber::ObjectState &objects_stat
   return {Reason::Allowed, {{goods.object, present ? body : Handle{}, false}}, std::move(revoked)};
 }
 
+SwapResult return_goods(State &state, const ReturnRequest &request, Step now) {
+  const auto &goods = request.goods;
+  if (!request.forced) {
+    if (goods.flags & Body)
+      return {Reason::NotGoods, {}, {}};
+    if (!request.plot || request.plot >= state.plots.rows.size() ||
+        state.plots.rows[request.plot].id != request.plot || goods.plot != request.plot)
+      return {Reason::InvalidScope, {}, {}};
+    if (request.actor == Holder::player(goods.owner))
+      return {Reason::NotController, {}, {}};
+    if (usable(find(state.grants, Holder::player(goods.owner), Scope::plot(request.plot)), 1, now))
+      return {Reason::MissingRight, {}, {}};
+    const auto allowed = check_land(request.actor, LandVerb::Return, state.plots.rows[request.plot],
+                                    state.players, state.grants, now);
+    if (!allowed)
+      return {allowed.reason, {}, {}};
+  }
+  for (auto &offer : state.offers.rows)
+    if (offer.live && offer.goods == goods.object) {
+      if (offer.trade) {
+        auto &trade = state.trades.rows[offer.trade];
+        // Other trade goods retain custody; the adapter clears their escrow flags.
+        for (auto &side : trade.sides)
+          if (side.offer && state.offers.rows[side.offer].live)
+            close_offer(state.offers, state.offers.rows[side.offer]);
+        trade.live = false;
+      } else
+        close_offer(state.offers, offer);
+    }
+  auto &owner = state.players.rows.at(goods.owner);
+  std::erase(owner.inventory, goods.object);
+  std::erase(owner.mailbox, goods.object);
+  (request.present ? owner.inventory : owner.mailbox).push_back(goods.object);
+  return {Reason::Allowed,
+          {{goods.object, request.present ? request.owner_body : Handle{}, false, true}},
+          {}};
+}
+
 SwapResult store_goods(amber::perm::State &perm_state, Holder actor, const Target &goods,
                        std::span<const Target> parts, PlayerId recipient, Handle body, bool present,
                        std::size_t mailbox_max, Step now) {

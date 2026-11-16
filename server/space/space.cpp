@@ -1037,7 +1037,7 @@ void remove(Space &space, IdentityRead identity, Handle object, ParentWrite pare
 }
 OperationResult can_custody(const Space &space, IdentityRead identity, Handle object,
                             Handle custodian, ParentRead parents,
-                            std::span<const Handle> descendants) {
+                            std::span<const Handle> descendants, bool stay_static) {
   if (!identity.valid(object) || (custodian && !identity.valid(custodian)))
     return {Status::StaleHandle, {}};
   for (auto child : descendants)
@@ -1060,10 +1060,11 @@ OperationResult can_custody(const Space &space, IdentityRead identity, Handle ob
       n.bodies.contains(object.bits) ||
       std::ranges::any_of(descendants, [&](Handle h) { return n.bodies.contains(h.bits); }) ||
       std::ranges::any_of(n.volumes, [&](const Volume &v) { return member(v.spec.owner); });
-  return can_release_occupants(space, object, descendants, retiring_body);
+  return can_release_occupants(space, object, descendants, retiring_body, stay_static);
 }
 OperationResult custody(amber::ObjectState &objects_state, Handle object, Handle custodian,
-                        amber::space::State &space_state, std::span<const Handle> descendants) {
+                        amber::space::State &space_state, std::span<const Handle> descendants,
+                        bool stay_static) {
   auto &space = space_state.space;
 
   auto identity = amber::identity(std::as_const(objects_state.objects));
@@ -1072,7 +1073,8 @@ OperationResult custody(amber::ObjectState &objects_state, Handle object, Handle
   auto &relations = space_state.physical_relations;
   auto &changes = space_state.relation_changes;
 
-  const auto checked = can_custody(space, identity, object, custodian, parents, descendants);
+  const auto checked =
+      can_custody(space, identity, object, custodian, parents, descendants, stay_static);
   if (checked.status != Status::Ok)
     return checked;
   std::set<std::uint64_t> assembly{object.bits};
@@ -1095,8 +1097,8 @@ OperationResult custody(amber::ObjectState &objects_state, Handle object, Handle
   // restore unrelated kinematic occupants to their ordinary dynamic motion.
   for (auto bits : assembly)
     extract_native(n, Handle{bits});
-  const auto released =
-      release_occupants(space, identity, object, descendants, parents, flags, relations, changes);
+  const auto released = release_occupants(space, identity, object, descendants, parents, flags,
+                                          relations, changes, stay_static);
   if (released.status != Status::Ok)
     return released;
   for (auto bits : assembly) {

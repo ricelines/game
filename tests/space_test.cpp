@@ -1,4 +1,5 @@
 #include "perm/perm.hpp"
+#include "space/private.hpp"
 #include "space_fixture.hpp"
 namespace {
 using namespace testspace;
@@ -6,6 +7,59 @@ bool edge(const sp::Edges &edges, Handle from, Handle to) {
   auto *list = edges.out.get(from.slot());
   return list && std::find(list->begin(), list->end(), to) != list->end();
 }
+void returns_release_seated_standing_and_static_occupants() {
+  Scene scene;
+  const auto seat = scene.box({4, 4, 1}, {0, 0, 1});
+  const auto seated = scene.character({0, 0, 2});
+  const auto standing = scene.character({1, 0, 2});
+  require(sp::attach(scene.objects_state, scene.space_state, {seated, seat, {{0, 0, 1}, {}}, false})
+                  .status == sp::Status::Ok,
+          "seat return fixture");
+  for (int tick = 0; tick < 4; ++tick)
+    scene.tick();
+  const auto seated_z = scene.objects.position[seated.slot()].z;
+  const auto standing_z = scene.objects.position[standing.slot()].z;
+  require(sp::custody(scene.objects_state, seat, {}, scene.space_state, {}, true).status ==
+                  sp::Status::Ok &&
+              !scene.objects.parent[seated.slot()] &&
+              sp::body_motion(scene.space, identity(scene.objects), seated) ==
+                  sp::Motion::Character,
+          "return did not release seated body");
+  for (int tick = 0; tick < 12; ++tick)
+    scene.tick();
+  require(scene.objects.position[seated.slot()].z < seated_z - .1f &&
+              scene.objects.position[standing.slot()].z < standing_z - .1f,
+          "returned support did not let bodies fall");
+  const auto root = scene.box({1, 1, 1}, {10, 0, 0});
+  Box mesh({1, 1, 1});
+  const auto geometry =
+      sp::import_geometry(scene.space, {mesh.mesh, {}, mesh.triangles, mesh.bounds});
+  ObjectInit init;
+  init.model = 1;
+  init.position = {12, 0, 0};
+  init.flags = Static;
+  const auto ornament = create(scene.objects, init);
+  require(
+      sp::add(scene.space, identity(scene.objects), transforms(scene.objects),
+              {ornament, geometry.geometry, sp::Motion::Static, {.6f, 0, 0}, 1, false, false, {}})
+              .status == sp::Status::Ok,
+      "triangle-only occupant fixture");
+  // Exercise the specified static-attachment fallback directly at the Space boundary.
+  scene.space.native->attachments.emplace(ornament.bits,
+                                          sp::Attachment{ornament, root, {{2, 0, 0}, {}}, false});
+  scene.objects.parent[ornament.slot()] = root;
+  const auto pose = scene.objects.position[ornament.slot()];
+  require(sp::can_custody(scene.space, identity(scene.objects), root, {}, parents(scene.objects))
+                      .status == sp::Status::UnsupportedMotion &&
+              sp::custody(scene.objects_state, root, {}, scene.space_state, {}, true).status ==
+                  sp::Status::Ok &&
+              !scene.objects.parent[ornament.slot()] &&
+              scene.objects.position[ornament.slot()] == pose &&
+              sp::body_motion(scene.space, identity(scene.objects), ornament)->motion ==
+                  sp::Motion::Static,
+          "return refused a static occupant without a hull or changed its pose");
+}
+
 void expired_native_queries_stop() {
   Scene scene;
   const auto object = scene.box({1, 1, 1}, {0, 0, 0});
@@ -1136,6 +1190,7 @@ int main(int argc, char **argv) {
       density_benchmarks();
       return 0;
     }
+    returns_release_seated_standing_and_static_occupants();
     expired_native_queries_stop();
     sensor_contacts_use_body_overlap();
     plot_membership_follows_real_motion_and_hidden_custody();

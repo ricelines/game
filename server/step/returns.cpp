@@ -1,0 +1,47 @@
+#include "commerce_private.hpp"
+
+namespace amber::step {
+NativeCompletion return_goods(perm::State &permissions, ObjectState &objects,
+                              const DeliveryTargets &delivery, const space::Space &space,
+                              const NativeCall &call, bool forced) {
+  const auto ids = identity(std::as_const(objects.objects));
+  const auto auth = authority(std::as_const(objects.objects));
+  const auto parents = amber::parents(std::as_const(objects.objects));
+  const auto item =
+      commerce_detail::goods(ids, objects.parts, objects.declared_parts, auth,
+                             permissions.owner_limits, permissions.plots, call.request.target);
+  auto body = commerce_detail::present(delivery, ids, item.root.owner);
+  if (space::can_custody(space, ids, item.root.object, body, parents,
+                         std::span(item.closure).subspan(1))
+          .status != space::Status::Ok)
+    body = {};
+  std::vector<perm::OfferId> live_offers;
+  for (const auto &offer : permissions.offers.rows)
+    if (offer.live)
+      live_offers.push_back(offer.id);
+  const auto returned = perm::return_goods(permissions,
+                                           {commerce_detail::actor(call), item.root, item.parts,
+                                            item.root.plot, body, bool(body), forced},
+                                           call.step);
+  if (!returned)
+    return commerce_detail::denied(returned.reason, "return",
+                                   "plot:" + std::to_string(item.root.plot));
+  auto flags = permission_flags(objects.objects);
+  // Returning one side cancels a trade as a whole, releasing the other side's escrow.
+  for (auto id : live_offers)
+    if (const auto &offer = permissions.offers.rows[id]; !offer.live) {
+      if (ids.valid(offer.goods))
+        flags.set(offer.goods.slot(), flags.get(offer.goods.slot()) & ~Escrow);
+      for (auto part : offer.parts)
+        if (ids.valid(part))
+          flags.set(part.slot(), flags.get(part.slot()) & ~Escrow);
+    }
+  auto out = commerce_detail::result(true, {{"object", to_string(item.root.object)},
+                                            {"recipient", "p:" + std::to_string(item.root.owner)},
+                                            {"location", body ? "inventory" : "mailbox"}});
+  out.custody = returned.custody;
+  out.changed_objects = item.closure;
+  commerce_detail::record(out, call, "return", item.closure, out.reply);
+  return out;
+}
+} // namespace amber::step

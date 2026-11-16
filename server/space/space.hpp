@@ -140,7 +140,8 @@ void remove(Space &, IdentityRead, Handle, ParentWrite, SpaceFlags, PhysicalRela
             std::vector<RelationChange> &);
 // Leaves no query-visible native body or attachment. A null custodian is offline storage.
 OperationResult can_custody(const Space &, IdentityRead, Handle, Handle custodian, ParentRead,
-                            std::span<const Handle> declared_descendants = {});
+                            std::span<const Handle> declared_descendants = {},
+                            bool stay_static = false);
 struct VisibleCustody {
   Handle goods, parent;
   bool grasp = false;
@@ -152,7 +153,8 @@ OperationResult visible_custody(amber::ObjectState &objects_state, amber::space:
                                 std::span<const Handle> declared_descendants = {});
 OperationResult custody(amber::ObjectState &objects_state, Handle, Handle custodian,
                         amber::space::State &space_state,
-                        std::span<const Handle> declared_descendants = {});
+                        std::span<const Handle> declared_descendants = {},
+                        bool stay_static = false);
 OperationResult set_surface(Space &, IdentityRead, Handle, Surface);
 struct BodyProperties {
   float mass_kg;

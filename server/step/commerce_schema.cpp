@@ -204,6 +204,10 @@ CommerceDeclarations declare_commerce(react::Terms &terms, react::NativeActions 
       schema(
           {{"price", money}, {"buyer", str}, {"expires_s", {{"type", "number"}, {"minimum", 0}}}},
           {"price"}, {{"price", 1}}));
+  ids.return_goods = add(
+      react::ExchangeAction::ReturnGoods, "engine.return",
+      "Return another owner's complete item from your land. A live Build grant protects its owner.",
+      "", schema(Json::object(), Json::array(), Json::object()));
   ids.offer_plot =
       add(react::ExchangeAction::OfferPlot, "engine.offer_plot",
           "Offer a lot for sale to anyone or a named buyer. Requires Transfer on its land.", "",

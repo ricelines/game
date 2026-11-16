@@ -498,6 +498,7 @@ enum class RuleMode { Validated, Enable, Disable };
 enum class MechanicAction { Grasp, Release, Attach, Impulse, Transfer };
 enum class ConstructionAction { Create, Destroy, Reconfigure, ReviseModel, PlaceExisting };
 enum class ExchangeAction {
+  ReturnGoods,
   OfferPlot,
   SetOfferPrice,
   HoldGoods,

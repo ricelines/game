@@ -186,6 +186,7 @@ template <class S> void serialize(S &s, CustodyChange &v) {
   s.object(v.goods);
   s.object(v.parent);
   s.boolValue(v.in_world);
+  s.boolValue(v.stay_static);
 }
 template <class S> void serialize(S &s, TradeSide &v) {
   s.value4b(v.offer);

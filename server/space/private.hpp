@@ -246,8 +246,8 @@ void flags_for(SpaceFlags, Handle, Motion, bool held = false);
 void sensor_contact_changed(Space::Native &, const CachedContact &, bool added);
 bool has_sensor_contact(const Space::Native &, const CachedContact &);
 OperationResult can_release_occupants(const Space &, Handle, std::span<const Handle>,
-                                      bool retiring_body);
+                                      bool retiring_body, bool stay_static = false);
 OperationResult release_occupants(Space &, IdentityRead, Handle, std::span<const Handle>,
                                   ParentWrite, SpaceFlags, PhysicalRelations &,
-                                  std::vector<RelationChange> &);
+                                  std::vector<RelationChange> &, bool stay_static = false);
 } // namespace amber::space

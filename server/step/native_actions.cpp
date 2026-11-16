@@ -130,6 +130,12 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
 
   NativeCompletion out;
   switch (operation) {
+  case react::ExchangeAction::ReturnGoods: {
+    if (const auto error = validate_inventory(call.arguments); !error.empty())
+      throw std::invalid_argument(error);
+    out = return_goods(perm_state, objects_state, delivery, space, call);
+    break;
+  }
   case react::ExchangeAction::OfferPlot: {
     if (const auto error = validate_offer_plot(call.arguments); !error.empty())
       throw std::invalid_argument(error);
