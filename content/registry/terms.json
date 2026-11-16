@@ -2047,5 +2047,218 @@
       0
     ],
     "description": "Outdoor ambient light in lux"
+  },
+  {
+    "name": "base.land_base",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land base"
+  },
+  {
+    "name": "base.land_front",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land front"
+  },
+  {
+    "name": "base.land_back",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land back"
+  },
+  {
+    "name": "base.land_along",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land along"
+  },
+  {
+    "name": "base.land_depth",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land depth"
+  },
+  {
+    "name": "base.land_port_falloff",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land port falloff"
+  },
+  {
+    "name": "base.land_rent_rate",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land rent rate"
+  },
+  {
+    "name": "base.land_tier_value",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land tier value"
+  },
+  {
+    "name": "base.land_tier_multiplier",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land tier multiplier"
+  },
+  {
+    "name": "base.land_scarcity",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land scarcity"
+  },
+  {
+    "name": "base.land_on_offer",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land on offer"
+  },
+  {
+    "name": "base.land_start_multiple",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land start multiple"
+  },
+  {
+    "name": "base.land_halving_days",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land halving days"
+  },
+  {
+    "name": "base.land_tick",
+    "kind": "event",
+    "description": "Settle land rent and update pool offers."
   }
 ]

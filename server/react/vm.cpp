@@ -28,6 +28,7 @@ struct RelationBinding {
   const Terms &terms;
 };
 struct ContributionBinding {
+  IdentityRead identity;
   SharedColumns &shared;
   GivesTo &gives_to;
   const Terms &terms;
@@ -727,7 +728,7 @@ void bind_values(Vm &vm, const ValueRead &values, State &react_state) {
   const auto relations =
       std::make_shared<RelationBinding>(RelationBinding{values.relations, values.terms});
   const auto contribution = std::make_shared<ContributionBinding>(
-      ContributionBinding{shared, gives_to, values.terms, values.relations});
+      ContributionBinding{values.identity, shared, gives_to, values.terms, values.relations});
   register_binding(vm, "get", get_binding, read);
   register_binding(vm, "setting", setting_binding, read);
   register_binding(vm, "get_share", share_binding, read);
@@ -1389,6 +1390,9 @@ int contribute_binding(lua_State *L) {
       std::find(inv.declaration->contributes.begin(), inv.declaration->contributes.end(), id) ==
           inv.declaration->contributes.end())
     luaL_error(L, "contribution term was not declared");
+  // Retirement has already removed every contribution to a dead subject.
+  if (amount == 0 && !binding.identity.valid(subject))
+    return 0;
   bool allowed = subject == inv.self.object;
   for (const auto &[term, relation] : binding.relations.columns) {
     (void)term;

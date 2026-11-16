@@ -308,7 +308,7 @@ def test_all_sources_pass_actual_luau_declaration_worker(tmp_path, baked_plan):
     assert native.returncode == 0, (native.stdout, native.stderr)
     state = json.loads(report.read_text())
     assert state["script_errors"] == 0
-    assert len(state["objects"]) == 357
+    assert len(state["objects"]) == 358
     assert sum("aq.health" in row["values"] for row in state["objects"]) >= 300
     registries = list((data_dir / "registry").glob("*.json"))
     final = max(registries, key=lambda path: path.stat().st_mtime_ns)
@@ -525,3 +525,219 @@ return body
     receiver_id = max(row["model"] for row in state["objects"])
     receiver = next(row for row in state["objects"] if row["model"] == receiver_id)
     assert receiver["values"]["base.liquid"] == pytest.approx(0.00002)
+
+
+def land_world(tmp_path, baked_plan, *, probe, steps=40, settings=None, edit=None):
+    """Exercise the authored settlement against the actual native permission/store path."""
+    plan = json.loads(json.dumps(baked_plan))
+    for profile in plan["profiles"]:
+        profile["key_file"] = str(tmp_path / "keys" / f"{profile['id']}.key")
+    plan["world_settings"].update({"base.settlement_seconds": 0.1, "base.day_seconds": 1})
+    plan["world_settings"].update(settings or {})
+    script = next(row for row in plan["scripts"] if row["key"] == "land")
+    ending = "return {kind='model',on={['base.start']=tick,['base.land_tick']=tick}}"
+    assert ending in script["source"]
+    script["source"] = script["source"].replace(ending, probe)
+    if edit:
+        edit(plan)
+    path, report = tmp_path / "plan.json", tmp_path / "report.json"
+    path.write_text(json.dumps(plan))
+    native = subprocess.run(
+        [
+            str(ROOT / ".build/release/amb-server"),
+            "--plan",
+            str(path),
+            "--config",
+            str(ROOT / "config.toml"),
+            "--profile",
+            "development",
+            "--assets",
+            str(ROOT / "assets"),
+            "--data",
+            str(tmp_path / "world"),
+            "--no-network",
+            "--unpaced",
+            "--steps",
+            str(steps),
+            "--report",
+            str(report),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=40,
+        check=False,
+    )
+    assert native.returncode == 0, (native.stdout, native.stderr)
+    state = json.loads(report.read_text())
+    assert state["script_errors"] == 0, (state["script_errors"], tmp_path / "world", native.stderr)
+    return state
+
+
+def test_land_values_rent_tier_burn_and_falling_offers(tmp_path, baked_plan):
+    probe = """
+local function check(self)
+    tick(self)
+    local a=value(self,{plot=900,bounds={8,50,24,82},port=0,port_x=0,fronts='street'})
+    local b=value(self,{plot=901,bounds={8,82,24,114},port=0,port_x=0,fronts='back way'})
+    local c=value(self,{plot=902,bounds={100008,50,100024,82},
+        port=100,port_x=100000,fronts='street'})
+    assert(math.abs(a-2440.01)<0.01 and math.abs(b-992.34)<0.01 and
+        math.abs(c-1476.01)<0.01,'cell reference values')
+    local day=self:now()
+    local rows=self:act('engine.offers',nil,{}).offers
+    local count=0
+    for _, offer in rows do
+        if offer.plot then
+            count+=1
+            local p=self:plot(offer.plot)
+            local v=value(self,p)
+            local first='initial_price:'..offer.plot
+            if not self.state[first] then self.state[first]=offer.price end
+            if day>=1 then assert(offer.price<self.state[first],'auction did not halve') end
+            assert(offer.price>=v,'auction fell below floor')
+        end
+    end
+    assert(count==4,'expected two offers per class')
+    if day>=1 then
+        assert(self:act('engine.balance',nil,{account='p:2'}).balance<1000,'rent was not paid')
+        assert(self:act('engine.balance',nil,{account='p:0'}).balance==0,'rent was not burnt')
+        self:set('base.charge',1)
+    end
+end
+return {kind='model',on={['base.start']=check,['base.land_tick']=check}}
+"""
+    state = land_world(tmp_path, baked_plan, probe=probe)
+    post = next(row for row in state["objects"] if row["position"] == [12, 49, 0])
+    assert post["values"]["base.charge"] == 1
+
+
+def test_land_delinquency_holds_salvages_and_returns_third_party(tmp_path, baked_plan):
+    def unpaid(plan):
+        plan["grants"] = [
+            row
+            for row in plan["grants"]
+            if not (
+                row["issuer"] == 2 and row["holder"] == {"script": "land", "on": "public.land_post"}
+            )
+        ]
+        third = next(row for row in plan["objects"] if row["model"] == "chair").copy()
+        third.update(key="test.third_party", owner=3, at=[10, 80, 0])
+        plan["objects"].append(third)
+
+    probe = """
+local function check(self)
+    tick(self)
+    if self:now()>=0.8 then
+        local pooled=false
+        for _, id in self:plots() do
+            local plot=self:plot(id)
+            if plot.bounds[1]==8 and plot.bounds[2]==50 then
+                pooled=plot.owner=='p:0'
+            end
+        end
+        assert(pooled,'delinquent lot was not pooled')
+        for _, id in self:plots() do
+            local p=self:plot(id)
+            if p.bounds[1]==8 and p.bounds[2]==50 then
+                assert(#self:plot_objects(id)==0,'third-party goods were not returned')
+            end
+        end
+        assert((self.state.held_count or 0)>0,'owner goods were not held')
+        local stock=0
+        for key, amount in self.state do
+            if type(key)=='number' then stock+=amount end
+            assert(type(key)~='string' or string.sub(key,1,8)~='held_kg:',
+                'held mass was not cleared after salvage')
+        end
+        assert(stock>0,'salvaged mass did not reach stock')
+        self:set('base.charge',1)
+    end
+end
+return {kind='model',on={['base.start']=check,['base.land_tick']=check}}
+"""
+    state = land_world(
+        tmp_path,
+        baked_plan,
+        steps=24,
+        probe=probe,
+        edit=unpaid,
+        settings={"base.rent_grace_days": 0.2, "base.rent_hold_days": 0.2},
+    )
+    post = next(row for row in state["objects"] if row["position"] == [12, 49, 0])
+    assert post["values"]["base.charge"] == 1
+    third = next(row for row in state["objects"] if row["position"] == [10, 80, 0])
+    assert third["values"]["base.mass"] > 0  # Returned goods remain live, not salvaged.
+
+
+def test_land_sale_resets_debt_replenishes_offers_and_charges_remote_owner(tmp_path, baked_plan):
+    probe = """
+local function check(self)
+    tick(self)
+    if not self.state.bought then
+        for _, offer in self:act('engine.offers',nil,{}).offers do
+            if offer.plot and self:plot(offer.plot).fronts=='street' then
+                assert(self:act('engine.set_offer_price',nil,{offer=offer.id,price=0}).ok)
+                assert(self:act('engine.accept',nil,{
+                    offer=offer.id,max_price=0,beneficiary='p:3',payer='p:3'}).ok,'remote purchase')
+                self.state.bought=offer.plot
+                self.state.balance=self:act('engine.balance',nil,{account='p:3'}).balance
+                return
+            end
+        end
+    elseif not self.state.reset then
+        assert(self.state['debt:'..self.state.bought]==0,'new owner inherited debt')
+        local street=0
+        for _, offer in self:act('engine.offers',nil,{}).offers do
+            if offer.plot and self:plot(offer.plot).fronts=='street' then street+=1 end
+        end
+        assert(street==2,'sold lot was not replaced on offer')
+        self.state.reset=true
+    elseif self:now()>=0.8 then
+        assert(self:act('engine.balance',nil,{account='p:3'}).balance<self.state.balance,
+            'remote new owner was not charged rent')
+        self:set('base.charge',1)
+    end
+end
+return {kind='model',on={['base.start']=check,['base.land_tick']=check}}
+"""
+    state = land_world(tmp_path, baked_plan, steps=24, probe=probe)
+    post = next(row for row in state["objects"] if row["position"] == [12, 49, 0])
+    assert post["values"]["base.charge"] == 1
+
+
+def test_land_tier_charges_concentrated_holdings_more(tmp_path, baked_plan):
+    def compare_plan(plan, shared):
+        plan["land"]["lots"] = [
+            {"owner": 2, "at": [8, 50]},
+            {"owner": 2 if shared else 3, "at": [24, 50]},
+        ]
+        plan["bootstrap"] = [
+            row for row in plan["bootstrap"] if row["target"] == "public.land_post"
+        ]
+        plan["grants"] = [row for row in plan["grants"] if "plot_at" not in row["scope"]]
+
+    paid = []
+    for shared in (True, False):
+        directory = tmp_path / str(shared)
+        directory.mkdir()
+        probe = """
+local function check(self)
+    tick(self)
+    local a=self:act('engine.balance',nil,{account='p:2'}).balance
+    local b=self:act('engine.balance',nil,{account='p:3'}).balance
+    self:set('base.charge',2000-a-b)
+end
+return {kind='model',on={['base.start']=check,['base.land_tick']=check}}
+"""
+        state = land_world(
+            directory,
+            baked_plan,
+            steps=24,
+            probe=probe,
+            settings={"base.land_tier_value": 3000},
+            edit=lambda plan, shared=shared: compare_plan(plan, shared),
+        )
+        post = next(row for row in state["objects"] if row["position"] == [12, 49, 0])
+        paid.append(post["values"]["base.charge"])
+    assert paid[0] > paid[1] > 0

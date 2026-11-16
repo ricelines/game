@@ -189,6 +189,21 @@ void persistence_and_activation() {
               std::get<double>(f.states.at({f.object, 2}).at(std::string("count"))) == 2,
           "inactive cached script cannot execute even with an old handler reference");
 }
+void withdrawing_from_retired_subject_is_idempotent() {
+  test_runtime::Fixture f(1000);
+  const auto script = f.add(R"(return {kind='model',contributes={'novel.signal'},on={
+    ['novel.cue']=function(self) self:contribute(self.state.old,'novel.signal',0) end}})");
+  react::ScriptState state;
+  state[std::string("old")] = f.b;
+  destroy(f.objects, f.b);
+  react::Invocation invocation;
+  invocation.self = {f.a, script};
+  invocation.state = &state;
+  invocation.effects = &f.effects;
+  const auto result = react::run_handler(f.vm, {script, "novel.cue", 6}, invocation);
+  require(result.status == react::RunOutcome::Status::Ok && f.gives_to.get(f.a.slot()) == nullptr,
+          "withdrawing an already retired contribution failed or changed a reused subject");
+}
 void model_rebind_retires_only_removed_installations() {
   test_runtime::Fixture f(1000);
   f.terms.rows[2].combine = react::Combine::Sum;
@@ -323,6 +338,7 @@ int main() {
   try {
     live_effects_and_causal_finalization();
     persistence_and_activation();
+    withdrawing_from_retired_subject_is_idempotent();
     model_rebind_retires_only_removed_installations();
     std::cout << "Actual VM execution, live effects and causal finalization tests passed.\n";
   } catch (const std::exception &error) {

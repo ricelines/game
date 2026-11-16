@@ -86,6 +86,12 @@
       "file": "scripts/wood_impact.luau",
       "author": 1,
       "world_rule": true
+    },
+    {
+      "key": "land",
+      "file": "scripts/land.luau",
+      "author": 1,
+      "world_rule": false
     }
   ],
   "models": [
@@ -446,6 +452,18 @@
         "description": "Physical sloping rails and posts beside every stair tread."
       },
       "author": 1
+    },
+    {
+      "key": "land_post",
+      "file": "models/equipment.py",
+      "material": "base.steel",
+      "text": {
+        "name": "Land post",
+        "description": "Posted land rents and current plot offers. Read the land script before buying."
+      },
+      "script": "land",
+      "author": 1,
+      "group": 1
     }
   ],
   "profiles": [
@@ -1003,7 +1021,20 @@
     "aq.stress_rate": 0.003,
     "aq.severe_rate": 0.012,
     "aq.recovery_rate": 0.002,
-    "base.outdoor_lux": 120
+    "base.outdoor_lux": 120,
+    "base.land_base": 1,
+    "base.land_front": 9,
+    "base.land_back": 1,
+    "base.land_along": 250,
+    "base.land_depth": 16,
+    "base.land_port_falloff": 0.01,
+    "base.land_rent_rate": 0.01,
+    "base.land_tier_value": 5000,
+    "base.land_tier_multiplier": 2,
+    "base.land_scarcity": 1,
+    "base.land_on_offer": 2,
+    "base.land_start_multiple": 3,
+    "base.land_halving_days": 1
   },
   "objects": [
     {
@@ -2809,6 +2840,43 @@
         "seeded"
       ],
       "maker": 1
+    },
+    {
+      "key": "public.land_post",
+      "model": "land_post",
+      "owner": 1,
+      "at": [
+        12,
+        49,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0.0,
+        1.0
+      ],
+      "flags": [
+        "static"
+      ],
+      "state": {},
+      "settings": {},
+      "preset": [
+        "use",
+        "copy"
+      ],
+      "seed": true,
+      "maker": 1,
+      "group": 1,
+      "group_rights": [
+        "use",
+        "take",
+        "move",
+        "edit",
+        "copy",
+        "transfer",
+        "destroy"
+      ]
     }
   ],
   "relations": [
@@ -3589,6 +3657,138 @@
         "seeded"
       ],
       "stakes": false
+    },
+    {
+      "issuer": 0,
+      "holder": {
+        "script": "land",
+        "on": "public.land_post"
+      },
+      "scope": {
+        "all_land": true
+      },
+      "rights": [
+        "transfer",
+        "destroy",
+        "land_transfer"
+      ],
+      "cap": 0,
+      "period_s": 0,
+      "expires_s": 31536000
+    },
+    {
+      "issuer": 2,
+      "holder": {
+        "script": "land",
+        "on": "public.land_post"
+      },
+      "scope": {
+        "account": "p:2"
+      },
+      "rights": [
+        "spend"
+      ],
+      "cap": 10000,
+      "period_s": 86400,
+      "expires_s": 31536000,
+      "starts": [
+        "seeded"
+      ]
+    },
+    {
+      "issuer": 3,
+      "holder": {
+        "script": "land",
+        "on": "public.land_post"
+      },
+      "scope": {
+        "account": "p:3"
+      },
+      "rights": [
+        "spend"
+      ],
+      "cap": 10000,
+      "period_s": 86400,
+      "expires_s": 31536000,
+      "starts": [
+        "seeded"
+      ]
+    },
+    {
+      "issuer": 4,
+      "holder": {
+        "script": "land",
+        "on": "public.land_post"
+      },
+      "scope": {
+        "account": "p:4"
+      },
+      "rights": [
+        "spend"
+      ],
+      "cap": 10000,
+      "period_s": 86400,
+      "expires_s": 31536000,
+      "starts": [
+        "seeded"
+      ]
+    },
+    {
+      "issuer": 5,
+      "holder": {
+        "script": "land",
+        "on": "public.land_post"
+      },
+      "scope": {
+        "account": "p:5"
+      },
+      "rights": [
+        "spend"
+      ],
+      "cap": 10000,
+      "period_s": 86400,
+      "expires_s": 31536000,
+      "starts": [
+        "seeded"
+      ]
+    },
+    {
+      "issuer": 6,
+      "holder": {
+        "script": "land",
+        "on": "public.land_post"
+      },
+      "scope": {
+        "account": "p:6"
+      },
+      "rights": [
+        "spend"
+      ],
+      "cap": 10000,
+      "period_s": 86400,
+      "expires_s": 31536000,
+      "starts": [
+        "seeded"
+      ]
+    },
+    {
+      "issuer": 7,
+      "holder": {
+        "script": "land",
+        "on": "public.land_post"
+      },
+      "scope": {
+        "account": "p:7"
+      },
+      "rights": [
+        "spend"
+      ],
+      "cap": 10000,
+      "period_s": 86400,
+      "expires_s": 31536000,
+      "starts": [
+        "seeded"
+      ]
     }
   ],
   "bootstrap": [
@@ -3703,6 +3903,11 @@
     },
     {
       "target": "resident.oren",
+      "event": "base.start",
+      "payload": null
+    },
+    {
+      "target": "public.land_post",
       "event": "base.start",
       "payload": null
     }
