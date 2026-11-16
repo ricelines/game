@@ -170,6 +170,11 @@ void plot_offer_snapshots_keep_remote_maker_and_its_authority() {
   require(row.plot == 1 && row.maker == maker && row.price == 25 && row.buyer == 2 &&
               restored.offers.expiring.contains({500, row.id}),
           "snapshot lost plot sale fields or expiry");
+  state.offers.rows[offered.offer].live = false;
+  destroy(objects, remote);
+  const auto closed = capture_authority(authority(objects), selected, actors, state);
+  require(!closed.offers.contains(offered.offer) && !closed.objects.contains(remote),
+          "local capture retained a closed quotation's retired maker");
 }
 
 void moved_goods_leave_plot_scoped_authority() {

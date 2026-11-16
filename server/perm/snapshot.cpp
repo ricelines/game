@@ -22,7 +22,7 @@ SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Han
     selected.plots.insert(authority.plot[object.slot()]);
   }
   for (const auto &offer : offers.rows)
-    if (offer.id &&
+    if (offer.id && offer.live &&
         (offer.plot ? selected.plots.contains(offer.plot)
                     : selected.objects.contains(offer.goods)) &&
         std::all_of(offer.parts.begin(), offer.parts.end(),
