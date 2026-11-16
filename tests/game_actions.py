@@ -164,19 +164,6 @@ async def nested_reinstallation(args, evidence, player, body):
             expires_s=60,
         )
         require(granted.get("ok"), "lifetime regression explicit object grant failed")
-    plot = (await player.request("inspect", target=body))["plot"]
-    async with Player(
-        "landlord", f"ws://127.0.0.1:{args.port}/ws", player.key_file.parent / "1.key", evidence
-    ) as landlord:
-        granted = await landlord.act(
-            "engine.grant",
-            holder=dict(script=coordinator, on=body),
-            scope=dict(plot=plot),
-            rights=["run_scripts"],
-            expires_s=60,
-        )
-        require(granted.get("ok"), "landlord could not permit coordinator reinstallation")
-
     reply = await player.act("base.recharge", body, amount=1)
     inspected = await player.request("inspect", target=body)
     fresh = state(inspected, outer)
@@ -302,7 +289,7 @@ async def exercise(args, evidence, player_id, key):
             "denied nested Build allocated an object or spent authored stock",
         )
         async with Player(
-            "landlord", f"ws://127.0.0.1:{args.port}/ws", key.parent / "1.key", evidence
+            "plot owner", f"ws://127.0.0.1:{args.port}/ws", key.parent / "2.key", evidence
         ) as landlord:
             build = await landlord.act(
                 "engine.grant",

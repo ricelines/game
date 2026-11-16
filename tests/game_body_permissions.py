@@ -62,7 +62,7 @@ def make_plan(args, directory):
                 [
                     dict(
                         slot=slot,
-                        scope={"owned_on_plot": {"owner": player, "plot": 3}},
+                        scope={"owned": f"p:{player}"},
                         rights=[slot],
                         expires_s=60,
                     )
@@ -111,7 +111,7 @@ async def exercise(args, evidence, player_id, key):
             initial["held"] == [] and len(initial["given"]) == 2,
             "starting body did not receive exactly its two configured scope grants",
         )
-        owned_scope = {"owned_on_plot": {"owner": f"p:{player_id}", "plot": 3}}
+        owned_scope = {"owned": f"p:{player_id}"}
         object_grant = next(row for row in initial["given"] if row["scope"] == owned_scope)
         avatar_grant = next(row for row in initial["given"] if row["scope"] == {"avatar": body})
         require(

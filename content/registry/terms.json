@@ -1045,22 +1045,6 @@
     "description": "purchase per joule"
   },
   {
-    "name": "base.issuance_rate",
-    "kind": "quantity",
-    "source": "setting",
-    "dimensions": [
-      0,
-      0,
-      -1,
-      0,
-      0,
-      0,
-      0,
-      1
-    ],
-    "description": "issuance rate"
-  },
-  {
     "name": "base.settlement_seconds",
     "kind": "quantity",
     "source": "setting",
@@ -1075,54 +1059,6 @@
       0
     ],
     "description": "settlement seconds"
-  },
-  {
-    "name": "base.rent_baseline",
-    "kind": "quantity",
-    "source": "setting",
-    "dimensions": [
-      -2,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      1
-    ],
-    "description": "rent baseline"
-  },
-  {
-    "name": "base.rent_frontage",
-    "kind": "quantity",
-    "source": "setting",
-    "dimensions": [
-      -1,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      1
-    ],
-    "description": "rent frontage"
-  },
-  {
-    "name": "base.rent_decay",
-    "kind": "quantity",
-    "source": "setting",
-    "dimensions": [
-      1,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "rent decay"
   },
   {
     "name": "base.rent_grace_days",
@@ -1443,22 +1379,6 @@
       0
     ],
     "description": "settle"
-  },
-  {
-    "name": "base.rent_tick",
-    "kind": "event",
-    "source": "state",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "rent tick"
   },
   {
     "name": "aq.swim",
@@ -2091,22 +2011,6 @@
       0
     ],
     "description": "living"
-  },
-  {
-    "name": "base.rent_controller",
-    "kind": "flag",
-    "source": "state",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "Authored land-accounting institution selector"
   },
   {
     "name": "base.demand_request",

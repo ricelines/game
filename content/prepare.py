@@ -116,6 +116,8 @@ def validate_symbols(plan: dict) -> None:
             raise ValueError("Money belongs to a registered player's wallet")
 
     def account(reference):
+        if reference == "p:0":
+            return
         if reference in objects:
             return
         if isinstance(reference, str) and reference.startswith("group:"):
@@ -128,9 +130,15 @@ def validate_symbols(plan: dict) -> None:
         if len(keys) != len(plan[field]):
             raise ValueError(f"Duplicate {field} key")
     for row in plan["objects"]:
+        if row["owner"] not in players:
+            raise ValueError("An object needs a registered non-root owner")
+        if row.get("group", 0) and row["group"] not in groups:
+            raise ValueError("Unknown object group")
         if row["model"] not in models:
             raise ValueError(f"Missing model {row['model']}")
     for row in plan["models"]:
+        if row.get("group", 0) and row["group"] not in groups:
+            raise ValueError("Unknown model group")
         if row.get("script") and row["script"] not in scripts:
             raise ValueError(f"Missing script {row['script']}")
     for profile in plan["profiles"]:
@@ -159,7 +167,14 @@ def validate_symbols(plan: dict) -> None:
         elif reference["script"] not in scripts or reference["on"] not in objects:
             raise ValueError(f"Missing installed grant holder: {reference}")
 
+    for row in plan["plots"]:
+        if row["owner"] not in players | {0} or row["kind"] not in {"street", "alley", "lot"}:
+            raise ValueError("Unknown plot owner or kind")
     for row in plan["grants"]:
+        if row["issuer"] not in players | {0}:
+            raise ValueError("Unknown grant issuer")
+        if "all_land" in row["scope"] and row["issuer"] != 0:
+            raise ValueError("Only root gives all-land grants")
         holder(row["holder"])
         if "caller" in row:
             holder(row["caller"])
@@ -170,6 +185,8 @@ def validate_symbols(plan: dict) -> None:
         if "account" in row["scope"]:
             account(row["scope"]["account"])
     for row in plan["balances"]:
+        if row["holder"] == "p:0":
+            raise ValueError("Root never stores a balance")
         account(row["holder"])
 
 

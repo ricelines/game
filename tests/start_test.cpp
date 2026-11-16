@@ -111,15 +111,12 @@ int main(int argc, char **argv) {
     install_land(plan, plots, groups, players);
     perm::Ledger &ledger = perm_state.ledger;
     auto money_plan = plan;
-    groups.rows.push_back({1, 1, "Funded institution"});
-    money_plan["balances"].push_back({{"holder", "public.treasury"}, {"amount", 100}});
-    money_plan["balances"].push_back({{"holder", "group:1"}, {"amount", 25}});
+    groups.rows.push_back({2, 1, "Funded institution"});
+    money_plan["balances"].push_back({{"holder", "group:2"}, {"amount", 25}});
     install_money(money_plan, symbols, identity(objects), authority(std::as_const(objects)),
                   players, groups, ledger);
     require(perm::balance(ledger, perm::Account::player(2)) == 1000 &&
-                perm::balance(
-                    ledger, perm::Account::object(symbols.objects.at("public.treasury"))) == 100 &&
-                perm::balance(ledger, perm::Account::group(1)) == 25 &&
+                perm::balance(ledger, perm::Account::group(2)) == 25 &&
                 perm::balance(ledger, perm::Account::player(1)) == 0,
             "startup aliased an object or group account to its controller's player wallet");
     react::RuleVersions &rules = react_state.rules;
@@ -156,15 +153,20 @@ int main(int argc, char **argv) {
         const auto holder = perm::Holder::script(script, body);
         require(bool(perm::check_scope(holder, perm::Scope::avatar(body), 3, grants, 0)),
                 "starting body cannot use its authored avatar grants");
-        for (const auto &plot : plots.rows)
-          if (plot.id)
-            for (const auto verb : {perm::Verb::Use, perm::Verb::Take, perm::Verb::Move})
-              require(bool(perm::check_scope(holder, perm::Scope::owned_on_plot(player, plot.id),
-                                             perm::bit(verb), grants, 0)),
-                      "starting body cannot use its owner's goods on an authored plot");
+        for (const auto verb : {perm::Verb::Use, perm::Verb::Take, perm::Verb::Move})
+          require(bool(perm::check_scope(holder, perm::Scope::owned(player), perm::bit(verb),
+                                         grants, 0)),
+                  "starting body can use its owner's goods on any plot");
       }
+    require(!players.rows[0].grants_given.empty() &&
+                !ledger.balance.contains(perm::Account::player(0)),
+            "start file loads root grants without storing a root balance");
+    const auto script_grant =
+        *std::find_if(plan.at("grants").begin(), plan.at("grants").end(), [](const auto &row) {
+          return row.at("holder").is_object() && row.at("holder").at("script") == "power_buyer";
+        });
     auto wrong_owner = plan;
-    wrong_owner["grants"] = Json::array({plan.at("grants")[0]});
+    wrong_owner["grants"] = Json::array({script_grant});
     wrong_owner["grants"][0]["issuer"] = 3;
     wrong_owner["grants"][0]["controller"] = 3;
     perm::State rejected_permissions;
@@ -178,7 +180,7 @@ int main(int argc, char **argv) {
         },
         "plan cannot forge current goods control");
     auto wrong_installation = plan;
-    wrong_installation["grants"] = Json::array({plan.at("grants")[0]});
+    wrong_installation["grants"] = Json::array({script_grant});
     wrong_installation["grants"][0]["holder"]["script"] = "body";
     rejects(
         [&] {

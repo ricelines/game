@@ -67,55 +67,84 @@ def test_school_uses_declared_parts_with_one_script(authored):
     assert all(g["expires_s"] > 0 for g in plan["grants"])
 
 
-def test_leases_and_starting_body_choices_have_real_scopes(authored):
-    for stakes in (True, False):
-        plan = select(authored, "seeded", stakes)
-        assert all(plot["owner"] == 1 for plot in plan["plots"])
-        rent = {"script": "rent", "on": "public.rent"}
-        leases = [row for row in plan["grants"] if row.get("caller") == rent]
-        assert len(leases) == 18
-        for row in leases:
-            roots = [
-                root
-                for root in plan["grants"]
-                if root["holder"] == rent and root["scope"] == row["scope"]
+def test_root_owned_and_starting_body_grants_have_real_scopes(authored):
+    for mode in ("seeded", "forage"):
+        for stakes in (True, False):
+            plan = select(authored, mode, stakes)
+            validate_symbols(plan)
+            assert plan["groups"] == [
+                {"id": 1, "controller": 0, "name": "architects", "members": [1]}
             ]
-            assert len(roots) == 1 and row["expires_s"] <= roots[0]["expires_s"]
-            assert set(row["rights"]) <= set(roots[0]["rights"])
-        assert sum(isinstance(row["holder"], str) for row in leases) == 6
-        assert not any("avatar" in row["scope"] for row in plan["grants"])
-        for profile in plan["profiles"]:
-            if "body" not in profile:
-                continue
-            choices = [choice for group in profile["body_installs"] for choice in group]
-            for plot in plan["plots"]:
-                owner_scope = {"owned_on_plot": {"owner": profile["id"], "plot": plot["id"]}}
+            assert all(
+                row["kind"] == ("street" if row["id"] == 3 else "lot") for row in plan["plots"]
+            )
+            owners = {1: 2, 2: 3, 3: 0, 4: 4, 5: 5, 6: 6, 7: 7}
+            assert all(
+                row["owner"] == (owners[row["id"]] if mode == "seeded" else 0)
+                for row in plan["plots"]
+            )
+            assert not any(
+                "caller" in row or "owned_on_plot" in row["scope"] for row in plan["grants"]
+            )
+            for profile in plan["profiles"]:
+                if "body" not in profile:
+                    continue
+                choices = [choice for group in profile["body_installs"] for choice in group]
+                owner_scope = {"owned": f"p:{profile['id']}"}
                 assert {row["slot"] for row in choices if row["scope"] == owner_scope} == {
                     "use",
                     "take",
                     "move",
                 }
-            avatar = [row for row in choices if row["scope"] == {"avatar": profile["body"]}]
-            assert {row["slot"] for row in avatar} == {"animate", "camera"}
-            assert all(row["rights"] == [row["slot"]] and row["expires_s"] > 0 for row in choices)
+                assert {
+                    row["slot"] for row in choices if row["scope"] == {"avatar": profile["body"]}
+                } == {"animate", "camera"}
+                assert all(
+                    row["rights"] == [row["slot"]] and row["expires_s"] > 0 for row in choices
+                )
+                build = [
+                    r
+                    for r in plan["grants"]
+                    if isinstance(r["holder"], dict)
+                    and r["holder"]["on"] == profile["body"]
+                    and r["rights"] == ["build"]
+                ]
+                assert len(build) == (2 if mode == "seeded" else 0)
+                if build:
+                    own_plot = next(
+                        row["id"] for row in plan["plots"] if row["owner"] == profile["id"]
+                    )
+                    assert all(
+                        row["issuer"] == profile["id"] and row["scope"] == {"plot": own_plot}
+                        for row in build
+                    )
+                owned = [
+                    r
+                    for r in plan["grants"]
+                    if isinstance(r["holder"], dict)
+                    and r["holder"]["on"] == profile["body"]
+                    and r["rights"] == ["edit", "destroy"]
+                ]
+                assert len(owned) == 1 and owned[0]["scope"] == owner_scope
 
 
-def test_institution_account_has_an_explicit_script_allowance(authored):
+def test_power_buyer_has_an_explicit_root_allowance(authored):
     plan = select(authored, "seeded", True)
-    assert all(row["holder"].startswith("p:") for row in plan["balances"])
-    treasury_spend = [
-        row
-        for row in plan["grants"]
-        if isinstance(row["holder"], dict)
-        and row["holder"]["script"] == "treasury"
-        and row["rights"] == ["spend"]
-    ]
-    assert len(treasury_spend) == 1
-    assert treasury_spend[0]["scope"] == {"account": "public.treasury"}
-    assert treasury_spend[0]["cap"] > 0 and treasury_spend[0]["expires_s"] > 0
-    plan["balances"].append({"holder": "public.treasury", "amount": 100})
-    validate_symbols(plan)
-    plan["groups"] = [{"id": 1, "controller": 1, "name": "Test group"}]
+    buyer = {"script": "power_buyer", "on": "public.power_buyer"}
+    grant = next(r for r in plan["grants"] if r["holder"] == buyer)
+    assert grant == {
+        "issuer": 0,
+        "holder": buyer,
+        "scope": {"account": "p:0"},
+        "rights": ["spend"],
+        "cap": 100000,
+        "period_s": 86400,
+        "expires_s": 31536000,
+    }
+    allowance = next(r for r in plan["grants"] if r["holder"] == "p:1")
+    assert allowance["issuer"] == 0 and allowance["scope"] == {"account": "p:0"}
+    assert allowance["cap"] == 1000000 and allowance["period_s"] == 604800
+    plan["balances"].append({"holder": "public.power_buyer", "amount": 100})
     plan["balances"].append({"holder": "group:1", "amount": 25})
     validate_symbols(plan)
     plan["balances"].append({"holder": "group:999", "amount": 25})
@@ -290,7 +319,6 @@ def test_all_sources_pass_actual_luau_declaration_worker(tmp_path, baked_plan):
     assert {row["name"] for row in data["terms"]} >= {
         "engine.create",
         "engine.grasp",
-        "engine.issue",
         "engine.grant",
     }
     config = tomllib.loads((ROOT / "config.toml").read_text())
@@ -333,81 +361,43 @@ def test_residents_supply_intentions_without_prepared_solutions():
         assert "route" not in row and "source" not in row and "actions" not in row
 
 
-def test_rent_holds_and_salvages_measured_materials_without_reacquiring(tmp_path, baked_plan):
+def test_power_buyer_pays_suppliers_from_root_within_its_cap(tmp_path, baked_plan):
     plan = json.loads(json.dumps(baked_plan))
     for profile in plan["profiles"]:
         profile["key_file"] = str(tmp_path / "keys" / f"{profile['id']}.key")
-    rent_state = next(row for row in plan["script_state"] if row["script"] == "rent")
-    rent_state["entries"] = [
-        {"key": "lease:6", "value": 6},
-        {"key": "tenant:6", "value": "p:6"},
-        {"key": "street_y", "value": 0},
-        {"key": "port:0", "value": 0},
-    ]
-    next(row for row in plan["balances"] if row["holder"] == "p:6")["amount"] = 0
-    plan["world_settings"].update(
-        {
-            "base.day_seconds": 1,
-            "base.settlement_seconds": 0.1,
-            "base.rent_grace_days": 0,
-            "base.rent_hold_days": 0.2,
-            "base.rent_baseline": 1,
-        }
+    plan["world_settings"].update({"base.settlement_seconds": 0.1, "base.purchase_per_joule": 0.01})
+    grant = next(
+        r
+        for r in plan["grants"]
+        if isinstance(r["holder"], dict) and r["holder"]["script"] == "power_buyer"
     )
-    cup = next(row for row in plan["objects"] if row["model"] == "cup")
-    plan["objects"].append(
-        {
-            **cup,
-            "key": "test.salvage",
-            "owner": 6,
-            "maker": 6,
-            "plot": 6,
-            "at": [45, 5, 0],
-            "flags": ["static"],
-        }
-    )
-    registry_data = registry(ROOT / "content/registry")
-    ceramic = next(row["id"] for row in registry_data["terms"] if row["name"] == "base.ceramic")
-    density = next(row["id"] for row in registry_data["terms"] if row["name"] == "base.density")
-    material = next(row for row in registry_data["materials"] if row["id"] == ceramic)
-    density_value = next(
-        row["value"]["value"] for row in material["values"] if row["term"] == density
-    )
-    model = next(row for row in plan["models"] if row["key"] == "cup")
-    manifest = json.loads((ROOT / "assets" / model["asset"] / "manifest.json").read_text())
-    expected = manifest["volume"] * density_value
-    source = (ROOT / "content/scripts/rent.luau").read_text()
-    # Run the actual authored policy, checking its stock and bookkeeping after
-    # enough subsequent ticks to catch plot-list/material-key collisions too.
-    source = (
+    grant["cap"] = 5
+    source = next(r for r in plan["scripts"] if r["key"] == "power_buyer")
+    source["source"] = (
         "local rule=(function()\n"
-        + source
+        + source["source"]
         + "\nend)()\n"
-        + f"""
-local tick=rule.on['base.rent_tick']
-rule.on['base.rent_tick']=function(self,...)
-    tick(self,...)
-    if self:now()>=0.8 then
-        assert(self.state.held_count==1,'one actual item must have been held')
-        assert(math.abs((self.state[{ceramic}] or 0)-{expected!r})<1e-9,'credited material mass')
-        assert(self.state['held:1']==nil and self.state['held_until:1']==nil,'cleared hold')
-        for key in self.state do
-            assert(type(key)~='string' or string.sub(key,1,8)~='held_kg:','cleared mass rows')
-        end
-        self:set('base.charge',self.state[{ceramic}])
+        + """
+local settle=rule.on['base.settle']
+rule.on['base.settle']=function(self,...)
+    settle(self,...)
+    if self:now()>=3 then
+        local balance=self:act('engine.balance',nil,{account='p:3'}).balance
+        assert(balance==1005,'supplier receives the capped root payment')
+        assert(self:act('engine.balance',nil,{account='p:0'}).balance==0,'root holds no money')
+        self:set('base.charge',5)
     end
 end
 return rule
 """
     )
-    next(row for row in plan["scripts"] if row["key"] == "rent")["source"] = source
-    plan_path, report = tmp_path / "plan.json", tmp_path / "report.json"
-    plan_path.write_text(json.dumps(plan))
+    path, report = tmp_path / "plan.json", tmp_path / "report.json"
+    path.write_text(json.dumps(plan))
     result = subprocess.run(
         [
             str(ROOT / ".build/release/amb-server"),
             "--plan",
-            str(plan_path),
+            str(path),
             "--config",
             str(ROOT / "config.toml"),
             "--assets",
@@ -417,7 +407,7 @@ return rule
             "--no-network",
             "--unpaced",
             "--steps",
-            "22",
+            "80",
             "--report",
             str(report),
         ],
@@ -430,9 +420,9 @@ return rule
     assert result.returncode == 0, (result.stdout, result.stderr)
     state = json.loads(report.read_text())
     assert state["script_errors"] == 0
-    rent_position = next(row["at"] for row in plan["objects"] if row["key"] == "public.rent")
-    rent = next(row for row in state["objects"] if row["position"] == rent_position)
-    assert rent["values"]["base.charge"] == pytest.approx(expected)
+    position = next(row["at"] for row in plan["objects"] if row["key"] == "public.power_buyer")
+    buyer = next(row for row in state["objects"] if row["position"] == position)
+    assert buyer["values"]["base.charge"] == 5
 
 
 def test_body_pours_into_a_model_without_container_bindings(tmp_path, baked_plan):

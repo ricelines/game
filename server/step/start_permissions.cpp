@@ -86,6 +86,8 @@ void install_money(const Json &plan, const Symbols &symbols, IdentityRead identi
     const auto account = step::account(reference, identity, authority, players, groups).account;
     if (!row.at("amount").is_number_integer())
       throw std::invalid_argument("initial balance must be whole units");
+    if (account == perm::Account::player(0))
+      throw std::invalid_argument("root never stores a balance");
     const auto amount = row.at("amount").get<std::int64_t>();
     if (amount < 0 || !initialized.insert(account).second)
       throw std::invalid_argument("invalid or duplicate initial balance");
