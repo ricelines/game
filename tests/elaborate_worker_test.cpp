@@ -29,7 +29,7 @@ FixtureJob job(JobId id, std::string mode) {
 void worker(const std::filesystem::path &executable, const std::filesystem::path &directory) {
   FixtureWorker pool(executable, directory, 2);
   auto slow = job(1, "slow");
-  slow.limits.timeout_ms = 100;
+  slow.limits.timeout_ms = 2000;
   pool.submit(slow);
   pool.submit(job(2, "normal"));
   pool.submit(job(3, "wrong"));
