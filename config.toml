@@ -130,8 +130,8 @@ MIN_REGION_CELLS = 4
 MERGE_REGION_CELLS = 64
 NODES_PER_QUERY = 8192
 POLYGONS_PER_PATH = 4096
-# Detour's 32-bit references require at least ten salt bits: 1024 tiles ×4096 polygons fits.
-MAX_TILES = 1024
+# Detour uses 64-bit references; reserve capacity for the initial terrain with small rebuild tiles.
+MAX_TILES = 8192
 POLYGONS_PER_TILE = 4096
 # Two tile workers keep navigation construction off the writer.
 WORKERS = 2
