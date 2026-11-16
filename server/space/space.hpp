@@ -68,6 +68,7 @@ struct Settings {
   float contact_slop_m, sweep_skin_m, crowd_correction_m, blocked_after_s;
   std::uint32_t max_characters;
   float crowd_query_radius_multiplier, crowd_optimize_radius_multiplier, crowd_separation_weight;
+  float terrain_tile_m;
 };
 struct Space {
   struct Native;
@@ -490,6 +491,7 @@ void remove_listener(Hearing &, std::uint64_t);
 namespace amber::space {
 struct State {
   Space space;
+  std::set<std::pair<std::int32_t, std::int32_t>> terrain;
   PhysicalRelations physical_relations;
   std::vector<RelationChange> relation_changes;
   observe::Hearing hearing;
@@ -504,4 +506,9 @@ struct State {
       : space(settings), lights(light_cell_m), light_subscriptions(light_cell_m),
         active_views(light_cell_m) {}
 };
+} // namespace amber::space
+
+namespace amber::space {
+void add_terrain(State &, std::int32_t i, std::int32_t j);
+void ensure_terrain(State &, const std::array<float, 4> &bounds);
 } // namespace amber::space

@@ -188,6 +188,9 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                             catalog_state, perm_state, net_state, step_state,
                                             elaborate_state);
     next_record = decoded.next_record;
+    for (const auto &plot : plots.rows)
+      if (plot.id)
+        space::ensure_terrain(space_state, plot.bounds);
 
     clock.step = restored->header.step;
     checkpoint::restore_pending_work(inputs, captures, catalog_root);
@@ -202,13 +205,14 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   } else {
     start::install_catalog(plan, react_state, registry.hash, settings.pins, settings.scripts,
                            launch.assets, launch.data / "scripts", catalog_state, symbols);
+    start::install_land(plan, perm_state, space_state, settings.land);
     initial =
         start::install_objects(plan, symbols, catalog_state, terms, objects_state, clock.step);
     start::install_properties(plan, symbols, react_state, clock.step, hz);
     start::install_relations(plan, symbols, terms, authored_relations, setup);
     start::install_script_state(plan, symbols, states);
     start::install_profiles(plan, symbols, profiles, players, std::filesystem::current_path());
-    start::install_land(plan, plots, groups, players);
+    perm::update_plots(ids, transforms(objects), plot_membership(objects), plots, initial, true);
     start::install_money(plan, symbols, ids, auth, players, groups, ledger);
     start::install_grants(plan, symbols, objects_state, perm_state, catalog_state, react_state,
                           clock);

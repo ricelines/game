@@ -32,14 +32,15 @@ void install_profiles(const Json &plan, const Symbols &symbols, net::Profiles &p
     net::put_profile(profiles, std::move(profile));
   }
 }
-void install_land(const Json &plan, perm::Plots &plots, perm::Groups &groups,
-                  perm::Players &players) {
+void install_land(const Json &plan, perm::State &perm, space::State &space,
+                  const LandSettings &settings) {
+  auto &groups = perm.groups;
+  auto &players = perm.players;
   for (const auto &row : plan.at("groups")) {
     const auto id = row.at("id").get<GroupId>();
     groups.rows.resize(std::max(groups.rows.size(), std::size_t(id) + 1));
     groups.rows[id] = {id, row.at("controller").get<PlayerId>(), row.at("name").get<std::string>()};
-    const auto members = row.value("members", Json::array());
-    for (const auto &value : members) {
+    for (const auto &value : row.value("members", Json::array())) {
       const auto player = value.get<PlayerId>();
       players.rows.resize(std::max(players.rows.size(), std::size_t(player) + 1));
       players.rows[player].groups.push_back(id);
@@ -47,33 +48,27 @@ void install_land(const Json &plan, perm::Plots &plots, perm::Groups &groups,
   }
   for (auto &player : players.rows)
     std::sort(player.groups.begin(), player.groups.end());
-  for (const auto &row : plan.at("plots")) {
-    const auto id = row.at("id").get<PlotId>();
-    plots.rows.resize(std::max(plots.rows.size(), std::size_t(id) + 1));
-    perm::Rights preset = 0;
-    const auto &access = row.at("access");
-    if (access.value("build", false))
-      preset |= 1;
-    if (access.value("enter", false))
-      preset |= 2;
-    if (access.value("run_scripts", false))
-      preset |= 4;
-    plots.rows[id] = {id,
-                      row.at("owner").get<PlayerId>(),
-                      row.value("group", GroupId{}),
-                      preset,
-                      row.at("bounds").get<std::array<float, 4>>(),
-                      {}};
-    const auto kind = row.at("kind").get<std::string>();
-    if (kind == "street")
-      plots.rows[id].kind = perm::PlotKind::Street;
-    else if (kind == "alley")
-      plots.rows[id].kind = perm::PlotKind::Alley;
-    else if (kind == "lot")
-      plots.rows[id].kind = perm::PlotKind::Lot;
-    else
-      throw std::invalid_argument("unknown plot kind");
+  auto land = settings;
+  land.way_group = plan.at("land").at("way_group").get<GroupId>();
+  if (!land.way_group || land.way_group >= groups.rows.size() || !groups.rows[land.way_group].id)
+    throw std::invalid_argument("unknown way group");
+  for (const auto &row : plan.at("land").value("lots", Json::array())) {
+    const auto at = row.at("at").get<std::array<float, 2>>();
+    const auto depth =
+        int(std::floor((std::abs(at[1]) - land.street_width_m / 2) / land.block_m)) + 1;
+    if (depth < 1)
+      throw std::invalid_argument("initial lot is on the Street");
+    survey_block(perm, space, land,
+                 {int(std::floor(at[0] / land.block_m)), at[1] >= 0 ? depth : -depth});
+    const auto found = std::ranges::find_if(perm.plots.rows, [&](const auto &plot) {
+      return plot.id && plot.kind == perm::PlotKind::Lot && plot.bounds[0] == at[0] &&
+             plot.bounds[1] == at[1];
+    });
+    if (found == perm.plots.rows.end())
+      throw std::invalid_argument("initial lot must name a lot's minimum corner");
+    found->owner = row.at("owner").get<PlayerId>();
   }
+  fill_pool(perm, space, land);
 }
 void install_money(const Json &plan, const Symbols &symbols, IdentityRead identity,
                    AuthorityRead authority, const perm::Players &players,

@@ -1,4 +1,5 @@
 #include "catalog/catalog.hpp"
+#include "settings.hpp"
 #include "step/start_private.hpp"
 
 #include <chrono>
@@ -109,7 +110,11 @@ int main(int argc, char **argv) {
     struct stat info{};
     require(::stat((directory / "keys/2.key").c_str(), &info) == 0 && (info.st_mode & 0777) == 0600,
             "generated credentials must remain private");
-    install_land(plan, plots, groups, players);
+    const auto settings = amber::read_settings(AMBER_CONFIG_PATH);
+    space::State land_space(settings.space, settings.light_cell_m);
+    install_land(plan, perm_state, land_space, settings.land);
+    perm::update_plots(identity(objects), transforms(objects), plot_membership(objects), plots,
+                       created, true);
     perm::Ledger &ledger = perm_state.ledger;
     auto money_plan = plan;
     groups.rows.push_back({2, 1, "Funded institution"});

@@ -3,8 +3,19 @@ namespace amber {
 struct Settings;
 }
 namespace amber::step {
+struct LandSettings {
+  float street_width_m, port_spacing_m, block_m, way_m, lot_front_m;
+  std::uint32_t pool_lots_min;
+  GroupId way_group = 0;
+};
+struct Block {
+  std::int32_t i, j;
+};
+void survey_block(perm::State &, space::State &, const LandSettings &, Block);
+void fill_pool(perm::State &, space::State &, const LandSettings &);
+
 struct State;
-}
+} // namespace amber::step
 
 #include "catalog/catalog.hpp"
 #include "elaborate/elaborate.hpp"
@@ -983,7 +994,7 @@ void install_relations(const Json &, const Symbols &, const react::Terms &,
                        react::AuthoredRelations &, react::DeferredEffects &);
 void install_profiles(const Json &, const Symbols &, net::Profiles &, perm::Players &,
                       const std::filesystem::path &key_root);
-void install_land(const Json &, perm::Plots &, perm::Groups &, perm::Players &);
+void install_land(const Json &, perm::State &, space::State &, const LandSettings &);
 void install_money(const Json &, const Symbols &, IdentityRead, AuthorityRead,
                    const perm::Players &, const perm::Groups &, perm::Ledger &);
 void install_grants(const Json &, const Symbols &, const amber::ObjectState &objects_state,

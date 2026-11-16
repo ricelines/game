@@ -55,6 +55,7 @@ add_library(amber_step STATIC
   travel.cpp
   start_catalog.cpp
   start_objects.cpp
+  land.cpp
   start_permissions.cpp
 )
 target_include_directories(amber_step PUBLIC ${PROJECT_SOURCE_DIR}/server)

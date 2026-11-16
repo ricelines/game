@@ -25,6 +25,10 @@ Settings read_settings(const std::filesystem::path &path) {
     return static_cast<float>(real(section, key));
   };
   Settings s{};
+  s.land = {f("land", "STREET_WIDTH_M"), f("land", "PORT_SPACING_M"),
+            f("land", "BLOCK_M"),        f("land", "WAY_M"),
+            f("land", "LOT_FRONT_M"),    size("land", "POOL_LOTS_MIN")};
+  s.space.terrain_tile_m = f("land", "TERRAIN_TILE_M");
   s.clock = {real("clock", "STEP_HZ"), real("clock", "STEP_MARGIN_MS"),
              size("clock", "PHASE_AVERAGE_STEPS")};
   s.scripts = {size("scripts", "SCRIPT_KB"), real("scripts", "DECLARATION_MS"),

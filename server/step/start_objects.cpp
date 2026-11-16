@@ -23,7 +23,6 @@ std::vector<Handle> install_objects(const Json &plan, Symbols &symbols,
     init.owner = row.at("owner").get<PlayerId>();
     init.maker = row.at("maker").get<PlayerId>();
     init.created_step = now;
-    init.plot = row.at("plot").get<PlotId>();
     init.group = row.value("group", GroupId{});
     init.preset = detail::rights(row.value("preset", Json::array())) |
                   (detail::rights(row.value("group_rights", Json::array())) << 8);
@@ -59,7 +58,6 @@ void install_properties(const Json &plan, const Symbols &symbols, amber::react::
   auto &processes = react_state.processes;
   auto &instances = react_state.instance_settings;
   auto &world = react_state.world_settings;
-  auto &plots = react_state.plot_settings;
 
   properties.resize(terms.rows.size());
   processes.resize(terms.rows.size());
@@ -74,11 +72,6 @@ void install_properties(const Json &plan, const Symbols &symbols, amber::react::
     const auto [id, scalar] = setting(name, value);
     world.values[id] = scalar;
   }
-  for (const auto &row : plan.at("plots"))
-    for (const auto &[name, value] : row.at("settings").items()) {
-      const auto [id, scalar] = setting(name, value);
-      plots.rows[row.at("id").get<PlotId>()][id] = scalar;
-    }
   react::DeferredEffects initial;
   for (const auto &row : plan.at("objects")) {
     const auto object = symbols.objects.at(row.at("key").get<std::string>());
