@@ -28,6 +28,11 @@ SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Han
         std::all_of(offer.parts.begin(), offer.parts.end(),
                     [&](Handle part) { return selected.objects.contains(part); })) {
       if (offer.maker.kind == HolderKind::Script) {
+        const auto maker = offer.maker.installed_on;
+        // Live instances have non-root owners; retirement clears the owner before slot reuse.
+        if (maker.slot() >= authority.generation.size() || !authority.owner[maker.slot()] ||
+            authority.generation[maker.slot()] != maker.generation())
+          continue;
         selected.objects.slots.insert(offer.maker.installed_on.slot());
         selected.objects.objects.insert(offer.maker.installed_on.bits);
         const auto slot = offer.maker.installed_on.slot();

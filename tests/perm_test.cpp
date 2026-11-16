@@ -175,6 +175,10 @@ void plot_offer_snapshots_keep_remote_maker_and_its_authority() {
   const auto closed = capture_authority(authority(objects), selected, actors, state);
   require(!closed.offers.contains(offered.offer) && !closed.objects.contains(remote),
           "local capture retained a closed quotation's retired maker");
+  state.offers.rows[offered.offer].live = true;
+  const auto stale = capture_authority(authority(objects), selected, actors, state);
+  require(!stale.offers.contains(offered.offer) && !stale.objects.contains(remote),
+          "local capture selected a quotation whose maker was retired");
 }
 
 void moved_goods_leave_plot_scoped_authority() {
