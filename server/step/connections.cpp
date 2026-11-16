@@ -10,7 +10,7 @@ namespace {
 using Json = nlohmann::json;
 Json initial_catalog(const catalog::Models &models, const catalog::ModelTexts &model_text,
                      const react::Terms &terms, const react::Materials &materials,
-                     net::MaterialAppearanceRoles appearance) {
+                     net::MaterialAppearanceRoles appearance, double world_ambient_lux) {
   std::vector<ModelId> model_ids;
   std::vector<TermId> term_ids, material_ids;
   for (const auto &model : models.rows)
@@ -23,6 +23,7 @@ Json initial_catalog(const catalog::Models &models, const catalog::ModelTexts &m
         material_ids.push_back(term.id);
     }
   return {{"t", "catalog"},
+          {"world", {{"ambient_lux", world_ambient_lux}}},
           {"models", net::model_metadata(models, model_text, model_ids)},
           {"terms", net::term_metadata(terms, term_ids)},
           {"materials", net::material_metadata(terms, materials, appearance, material_ids)}};
@@ -96,10 +97,11 @@ connection_notice(const net::SessionNotice &notice, amber::net::State &net_state
                                            {"cell_m", cell_m},
                                            {"repl_delay_ms", repl_delay_ms},
                                            {"assets", "/assets/"}});
-          sessions.send(value.session, {{"t", "terrain"}, {"tile_m", settings.space.terrain_tile_m},
-                                         {"tiles", space_state.terrain}});
-          sessions.send(value.session,
-                        initial_catalog(models, model_text, terms, materials, appearance));
+          sessions.send(value.session, {{"t", "terrain"},
+                                        {"tile_m", settings.space.terrain_tile_m},
+                                        {"tiles", space_state.terrain}});
+          sessions.send(value.session, initial_catalog(models, model_text, terms, materials,
+                                                       appearance, outdoor_lux(react_state)));
           auto &row = views.rows[value.session];
           row.player = value.principal.player;
           row.body = value.principal.body;
@@ -189,7 +191,7 @@ void answer_query(amber::net::State &net_state, amber::space::State &space_state
   switch (request.request.kind) {
   case net::ControlKind::Look: {
     reply = net::read_look(catalog_state, react_state, views, space_state, objects_state,
-                           step_state, settings, 0, request);
+                           step_state, settings, outdoor_lux(react_state), request);
     if (reply.fields.contains("step")) {
       record::Event event;
       event.step = now;
@@ -306,6 +308,7 @@ void refresh_connections(amber::net::State &net_state, amber::space::State &spac
   for (auto session : observe::take_dirty_views(active))
     if (const auto principal = sessions.principal(session))
       net::refresh_view(catalog_state, react_state, views, space_state, objects_state, step_state,
-                        settings, 0, net::Authenticated{session, *principal}, settings.things_max);
+                        settings, outdoor_lux(react_state), net::Authenticated{session, *principal},
+                        settings.things_max);
 }
 } // namespace amber::step

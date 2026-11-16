@@ -293,8 +293,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   if (fixture_case)
     fixture::initialize_case(*fixture_case, react_state, values, scripts, fixture_rule_change,
                              queues, clock, setup);
-  sample_illuminance(light_subscriptions, space, ids, lights, zones, runtime_measurements, 0,
-                     setup);
+  sample_illuminance(light_subscriptions, space, ids, lights, zones, runtime_measurements,
+                     outdoor_lux(react_state), setup);
   publish_effects(std::move(setup), {}, clock.step, queues, timers, journal,
                   settings.event_queue_max);
   if (!restored)
@@ -529,7 +529,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
           for (auto model : installed.changed_models)
             react::project_model(triggers, models, scripts, terms, model);
           publish_catalog_changes(sessions, session_views, models, model_text, terms, materials,
-                                  appearance, installed);
+                                  appearance, outdoor_lux(react_state), installed);
           deliver_input(inputs, sessions, hearing, settings.perception.events_per_response,
                         input.id, {std::move(installed.reply), origin});
           continue;
@@ -660,7 +660,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             project_visibility(illumination_sources, space_state, replication, poses, catalog_state,
                                values, completed, settings.light_source_radius_m, clock);
             publish_catalog_changes(sessions, session_views, models, model_text, terms, materials,
-                                    appearance, completed);
+                                    appearance, outdoor_lux(react_state), completed);
             publish_object_changes(sessions, session_views, ids, auth, parent, model_text,
                                    instance_text, completed.changed_objects);
             for (const auto &[recipient, notice] : completed.notices)

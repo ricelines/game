@@ -2031,5 +2031,21 @@
     "name": "aq.condition_update",
     "kind": "event",
     "description": "Report water and oxygen conditions to a connected school."
+  },
+  {
+    "name": "base.outdoor_lux",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "Outdoor ambient light in lux"
   }
 ]

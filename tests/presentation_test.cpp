@@ -287,7 +287,7 @@ void coherent_catalog_publication() {
   changed.changed_terms = {added, added};
   changed.changed_materials = {3, 3};
   step::publish_catalog_changes(sessions, views, f.models, f.texts, f.terms, f.materials,
-                                {4, 0, 0, 0, 0, 0}, changed);
+                                {4, 0, 0, 0, 0, 0}, 120, changed);
   const std::array object_changes{object, object};
   step::publish_object_changes(sessions, views, identity(f.objects), authority(f.objects),
                                parents(f.objects), f.texts, f.instance_texts, object_changes);

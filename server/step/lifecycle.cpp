@@ -238,18 +238,23 @@ void refresh_object_plots(const space::Space &space, amber::ObjectState &objects
 void publish_catalog_changes(net::Sessions &sessions, net::SessionViews &views,
                              const catalog::Models &models, const catalog::ModelTexts &texts,
                              const react::Terms &terms, const react::Materials &materials,
-                             net::MaterialAppearanceRoles appearance, NativeCompletion &out) {
+                             net::MaterialAppearanceRoles appearance, double world_ambient_lux,
+                             NativeCompletion &out) {
   unique(out.changed_models);
   unique(out.changed_scripts);
   unique(out.changed_terms);
   unique(out.changed_materials);
   if (!out.changed_models.empty())
-    sessions.broadcast(
-        {{"t", "catalog"}, {"models", net::model_metadata(models, texts, out.changed_models)}});
+    sessions.broadcast({{"t", "catalog"},
+                        {"world", {{"ambient_lux", world_ambient_lux}}},
+                        {"models", net::model_metadata(models, texts, out.changed_models)}});
   if (!out.changed_terms.empty())
-    sessions.broadcast({{"t", "catalog"}, {"terms", net::term_metadata(terms, out.changed_terms)}});
+    sessions.broadcast({{"t", "catalog"},
+                        {"world", {{"ambient_lux", world_ambient_lux}}},
+                        {"terms", net::term_metadata(terms, out.changed_terms)}});
   if (!out.changed_materials.empty())
     sessions.broadcast({{"t", "catalog"},
+                        {"world", {{"ambient_lux", world_ambient_lux}}},
                         {"materials", net::material_metadata(terms, materials, appearance,
                                                              out.changed_materials)}});
   if (out.permissions_changed || !out.changed_models.empty() || !out.changed_scripts.empty() ||

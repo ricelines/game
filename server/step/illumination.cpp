@@ -4,6 +4,14 @@
 #include <algorithm>
 
 namespace amber::step {
+double outdoor_lux(const react::State &state) {
+  const auto term = state.terms.by_name.find("base.outdoor_lux");
+  if (term == state.terms.by_name.end())
+    return 0;
+  const auto value = state.world_settings.values.find(term->second);
+  return value == state.world_settings.values.end() ? 0 : value->second.numeric();
+}
+
 namespace {
 void dirty_light(observe::LightSubscriptions &points, observe::ActiveViews &views,
                  const observe::Lights &lights, Handle source) {
@@ -293,6 +301,7 @@ void update_frame_illumination(amber::step::State &step_state, amber::space::Sta
                          changed_sources);
   illumination_values_changed(sources, space_state, values, changed, now, hz);
   advance_illumination(sources, space_state, values, now, hz);
-  sample_illuminance(points, world, values.identity, lights, zones, measurements, 0, effects);
+  sample_illuminance(points, world, values.identity, lights, zones, measurements,
+                     outdoor_lux(react_state), effects);
 }
 } // namespace amber::step

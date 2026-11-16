@@ -928,10 +928,11 @@ void retire_publication(net::ReplicationIndex &, net::SessionViews &, catalog::I
 void refresh_object_plots(const space::Space &, amber::ObjectState &objects_state,
                           const perm::Plots &, const amber::react::State &react_state,
                           const amber::Origin &, NativeCompletion &);
+double outdoor_lux(const react::State &);
 void publish_catalog_changes(net::Sessions &, net::SessionViews &, const catalog::Models &,
                              const catalog::ModelTexts &, const react::Terms &,
                              const react::Materials &, net::MaterialAppearanceRoles,
-                             NativeCompletion &);
+                             double world_ambient_lux, NativeCompletion &);
 void publish_object_changes(net::Sessions &, net::SessionViews &, IdentityRead, AuthorityRead,
                             ParentRead, const catalog::ModelTexts &, const catalog::InstanceTexts &,
                             std::span<const Handle> changed);

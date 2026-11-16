@@ -1339,7 +1339,8 @@
     "aq.oxygen_max": 0.008,
     "aq.stress_rate": 0.003,
     "aq.severe_rate": 0.012,
-    "aq.recovery_rate": 0.002
+    "aq.recovery_rate": 0.002,
+    "base.outdoor_lux": 120
   },
   "objects": [
     {
