@@ -1499,8 +1499,11 @@ std::optional<Hit> sweep(const Space &space, IdentityRead identity, Handle objec
   auto cast = JPH::RShapeCast::sFromWorldTransform(
       shape, JPH::Vec3::sReplicate(1),
       JPH::RMat44::sRotationTranslation(jq(body.pose.rotation), jv(body.pose.position)), jv(delta));
-  n.physics.GetNarrowPhaseQuery().CastShape(cast, JPH::ShapeCastSettings{}, JPH::RVec3::sZero(),
-                                            collector, {}, objects, bodies);
+  JPH::ShapeCastSettings settings;
+  // Rounded casts give grazing contacts, including terrain, a stable surface normal.
+  settings.mUseShrunkenShapeAndConvexRadius = true;
+  n.physics.GetNarrowPhaseQuery().CastShape(cast, settings, JPH::RVec3::sZero(), collector, {},
+                                            objects, bodies);
   if (!collector.closest)
     return {};
   auto hit = *collector.closest;

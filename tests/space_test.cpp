@@ -208,6 +208,18 @@ void gravity_visibility_zones_and_snapshot() {
   require(scene.objects.position[falling.slot()].z < -.2f,
           "removing support did not wake falling body");
 }
+void terrain_sweep() {
+  Scene scene;
+  sp::add_terrain(scene.space_state, 0, 0);
+  auto leaf = scene.box({2.4f, .08f, 2.4f}, {18.55f, 45.9f, 0}, sp::Motion::Kinematic, 0, false);
+  auto move = sp::translate(scene.space, identity(scene.objects), transforms(scene.objects), leaf,
+                            {-.06f, 0, 0}, scene.dt);
+  require(move.status == sp::Status::Ok, "terrain does not obstruct motion along its surface");
+  move = sp::translate(scene.space, identity(scene.objects), transforms(scene.objects), leaf,
+                       {0, 0, -.1f}, scene.dt);
+  require(move.status == sp::Status::Obstructed && move.actual.position.z >= -.001f,
+          "terrain blocks motion into its surface");
+}
 void attachments_and_sweep() {
   Scene scene;
   scene.box({20, 20, .2f}, {0, 0, -.2f});
@@ -1128,6 +1140,7 @@ int main(int argc, char **argv) {
     sensor_contacts_use_body_overlap();
     plot_membership_follows_real_motion_and_hidden_custody();
     gravity_visibility_zones_and_snapshot();
+    terrain_sweep();
     attachments_and_sweep();
     real_stair_navigation();
     snapshot_continuation_and_fixed_parts();
