@@ -14,6 +14,8 @@ Handle present(const DeliveryTargets &delivery, IdentityRead identity, PlayerId 
 step::NativeCompletion result(bool changed, Json extra = Json::object());
 step::NativeCompletion denied(perm::Reason why, std::string need, std::string on,
                               PlayerId controller = 0);
+step::NativeCompletion denied(std::string_view need, Json on, std::string_view why,
+                              std::string_view fix);
 void record(step::NativeCompletion &out, const step::NativeCall &call, std::string name,
             std::vector<Handle> objects, Json facts);
 struct Goods {

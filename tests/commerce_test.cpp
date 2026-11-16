@@ -820,6 +820,60 @@ void login_delivers_complete_mailbox_without_native_capacity_or_identity_changes
   require(deliver(f.bodies[1], 23) == 0 && delivered.records.empty(),
           "repeated authenticated hello cannot duplicate delivered goods or records");
 }
+void land_refusals_have_fixes_and_denial_records() {
+  Fixture f;
+  auto denied = [&](const step::NativeCompletion &out, std::string_view fix) {
+    require(out.reply.at("ok") == false && out.reply.at("denied").at("fix") == fix,
+            "land refusal has no useful fix");
+    record::Journal journal(100, {});
+    step::ActionRun run;
+    record::Event event;
+    event.name = "land refusal";
+    run.call.origin = journal.append(event);
+    step::finish_native(run, out, identity(f.f.objects), attribution(f.f.objects), f.f.models,
+                        f.f.scripts, journal);
+    const auto records = journal.take();
+    require(records.size() == 1 && records[0]["result"] == "denied",
+            "land refusal was not recorded as denied");
+  };
+  denied(f.call(f.ids.abandon_plot, PlayerId{2}, {{"plot", 1}}), "ask p:1 for transfer on plot:1");
+  f.plots.rows[2].kind = perm::PlotKind::Street;
+  denied(f.call(f.ids.abandon_plot, PlayerId{1}, {{"plot", 2}}),
+         "correct the supplied transfer for plot:2");
+  denied(f.call(f.ids.split_plot, PlayerId{1}, {{"plot", 1}, {"x", -20}}),
+         "cut at a whole meter strictly inside the lot");
+  f.plots.rows[2].kind = perm::PlotKind::Lot;
+  f.plots.rows[2].owner = 1;
+  f.plots.rows[2].bounds[0] = 1;
+  denied(f.call(f.ids.join_plots, PlayerId{1}, {{"plots", {1, 2}}}),
+         "choose two lots of one owner that share a whole edge and form a rectangle");
+  auto own = f.item(1, {-4, 0, 0});
+  denied(f.call(f.ids.return_goods, PlayerId{1}, {}, own.root), "pick it up instead");
+  auto other = f.item(2, {-6, 0, 0});
+  const auto grant =
+      perm::create_grant(f.grants, f.players, perm::Holder::player(1),
+                         {1, perm::Holder::player(2), perm::Scope::plot(1), 1, 0, 0, 100},
+                         {perm::Scope::plot(1), 1, 31}, {perm::Holder::player(2), 2, false}, 1);
+  require(bool(grant), "protected builder grant");
+  denied(f.call(f.ids.return_goods, PlayerId{1}, {}, other.root),
+         "ask p:2 to remove it, or revoke their build grant");
+  perm::revoke(f.grants, f.players, grant.grant);
+  denied(f.call(f.ids.return_goods, PlayerId{3}, {}, other.root), "ask p:1 for return on plot:1");
+  const auto offer = f.call(f.ids.offer_plot, PlayerId{1}, {{"plot", 1}, {"price", 10}});
+  const auto name = offer.reply.at("offer");
+  denied(f.call(f.ids.set_offer_price, PlayerId{2}, {{"offer", name}, {"price", 20}}),
+         "ask the offer's maker or seller");
+  denied(f.call(f.ids.accept, PlayerId{2}, {{"offer", name}, {"max_price", 9}}),
+         "inspect the offer and accept again with a max_price of at least its price");
+  f.plots.rows[1].owner = 0;
+  require(
+      bool(perm::create_root_grant(
+          f.grants, f.players, {0, perm::Holder::player(1), perm::Scope::all_land(), 8, 0, 0, 100},
+          {perm::Holder::player(1), 1, false}, 1)),
+      "pool transfer grant");
+  denied(f.call(f.ids.abandon_plot, PlayerId{1}, {{"plot", 1}}),
+         "this lot already belongs to the pool");
+}
 void land_editing_preserves_grants_and_refreshes_objects() {
   Fixture f;
   auto item = f.item(1, {-4, 0, 0});
@@ -851,6 +905,7 @@ void land_editing_preserves_grants_and_refreshes_objects() {
 } // namespace
 int main() {
   try {
+    land_refusals_have_fixes_and_denial_records();
     land_editing_preserves_grants_and_refreshes_objects();
     offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox();
     wallet_native_authority_is_explicit();

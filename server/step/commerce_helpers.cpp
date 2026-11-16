@@ -52,6 +52,14 @@ step::NativeCompletion result(bool changed, Json extra) {
   out.reply.update(extra);
   return out;
 }
+step::NativeCompletion denied(std::string_view need, Json on, std::string_view why,
+                              std::string_view fix) {
+  step::NativeCompletion out;
+  out.result = record::Result::Denied;
+  out.reply = {{"ok", false},
+               {"denied", {{"need", need}, {"on", std::move(on)}, {"why", why}, {"fix", fix}}}};
+  return out;
+}
 step::NativeCompletion denied(perm::Reason why, std::string need, std::string on,
                               PlayerId controller) {
   std::string fix;
@@ -92,6 +100,9 @@ step::NativeCompletion denied(perm::Reason why, std::string need, std::string on
   case perm::Reason::InheritedLimit:
   case perm::Reason::NoCopy:
     fix = "choose goods whose next-owner permissions allow this exchange";
+    break;
+  case perm::Reason::PriceChanged:
+    fix = "inspect the offer and accept again with a max_price of at least its price";
     break;
   case perm::Reason::NotController:
     fix = "use goods from your inventory or ask their owner to place them";

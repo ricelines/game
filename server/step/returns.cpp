@@ -23,9 +23,21 @@ NativeCompletion return_goods(perm::State &permissions, ObjectState &objects,
                                            {commerce_detail::actor(call), item.root, item.parts,
                                             item.root.plot, body, bool(body), forced},
                                            call.step);
-  if (!returned)
-    return commerce_detail::denied(returned.reason, "return",
-                                   "plot:" + std::to_string(item.root.plot));
+  if (!returned) {
+    const auto on = "plot:" + std::to_string(item.root.plot);
+    if (returned.reason == perm::Reason::NotController)
+      return commerce_detail::denied("return", on, "you own this", "pick it up instead");
+    if (returned.reason == perm::Reason::MissingRight &&
+        perm::check_scope(perm::Holder::player(item.root.owner), perm::Scope::plot(item.root.plot),
+                          1, permissions.grants, call.step))
+      return commerce_detail::denied("return", on, "its owner holds build on this plot",
+                                     "ask p:" + std::to_string(item.root.owner) +
+                                         " to remove it, or revoke their build grant");
+    return commerce_detail::denied(returned.reason, "return", on,
+                                   item.root.plot < permissions.plots.rows.size()
+                                       ? permissions.plots.rows[item.root.plot].owner
+                                       : 0);
+  }
   auto flags = permission_flags(objects.objects);
   std::vector<Handle> cleared;
   // Returning one side cancels a trade as a whole, releasing the other side's escrow.

@@ -1,10 +1,11 @@
 #include "catalog/catalog.hpp"
-#include "step.hpp"
+#include "commerce_private.hpp"
 
 #include <algorithm>
 #include <limits>
 
 namespace amber::step {
+using commerce_detail::denied;
 namespace {
 PlayerId player(const step::NativeCall &call, const perm::Players &players) {
   const auto *id = std::get_if<PlayerId>(&call.request.caller);
@@ -68,14 +69,6 @@ step::NativeCompletion result(bool changed, Json fields = Json::object()) {
   out.result = changed ? record::Result::Applied : record::Result::NoEffect;
   out.reply = {{"ok", true}, {"effect", changed ? "applied" : "none"}};
   out.reply.update(fields);
-  return out;
-}
-step::NativeCompletion denied(std::string_view need, Json on, std::string_view why,
-                              std::string_view fix) {
-  step::NativeCompletion out;
-  out.result = record::Result::Denied;
-  out.reply = {{"ok", false},
-               {"denied", {{"need", need}, {"on", std::move(on)}, {"why", why}, {"fix", fix}}}};
   return out;
 }
 step::NativeCompletion bad_input(std::string_view problem) {

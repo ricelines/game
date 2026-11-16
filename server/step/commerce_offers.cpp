@@ -118,6 +118,10 @@ step::NativeCompletion set_offer_price(perm::Offers &offers, const NativeCall &c
   const auto reason =
       perm::set_offer_price(offers, commerce_detail::actor(call), id,
                             call.arguments.at("price").get<std::int64_t>(), call.step);
+  if (reason == perm::Reason::NotController)
+    return commerce_detail::denied("offer maker", "offer:" + std::to_string(id),
+                                   "you are not this offer's maker or seller",
+                                   "ask the offer's maker or seller");
   if (reason != perm::Reason::Allowed)
     return commerce_detail::denied(reason, "offer maker", "offer:" + std::to_string(id));
   auto out = commerce_detail::result(

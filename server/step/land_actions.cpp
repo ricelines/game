@@ -4,16 +4,17 @@
 
 namespace amber::step {
 namespace {
-perm::Plot &lot(perm::State &state, PlotId id, const NativeCall &call) {
+std::optional<NativeCompletion> lot(perm::State &state, PlotId id, const NativeCall &call) {
+  const auto on = "plot:" + std::to_string(id);
   if (!id || id >= state.plots.rows.size() || state.plots.rows[id].id != id ||
       state.plots.rows[id].kind != perm::PlotKind::Lot)
-    throw std::invalid_argument("unknown lot");
-  auto &plot = state.plots.rows[id];
+    return commerce_detail::denied(perm::Reason::InvalidScope, "transfer", on, 0);
+  const auto &plot = state.plots.rows[id];
   const auto allowed = perm::check_land(commerce_detail::actor(call), perm::LandVerb::Transfer,
                                         plot, state.players, state.grants, call.step);
   if (!allowed)
-    throw std::invalid_argument(std::string(perm::reason_text(allowed.reason)));
-  return plot;
+    return commerce_detail::denied(allowed.reason, "transfer", on, plot.owner);
+  return std::nullopt;
 }
 void close_offers(perm::Offers &offers, PlotId id) {
   for (auto &offer : offers.rows)
@@ -41,9 +42,13 @@ NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
                               const DeliveryTargets &delivery, const space::Space &space,
                               const NativeCall &call) {
   const auto id = call.arguments.at("plot").get<PlotId>();
-  const auto owner = lot(state, id, call).owner;
+  if (auto refusal = lot(state, id, call))
+    return *refusal;
+  const auto owner = state.plots.rows[id].owner;
   if (!owner)
-    throw std::invalid_argument("lot is already in the pool");
+    return commerce_detail::denied("transfer", "plot:" + std::to_string(id),
+                                   "lot is already in the pool",
+                                   "this lot already belongs to the pool");
   auto out = commerce_detail::result(true, {{"plot", id}, {"owner", "p:0"}});
   const auto ids = identity(std::as_const(objects.objects));
   for (std::uint32_t slot = 1; slot < ids.model.size(); ++slot) {
@@ -73,13 +78,16 @@ NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
 }
 NativeCompletion split_plot(perm::State &state, ObjectState &objects, const NativeCall &call) {
   const auto id = call.arguments.at("plot").get<PlotId>();
-  auto &plot = lot(state, id, call);
+  if (auto refusal = lot(state, id, call))
+    return *refusal;
+  auto &plot = state.plots.rows[id];
   const bool x = call.arguments.contains("x");
   const auto axis = x ? 0 : 1;
   const auto cut = call.arguments.at(x ? "x" : "y").get<float>();
   if (!std::isfinite(cut) || std::floor(cut) != cut || cut <= plot.bounds[axis] ||
       cut >= plot.bounds[axis + 2])
-    throw std::invalid_argument("cut must be a whole metre strictly inside the lot");
+    return commerce_detail::denied("transfer", "plot:" + std::to_string(id), "invalid cut",
+                                   "cut at a whole meter strictly inside the lot");
   auto upper = plot;
   upper.id = PlotId(state.plots.rows.size());
   const auto next = upper.id;
@@ -116,15 +124,20 @@ NativeCompletion join_plots(perm::State &state, ObjectState &objects, const Nati
   auto b = call.arguments.at("plots").at(1).get<PlotId>();
   if (a > b)
     std::swap(a, b);
-  auto &left = lot(state, a, call);
-  auto &right = lot(state, b, call);
+  if (auto refusal = lot(state, a, call))
+    return *refusal;
+  if (auto refusal = lot(state, b, call))
+    return *refusal;
+  auto &left = state.plots.rows[a];
+  auto &right = state.plots.rows[b];
   const auto &l = left.bounds;
   const auto &r = right.bounds;
   if (a == b || left.owner != right.owner ||
       !((l[0] == r[0] && l[2] == r[2] && (l[1] == r[3] || l[3] == r[1])) ||
         (l[1] == r[1] && l[3] == r[3] && (l[0] == r[2] || l[2] == r[0]))))
-    throw std::invalid_argument(
-        "lots must have the same owner and form one rectangle along a whole edge");
+    return commerce_detail::denied(
+        "transfer", "plot:" + std::to_string(a), "invalid join",
+        "choose two lots of one owner that share a whole edge and form a rectangle");
   left.bounds = {std::min(l[0], r[0]), std::min(l[1], r[1]), std::max(l[2], r[2]),
                  std::max(l[3], r[3])};
   right.id = 0;
