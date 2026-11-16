@@ -253,9 +253,10 @@ class Journey:
         raise AssertionError("actual sandbox/native registration timed out")
 
     async def place(self, actor, model, params=None):
-        plots = (await self.tool(actor, "inspect", target="plots"))["plots"]
-        bounds = plots[0]["bounds"]
-        position = [bounds["min"][0] + 0.6, bounds["min"][1] + 0.6, 0.05]
+        plots = (await self.tool(actor, "inspect", target="land"))["land"]
+        owner = (await self.tool(actor, "inspect", target="self"))["owner"]
+        bounds = next(plot["bounds"] for plot in plots if plot["owner"] == owner)
+        position = [bounds[0] + 0.6, bounds[1] + 0.6, 0.05]
         arguments = {"model": model, "position": position}
         if params is not None:
             arguments["params"] = params

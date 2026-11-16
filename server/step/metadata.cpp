@@ -105,7 +105,8 @@ struct MeterReadBinding {
   IdentityRead identity;
 };
 struct PlotReadBinding {
-  const perm::Plots &plots;
+  const perm::State &permissions;
+  float port_spacing_m;
   AuthorityRead authority;
 };
 void text(lua_State *L, const std::string &text) {
@@ -410,36 +411,32 @@ int meter_binding(lua_State *L) {
 }
 int plot_binding(lua_State *L) {
   const auto &b = *static_cast<PlotReadBinding *>(react::binding_data(L));
-  const auto id = lua_isnoneornil(L, 2) ? b.authority.plot[react::invocation(L).self.object.slot()]
-                                        : unsigned_arg(L, 2);
-  if (!id || id >= b.plots.rows.size() || b.plots.rows[id].id != id)
+  const auto &plots = b.permissions.plots;
+  const auto &inv = react::invocation(L);
+  const auto id =
+      lua_isnoneornil(L, 2) ? b.authority.plot[inv.self.object.slot()] : unsigned_arg(L, 2);
+  if (!id || id >= plots.rows.size() || plots.rows[id].id != id)
     luaL_error(L, "unknown plot");
-  const auto &plot = b.plots.rows[id];
-  lua_createtable(L, 0, 5);
-  number_field(L, "id", id);
-  text(L, "p:" + std::to_string(plot.owner));
-  lua_setfield(L, -2, "owner");
-  number_field(L, "group", plot.group);
-  number_field(L, "preset", plot.preset);
-  lua_createtable(L, 0, 2);
-  for (int corner = 0; corner < 2; ++corner) {
-    lua_createtable(L, 2, 0);
-    for (int axis = 0; axis < 2; ++axis) {
-      lua_pushnumber(L, plot.bounds[corner * 2 + axis]);
-      lua_rawseti(L, -2, axis + 1);
+  json_value(L, perm::plot_record(plots, b.permissions.grants, id, b.port_spacing_m, inv.step));
+  return 1;
+}
+int plots_binding(lua_State *L) {
+  const auto &b = *static_cast<PlotReadBinding *>(react::binding_data(L));
+  lua_newtable(L);
+  int index = 0;
+  for (const auto &plot : b.permissions.plots.rows)
+    if (plot.id) {
+      lua_pushnumber(L, plot.id);
+      lua_rawseti(L, -2, ++index);
     }
-    lua_setreadonly(L, -1, true);
-    lua_setfield(L, -2, corner ? "max" : "min");
-  }
-  lua_setreadonly(L, -1, true);
-  lua_setfield(L, -2, "bounds");
   lua_setreadonly(L, -1, true);
   return 1;
 }
 } // namespace
 void bind_metadata(const amber::ObjectState &objects_state,
                    const amber::catalog::State &catalog_state, amber::react::State &react_state,
-                   const perm::Plots &plots) {
+                   const perm::State &permissions, float port_spacing_m) {
+  const auto &plots = permissions.plots;
   const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   auto &vm = react_state.vm;
@@ -479,8 +476,12 @@ void bind_metadata(const amber::ObjectState &objects_state,
   react::register_binding(
       vm, "meter", meter_binding,
       std::make_shared<MeterReadBinding>(MeterReadBinding{meters, terms, identity}));
-  react::register_binding(vm, "plot", plot_binding,
-                          std::make_shared<PlotReadBinding>(PlotReadBinding{plots, authority}));
+  react::register_binding(
+      vm, "plot", plot_binding,
+      std::make_shared<PlotReadBinding>(PlotReadBinding{permissions, port_spacing_m, authority}));
+  react::register_binding(
+      vm, "plots", plots_binding,
+      std::make_shared<PlotReadBinding>(PlotReadBinding{permissions, port_spacing_m, authority}));
   react::register_binding(vm, "plot_objects", plot_objects_binding,
                           std::make_shared<PlotObjectsBinding>(
                               PlotObjectsBinding{identity, authority.plot, declared_parts, plots}));

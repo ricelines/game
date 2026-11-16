@@ -6,6 +6,63 @@
 #include <unordered_set>
 
 namespace amber::perm {
+nlohmann::json plot_record(const Plots &plots, const Grants &grants, PlotId id,
+                           float port_spacing_m, Step now) {
+  using Json = nlohmann::json;
+  const auto &plot = plots.rows.at(id);
+  const auto &b = plot.bounds;
+  const char *fronts = "none";
+  for (const auto &way : plots.rows) {
+    if (!way.id || way.kind == PlotKind::Lot)
+      continue;
+    const auto &w = way.bounds;
+    const bool vertical =
+        (b[0] == w[2] || b[2] == w[0]) && std::max(b[1], w[1]) < std::min(b[3], w[3]);
+    const bool horizontal =
+        (b[1] == w[3] || b[3] == w[1]) && std::max(b[0], w[0]) < std::min(b[2], w[2]);
+    if (!vertical && !horizontal)
+      continue;
+    if (way.kind == PlotKind::Street) {
+      fronts = "street";
+      break;
+    }
+    if (std::string_view(fronts) == "none")
+      fronts = w[2] - w[0] > w[3] - w[1] ? "back way" : "alley";
+  }
+  const auto port = std::int64_t(std::round((b[0] + b[2]) / (2 * port_spacing_m)));
+  Json rights = Json::array();
+  for (const auto &grant : grants.rows) {
+    if (!grant.live || (grant.expires_step && now >= grant.expires_step))
+      continue;
+    Rights verbs = 0;
+    if (grant.scope == Scope::plot(id))
+      verbs = grant.verbs;
+    else if (plot.kind == PlotKind::Lot && !grant.issuer && grant.scope.kind == ScopeKind::AllLand)
+      verbs = grant.verbs >> 8;
+    if (!(verbs & 24) || (grant.holder.kind == HolderKind::Player && grant.holder.id == plot.owner))
+      continue;
+    Json holder = grant.holder.kind == HolderKind::Player
+                      ? Json("p:" + std::to_string(grant.holder.id))
+                      : Json{{"script", "s:" + std::to_string(grant.holder.id)},
+                             {"on", to_string(grant.holder.installed_on)}};
+    Json names = Json::array();
+    constexpr const char *land_verbs[]{"build", "enter", "run_scripts", "transfer", "return"};
+    for (unsigned bit = 0; bit < 5; ++bit)
+      if (verbs & (1u << bit))
+        names.push_back(land_verbs[bit]);
+    rights.push_back({{"holder", std::move(holder)}, {"verbs", std::move(names)}});
+  }
+  constexpr const char *kinds[]{"street", "alley", "lot"};
+  return {{"plot", id},
+          {"kind", kinds[static_cast<unsigned>(plot.kind)]},
+          {"owner", "p:" + std::to_string(plot.owner)},
+          {"bounds", b},
+          {"area_m2", (b[2] - b[0]) * (b[3] - b[1])},
+          {"fronts", fronts},
+          {"port", port},
+          {"port_x", port * port_spacing_m},
+          {"rights", std::move(rights)}};
+}
 std::string_view required_right(std::string_view right, Caller caller, const perm::Target &target) {
   const auto *script = std::get_if<ScriptHolder>(&caller);
   return right == "move" && (target.flags & Body) && script && script->object != target.object

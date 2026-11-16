@@ -472,8 +472,16 @@ int main(int argc, char **argv) {
     plots.rows.push_back({3, 2, 0, 0, {95, 30, 105, 40}, {}});
 
     const auto inspect = [&](const net::Invocation &request) {
-      return vi::read_inspect(catalog_state, react_state, views, hearing, scene.objects_state,
-                              perm_state, amber::step::Clock{.step = now, .hz = 20}, 40, request);
+      return vi::read_inspect(
+          catalog_state, react_state, views, hearing, scene.objects_state, perm_state,
+          amber::step::Clock{.step = now, .hz = 20},
+          [&] {
+            amber::Settings loaded{};
+            loaded.perception = perception;
+            loaded.land.port_spacing_m = 1000;
+            return loaded;
+          }(),
+          request);
     };
     auto grant_call = call;
     grant_call.request.fields = {{"target", "grants"}};
@@ -569,16 +577,20 @@ int main(int argc, char **argv) {
     require(inspect(call).fields["script_states"].size() == 1,
             "inspection exposed a no-longer-applicable rule state as an installed script");
     call.principal.player = 2;
-    call.request.fields = {{"target", "plots"}};
-    const auto owned = inspect(call).fields;
-    require(owned["plots"].size() == 2 && owned["plots"][0]["id"] == 1 &&
-                owned["plots"][1]["id"] == 3 &&
-                owned["plots"][0]["bounds"]["min"] == Json::array({80.f, 30.f}),
-            "owned-land inspection omitted actual remote bounds or included a foreign plot");
+    call.request.fields = {{"target", "land"}};
+    const auto nearby_land = inspect(call).fields;
+    require(nearby_land["land"].is_array(), "land inspection returns plots in sight");
+    for (std::size_t i = 0; i < nearby_land["land"].size(); ++i) {
+      require(nearby_land["land"][i]["dist_m"].get<float>() <= perception.sight_m,
+              "land inspection includes a plot beyond sight");
+      if (i)
+        require(nearby_land["land"][i - 1]["dist_m"] <= nearby_land["land"][i]["dist_m"],
+                "land inspection orders plots by nearest point");
+    }
     call.request.fields = {{"target", "plot:2"}};
     const auto land = inspect(call).fields;
-    require(land["plot"]["owner"] == "p:3" && land["plot"]["id"] == 2 &&
-                land["plot"]["bounds"]["max"] == Json::array({-10.f, 0.f}),
+    require(land["owner"] == "p:3" && land["plot"] == 2 &&
+                land["bounds"] == Json::array({-20.f, -10.f, -10.f, 0.f}),
             "public plot inspection invented ownership or failed by actual ID");
     call.request.fields = {{"target", "plot:0"}};
     require(!inspect(call).fields["ok"].get<bool>(), "plot lookup accepted reserved ID zero");

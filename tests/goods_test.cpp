@@ -75,7 +75,7 @@ struct Fixture {
         sp::attach(scene.objects_state, scene.space_state, {child, root, {{0, 0, .5f}, {}}, false})
                 .status == sp::Status::Ok,
         "fixture declared child attachment");
-    step::bind_metadata(scene.objects_state, catalog_state, react_state, plots);
+    step::bind_metadata(scene.objects_state, catalog_state, react_state, perm_state, 1000);
     st::declare_hold_goods_action(terms, declarations);
     action = terms.by_name.at("engine.hold_goods");
     auto code = re::compile_script(R"(

@@ -171,7 +171,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
 
   react::bind_values(vm, values, react_state);
   react::bind_events(vm, terms);
-  bind_metadata(objects_state, catalog_state, react_state, plots);
+  bind_metadata(objects_state, catalog_state, react_state, perm_state,
+                settings.land.port_spacing_m);
   bind_physical(vm, objects_state, step_state, perm_state, settings.part_batch_max, space_state,
                 catalog_state);
   if (!restored)

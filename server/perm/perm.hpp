@@ -387,3 +387,7 @@ struct State {
   Trades trades;
 };
 } // namespace amber::perm
+
+namespace amber::perm {
+nlohmann::json plot_record(const Plots &, const Grants &, PlotId, float port_spacing_m, Step);
+}

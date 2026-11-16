@@ -108,7 +108,7 @@ struct Fixture {
     players.rows.resize(4);
     plots.rows.push_back({1, 2, 0, 7, {-5, -4, 30, 40}, {}});
     catalog_state.mechanical.values["measurements"] = {{"density", 1}, {"capacity", 6}};
-    step::bind_metadata(objects_state, catalog_state, react_state, plots);
+    step::bind_metadata(objects_state, catalog_state, react_state, perm_state, 1000);
   }
   react::RunOutcome run(std::string_view body) {
     const auto source = "return {on={run=function(self,from,args) " + std::string(body) + " end}}";
@@ -163,9 +163,10 @@ void effective_metadata_and_mass() {
     assert(live.volume_m3==7 and live.capacity_m3==0.25)
     assert(not pcall(function()live.volume_m3=99 end))
     assert(self:meter(self.handle,'custom.2',from)==5)
+    assert(#self:plots()==1 and self:plots()[1]==1)
     local p=self:plot()
-    assert(p.id==1 and p.owner=='p:2' and p.bounds.min[1]==-5 and p.bounds.max[2]==40)
-    assert(not pcall(function()p.bounds.min[1]=0 end))
+    assert(p.plot==1 and p.owner=='p:2' and p.bounds[1]==-5 and p.bounds[4]==40)
+    assert(not pcall(function()p.bounds[1]=0 end))
   )");
   require(f.assets.rows.at("variant").manifest["capacity"] == 99.0 &&
               f.assets.rows.at("variant").manifest["seats"][0]["position"][1] == 2,

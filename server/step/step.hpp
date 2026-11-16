@@ -3,17 +3,6 @@ namespace amber {
 struct Settings;
 }
 namespace amber::step {
-struct LandSettings {
-  float street_width_m, port_spacing_m, block_m, way_m, lot_front_m;
-  std::uint32_t pool_lots_min;
-  GroupId way_group = 0;
-};
-struct Block {
-  std::int32_t i, j;
-};
-void survey_block(perm::State &, space::State &, const LandSettings &, Block);
-void fill_pool(perm::State &, space::State &, const LandSettings &);
-
 struct State;
 } // namespace amber::step
 
@@ -33,6 +22,16 @@ struct State;
 #include <unordered_set>
 
 namespace amber::step {
+struct LandSettings {
+  float street_width_m, port_spacing_m, block_m, way_m, lot_front_m;
+  std::uint32_t pool_lots_min;
+  GroupId way_group = 0;
+};
+struct Block {
+  std::int32_t i, j;
+};
+void survey_block(perm::State &, space::State &, const LandSettings &, Block);
+void fill_pool(perm::State &, space::State &, const LandSettings &);
 
 struct InputWork {
   std::uint64_t id = 0;
@@ -499,7 +498,7 @@ void declare_physical_actions(react::Terms &, react::NativeActions &);
 
 void bind_metadata(const amber::ObjectState &objects_state,
                    const amber::catalog::State &catalog_state, amber::react::State &react_state,
-                   const perm::Plots &);
+                   const perm::State &, float port_spacing_m);
 
 using Json = nlohmann::json;
 struct CommerceDeclarations {

@@ -208,7 +208,7 @@ void answer_query(amber::net::State &net_state, amber::space::State &space_state
   }
   case net::ControlKind::Inspect:
     reply = net::read_inspect(catalog_state, react_state, views, hearing, objects_state, perm_state,
-                              clock, settings.events_per_response, request);
+                              clock, loaded_settings, request);
     break;
   case net::ControlKind::Actions:
     reply = net::read_actions(catalog_state, react_state, objects_state, views, hearing,

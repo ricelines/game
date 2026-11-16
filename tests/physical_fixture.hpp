@@ -81,7 +81,7 @@ struct Fixture {
     step::declare_physical_actions(f.terms, declarations);
     step::bind_physical(f.vm, f.objects_state, step_state, perm_state, 1024, space_state,
                         catalog_state);
-    step::bind_metadata(f.objects_state, f.catalog_state, f.react_state, plots);
+    step::bind_metadata(f.objects_state, f.catalog_state, f.react_state, perm_state, 1000);
     add_body(f.a, {.6f, .6f, 1.8f}, space::Motion::Character);
     add_body(f.b, {.4f, .4f, .4f}, item);
     add_body(f.c, {.5f, .5f, .5f}, space::Motion::Dynamic);
