@@ -105,7 +105,7 @@ struct Fixture {
     i.hz = 20;
     i.state = &state;
     i.effects = &effects;
-    i.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+    i.deadline = RunDeadline::after(100);
     const auto result = re::run_handler(vm, {1, "inspect"}, i);
     require(result.status == re::RunOutcome::Status::Ok, result.error.c_str());
   }

@@ -104,7 +104,7 @@ void chosen_actions_and_typed_inputs() {
   record::Journal journal(8, {});
   space::State space_state{testspace::settings(), 8};
   auto &space = space_state.space;
-  const auto deadline = step::Monotonic::now() + std::chrono::seconds(2);
+  const auto deadline = RunDeadline::after(2000);
   auto root = step::begin_action(
       f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space_state, intents,
       journal, 2,
@@ -287,7 +287,7 @@ void canonical_results_and_actual_bounds() {
   step::Intents intents;
   record::Journal journal(8, {});
   std::vector<step::GapDraft> gaps;
-  const auto deadline = step::Monotonic::now() + std::chrono::seconds(2);
+  const auto deadline = RunDeadline::after(2000);
   auto declared = step::begin_action(
       f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space_state, intents,
       journal, 2,
@@ -403,7 +403,7 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
         for (auto &timer : planned.changes.timers)
           step::schedule(timers, std::move(timer));
         for (auto &plan : planned.invocations) {
-          plan.input.deadline = step::Monotonic::now() + std::chrono::seconds(2);
+          plan.input.deadline = RunDeadline::after(2000);
           auto completed = invoke(f, plan, journal);
           step::publish_invocation(journal, queues, timers, std::move(completed), watch.origin,
                                    1000);
@@ -455,7 +455,7 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
     auto plans = step::plan_event(f.triggers, f.values(),
                                   {f.a, {}, 6, Value(i % 2 ? .000001 : .000002), origin}, 41, 20);
     require(plans.size() == 1, "only the installed rate handler receives its event");
-    plans.front().input.deadline = step::Monotonic::now() + std::chrono::seconds(2);
+    plans.front().input.deadline = RunDeadline::after(2000);
     auto completed = invoke(f, plans.front(), journal);
     step::cancel_source_thresholds(timers, f.subscriptions, {f.a, 1});
     const auto changed = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
@@ -479,7 +479,7 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
               std::get<double>(f.states.at({f.a, direct}).at(std::string("count"))) == 2,
           "far-future replacements retain latest real origin without invented threshold callbacks");
   auto plans = step::plan_event(f.triggers, f.values(), {f.a, {}, 6, Value(-.5), origin}, 41, 20);
-  plans.front().input.deadline = step::Monotonic::now() + std::chrono::seconds(2);
+  plans.front().input.deadline = RunDeadline::after(2000);
   auto completed = invoke(f, plans.front(), journal);
   step::cancel_source_thresholds(timers, f.subscriptions, {f.a, 1});
   const auto changed = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
@@ -500,7 +500,7 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
   const auto stopped_token = step::timers(timers).front();
   const auto stopped_at = timers.now;
   plans = step::plan_event(f.triggers, f.values(), {f.a, {}, 6, Value(0.), origin}, stopped_at, 20);
-  plans.front().input.deadline = step::Monotonic::now() + std::chrono::seconds(2);
+  plans.front().input.deadline = RunDeadline::after(2000);
   completed = invoke(f, plans.front(), journal);
   require(f.processes[1].get(f.a.slot())->rate == 0 && timers.thresholds.size() == 2,
           "actual Lua stopping a process exposes the two pending old crossings");

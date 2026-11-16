@@ -176,7 +176,7 @@ struct QueryFilter {
   Handle ignore_a, ignore_b;
   bool include_sensors = false;
   std::span<const Handle> ignore = {};
-  std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
+  RunDeadline deadline{};
 };
 struct Hit {
   Handle object;

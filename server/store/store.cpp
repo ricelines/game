@@ -1,8 +1,33 @@
 #include "store.hpp"
 
 #include <charconv>
+#include <time.h>
 
 namespace amber {
+namespace {
+std::chrono::nanoseconds thread_cpu_time() {
+  timespec value{};
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &value);
+  return std::chrono::seconds(value.tv_sec) + std::chrono::nanoseconds(value.tv_nsec);
+}
+} // namespace
+RunDeadline RunDeadline::after(double milliseconds) {
+  const auto budget = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::duration<double, std::milli>(milliseconds));
+  const auto cpu_end = thread_cpu_time() + budget;
+  return {std::chrono::steady_clock::now() + budget, cpu_end};
+}
+bool RunDeadline::passed() {
+  const auto now = std::chrono::steady_clock::now();
+  if (now < wall)
+    return false;
+  const auto cpu = thread_cpu_time();
+  if (cpu >= cpu_end)
+    return true;
+  wall = now + (cpu_end - cpu);
+  return false;
+}
+
 Quat compose(Quat a, Quat b) {
   return {
       a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,

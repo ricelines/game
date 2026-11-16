@@ -232,7 +232,7 @@ int plot_objects_binding(lua_State *L) {
   lua_newtable(L);
   int index = 0;
   for (std::uint32_t slot = 1; slot < b.identity.model.size(); ++slot) {
-    if (std::chrono::steady_clock::now() >= i.deadline)
+    if (i.deadline.passed())
       luaL_error(L, "handler deadline exceeded");
     if (!b.identity.model[slot] || b.plot[slot] != plot || (b.identity.flags[slot] & (Body | Held)))
       continue;

@@ -68,7 +68,7 @@ int main() {
       invocation.state = &states[row];
       invocation.random = &random[row];
       invocation.effects = &effects;
-      invocation.deadline = Clock::now() + std::chrono::milliseconds(5);
+      invocation.deadline = RunDeadline::after(5);
       auto result = run_handler(vm, handler, invocation);
       if (result.status != RunOutcome::Status::Ok)
         throw std::runtime_error(result.error);

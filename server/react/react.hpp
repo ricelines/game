@@ -397,7 +397,7 @@ struct Invocation {
   ScriptState *state = nullptr;
   std::uint64_t *random = nullptr;
   DeferredEffects *effects = nullptr;
-  std::chrono::steady_clock::time_point deadline;
+  RunDeadline deadline{};
   const ScriptDeclaration *declaration = nullptr;
 };
 
@@ -428,7 +428,7 @@ struct InvocationInput {
   std::vector<Handle> acquired;
   std::optional<Caller> action_caller;
   Handle action_body, action_target;
-  std::chrono::steady_clock::time_point deadline{};
+  RunDeadline deadline{};
   std::optional<WatchRun> watch;
 };
 

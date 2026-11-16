@@ -159,7 +159,7 @@ struct NativeCall {
   double hz = 0;
   amber::Origin origin;
   std::optional<InputOrder> order{};
-  Monotonic::time_point deadline{};
+  RunDeadline deadline{};
 };
 struct NativeCompletion {
   record::Result result = record::Result::NoEffect;

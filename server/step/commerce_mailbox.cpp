@@ -1,7 +1,8 @@
 #include "commerce_private.hpp"
 
 namespace amber::step {
-void notify(perm::Players &players, net::Sessions &sessions, std::size_t mailbox_max, PlayerId player, Json notice) {
+void notify(perm::Players &players, net::Sessions &sessions, std::size_t mailbox_max,
+            PlayerId player, Json notice) {
   if (!player)
     return;
   for (auto id : sessions.sessions_for(player))

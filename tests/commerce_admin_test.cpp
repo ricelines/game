@@ -427,14 +427,13 @@ int main() {
         perm::create_grant(grants, players, perm::Holder::player(3),
                            {3, perm::Holder::player(2), ordinary_scope, 1, 10, 100, 300},
                            {ordinary_scope, 3, 1}, {}, 10);
-    require(
-        ordinary && run(4, ids.revoke, {}, {{"holder", "p:2"}}).reply["ok"] &&
-            grants.rows[ordinary.grant].live,
-        "architect holder-only revocation preserves another issuer's grants");
-    require(
-        run(4, ids.revoke, {}, {{"grant", "g:" + std::to_string(ordinary.grant)}}).changed &&
-            !grants.rows[ordinary.grant].live && grants.rows[root_grant.grant].live,
-        "architect explicit revocation removes another issuer's grant while preserving root grants");
+    require(ordinary && run(4, ids.revoke, {}, {{"holder", "p:2"}}).reply["ok"] &&
+                grants.rows[ordinary.grant].live,
+            "architect holder-only revocation preserves another issuer's grants");
+    require(run(4, ids.revoke, {}, {{"grant", "g:" + std::to_string(ordinary.grant)}}).changed &&
+                !grants.rows[ordinary.grant].live && grants.rows[root_grant.grant].live,
+            "architect explicit revocation removes another issuer's grant while preserving root "
+            "grants");
     require(
         !run(0, ids.grant, {},
              {{"holder", "p:2"}, {"scope", {{"object", to_string(f.a)}}}, {"rights", {"use"}}})

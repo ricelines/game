@@ -6,6 +6,21 @@ bool edge(const sp::Edges &edges, Handle from, Handle to) {
   auto *list = edges.out.get(from.slot());
   return list && std::find(list->begin(), list->end(), to) != list->end();
 }
+void expired_native_queries_stop() {
+  Scene scene;
+  const auto object = scene.box({1, 1, 1}, {0, 0, 0});
+  sp::QueryFilter filter;
+  filter.deadline = {std::chrono::steady_clock::now(), {}};
+  std::vector<Handle> found;
+  sp::near(scene.space, identity(scene.objects), {0, 0, 0}, 5, filter, found);
+  require(found.empty(), "near stops on an exhausted CPU deadline");
+  require(!sp::raycast(scene.space, identity(scene.objects), {-3, 0, .5f}, {3, 0, .5f}, filter),
+          "raycast stops on an exhausted CPU deadline");
+  require(
+      sp::raycast(scene.space, identity(scene.objects), {-3, 0, .5f}, {3, 0, .5f}, {})->object ==
+          object,
+      "an unlimited query sees the same geometry");
+}
 void sensor_contacts_use_body_overlap() {
   Scene scene;
   const auto moving = scene.box({.6f, .6f, .6f}, {2, 0, 0}, sp::Motion::Kinematic, 0, false, false);
@@ -1109,6 +1124,7 @@ int main(int argc, char **argv) {
       density_benchmarks();
       return 0;
     }
+    expired_native_queries_stop();
     sensor_contacts_use_body_overlap();
     plot_membership_follows_real_motion_and_hidden_custody();
     gravity_visibility_zones_and_snapshot();

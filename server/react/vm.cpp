@@ -121,7 +121,7 @@ void interrupt(lua_State *L, int gc) {
   if (gc >= 0)
     return;
   auto *run = static_cast<RunContext *>(lua_getthreaddata(L));
-  if (run && run->invocation && std::chrono::steady_clock::now() >= run->invocation->deadline)
+  if (run && run->invocation && run->invocation->deadline.passed())
     luaL_error(L, "handler deadline exceeded");
 }
 std::size_t atom_size(const StateAtom &atom) {
@@ -843,9 +843,7 @@ RunOutcome load_script(Vm &vm, const CompiledScript &compiled,
   lua_setreadonly(L, -1, true);
   lua_setglobal(L, "world");
   Invocation startup;
-  startup.deadline = std::chrono::steady_clock::now() +
-                     std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                         std::chrono::duration<double, std::milli>(impl.settings.declaration_ms));
+  startup.deadline = RunDeadline::after(impl.settings.declaration_ms);
   RunContext run{&startup, 0, 0};
   lua_setthreaddata(L, &run);
   const int loaded = luau_load(L, "script", compiled.bytecode.data(), compiled.bytecode.size(), 0);
@@ -906,8 +904,7 @@ RunOutcome Vm::Impl::advance(Invocation &inv) {
       result.error = "script state was retired during its action";
     else
       result.error = lua_tostring(L, -1) ? lua_tostring(L, -1) : "script failure";
-    result.status = std::chrono::steady_clock::now() >= inv.deadline ? RunOutcome::Status::Cutoff
-                                                                     : RunOutcome::Status::Error;
+    result.status = inv.deadline.passed() ? RunOutcome::Status::Cutoff : RunOutcome::Status::Error;
     inv.effects->ordered.push_back(
         Diagnostic{result.status == RunOutcome::Status::Cutoff ? "cutoff" : "error", result.error});
   }
@@ -936,10 +933,8 @@ RunOutcome run_handler(Vm &vm, const HandlerRef &handler, Invocation &inv) {
     return {RunOutcome::Status::Error, "native action call stack overflow", 0};
   inv.self.script = handler.script;
   inv.declaration = &script.declaration;
-  if (inv.deadline == std::chrono::steady_clock::time_point{})
-    inv.deadline = std::chrono::steady_clock::now() +
-                   std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                       std::chrono::duration<double, std::milli>(impl.settings.handler_ms));
+  if (inv.deadline.wall == std::chrono::steady_clock::time_point::max())
+    inv.deadline = RunDeadline::after(impl.settings.handler_ms);
   auto run = std::make_unique<RunContext>();
   run->invocation = &inv;
   run->state_bytes = state_size(*inv.state);
@@ -970,7 +965,7 @@ RunOutcome resume_handler(Vm &vm, Invocation &inv, const nlohmann::json &result)
 namespace {
 nlohmann::json metadata_json(lua_State *L, int index, std::size_t &nodes, int depth,
                              bool host_values) {
-  if (host_values && std::chrono::steady_clock::now() >= invocation(L).deadline)
+  if (host_values && invocation(L).deadline.passed())
     luaL_error(L, "handler deadline exceeded");
   if (++nodes > 100000)
     throw std::runtime_error("declaration node limit exceeded");
@@ -1043,7 +1038,7 @@ nlohmann::json metadata_json(lua_State *L, int index, std::size_t &nodes, int de
   }
 }
 void push_result(lua_State *L, const nlohmann::json &value) {
-  if (std::chrono::steady_clock::now() >= invocation(L).deadline)
+  if (invocation(L).deadline.passed())
     luaL_error(L, "handler deadline exceeded");
   if (value.is_null())
     lua_pushnil(L);

@@ -15,10 +15,6 @@
 namespace amber::step {
 namespace {
 using Json = nlohmann::json;
-Monotonic::time_point handler_deadline(double milliseconds) {
-  return Monotonic::now() + std::chrono::duration_cast<Monotonic::duration>(
-                                std::chrono::duration<double, std::milli>(milliseconds));
-}
 std::array<std::uint8_t, 32> hash_bytes(const catalog::Hash &text) {
   std::array<std::uint8_t, 32> out{};
   for (std::size_t i = 0; i < out.size(); ++i)
@@ -365,7 +361,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                              0}
                      : begin_frame(clock, settings.clock, costs, queues, timers, {}, frame_started);
     advance_permission_deadlines(perm_state, travel_access, sessions, journal, clock.step, hz,
-                                 settings.grant_reminder_seconds, settings.deadlines_per_step, settings.mailbox_max);
+                                 settings.grant_reminder_seconds, settings.deadlines_per_step,
+                                 settings.mailbox_max);
     expire_sale_offers(perm_state, ids, permission_flags(objects), session_views, sessions, journal,
                        clock.step, settings.deadlines_per_step, settings.mailbox_max);
 
@@ -428,7 +425,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     std::deque<ExecutionFrame> execution;
     if (fixture_action) {
       fixture_action->origin = {};
-      fixture_action->deadline = handler_deadline(settings.scripts.handler_ms);
+      fixture_action->deadline = RunDeadline::after(settings.scripts.handler_ms);
       execution.emplace_back(begin_action(catalog_state, react_state, profiles, perm_state,
                                           objects_state, space_state, intents, journal,
                                           settings.perception.reach_m, std::move(*fixture_action)));
@@ -455,7 +452,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                           input, clock.step, hz);
             if (auto *call = std::get_if<NativeCall>(&prepared)) {
               call->origin = input.origin;
-              call->deadline = handler_deadline(settings.scripts.handler_ms);
+              call->deadline = RunDeadline::after(settings.scripts.handler_ms);
               execution.emplace_back(begin_action(catalog_state, react_state, profiles, perm_state,
                                                   objects_state, space_state, intents, journal,
                                                   settings.perception.reach_m, std::move(*call)));

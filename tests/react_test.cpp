@@ -4,6 +4,8 @@
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
+#include <time.h>
 using namespace amber;
 using namespace amber::react;
 namespace {
@@ -317,8 +319,40 @@ RunOutcome execute(Vm &vm, ScriptState &state, DeferredEffects &effects, Handle 
   inv.state = &state;
   inv.random = &rng;
   inv.effects = &effects;
-  inv.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+  inv.deadline = RunDeadline::after(ms);
   return run_handler(vm, {id, std::move(function)}, inv);
+}
+void deadlines_count_thread_cpu() {
+  RunDeadline unlimited;
+  require(!unlimited.passed(), "default deadline is unlimited");
+  auto deadline = RunDeadline::after(5);
+  const auto start = deadline.cpu_end - std::chrono::milliseconds(5);
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  require(!deadline.passed(), "sleeping does not consume the handler CPU budget");
+  while (!deadline.passed()) {
+  }
+  timespec cpu{};
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu);
+  require(std::chrono::seconds(cpu.tv_sec) + std::chrono::nanoseconds(cpu.tv_nsec) - start >=
+              std::chrono::milliseconds(5),
+          "cutoff uses at least the allotted CPU time");
+  Vm vm({4096, 50, 5, 64});
+  ScriptDeclaration declaration;
+  declaration.id = 1;
+  require(load_script(vm, compile_script("return {on={run=function(self) self.state.done=1 end}}"),
+                      declaration)
+                  .status == RunOutcome::Status::Ok,
+          "load short handler");
+  ScriptState state;
+  DeferredEffects effects;
+  Invocation inv;
+  inv.self = {Handle::make(1, 1), 1};
+  inv.state = &state;
+  inv.effects = &effects;
+  inv.deadline = RunDeadline::after(5);
+  inv.deadline.wall = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+  require(run_handler(vm, {1, "run"}, inv).status == RunOutcome::Status::Ok,
+          "a past wall estimate with CPU remaining still runs successfully");
 }
 void action_handlers_receive_the_actual_caller() {
   test_runtime::Fixture f(1000);
@@ -341,7 +375,7 @@ void action_handlers_receive_the_actual_caller() {
   child.state = &state;
   child.effects = &effects;
   child.random = &random;
-  child.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  child.deadline = RunDeadline::after(1000);
   child.action_caller = PlayerId{2};
   require(run_handler(f.vm, {script, "novel.touch"}, child).status == RunOutcome::Status::Ok &&
               std::get<std::string>(state.at(std::string("kind"))) == "player",
@@ -523,7 +557,7 @@ void luau_bound_values_and_events() {
   bound_invocation.state = &state;
   bound_invocation.random = &rng;
   bound_invocation.effects = &effects;
-  bound_invocation.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  bound_invocation.deadline = RunDeadline::after(1000);
   auto result = run_handler(vm, {1, "run"}, bound_invocation);
   require(result.status == RunOutcome::Status::Action && result.action &&
               std::get<ScriptHolder>(result.action->request.caller) == ScriptHolder{1, f.a} &&
@@ -622,7 +656,7 @@ void synchronous_actions_and_nested_deadlines() {
   outer.state = &outer_state;
   outer.effects = &outer_effects;
   outer.random = &rng;
-  outer.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  outer.deadline = RunDeadline::after(1000);
   inner.self = {f.b, 1};
   inner.payload = Value{};
   inner.state = &inner_state;
@@ -649,14 +683,14 @@ void synchronous_actions_and_nested_deadlines() {
                   RunOutcome::Status::Ok &&
               std::get<Handle>(outer_state.at(std::string("after"))) == f.c,
           "outer call retains its own Lua stack and receives real created handles");
-  outer.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  outer.deadline = RunDeadline::after(1000);
   require(run_handler(vm, handler, outer).status == RunOutcome::Status::Action,
           "start another ordinary action");
-  outer.deadline = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+  outer.deadline = RunDeadline{std::chrono::steady_clock::now(), {}};
   require(resume_handler(vm, outer, {{"ok", true}}).status == RunOutcome::Status::Cutoff &&
               std::get<double>(outer_state.at(std::string("before"))) == 2,
           "nested work does not reset the caller deadline or roll back prior writes");
-  outer.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  outer.deadline = RunDeadline::after(1000);
   require(run_handler(vm, handler, outer).status == RunOutcome::Status::Action &&
               resume_handler(vm, outer, {{"ok", false}, {"denied", {{"need", "take"}}}}).status ==
                   RunOutcome::Status::Ok,
@@ -689,7 +723,7 @@ void nested_calls_share_live_state() {
   inner.effects = &inner_effects;
   outer.payload = Value(false);
   inner.payload = Value(true);
-  outer.deadline = inner.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  outer.deadline = inner.deadline = RunDeadline::after(1000);
   const HandlerRef handler{1, "run"};
   require(run_handler(vm, handler, outer).status == RunOutcome::Status::Action,
           "outer handler suspends before a child adds shared state");
@@ -733,7 +767,7 @@ void candidate_start_uses_current_installation() {
     InvocationInput input;
     input.receiver = f.a;
     input.trigger = 6;
-    input.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    input.deadline = RunDeadline::after(1000);
     return start_invocation(f.react_state, objects_state, 7, f.catalog_state, journal, handler,
                             std::move(input), inv, done);
   };
@@ -789,7 +823,7 @@ void suspended_handler_sees_replaced_parts() {
   InvocationInput input;
   input.receiver = root;
   input.trigger = 6;
-  input.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  input.deadline = RunDeadline::after(1000);
   Invocation invocation;
   CompletedInvocation completed;
   record::Journal journal(8, {});
@@ -816,6 +850,7 @@ void suspended_handler_sees_replaced_parts() {
 }
 } // namespace
 int main() {
+  deadlines_count_thread_cpu();
   source_resolution();
   owner_value_view_reads_bound_relations();
   process_thresholds_and_transfer();

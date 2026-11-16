@@ -134,7 +134,7 @@ struct Fixture {
     call.step = clock.step;
     call.hz = 20;
     call.origin = parent;
-    call.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    call.deadline = RunDeadline::after(1000);
     return step::begin_action(f.catalog_state, f.react_state, profiles, perm_state, f.objects_state,
                               space_state, intents, journal, reach_m, std::move(call));
   }

@@ -559,7 +559,8 @@ step::NativeCompletion plot_permissions(perm::Plots &plots, const perm::Players 
 }
 void advance_permission_deadlines(amber::perm::State &perm_state, TravelAccess &travel_access,
                                   net::Sessions &sessions, record::Journal &journal, Step now,
-                                  double hz, double reminder_seconds, std::size_t limit, std::size_t mailbox_max) {
+                                  double hz, double reminder_seconds, std::size_t limit,
+                                  std::size_t mailbox_max) {
   auto &grants = perm_state.grants;
   auto &players = perm_state.players;
 

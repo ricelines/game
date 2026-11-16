@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <compare>
 #include <cstddef>
@@ -16,6 +17,14 @@
 #include <vector>
 
 namespace amber {
+
+// A script run's time limit (S4.3): CPU time used by the thread running it.
+struct RunDeadline {
+  std::chrono::steady_clock::time_point wall = std::chrono::steady_clock::time_point::max();
+  std::chrono::nanoseconds cpu_end{};
+  static RunDeadline after(double milliseconds);
+  bool passed();
+};
 
 using Step = std::uint64_t;
 using PlayerId = std::uint32_t;
