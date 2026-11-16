@@ -589,8 +589,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                                 objects_state, architect, operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::ScriptAction>) {
                       return native_scripts(catalog_state, react_state, perm_state, objects_state,
-                                            role("events", "start"), roles, operation,
-                                            action->call);
+                                            role("events", "start"), operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::ValueAction>) {
                       return native_values(players, models, values, react_state, relation_terms,
                                            roles, operation, action->call);

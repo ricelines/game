@@ -270,8 +270,7 @@ NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
 NativeCompletion native_scripts(amber::catalog::State &catalog_state,
                                 amber::react::State &react_state, amber::perm::State &perm_state,
                                 const amber::ObjectState &objects_state, TermId start_event,
-                                std::span<const std::string> roles, react::ScriptAction operation,
-                                const NativeCall &call) {
+                                react::ScriptAction operation, const NativeCall &call) {
   const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   NativeCompletion out;

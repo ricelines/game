@@ -68,8 +68,7 @@ NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
 NativeCompletion native_scripts(amber::catalog::State &catalog_state,
                                 amber::react::State &react_state, amber::perm::State &perm_state,
                                 const amber::ObjectState &objects_state, TermId start_event,
-                                std::span<const std::string> roles, react::ScriptAction operation,
-                                const NativeCall &call);
+                                react::ScriptAction operation, const NativeCall &call);
 NativeCompletion native_values(const perm::Players &players, const catalog::Models &models,
                                const react::ValueRead &values, amber::react::State &react_state,
                                std::array<TermId, 4> relation_terms,
