@@ -1162,7 +1162,7 @@ TradeResult change_trade(amber::perm::State &perm_state, PermissionFlags flags, 
   const auto offer_id = static_cast<OfferId>(offers.rows.size());
   // Direct-trade money is the amount this side gives, independent of a goods sale price.
   offers.rows.push_back({offer_id, actor, trade.players[1 - side], goods ? goods->object : Handle{},
-                         0, 0, id, true, part_handles(parts)});
+                         0, 0, id, true, part_handles(parts), 0, Holder::player(actor)});
   previous = {offer_id, money, false};
   trade.sides[1 - side].confirmed = false;
   if (goods) {

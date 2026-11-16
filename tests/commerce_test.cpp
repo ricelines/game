@@ -12,7 +12,6 @@ namespace cm = step;
 using test_runtime::require;
 template <class F> void rejects(F action, const char *message) {
   try {
-    land_editing_preserves_grants_and_refreshes_objects();
     action();
   } catch (const std::invalid_argument &) {
     return;
@@ -175,7 +174,7 @@ struct Fixture {
     if (args.is_null())
       args = nlohmann::json::object();
     const auto operation = std::get<react::ExchangeAction>(declarations.rows.at(action).operation);
-    auto settings = read_settings(AMBER_CONFIG_PATH);
+    amber::Settings settings{};
     settings.mailbox_max = mailbox_max;
     auto out =
         step::native_exchange(objects_state, perm_state, space_state, delivery, settings, operation,
@@ -852,6 +851,7 @@ void land_editing_preserves_grants_and_refreshes_objects() {
 } // namespace
 int main() {
   try {
+    land_editing_preserves_grants_and_refreshes_objects();
     offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox();
     wallet_native_authority_is_explicit();
     actual_assembly_sale_and_inventory_reveal_preserve_identity();

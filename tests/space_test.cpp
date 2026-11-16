@@ -22,7 +22,7 @@ void returns_release_seated_standing_and_static_occupants() {
   require(sp::custody(scene.objects_state, seat, {}, scene.space_state, {}, true).status ==
                   sp::Status::Ok &&
               !scene.objects.parent[seated.slot()] &&
-              sp::body_motion(scene.space, identity(scene.objects), seated) ==
+              sp::body_motion(scene.space, identity(scene.objects), seated)->motion ==
                   sp::Motion::Character,
           "return did not release seated body");
   for (int tick = 0; tick < 12; ++tick)
@@ -58,6 +58,30 @@ void returns_release_seated_standing_and_static_occupants() {
               sp::body_motion(scene.space, identity(scene.objects), ornament)->motion ==
                   sp::Motion::Static,
           "return refused a static occupant without a hull or changed its pose");
+  auto limited_settings = settings();
+  limited_settings.max_bodies = 2;
+  Scene limited(limited_settings);
+  ObjectInit logical;
+  logical.model = 1;
+  const auto shelf = create(limited.objects, logical);
+  require(sp::register_logical_root(limited.space, identity(limited.objects), shelf).status ==
+              sp::Status::Ok,
+          "capacity return logical root");
+  const auto attached = limited.box({1, 1, 1}, {2, 0, 0}, sp::Motion::Kinematic);
+  limited.box({1, 1, 1}, {4, 0, 0});
+  require(sp::attach(limited.objects_state, limited.space_state,
+                     {attached, shelf, {{2, 0, 0}, {}}, false})
+                  .status == sp::Status::Ok,
+          "capacity return attachment");
+  require(
+      sp::can_custody(limited.space, identity(limited.objects), shelf, {}, parents(limited.objects))
+                  .status == sp::Status::Capacity &&
+          sp::custody(limited.objects_state, shelf, {}, limited.space_state, {}, true).status ==
+              sp::Status::Ok &&
+          sp::body_motion(limited.space, identity(limited.objects), attached)->motion ==
+              sp::Motion::Static &&
+          limited.objects.position[attached.slot()] == Vec3{2, 0, 0},
+      "full native capacity blocked a return or moved its occupant");
 }
 
 void expired_native_queries_stop() {

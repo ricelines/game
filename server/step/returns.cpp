@@ -27,20 +27,26 @@ NativeCompletion return_goods(perm::State &permissions, ObjectState &objects,
     return commerce_detail::denied(returned.reason, "return",
                                    "plot:" + std::to_string(item.root.plot));
   auto flags = permission_flags(objects.objects);
+  std::vector<Handle> cleared;
   // Returning one side cancels a trade as a whole, releasing the other side's escrow.
   for (auto id : live_offers)
     if (const auto &offer = permissions.offers.rows[id]; !offer.live) {
-      if (ids.valid(offer.goods))
+      if (ids.valid(offer.goods)) {
         flags.set(offer.goods.slot(), flags.get(offer.goods.slot()) & ~Escrow);
+        cleared.push_back(offer.goods);
+      }
       for (auto part : offer.parts)
-        if (ids.valid(part))
+        if (ids.valid(part)) {
           flags.set(part.slot(), flags.get(part.slot()) & ~Escrow);
+          cleared.push_back(part);
+        }
     }
   auto out = commerce_detail::result(true, {{"object", to_string(item.root.object)},
                                             {"recipient", "p:" + std::to_string(item.root.owner)},
                                             {"location", body ? "inventory" : "mailbox"}});
   out.custody = returned.custody;
   out.changed_objects = item.closure;
+  out.changed_objects.insert(out.changed_objects.end(), cleared.begin(), cleared.end());
   commerce_detail::record(out, call, "return", item.closure, out.reply);
   return out;
 }

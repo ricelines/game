@@ -133,6 +133,45 @@ void returns_respect_build_grants_and_ignore_mailbox_limits() {
   require(bool(return_goods(state, stranger, 2)), "forced abandonment did not return goods");
 }
 
+void plot_offer_snapshots_keep_remote_maker_and_its_authority() {
+  Fixture f;
+  auto &state = f.perm_state;
+  state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
+  state.plots.rows.push_back({2, 3, 0, 2, {16, 0, 32, 32}, {}});
+  Objects objects;
+  ObjectInit init;
+  init.model = 1;
+  init.owner = 1;
+  init.plot = 1;
+  const auto local = create(objects, init);
+  init.plot = 2;
+  const auto remote = create(objects, init);
+  const auto maker = Holder::script(7, remote);
+  const auto grant = f.grant(1, maker, Scope::plot(1), 1, 8);
+  const auto offered = offer_plot(state, maker, 1, 25, 2, 500, 2);
+  const std::array selected{local};
+  const std::array<PlayerId, 1> actors{2};
+  const auto selection = capture_authority(authority(objects), selected, actors, state);
+  require(selection.objects.contains(remote) && selection.grants.contains(grant) &&
+              selection.offers.contains(offered.offer),
+          "capture omitted remote maker or sale authority");
+  snap::Buffer bytes;
+  snap::Output out{bytes};
+  write_players(out, state.players, state.ledger, state.plots, state.groups, &selection);
+  write_grants(out, state.grants, state.offers, state.trades, state.owner_limits, &selection);
+  bytes.resize(out.adapter().writtenBytesCount());
+  State restored;
+  snap::Input in{bytes.data(), bytes.size()};
+  read_players(in, restored.players, restored.ledger, restored.plots, restored.groups);
+  read_grants(in, restored.grants, restored.offers, restored.trades, restored.owner_limits,
+              objects.model.size());
+  snap::check_complete(in);
+  const auto &row = restored.offers.rows[offered.offer];
+  require(row.plot == 1 && row.maker == maker && row.price == 25 && row.buyer == 2 &&
+              restored.offers.expiring.contains({500, row.id}),
+          "snapshot lost plot sale fields or expiry");
+}
+
 void moved_goods_leave_plot_scoped_authority() {
   Fixture f;
   Objects objects;
@@ -1261,6 +1300,7 @@ int main() {
   try {
     changing_plot_owner_clears_only_old_owner_authority();
     plot_sales_recheck_price_authority_and_burn_pool_payments();
+    plot_offer_snapshots_keep_remote_maker_and_its_authority();
     returns_respect_build_grants_and_ignore_mailbox_limits();
     moved_goods_leave_plot_scoped_authority();
     plot_records_show_live_land_control();

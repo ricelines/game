@@ -51,8 +51,13 @@ OperationResult release_occupants(Space &space, IdentityRead identity, Handle ro
       const auto old = n.world_bounds(body);
       mode = body.character ? Motion::Character : Motion::Dynamic;
       if (stay_static && !body.character && body.spec.motion != Motion::Dynamic &&
-          (!n.geometries[body.spec.geometry]->hull || capacity(space).native_available == 0))
+          (!n.geometries[body.spec.geometry]->hull || capacity(space).native_available == 0)) {
         mode = Motion::Static;
+        n.physics.GetBodyInterface().SetMotionType(body.body, JPH::EMotionType::Static,
+                                                   JPH::EActivation::DontActivate);
+        body.spec.motion = mode;
+        body.kinematic_start.reset();
+      }
       const auto ready = update_motion(n, body, mode);
       if (ready.status != Status::Ok)
         return ready;

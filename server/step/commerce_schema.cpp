@@ -274,7 +274,7 @@ CommerceDeclarations declare_commerce(react::Terms &terms, react::NativeActions 
                    "", schema(Json::object(), Json::array(), Json::object()));
   ids.accept =
       add(react::ExchangeAction::Accept, "engine.accept",
-          "Accept an ordinary offer, paying the seller and receiving the complete item. "
+          "Accept a goods or plot offer up to max_price, paying the seller. "
           "Scripts must name a beneficiary and hold payer-wallet Spend permission.",
           "",
           schema({{"offer", str}, {"max_price", money}, {"payer", str}, {"beneficiary", str}},
