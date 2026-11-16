@@ -133,15 +133,16 @@ struct Goods {
 };
 inline Goods goods(IdentityRead identity, const lifecycle::Parts &parts,
                    const Relation &declared_parts, AuthorityRead authority,
-                   const perm::OwnerLimits &limits, Handle h) {
+                   const perm::OwnerLimits &limits, const perm::Plots &plots, Handle h) {
   if (!identity.valid(h))
     throw std::invalid_argument("stale goods handle");
   if (const auto *parents = declared_parts.in.get(h.slot()); parents && !parents->empty())
     throw std::invalid_argument("exchange the declared assembly root, not an internal part");
-  Goods out{
-      perm::target(identity, authority, limits, h), lifecycle::collect(parts, identity, h), {}};
+  Goods out{perm::target(identity, authority, limits, plots, h),
+            lifecycle::collect(parts, identity, h),
+            {}};
   for (auto part : std::span{out.closure}.subspan(1))
-    out.parts.push_back(perm::target(identity, authority, limits, part));
+    out.parts.push_back(perm::target(identity, authority, limits, plots, part));
   return out;
 }
 void check_custody(const space::Space &, IdentityRead, ParentRead, const lifecycle::Parts &,

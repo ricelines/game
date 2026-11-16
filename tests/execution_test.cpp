@@ -251,7 +251,7 @@ void model_rebind_retires_only_removed_installations() {
           "changing the same root model retires removed state but retains explicit script state");
   require(!grants.rows[old_grant].live && grants.rows[kept_grant].live,
           "only removed ScriptHolder authority is revoked");
-  const auto target = perm::target(identity(f.objects), authority(f.objects), {}, f.b);
+  const auto target = perm::target(identity(f.objects), authority(f.objects), {}, {}, f.b);
   require(!perm::check(perm::Holder::script(old, f.a), perm::Verb::Transfer, target, players,
                        grants, 12) &&
               bool(perm::check(perm::Holder::script(keep, f.a), perm::Verb::Transfer, target,

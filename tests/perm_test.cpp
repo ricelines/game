@@ -53,9 +53,9 @@ void moved_goods_leave_plot_scoped_authority() {
   const auto script = Holder::script(7, Handle::make(30, 1));
   f.grant(1, script, Scope::owned_on_plot(1, 1), 1, bit(Verb::Move));
   auto allowed = [&] {
-    return static_cast<bool>(check(script, Verb::Move,
-                                   target(identity(objects), authority(objects), limits, item),
-                                   f.players, f.grants, 2));
+    return static_cast<bool>(check(
+        script, Verb::Move, target(identity(objects), authority(objects), limits, plots, item),
+        f.players, f.grants, 2));
   };
   require(allowed(), "on-plot grant did not cover initial owned goods");
   objects.position[item.slot()].x = 0;
@@ -337,6 +337,69 @@ void repeated_revocation_keeps_only_live_deadlines() {
   }
 }
 
+void owned_and_all_land_cover_only_their_declared_scopes() {
+  Fixture f;
+  Objects objects;
+  Plots plots;
+  plots.rows.push_back({1, 2, 0, 0, {-5, -5, 5, 5}, {}, PlotKind::Lot});
+  plots.rows.push_back({2, 0, 0, 0, {-5, 5, 5, 10}, {}, PlotKind::Street});
+  OwnerLimits limits;
+  ObjectInit init;
+  init.model = 1;
+  init.owner = 2;
+  init.plot = 1;
+  const auto first = create(objects, init);
+  init.owner = 3;
+  const auto second = create(objects, init);
+  init.plot = 2;
+  const auto street = create(objects, init);
+  const auto body = Holder::script(7, Handle::make(30, 1));
+  f.grant(2, body, Scope::owned(2), 2, bit(Verb::Move));
+  auto read = [&](Handle h) {
+    return target(identity(objects), authority(objects), limits, plots, h);
+  };
+  require(check(body, Verb::Move, read(first), f.players, f.grants, 2) &&
+              !check(body, Verb::Move, read(second), f.players, f.grants, 2),
+          "owned scope covers only its owner's objects");
+  objects.plot[first.slot()] = 2;
+  require(bool(check(body, Verb::Move, read(first), f.players, f.grants, 2)),
+          "owned scope follows an owner's object across plots");
+  objects.plot[first.slot()] = 1;
+  const auto land = Holder::script(8, Handle::make(31, 1));
+  const auto root = create_root_grant(
+      f.grants, f.players,
+      {0, land, Scope::all_land(), bit(Verb::Destroy) | (Rights{17} << 8), 0, 0, 200},
+      {land, 1, true}, 1);
+  require(root && check(land, Verb::Destroy, read(first), f.players, f.grants, 2) &&
+              check(land, Verb::Destroy, read(second), f.players, f.grants, 2) &&
+              !check(land, Verb::Destroy, read(street), f.players, f.grants, 2),
+          "all-land object authority covers two owners on lots and excludes the Street");
+  require(check_land(land, LandVerb::Build, plots.rows[1], f.players, f.grants, 2) &&
+              check_land(land, LandVerb::Return, plots.rows[1], f.players, f.grants, 2) &&
+              !check_land(land, LandVerb::Build, plots.rows[2], f.players, f.grants, 2),
+          "all-land land verbs use their shifted bits and exclude ways");
+  plots.rows[1].preset = ~Rights{};
+  require(
+      !check_land(Holder::player(1), LandVerb::Transfer, plots.rows[1], f.players, f.grants, 2) &&
+          !check_land(Holder::player(1), LandVerb::Return, plots.rows[1], f.players, f.grants, 2),
+      "presets never authorize land transfer or return");
+  const auto child = Holder::script(9, Handle::make(32, 1));
+  const auto delegated = create_grant(
+      f.grants, f.players, land, {1, child, Scope::object(first), bit(Verb::Destroy), 0, 0, 100},
+      {Scope::object(first), 2, all_rights, 1, true}, {child, 2, true}, 2);
+  require(delegated && f.grants.rows[delegated.grant].parent == root.grant,
+          "all-land holder can pass one object's authority to another script");
+  objects.plot[first.slot()] = 0;
+  objects.flags[first.slot()] |= Held;
+  require(check(child, Verb::Destroy, read(first), f.players, f.grants, 3) &&
+              !check(land, Verb::Destroy, read(first), f.players, f.grants, 3),
+          "delegated object grant survives holding while all-land coverage ends");
+  require(!create_grant(f.grants, f.players, Holder::player(1),
+                        {1, Holder::player(2), Scope::all_land(), bit(Verb::Destroy)},
+                        {Scope::all_land(), 1, all_rights}, {}, 2),
+          "only root can issue all-land grants");
+}
+
 void root_grants_validate_their_boundaries() {
   Fixture f;
   const auto script = Holder::script(8, Handle::make(20, 1));
@@ -430,8 +493,10 @@ void next_owner_limits_preserve_fair_use_and_clear_old_script_grants() {
   f.grant(1, Holder::player(2), Scope::object(object), 1, bit(Verb::Use));
   f.grant(1, script, Scope::account(Account::player(1)), 1, 1, 100, 100, 500);
   transfer_owner(authority(objects), limits, permission_flags(objects), f.grants, f.players,
-                 target(identity(objects), authority(objects), limits, object), 3);
-  const auto sold = target(identity(objects), authority(objects), limits, object);
+                 target(identity(objects), authority(objects), limits, f.perm_state.plots, object),
+                 3);
+  const auto sold =
+      target(identity(objects), authority(objects), limits, f.perm_state.plots, object);
   require(sold.owner == 3 && (sold.flags & NoCopy), "owner/next-owner copy limit not applied");
   for (auto verb : {Verb::Use, Verb::Take, Verb::Move, Verb::Destroy, Verb::Transfer})
     require(static_cast<bool>(check(Holder::player(3), verb, sold, f.players, f.grants, 2)),
@@ -446,10 +511,11 @@ void next_owner_limits_preserve_fair_use_and_clear_old_script_grants() {
   limits.erase(object.slot()); // Explicit owner cleanup precedes storage destruction and reuse.
   destroy(objects, object);
   const auto replacement = create(objects, init);
-  require(!check(script, Verb::Use,
-                 target(identity(objects), authority(objects), limits, replacement), f.players,
-                 f.grants, 2),
-          "reused slot inherited old script grant");
+  require(
+      !check(script, Verb::Use,
+             target(identity(objects), authority(objects), limits, f.perm_state.plots, replacement),
+             f.players, f.grants, 2),
+      "reused slot inherited old script grant");
 }
 
 struct GoodsFixture : Fixture {
@@ -466,7 +532,9 @@ struct GoodsFixture : Fixture {
     init.preset = all_rights << 16;
     goods = create(objects, init);
   }
-  Target current() { return target(identity(objects), authority(objects), limits, goods); }
+  Target current() {
+    return target(identity(objects), authority(objects), limits, perm_state.plots, goods);
+  }
   OfferResult sell(std::int64_t price = 50, PlayerId buyer = 0) {
     return offer(perm_state, permission_flags(objects), Holder::player(1), current(), price, buyer,
                  100, true, 2);
@@ -683,9 +751,10 @@ void offer_deadlines_skip_completed_quotes_and_rebuild_on_restore() {
     init.model = 1;
     init.owner = 1;
     const auto other = create(f.objects, init);
-    const auto second = offer(f.perm_state, permission_flags(f.objects), Holder::player(1),
-                              target(identity(f.objects), authority(f.objects), f.limits, other), 1,
-                              0, 100, true, 2);
+    const auto second = offer(
+        f.perm_state, permission_flags(f.objects), Holder::player(1),
+        target(identity(f.objects), authority(f.objects), f.limits, f.perm_state.plots, other), 1,
+        0, 100, true, 2);
     require(first && second &&
                 advance_offers(f.offers, identity(f.objects), permission_flags(f.objects), 100, 0)
                     .empty() &&
@@ -730,7 +799,8 @@ void direct_trade_rechecks_both_sides_resets_confirmation_and_cannot_be_bought_p
   f.ledger.balance[Account::player(2)] = 50;
   const auto id = open_trade(trades, f.players, 1, 2).trade;
   const auto first_target = f.current();
-  auto second_target = target(identity(f.objects), authority(f.objects), f.limits, second);
+  auto second_target =
+      target(identity(f.objects), authority(f.objects), f.limits, f.perm_state.plots, second);
   require(static_cast<bool>(change_trade(perm_state, permission_flags(f.objects), id, 1,
                                          &first_target, 10, false, 2)) &&
               static_cast<bool>(change_trade(perm_state, permission_flags(f.objects), id, 2,
@@ -741,8 +811,8 @@ void direct_trade_rechecks_both_sides_resets_confirmation_and_cannot_be_bought_p
   require(f.buy(offered, buyer).reason == Reason::OfferGone,
           "one side of direct trade accepted independently");
   auto targets = [&] {
-    return std::array<Target, 2>{
-        f.current(), target(identity(f.objects), authority(f.objects), f.limits, second)};
+    return std::array<Target, 2>{f.current(), target(identity(f.objects), authority(f.objects),
+                                                     f.limits, f.perm_state.plots, second)};
   };
   auto confirm = [&](PlayerId player, const std::array<Handle, 2> &present) {
     return confirm_trade(perm_state, f.objects_state, id, player, targets(), present, 3);
@@ -824,7 +894,8 @@ void assembly_offers_preflight_and_transfer_every_declared_part() {
   init.preset = (all_rights & ~bit(Verb::Copy)) << 16;
   const auto part = create(f.objects, init);
   auto components = [&] {
-    return std::array<Target, 1>{target(identity(f.objects), authority(f.objects), f.limits, part)};
+    return std::array<Target, 1>{
+        target(identity(f.objects), authority(f.objects), f.limits, f.perm_state.plots, part)};
   };
   const auto component_grant =
       f.grant(1, Holder::script(20, part), Scope::account(Account::player(1)), 1, 1, 100, 100);
@@ -1035,6 +1106,7 @@ int main() {
     reminder_deadlines_ignore_revocation_and_notify_once();
     overdue_grant_cleanup_waits_without_extending_authority();
     repeated_revocation_keeps_only_live_deadlines();
+    owned_and_all_land_cover_only_their_declared_scopes();
     root_grants_validate_their_boundaries();
     wallets_and_root_require_explicit_authority();
     next_owner_limits_preserve_fair_use_and_clear_old_script_grants();

@@ -51,11 +51,17 @@ perm::ScopeControl scope(const Json &row, IdentityRead identity, AuthorityRead a
     throw std::invalid_argument("choose one scope");
   if (row.contains("object")) {
     const auto object = live_handle(row.at("object"), identity);
-    const auto target = perm::target(identity, authority, limits, object);
+    const auto target = perm::target(identity, authority, limits, plots, object);
     return {perm::Scope::object(object), target.owner,
             (perm::all_rights & ~perm::inherited_rights) |
                 (target.owner_limit & perm::inherited_rights),
-            target.plot};
+            target.plot, target.on_lot};
+  }
+  if (row.contains("owned")) {
+    const auto owner = identifier(row.at("owned"), "p:");
+    if (owner >= players.rows.size())
+      throw std::invalid_argument("unknown owned scope");
+    return {perm::Scope::owned(owner), owner, perm::all_rights};
   }
   if (row.contains("owned_on_plot")) {
     const auto &owned = row.at("owned_on_plot");
@@ -81,8 +87,8 @@ perm::ScopeControl scope(const Json &row, IdentityRead identity, AuthorityRead a
     const auto id = row.at("plot").get<PlotId>();
     if (!id || id >= plots.rows.size() || plots.rows[id].id != id)
       throw std::invalid_argument("unknown plot scope");
-    return {perm::Scope::plot(id), plots.rows[id].owner,
-            perm::Rights{7} | perm::bit(perm::Verb::Transfer), id};
+    return {perm::Scope::plot(id), plots.rows[id].owner, perm::Rights{31}, id,
+            plots.rows[id].kind == perm::PlotKind::Lot};
   }
   throw std::invalid_argument("unknown grant scope");
 }
@@ -101,6 +107,8 @@ perm::Rights rights(const Json &row, perm::ScopeKind scope) {
         result |= 2;
       else
         throw std::invalid_argument("wrong avatar right");
+    } else if (scope == perm::ScopeKind::AllLand && name.starts_with("land_")) {
+      result |= rights(Json::array({name.substr(5)}), perm::ScopeKind::Plot) << 8;
     } else if (scope == perm::ScopeKind::Plot) {
       if (name == "build")
         result |= 1;
@@ -108,6 +116,10 @@ perm::Rights rights(const Json &row, perm::ScopeKind scope) {
         result |= 2;
       else if (name == "run_scripts")
         result |= 4;
+      else if (name == "transfer")
+        result |= 8;
+      else if (name == "return")
+        result |= 16;
       else
         throw std::invalid_argument("wrong plot right");
     } else {

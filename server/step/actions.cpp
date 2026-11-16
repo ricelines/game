@@ -147,8 +147,8 @@ ActionRun begin_action(const amber::catalog::State &catalog_state,
     return run;
   }
   if (!resolution.right.empty()) {
-    const auto target =
-        perm::target(values.identity, authority, limits, resolution.permission_target);
+    const auto target = perm::target(values.identity, authority, limits, perm_state.plots,
+                                     resolution.permission_target);
     const auto gate =
         perm::check_right(resolution.right, request.caller, target, players, grants, run.call.step);
     if (!gate.allowed) {

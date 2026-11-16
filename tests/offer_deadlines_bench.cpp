@@ -29,7 +29,8 @@ int main() {
   const auto flags = permission_flags(objects);
   for (auto object : goods)
     if (!perm::offer(perm_state, flags, perm::Holder::player(1),
-                     perm::target(ids, owners, limits, object), 1, 0, 100, true, 1))
+                     perm::target(ids, owners, limits, perm_state.plots, object), 1, 0, 100, true,
+                     1))
       throw std::runtime_error("benchmark actual offer registration failed");
   const auto idle_start = Clock::now();
   for (std::size_t i = 0; i < idle_checks; ++i)

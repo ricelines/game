@@ -157,7 +157,7 @@ void explicit_authority_and_online_assembly() {
               f.grants.rows[id].live &&
               bool(pe::check(pe::Holder::script(1, f.controller), pe::Verb::Destroy,
                              pe::target(identity(f.scene.objects), authority(f.scene.objects),
-                                        f.limits, f.root),
+                                        f.limits, f.perm_state.plots, f.root),
                              f.players, f.grants, 1)),
           "custody retains owner, ceilings and explicit later salvage grant");
   require(std::ranges::find(f.hidden, f.root) != f.hidden.end() &&

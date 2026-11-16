@@ -33,7 +33,7 @@ std::vector<Handle> update_plots(IdentityRead, TransformRead, PlotWrite, const P
 Decision check_land(Holder, LandVerb, const Plot &, const Players &, const Grants &, Step);
 
 // Targets are resolved from live projections before calling these operations.
-Target target(IdentityRead, AuthorityRead, const OwnerLimits &, Handle);
+Target target(IdentityRead, AuthorityRead, const OwnerLimits &, const Plots &, Handle);
 Decision check(Holder, Verb, const Target &, const Players &, const Grants &, Step);
 Decision check_scope(Holder, Scope, Rights required, const Grants &, Step);
 Decision check_account(Holder, AccountTarget, std::int64_t amount, const Grants &, Step);

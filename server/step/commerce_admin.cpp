@@ -109,6 +109,10 @@ Json scope_json(perm::Scope scope) {
   switch (scope.kind) {
   case perm::ScopeKind::Object:
     return {{"object", to_string(Handle{scope.subject})}};
+  case perm::ScopeKind::Owned:
+    return {{"owned", "p:" + std::to_string(scope.owner)}};
+  case perm::ScopeKind::AllLand:
+    return {{"all_land", true}};
   case perm::ScopeKind::OwnedOnPlot:
     return {{"owned_on_plot",
              {{"owner", "p:" + std::to_string(scope.owner)}, {"plot", scope.subject}}}};
@@ -131,13 +135,15 @@ Json rights_json(perm::Rights rights, perm::ScopeKind scope) {
       result.push_back("animate");
     if (rights & 2)
       result.push_back("camera");
+  } else if (scope == perm::ScopeKind::AllLand) {
+    result = rights_json(rights & perm::all_rights, perm::ScopeKind::Object);
+    for (const auto &name : rights_json(rights >> 8, perm::ScopeKind::Plot))
+      result.push_back("land_" + name.get<std::string>());
   } else if (scope == perm::ScopeKind::Plot) {
-    constexpr std::array names{"build", "enter", "run_scripts"};
+    constexpr std::array names{"build", "enter", "run_scripts", "transfer", "return"};
     for (std::size_t index = 0; index < names.size(); ++index)
       if (rights & (perm::Rights{1} << index))
         result.push_back(names[index]);
-    if (rights & perm::bit(perm::Verb::Transfer))
-      result.push_back("transfer");
   } else {
     constexpr std::array names{"use", "take", "move", "edit", "copy", "transfer", "destroy"};
     for (std::size_t index = 0; index < names.size(); ++index)
@@ -405,7 +411,7 @@ step::NativeCompletion preset(amber::ObjectState &objects_state,
     const auto object = call.request.target;
     if (!identity.valid(object))
       throw std::invalid_argument("stale goods handle");
-    const auto target = perm::target(identity, authority, limits, object);
+    const auto target = perm::target(identity, authority, limits, perm_state.plots, object);
     if (target.flags & Body)
       throw std::invalid_argument("body is not goods");
     if (target.owner != who)

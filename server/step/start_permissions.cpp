@@ -63,6 +63,15 @@ void install_land(const Json &plan, perm::Plots &plots, perm::Groups &groups,
                       preset,
                       row.at("bounds").get<std::array<float, 4>>(),
                       {}};
+    const auto kind = row.at("kind").get<std::string>();
+    if (kind == "street")
+      plots.rows[id].kind = perm::PlotKind::Street;
+    else if (kind == "alley")
+      plots.rows[id].kind = perm::PlotKind::Alley;
+    else if (kind == "lot")
+      plots.rows[id].kind = perm::PlotKind::Lot;
+    else
+      throw std::invalid_argument("unknown plot kind");
   }
 }
 void install_money(const Json &plan, const Symbols &symbols, IdentityRead identity,
@@ -140,7 +149,10 @@ void install_grants(const Json &plan, const Symbols &symbols,
           found != symbols.objects.end())
         scope["account"] = to_string(found->second);
     const auto control =
-        step::scope(scope, values.identity, authority, limits, players, plots, groups);
+        issuer == 0 && scope.size() == 1 && scope.value("all_land", false)
+            ? perm::ScopeControl{perm::Scope::all_land(), 0,
+                                 perm::all_rights | (perm::Rights{31} << 8)}
+            : step::scope(scope, values.identity, authority, limits, players, plots, groups);
     const auto duration = detail::steps(row.value("expires_s", 0.), hz);
     const perm::GrantRequest request{issuer,
                                      recipient.holder,

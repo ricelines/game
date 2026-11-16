@@ -38,6 +38,10 @@ SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Han
     case ScopeKind::Object:
     case ScopeKind::Avatar:
       return selected.objects.contains(Handle{scope.subject});
+    case ScopeKind::Owned:
+      return selected.players.contains(scope.owner);
+    case ScopeKind::AllLand:
+      return true;
     case ScopeKind::OwnedOnPlot:
       return selected.players.contains(scope.owner) && selected.plots.contains(scope.subject);
     case ScopeKind::Plot:
@@ -127,6 +131,7 @@ template <class S> void serialize(S &s, Plot &v) {
   s.value4b(v.owner);
   s.value4b(v.group);
   s.value4b(v.preset);
+  s.value1b(v.kind);
   s.container4b(v.bounds);
   snap::field(s, v.banned);
 }

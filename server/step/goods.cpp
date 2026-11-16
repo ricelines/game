@@ -48,7 +48,7 @@ step::NativeCompletion hold_goods(amber::perm::State &perm_state, amber::ObjectS
   }
   std::vector<perm::Target> parts;
   for (auto child : descendants)
-    parts.push_back(perm::target(identity, authority, limits, child));
+    parts.push_back(perm::target(identity, authority, limits, perm_state.plots, child));
   const auto delivered = delivery.present_bodies.find(recipient);
   const bool present =
       delivered != delivery.present_bodies.end() && identity.valid(delivered->second);
@@ -69,9 +69,9 @@ step::NativeCompletion hold_goods(amber::perm::State &perm_state, amber::ObjectS
     if (ready.status != space::Status::Ok)
       return deny(space::status_text(ready.status));
   }
-  const auto stored_goods =
-      perm::store_goods(perm_state, holder, perm::target(identity, authority, limits, h), parts,
-                        recipient, custodian, present, mailbox_max, call.step);
+  const auto stored_goods = perm::store_goods(
+      perm_state, holder, perm::target(identity, authority, limits, perm_state.plots, h), parts,
+      recipient, custodian, present, mailbox_max, call.step);
   if (!stored_goods)
     return deny(perm::reason_text(stored_goods.reason));
   step::NativeCompletion out;

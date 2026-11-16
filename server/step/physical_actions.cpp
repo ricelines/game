@@ -331,9 +331,9 @@ step::NativeCompletion attach_action(amber::ObjectState &objects_state,
 
   const auto subject = call.request.target;
   const auto parent = input_handle(call.arguments.at("parent"), identity);
-  const auto permit =
-      perm::check(actor(call), Verb::Use, perm::target(identity, authority, limits, parent),
-                  players, grants, call.step);
+  const auto permit = perm::check(
+      actor(call), Verb::Use, perm::target(identity, authority, limits, perm_state.plots, parent),
+      players, grants, call.step);
   if (!permit)
     return native_denied("use", parent, permit.reason, authority.owner[parent.slot()]);
   const auto body = actor_body(call);
@@ -384,7 +384,8 @@ step::NativeCompletion release_action(amber::ObjectState &objects_state,
     const auto permit =
         (identity.flags[target.slot()] & Body)
             ? perm::check_scope(holder, perm::Scope::avatar(target), 1, grants, call.step)
-            : perm::check(holder, Verb::Move, perm::target(identity, authority, limits, target),
+            : perm::check(holder, Verb::Move,
+                          perm::target(identity, authority, limits, perm_state.plots, target),
                           players, grants, call.step);
     if (!permit)
       return native_denied("move", target, permit.reason, authority.owner[target.slot()]);
@@ -437,8 +438,9 @@ step::NativeCompletion transfer_action(amber::react::State &react_state,
   const auto source = call.request.target;
   const auto destination = input_handle(call.arguments.at("to"), identity);
   const auto permit =
-      perm::check(actor(call), Verb::Use, perm::target(identity, authority, limits, destination),
-                  players, grants, call.step);
+      perm::check(actor(call), Verb::Use,
+                  perm::target(identity, authority, limits, perm_state.plots, destination), players,
+                  grants, call.step);
   if (!permit)
     return native_denied("use", destination, permit.reason, authority.owner[destination.slot()]);
   const auto term = terms.by_name.at(call.arguments.at("term").get<std::string>());

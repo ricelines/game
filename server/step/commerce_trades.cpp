@@ -41,7 +41,8 @@ step::NativeCompletion trade_change(amber::perm::State &perm_state,
   bool in_world = false;
   if (call.arguments.contains("goods") && !call.arguments.at("goods").is_null()) {
     const auto h = step::live_handle(call.arguments.at("goods"), identity);
-    item = commerce_detail::goods(identity, parts, declared_parts, authority, limits, h);
+    item = commerce_detail::goods(identity, parts, declared_parts, authority, limits,
+                                  perm_state.plots, h);
     in_world = space::body_motion(space, identity, h).has_value() ||
                (space::is_logical_root(space, identity, h) && !(item->root.flags & Held));
     if (h != old_goods)
@@ -104,7 +105,7 @@ step::NativeCompletion trade_confirm(amber::perm::State &perm_state,
     const auto offer_id = trade.sides[side].offer;
     if (offer_id && offers.rows.at(offer_id).goods) {
       const auto item = commerce_detail::goods(identity, parts, declared_parts, authority, limits,
-                                               offers.rows[offer_id].goods);
+                                               perm_state.plots, offers.rows[offer_id].goods);
       targets[side] = item.root;
       part_targets[side] = item.parts;
       affected.insert(affected.end(), item.closure.begin(), item.closure.end());

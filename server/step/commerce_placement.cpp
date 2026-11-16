@@ -41,7 +41,7 @@ place_existing(amber::ObjectState &objects_state, amber::space::State &space_sta
 
   const auto holder = commerce_detail::actor(call);
   const auto item = commerce_detail::goods(identity, parts, declared_parts, authority, limits,
-                                           call.request.target);
+                                           perm_state.plots, call.request.target);
   const auto who = item.root.owner;
   if (who >= players.rows.size())
     return commerce_detail::denied(perm::Reason::UnknownHolder, "account",

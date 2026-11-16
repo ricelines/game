@@ -56,7 +56,8 @@ void native_reconfiguration_retains_identity_and_real_geometry() {
           "reconfiguration updates actual native shape instead of metadata alone");
   const auto holder = perm::Holder::script(x.script, x.f.a);
   require(!perm::check(holder, perm::Verb::Destroy,
-                       perm::target(identity(x.f.objects), authority(x.f.objects), x.limits, root),
+                       perm::target(identity(x.f.objects), authority(x.f.objects), x.limits,
+                                    x.perm_state.plots, root),
                        x.players, x.grants, 0),
           "Edit authority never implies Destroy");
   x.grant(root, perm::bit(perm::Verb::Destroy));

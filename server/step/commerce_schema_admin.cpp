@@ -35,10 +35,15 @@ void holder(const Json &value) {
     throw std::invalid_argument("script holder needs a full object handle");
 }
 void scope(const Json &scope) {
-  fields(scope, {}, {"object", "owned_on_plot", "account", "avatar", "plot"});
+  fields(scope, {}, {"object", "owned_on_plot", "owned", "all_land", "account", "avatar", "plot"});
   if (scope.size() != 1)
     throw std::invalid_argument("choose one scope");
-  if (scope.contains("owned_on_plot")) {
+  if (scope.contains("owned")) {
+    step::identifier(scope.at("owned"), "p:");
+  } else if (scope.contains("all_land")) {
+    if (scope.at("all_land") != true)
+      throw std::invalid_argument("all_land must be true");
+  } else if (scope.contains("owned_on_plot")) {
     fields(scope.at("owned_on_plot"), {"owner", "plot"});
     step::identifier(scope.at("owned_on_plot").at("owner"), "p:");
     if (!scope.at("owned_on_plot").at("plot").is_number_unsigned() &&

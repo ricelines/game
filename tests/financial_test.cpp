@@ -288,9 +288,11 @@ void object_and_group_payments_use_their_actual_accounts() {
   require(perm::balance(f.ledger, object) == 31 && perm::balance(f.ledger, group) == 79 &&
               perm::balance(f.ledger, perm::Account::player(2)) == 100,
           "actual Lua payment aliased a typed account to the owner's wallet");
-  perm::transfer_owner(
-      authority(f.f.objects), f.limits, permission_flags(f.f.objects), f.grants, f.players,
-      perm::target(identity(f.f.objects), authority(f.f.objects), f.limits, f.f.a), 3);
+  perm::transfer_owner(authority(f.f.objects), f.limits, permission_flags(f.f.objects), f.grants,
+                       f.players,
+                       perm::target(identity(f.f.objects), authority(f.f.objects), f.limits,
+                                    f.perm_state.plots, f.f.a),
+                       3);
   f.balances({{"expected", Value(31.)}, {"explicit", Value(100.)}});
   f.pay(args(name, "group:1", 1, false));
   require(!f.grants.rows[object_grant].live, "sale left an old account Spend grant installed");

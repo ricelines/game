@@ -193,6 +193,11 @@ std::vector<GrantId> remove_marked(Grants &grants, Players &players, std::vector
 
 bool covered(const Grant &parent, const ScopeControl &control) {
   return parent.scope == control.scope ||
+         (parent.scope.kind == ScopeKind::Owned && parent.scope.owner == control.controller &&
+          (control.scope.kind == ScopeKind::Object ||
+           control.scope.kind == ScopeKind::OwnedOnPlot)) ||
+         (parent.scope.kind == ScopeKind::AllLand && control.on_lot &&
+          (control.scope.kind == ScopeKind::Object || control.scope.kind == ScopeKind::Plot)) ||
          (parent.scope.kind == ScopeKind::OwnedOnPlot && control.scope.kind == ScopeKind::Object &&
           parent.scope.owner == control.controller && parent.scope.subject == control.plot);
 }
@@ -221,7 +226,8 @@ std::string account_name(Account account) {
   throw std::invalid_argument("unknown account kind");
 }
 
-Target target(IdentityRead identity, AuthorityRead authority, const OwnerLimits &limits, Handle h) {
+Target target(IdentityRead identity, AuthorityRead authority, const OwnerLimits &limits,
+              const Plots &plots, Handle h) {
   assert(identity.valid(h));
   const auto slot = h.slot();
   const auto *limit = limits.get(slot);
@@ -231,7 +237,9 @@ Target target(IdentityRead identity, AuthorityRead authority, const OwnerLimits 
           authority.preset[slot],
           authority.plot[slot],
           identity.flags[slot],
-          limit ? *limit : inherited_rights};
+          limit ? *limit : inherited_rights,
+          authority.plot[slot] && authority.plot[slot] < plots.rows.size() &&
+              plots.rows[authority.plot[slot]].kind == PlotKind::Lot};
 }
 
 Decision check(Holder actor, Verb verb, const Target &target, const Players &players,
@@ -258,11 +266,22 @@ Decision check(Holder actor, Verb verb, const Target &target, const Players &pla
   const auto direct = usable(find(grants, actor, Scope::object(target.object)), required, now);
   if (direct)
     return direct;
+  const auto owned = usable(find(grants, actor, Scope::owned(target.owner)), required, now);
+  if (owned)
+    return owned;
   const auto plot =
       usable(find(grants, actor, Scope::owned_on_plot(target.owner, target.plot)), required, now);
   if (plot)
     return plot;
-  return direct.reason == Reason::Expired ? direct : plot;
+  const auto land =
+      target.on_lot ? usable(find(grants, actor, Scope::all_land()), required, now) : Decision{};
+  if (land)
+    return land;
+  if (direct.reason == Reason::Expired)
+    return direct;
+  if (owned.reason == Reason::Expired)
+    return owned;
+  return plot.reason == Reason::Expired ? plot : land;
 }
 
 Decision check_scope(Holder actor, Scope scope, Rights required, const Grants &grants, Step now) {
@@ -280,14 +299,20 @@ Decision check_land(Holder actor, LandVerb verb, const Plot &plot, const Players
       return {Reason::Allowed};
   }
   const auto required = Rights{1} << static_cast<unsigned>(verb);
-  if (plot.preset & required)
+  const bool preset_verb = verb <= LandVerb::RunScripts;
+  if (preset_verb && (plot.preset & required))
     return {Reason::Allowed};
-  if (actor.kind == HolderKind::Player && plot.group && (plot.preset & (required << 8))) {
+  if (preset_verb && actor.kind == HolderKind::Player && plot.group &&
+      (plot.preset & (required << 8))) {
     const auto &groups = players.rows[actor.id].groups;
     if (std::binary_search(groups.begin(), groups.end(), plot.group))
       return {Reason::Allowed};
   }
-  return check_scope(actor, Scope::plot(plot.id), required, grants, now);
+  const auto direct = check_scope(actor, Scope::plot(plot.id), required, grants, now);
+  if (direct || plot.kind != PlotKind::Lot)
+    return direct;
+  const auto land = check_scope(actor, Scope::all_land(), required << 8, grants, now);
+  return land || direct.reason != Reason::Expired ? land : direct;
 }
 
 Decision check_account(Holder actor, AccountTarget target, std::int64_t amount,
@@ -330,9 +355,11 @@ Reason validate_grant(const Grants &grants, const Players &players, const GrantR
   if (!request.verbs)
     return Reason::InvalidScope;
   const Rights scope_mask = request.scope.kind == ScopeKind::Avatar ? Rights{3}
-                            : request.scope.kind == ScopeKind::Plot ? Rights{7}
-                            : monetary(request.scope)               ? Rights{1}
-                                                                    : all_rights;
+                            : request.scope.kind == ScopeKind::Plot ? Rights{31}
+                            : request.scope.kind == ScopeKind::AllLand
+                                ? (all_rights | (Rights{31} << 8))
+                            : monetary(request.scope) ? Rights{1}
+                                                      : all_rights;
   if (request.verbs & ~scope_mask)
     return Reason::InvalidScope;
   if (grants.by_key.contains({request.holder, request.scope}))
@@ -374,7 +401,9 @@ GrantResult create_grant(Grants &grants, Players &players, Holder issuer,
       (issuer.kind == HolderKind::Script && !issuer.installed_on) ||
       (request.holder.kind == HolderKind::Player && request.holder.id >= players.rows.size()))
     return {Reason::UnknownHolder};
-  if (control.scope != request.scope || request.verbs == 0 ||
+  if (request.scope.kind == ScopeKind::AllLand ||
+      (request.scope.kind == ScopeKind::Owned && request.scope.owner != request.issuer) ||
+      control.scope != request.scope || request.verbs == 0 ||
       (request.scope.kind == ScopeKind::Account &&
        (((request.scope.subject == 0 || !control.controller) &&
          request.scope.account() != Account::player(0)) ||
@@ -394,8 +423,12 @@ GrantResult create_grant(Grants &grants, Players &players, Holder issuer,
   const bool controls = issuer.kind == HolderKind::Player && request.issuer == control.controller;
   if (!controls) {
     auto eligible = [&](const Grant *candidate) {
+      const auto required = candidate && candidate->scope.kind == ScopeKind::AllLand &&
+                                    request.scope.kind == ScopeKind::Plot
+                                ? request.verbs << 8
+                                : request.verbs;
       return candidate && candidate->live && !expired(*candidate, now) && !candidate->parent &&
-             covered(*candidate, control) && (request.verbs & candidate->verbs) == request.verbs &&
+             covered(*candidate, control) && (required & candidate->verbs) == required &&
              (issuer.kind == HolderKind::Script ||
               (request.holder.kind == HolderKind::Script && holder.controller == request.issuer)) &&
              (!monetary(request.scope) || request.cap <= candidate->cap) &&
@@ -405,6 +438,11 @@ GrantResult create_grant(Grants &grants, Players &players, Holder issuer,
     const Grant *parent = find(grants, issuer, request.scope);
     if (!eligible(parent) && request.scope.kind == ScopeKind::Object)
       parent = find(grants, issuer, Scope::owned_on_plot(control.controller, control.plot));
+    if (!eligible(parent) &&
+        (request.scope.kind == ScopeKind::Object || request.scope.kind == ScopeKind::OwnedOnPlot))
+      parent = find(grants, issuer, Scope::owned(control.controller));
+    if (!eligible(parent))
+      parent = find(grants, issuer, Scope::all_land());
     if (!eligible(parent))
       return {Reason::InvalidDelegation};
     parent_id = parent->id;

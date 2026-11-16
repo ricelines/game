@@ -30,7 +30,7 @@ step::NativeCompletion give(amber::perm::State &perm_state, amber::ObjectState &
   auto &declared_parts = objects_state.declared_parts;
 
   const auto item = commerce_detail::goods(identity, parts, declared_parts, authority, limits,
-                                           call.request.target);
+                                           perm_state.plots, call.request.target);
   const auto recipient = commerce_detail::player_id(call.arguments.at("recipient"), players);
   const auto body = commerce_detail::present(delivery, identity, recipient);
   commerce_detail::check_custody(space, identity, parents, parts, {item.root.object, body, false});
@@ -63,7 +63,7 @@ step::NativeCompletion offer(amber::perm::State &perm_state, amber::ObjectState 
   auto &declared_parts = objects_state.declared_parts;
 
   const auto item = commerce_detail::goods(identity, parts, declared_parts, authority, limits,
-                                           call.request.target);
+                                           perm_state.plots, call.request.target);
   const auto buyer = call.arguments.contains("buyer")
                          ? commerce_detail::player_id(call.arguments.at("buyer"), players)
                          : 0;
@@ -129,8 +129,8 @@ step::NativeCompletion accept(amber::perm::State &perm_state, amber::ObjectState
 
   const auto id = step::identifier(call.arguments.at("offer"), "offer:");
   const auto &row = commerce_detail::offer_row(offers, id);
-  const auto item =
-      commerce_detail::goods(identity, parts, declared_parts, authority, limits, row.goods);
+  const auto item = commerce_detail::goods(identity, parts, declared_parts, authority, limits,
+                                           perm_state.plots, row.goods);
   const auto beneficiary =
       call.arguments.contains("beneficiary")
           ? commerce_detail::player_id(call.arguments.at("beneficiary"), players)
@@ -185,8 +185,8 @@ step::NativeCompletion cancel_offer(amber::perm::State &perm_state,
 
   const auto id = step::identifier(call.arguments.at("offer"), "offer:");
   const auto &row = commerce_detail::offer_row(offers, id);
-  const auto item =
-      commerce_detail::goods(identity, parts, declared_parts, authority, limits, row.goods);
+  const auto item = commerce_detail::goods(identity, parts, declared_parts, authority, limits,
+                                           perm_state.plots, row.goods);
   const auto cancelled = perm::cancel_offer(perm_state, flags, commerce_detail::actor(call),
                                             item.root, id, call.step, item.parts);
   if (!cancelled)

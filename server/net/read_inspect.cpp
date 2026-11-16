@@ -57,6 +57,10 @@ Json scope_record(perm::Scope scope) {
   switch (scope.kind) {
   case perm::ScopeKind::Object:
     return {{"object", to_string(Handle{scope.subject})}};
+  case perm::ScopeKind::Owned:
+    return {{"owned", "p:" + std::to_string(scope.owner)}};
+  case perm::ScopeKind::AllLand:
+    return {{"all_land", true}};
   case perm::ScopeKind::OwnedOnPlot:
     return {{"owner", "p:" + std::to_string(scope.owner)}, {"plot", scope.subject}};
   case perm::ScopeKind::Account:
@@ -185,7 +189,7 @@ Json object_record(const amber::catalog::State &catalog_state,
     if (!incoming.empty() || !outgoing.empty())
       result["relations"][values.terms.rows.at(term).name] = {{"in", incoming}, {"out", outgoing}};
   }
-  const auto target = perm::target(identity, authority, limits, object);
+  const auto target = perm::target(identity, authority, limits, perm_state.plots, object);
   result["rights"] = Json::object();
   constexpr const char *names[]{"use", "take", "move", "edit", "copy", "transfer", "destroy"};
   for (unsigned index = 0; index < 7; ++index) {

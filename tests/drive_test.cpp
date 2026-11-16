@@ -255,7 +255,7 @@ void action_plans_keep_authority_separate() {
   perm::Players players;
   players.rows.resize(2);
   f.objects.owner[f.a.slot()] = 1;
-  const auto selected = perm::target(identity(f.objects), authority(f.objects), {}, f.a);
+  const auto selected = perm::target(identity(f.objects), authority(f.objects), {}, {}, f.a);
   require(!perm::check(perm::Holder::script(body, f.b), perm::Verb::Transfer, selected, players, {},
                        1) &&
               perm::check(perm::Holder::player(1), perm::Verb::Transfer, selected, players, {}, 1),

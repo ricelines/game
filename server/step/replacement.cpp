@@ -9,16 +9,16 @@ namespace amber::step {
 namespace {
 using namespace structural_detail;
 std::string edit_rights(IdentityRead identity, AuthorityRead authority,
-                        const perm::OwnerLimits &limits, const perm::Players &players,
-                        const perm::Grants &grants, const step::NativeCall &call,
-                        std::span<const Handle> selected) {
+                        const perm::OwnerLimits &limits, const perm::Plots &plots,
+                        const perm::Players &players, const perm::Grants &grants,
+                        const step::NativeCall &call, std::span<const Handle> selected) {
   const auto actor = permission_holder(call.request.caller);
   for (auto h : selected) {
     if (identity.flags[h.slot()] & Escrow)
       return "edit: object belongs to an active offer or trade";
     const auto decision =
-        perm::check(actor, perm::Verb::Edit, perm::target(identity, authority, limits, h), players,
-                    grants, call.step);
+        perm::check(actor, perm::Verb::Edit, perm::target(identity, authority, limits, plots, h),
+                    players, grants, call.step);
     if (!decision)
       return "edit: " + std::string(perm::reason_text(decision.reason));
   }
@@ -263,7 +263,8 @@ NativeCompletion replace_instance(amber::ObjectState &objects_state,
   using namespace structural_detail;
   const auto identity = values.identity;
   const auto selected = lifecycle::collect(parts, identity, call.request.target);
-  const auto error = edit_rights(identity, authority, limits, players, grants, call, selected);
+  const auto error =
+      edit_rights(identity, authority, limits, perm_state.plots, players, grants, call, selected);
   if (!error.empty())
     return structural_denied(
         "edit", to_string(call.request.target), error,

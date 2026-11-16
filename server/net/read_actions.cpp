@@ -88,10 +88,10 @@ bool available(const amber::catalog::State &catalog_state, const amber::react::S
     return false;
   if (resolved.right.empty())
     return true;
-  return perm::check_right(
-             resolved.right, request.caller,
-             perm::target(values.identity, authority, limits, resolved.permission_target), players,
-             grants, now)
+  return perm::check_right(resolved.right, request.caller,
+                           perm::target(values.identity, authority, limits, perm_state.plots,
+                                        resolved.permission_target),
+                           players, grants, now)
       .allowed;
 }
 } // namespace

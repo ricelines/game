@@ -1240,7 +1240,7 @@ struct AccountTarget {
   PlayerId controller = 0;
   static AccountTarget player(PlayerId id) { return {Account::player(id), id}; }
 };
-enum class ScopeKind : std::uint8_t { Object, OwnedOnPlot, Account, Avatar, Plot };
+enum class ScopeKind : std::uint8_t { Object, OwnedOnPlot, Account, Avatar, Plot, Owned, AllLand };
 struct Scope {
   ScopeKind kind = ScopeKind::Object;
   std::uint64_t subject = 0;
@@ -1256,6 +1256,8 @@ struct Scope {
   Account account() const { return {account_kind, subject}; }
   static Scope avatar(Handle body) { return {ScopeKind::Avatar, body.bits, 0}; }
   static Scope plot(PlotId id) { return {ScopeKind::Plot, id, 0}; }
+  static Scope owned(PlayerId owner) { return {ScopeKind::Owned, 0, owner}; }
+  static Scope all_land() { return {ScopeKind::AllLand, 0, 0}; }
   bool operator==(const Scope &) const = default;
 };
 struct GrantKey {
@@ -1311,6 +1313,7 @@ struct Target {
   PlotId plot = 0;
   std::uint32_t flags = 0;
   Rights owner_limit = inherited_rights;
+  bool on_lot = false;
 };
 enum class Reason {
   Allowed,
@@ -1339,7 +1342,8 @@ enum class Reason {
   NotParticipant,
   NotPresent
 };
-enum class LandVerb : std::uint8_t { Build, Enter, RunScripts };
+enum class LandVerb : std::uint8_t { Build, Enter, RunScripts, Transfer, Return };
+enum class PlotKind : std::uint8_t { Street, Alley, Lot };
 struct Plot {
   PlotId id = 0;
   PlayerId owner = 0;
@@ -1347,6 +1351,7 @@ struct Plot {
   Rights preset = 0;
   std::array<float, 4> bounds{}; // min x, min y, max x, max y
   std::vector<PlayerId> banned;  // sorted
+  PlotKind kind = PlotKind::Lot;
 };
 struct Plots {
   std::vector<Plot> rows{Plot{}};
@@ -1369,6 +1374,7 @@ struct ScopeControl {
   PlayerId controller = 0;
   Rights available = 0;
   PlotId plot = 0;
+  bool on_lot = false;
 };
 struct HolderControl {
   Holder holder;

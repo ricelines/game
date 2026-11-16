@@ -90,10 +90,12 @@ int main() {
     require(settings.changed && settings.reply.at("preset").at("group") == "group:1" &&
                 f.objects.group[f.a.slot()] == 1 && (f.objects.flags[f.a.slot()] & NoCopy) &&
                 perm::check(perm::Holder::player(2), perm::Verb::Edit,
-                            perm::target(identity(f.objects), authority(f.objects), limits, f.a),
+                            perm::target(identity(f.objects), authority(f.objects), limits,
+                                         perm_state.plots, f.a),
                             players, grants, 10) &&
                 !perm::check(perm::Holder::player(2), perm::Verb::Copy,
-                             perm::target(identity(f.objects), authority(f.objects), limits, f.a),
+                             perm::target(identity(f.objects), authority(f.objects), limits,
+                                          perm_state.plots, f.a),
                              players, grants, 10),
             "actual group preset/no-copy checks disagree with administration result");
     const auto not_owner = run(2, ids.preset, f.a, {{"everyone", {"destroy"}}}).reply;

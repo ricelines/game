@@ -101,7 +101,8 @@ int main() {
               "one holder/scope must have one grant with the explicitly combined rights");
       const auto holder = perm::Holder::script(body_controls, f.b);
       require(bool(perm::check(holder, perm::Verb::Take,
-                               perm::target(identity(f.objects), authority(f.objects), limits, f.b),
+                               perm::target(identity(f.objects), authority(f.objects), limits,
+                                            perm_state.plots, f.b),
                                players, grants, 10)) &&
                   bool(perm::check_scope(holder, perm::Scope::avatar(f.b), 3, grants, 10)),
               "explicit body consent did not authorize the requested ordinary rights");
@@ -116,7 +117,8 @@ int main() {
               "conflicting limits on one grant scope were silently changed");
       perm::revoke(grants, players, object_grant);
       require(!perm::check(holder, perm::Verb::Take,
-                           perm::target(identity(f.objects), authority(f.objects), limits, f.b),
+                           perm::target(identity(f.objects), authority(f.objects), limits,
+                                        perm_state.plots, f.b),
                            players, grants, 10) &&
                   !perm::check_scope(holder, perm::Scope::avatar(f.b), 3, grants, 410),
               "body authority survived revocation or finite expiry");
