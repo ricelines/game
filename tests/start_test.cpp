@@ -115,6 +115,14 @@ int main(int argc, char **argv) {
     install_land(plan, perm_state, land_space, settings.land);
     perm::update_plots(identity(objects), transforms(objects), plot_membership(objects), plots,
                        created, true);
+    require(plan.at("land").at("lots") == Json::array({{{"owner", 2}, {"at", {8, 50}}},
+                                                       {{"owner", 2}, {"at", {24, 50}}},
+                                                       {{"owner", 3}, {"at", {40, 50}}},
+                                                       {{"owner", 4}, {"at", {56, 50}}},
+                                                       {{"owner", 5}, {"at", {-16, 50}}},
+                                                       {{"owner", 6}, {"at", {-32, 50}}},
+                                                       {{"owner", 7}, {"at", {-48, 50}}}}),
+            "seeded residents own the specified lots, including both cafe lots");
     for (const auto &lot : plan.at("land").value("lots", Json::array())) {
       const auto at = lot.at("at").get<std::array<float, 2>>();
       const auto found = std::ranges::find_if(plots.rows, [&](const auto &plot) {

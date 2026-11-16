@@ -80,14 +80,15 @@ def test_root_owned_and_starting_body_grants_have_real_scopes(authored):
                 "lots": (
                     [
                         {"owner": owner, "at": at}
-                        for owner, at in {
-                            2: [8, 50],
-                            3: [24, 50],
-                            4: [40, 50],
-                            5: [56, 50],
-                            6: [-16, 50],
-                            7: [-32, 50],
-                        }.items()
+                        for owner, at in [
+                            (2, [8, 50]),
+                            (2, [24, 50]),
+                            (3, [40, 50]),
+                            (4, [56, 50]),
+                            (5, [-16, 50]),
+                            (6, [-32, 50]),
+                            (7, [-48, 50]),
+                        ]
                     ]
                     if mode == "seeded"
                     else []
@@ -119,15 +120,16 @@ def test_root_owned_and_starting_body_grants_have_real_scopes(authored):
                     and r["holder"]["on"] == profile["body"]
                     and r["rights"] == ["build"]
                 ]
-                assert len(build) == (2 if mode == "seeded" else 0)
-                if build:
-                    own_plot = next(
-                        row["at"] for row in plan["land"]["lots"] if row["owner"] == profile["id"]
-                    )
-                    assert all(
-                        row["issuer"] == profile["id"] and row["scope"] == {"plot_at": own_plot}
+                own_plots = [
+                    row["at"] for row in plan["land"]["lots"] if row["owner"] == profile["id"]
+                ]
+                assert len(build) == 2 * len(own_plots)
+                for at in own_plots:
+                    assert {
+                        row["holder"]["script"]
                         for row in build
-                    )
+                        if row["issuer"] == profile["id"] and row["scope"] == {"plot_at": at}
+                    } == {"body", "stakes" if stakes else "stakes_free"}
                 owned = [
                     r
                     for r in plan["grants"]
