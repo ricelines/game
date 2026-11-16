@@ -482,7 +482,7 @@ async def run(options):
                 {"model": model, "source": revision},
                 while_pending=concurrent_reconfigure,
             )
-            require(proposed.get("effect") == "revision_staged", "actual proposal staging failed")
+            require(proposed.get("effect") == "proposal_ready", "actual proposal staging failed")
             require(
                 proposed["progress"] == {"completed": 2, "total": 2},
                 "definition edit did not bake exactly the two distinct current parameter sets",
