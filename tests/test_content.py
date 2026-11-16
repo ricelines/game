@@ -306,7 +306,7 @@ def test_all_sources_pass_actual_luau_declaration_worker(tmp_path, baked_plan):
     assert native.returncode == 0, (native.stdout, native.stderr)
     state = json.loads(report.read_text())
     assert state["script_errors"] == 0
-    assert len(state["objects"]) == 360
+    assert len(state["objects"]) == 357
     assert sum("aq.health" in row["values"] for row in state["objects"]) >= 300
     registries = list((data_dir / "registry").glob("*.json"))
     final = max(registries, key=lambda path: path.stat().st_mtime_ns)

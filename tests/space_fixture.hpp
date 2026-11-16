@@ -51,7 +51,8 @@ inline sp::Settings settings() {
       i(p["MAX_CHARACTERS"]),
       f(n["CROWD_QUERY_RADIUS_MULTIPLIER"]),
       f(n["CROWD_OPTIMIZE_RADIUS_MULTIPLIER"]),
-      f(n["CROWD_SEPARATION_WEIGHT"])};
+      f(n["CROWD_SEPARATION_WEIGHT"]),
+      f(config["land"]["TERRAIN_TILE_M"])};
 }
 class Output final : public JPH::StreamOut {
 public:

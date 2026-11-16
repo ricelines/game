@@ -308,6 +308,8 @@ void coherent_catalog_publication() {
                 rows(id, "terms")[0]["id"] == added && rows(id, "materials").size() == 1 &&
                 rows(id, "materials")[0]["color"][0] == .75,
             "direct definition publication duplicated or retained old rows");
+    require(rows(id, "world")["ambient_lux"] == 120,
+            "catalog deltas carry the configured outdoor light");
     const auto &objects = rows(id, "objects");
     require(objects.size() == 1 && objects[0]["h"] == to_string(object) &&
                 objects[0]["owner"] == "p:10" && objects[0]["parent"] == to_string(parent) &&

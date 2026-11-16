@@ -9,7 +9,7 @@ namespace {
 std::set<std::pair<int, int>> surveyed(const perm::Plots &plots, const LandSettings &s) {
   std::set<std::pair<int, int>> result;
   for (const auto &plot : plots.rows)
-    if (plot.id && plot.kind == perm::PlotKind::Lot) {
+    if (plot.id && plot.kind != perm::PlotKind::Street) {
       const auto x = (plot.bounds[0] + plot.bounds[2]) / 2;
       const auto y = (plot.bounds[1] + plot.bounds[3]) / 2;
       const auto depth = int(std::floor((std::abs(y) - s.street_width_m / 2) / s.block_m)) + 1;

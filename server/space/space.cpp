@@ -518,9 +518,11 @@ void add_terrain(State &state, std::int32_t i, std::int32_t j) {
     n.terrain_geometry->bounds = {{0, 0, 0}, {size, size, 0}};
   }
   JPH::BodyCreationSettings body(new JPH::BoxShape({size / 2, size / 2, .5f}),
-      jv({(i + .5f) * size, (j + .5f) * size, -.5f}), JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0);
+                                 jv({(i + .5f) * size, (j + .5f) * size, -.5f}),
+                                 JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0);
   body.mUserData = 0;
-  const auto id = n.physics.GetBodyInterface().CreateAndAddBody(body, JPH::EActivation::DontActivate);
+  const auto id =
+      n.physics.GetBodyInterface().CreateAndAddBody(body, JPH::EActivation::DontActivate);
   if (id.IsInvalid())
     throw std::runtime_error("terrain body capacity exhausted");
   state.terrain.emplace(i, j);

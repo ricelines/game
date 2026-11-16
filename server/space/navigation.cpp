@@ -313,7 +313,8 @@ NavigationInstall install_ready_navigation(Space &space) {
         if (lock.Succeeded() && lock.GetBody().GetUserData() == 0 && n.terrain_geometry) {
           const auto center = av(lock.GetBody().GetPosition());
           const auto size = n.settings.terrain_tile_m;
-          NavInstance tile{n.terrain_geometry, {{center.x - size / 2, center.y - size / 2, 0}, {}}, true};
+          NavInstance tile{
+              n.terrain_geometry, {{center.x - size / 2, center.y - size / 2, 0}, {}}, true};
           if (overlaps(instance_bounds(tile), region))
             job.instances.push_back(std::move(tile));
         }
