@@ -32,6 +32,34 @@ struct Fixture {
   }
 };
 
+void changing_plot_owner_clears_only_old_owner_authority() {
+  Fixture f;
+  auto &state = f.perm_state;
+  state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
+  const auto parent = f.grant(1, Holder::script(1, Handle::make(1, 1)), Scope::plot(1), 1, 7);
+  const auto child = create_grant(f.grants, f.players, f.grants.rows[parent].holder,
+      {1, Holder::player(2), Scope::plot(1), 1, 0, 0, 500},
+      {Scope::plot(1), 1, 7}, {Holder::player(2), 2, false}, 2);
+  require(bool(child), "plot delegation failed");
+  const auto owned = f.grant(1, Holder::player(3), Scope::owned_on_plot(1, 1), 1, bit(Verb::Move));
+  const auto unrelated = f.grant(1, Holder::player(4), Scope::owned(1), 1, bit(Verb::Move));
+  const auto root = create_root_grant(f.grants, f.players,
+      {0, Holder::player(5), Scope::plot(1), 1, 0, 0, 1000},
+      {Holder::player(5), 5, false}, 1);
+  require(bool(root), "root grant failed");
+  state.offers.rows.push_back({});
+  auto &offer = state.offers.rows.back();
+  offer.id = 1; offer.live = true; offer.plot = 1; offer.expires_step = 900;
+  state.offers.expiring.emplace(900, 1);
+  const auto removed = change_plot_owner(state, 1, 2);
+  require(removed == std::vector<GrantId>{parent, child.grant, owned} &&
+      state.plots.rows[1].owner == 2 && f.grants.rows[root.grant].live &&
+      f.grants.rows[unrelated].live && !state.offers.rows[1].live && state.offers.expiring.empty(),
+      "plot sale did not clear precisely old-owner grants, children and offers");
+  require(change_plot_owner(state, 1, 0).empty() && f.grants.rows[root.grant].live,
+      "abandon removed root authority");
+}
+
 void moved_goods_leave_plot_scoped_authority() {
   Fixture f;
   Objects objects;
@@ -1158,6 +1186,7 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
 
 int main() {
   try {
+    changing_plot_owner_clears_only_old_owner_authority();
     moved_goods_leave_plot_scoped_authority();
     plot_records_show_live_land_control();
     object_checks_do_not_inherit_owner_or_groups_for_scripts();

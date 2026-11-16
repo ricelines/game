@@ -754,6 +754,23 @@ std::vector<GrantId> transfer_goods(AuthorityWrite authority, OwnerLimits &limit
 }
 } // namespace
 
+std::vector<GrantId> change_plot_owner(State &state, PlotId id, PlayerId owner) {
+  auto &plot = state.plots.rows.at(id);
+  std::vector<bool> marked(state.grants.rows.size());
+  if (plot.owner)
+    for (const auto &grant : state.grants.rows)
+      if (grant.live && grant.issuer == plot.owner &&
+          (grant.scope == Scope::plot(id) ||
+           grant.scope == Scope::owned_on_plot(plot.owner, id)))
+        marked[grant.id] = true;
+  auto removed = remove_marked(state.grants, state.players, marked);
+  for (auto &row : state.offers.rows)
+    if (row.live && row.plot == id)
+      close_offer(state.offers, row);
+  plot.owner = owner;
+  return removed;
+}
+
 OfferResult offer(amber::perm::State &perm_state, PermissionFlags flags, Holder seller,
                   const Target &goods, std::int64_t price, PlayerId buyer, Step expiry, bool placed,
                   Step now, std::span<const Target> parts) {

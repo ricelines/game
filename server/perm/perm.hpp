@@ -216,6 +216,7 @@ struct Offer {
   std::uint32_t trade = 0;
   bool live = false;
   std::vector<Handle> parts;
+  PlotId plot = 0;
 };
 struct Offers {
   std::vector<Offer> rows{Offer{}};
@@ -321,6 +322,8 @@ TransferResult pay(Ledger &, Grants &, Holder, AccountTarget payer, Account reci
 
 Reason can_refund_object_accounts(const Ledger &, AuthorityRead, std::span<const Handle>);
 std::vector<AccountRefund> refund_object_accounts(Ledger &, AuthorityRead, std::span<const Handle>);
+
+std::vector<GrantId> change_plot_owner(State &, PlotId, PlayerId owner);
 
 // Changes only authority/permission-owned columns; custody is mirrored separately.
 std::vector<GrantId> transfer_owner(AuthorityWrite, OwnerLimits &, PermissionFlags, Grants &,
