@@ -386,6 +386,7 @@ struct SessionView {
   std::vector<Handle> last_observation;
 };
 struct SessionViews {
+  std::unordered_map<std::uint64_t, std::vector<SessionId>> shown_in;
   std::unordered_map<SessionId, SessionView> rows;
 };
 struct RecordFeed {

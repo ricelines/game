@@ -4,6 +4,29 @@
 
 namespace amber::net {
 namespace {
+std::vector<Handle> shown(const PendingView &view) {
+  std::vector<Handle> result;
+  auto add = [&](Handle h) {
+    if (h && std::find(result.begin(), result.end(), h) == result.end())
+      result.push_back(h);
+  };
+  add(view.self.body);
+  add(view.self.holding);
+  for (const auto &[zone, name] : view.self.zones)
+    add(zone);
+  for (const auto *rows : {&view.things, &view.far})
+    for (const auto &thing : *rows)
+      add(thing.seen.object);
+  return result;
+}
+void unshow(SessionViews &views, SessionId session, const PendingView &view) {
+  for (auto object : shown(view)) {
+    const auto found = views.shown_in.find(object.bits);
+    std::erase(found->second, session);
+    if (found->second.empty())
+      views.shown_in.erase(found);
+  }
+}
 void referenced_settings(const Json &value, const react::Terms &terms,
                          std::unordered_set<TermId> &selected) {
   if (value.is_string()) {
@@ -106,20 +129,17 @@ void view_changed(SessionViews &views, net::SessionId session, Vec3 eye) {
   views.rows[session].eye = eye;
 }
 void invalidate(SessionViews &views, std::span<const Handle> changed) {
-  for (auto &[session, row] : views.rows) {
-    (void)session;
-    if (!row.pending.ready)
-      continue;
-    for (const auto object : changed)
-      if (row.body == object || row.acquired.contains(object.bits)) {
-        row.pending.ready = false;
-        break;
-      }
-  }
+  for (auto object : changed)
+    if (const auto found = views.shown_in.find(object.bits); found != views.shown_in.end())
+      for (auto session : found->second)
+        views.rows.at(session).pending.ready = false;
 }
 void remove_session(SessionViews &views, observe::ActiveViews &active, observe::Hearing &hearing,
                     net::SessionId session) {
-  views.rows.erase(session);
+  if (const auto found = views.rows.find(session); found != views.rows.end()) {
+    unshow(views, session, found->second.pending);
+    views.rows.erase(found);
+  }
   observe::remove_view(active, session);
   observe::remove_listener(hearing, session);
 }
@@ -243,6 +263,9 @@ void refresh_view(const amber::catalog::State &catalog_state,
   prepare(scan.far, next.far);
   next.body_actions = object_actions(models, scripts, instances, native, values, principal.body);
   next.player_actions = player_actions(native, values);
+  unshow(sessions, session, row.pending);
+  for (auto object : shown(next))
+    sessions.shown_in[object.bits].push_back(session);
   row.pending = std::move(next);
   const auto tracked = active.rows.find(session);
   if (tracked == active.rows.end() || !(tracked->second.eye == observer.eye))
