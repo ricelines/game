@@ -291,9 +291,11 @@ net::Reply read_inspect(const amber::catalog::State &catalog_state,
         Json land = Json::array();
         for (const auto &plot : plots.rows)
           if (plot.id) {
-            auto row = record(plot);
-            if (row["dist_m"].get<float>() <= settings.perception.sight_m)
-              land.push_back(std::move(row));
+            const Vec3 delta{std::clamp(position.x, plot.bounds[0], plot.bounds[2]) - position.x,
+                             std::clamp(position.y, plot.bounds[1], plot.bounds[3]) - position.y,
+                             0};
+            if (delta.length() <= settings.perception.sight_m)
+              land.push_back(record(plot));
           }
         std::stable_sort(land.begin(), land.end(),
                          [](const Json &a, const Json &b) { return a["dist_m"] < b["dist_m"]; });
