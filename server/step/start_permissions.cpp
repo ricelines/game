@@ -134,11 +134,6 @@ void install_grants(const Json &plan, const Symbols &symbols,
   for (const auto &row : plan.at("grants")) {
     const auto recipient = holder(row.at("holder"));
     const auto issuer = row.at("issuer").get<PlayerId>();
-    const auto caller = row.contains("caller")
-                            ? holder(row.at("caller"))
-                            : perm::HolderControl{perm::Holder::player(issuer), issuer, true};
-    if (!caller.installed || caller.controller != issuer)
-      throw std::invalid_argument("initial grant caller must be current and controlled by issuer");
     auto scope = row.at("scope");
     for (const char *field : {"object", "avatar"})
       if (scope.contains(field))
@@ -163,10 +158,10 @@ void install_grants(const Json &plan, const Symbols &symbols,
                                      row.value("cap", std::int64_t{}),
                                      detail::steps(row.value("period_s", 0.), hz),
                                      duration ? now + duration : 0};
-    const auto created =
-        issuer == 0
-            ? perm::create_root_grant(grants, players, request, recipient, now)
-            : perm::create_grant(grants, players, caller.holder, request, control, recipient, now);
+    const auto created = issuer == 0
+                             ? perm::create_root_grant(grants, players, request, recipient, now)
+                             : perm::create_grant(grants, players, perm::Holder::player(issuer),
+                                                  request, control, recipient, now);
     if (!created)
       throw std::invalid_argument("initial grant denied by ordinary permissions: " +
                                   std::string(perm::reason_text(created.reason)));

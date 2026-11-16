@@ -176,8 +176,6 @@ def validate_symbols(plan: dict) -> None:
         if "all_land" in row["scope"] and row["issuer"] != 0:
             raise ValueError("Only root gives all-land grants")
         holder(row["holder"])
-        if "caller" in row:
-            holder(row["caller"])
         for field in ("object", "avatar"):
             endpoint = row["scope"].get(field)
             if endpoint and endpoint not in objects:

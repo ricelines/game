@@ -1,8 +1,6 @@
 local function settle(self)
     local seconds = self:setting('base.settlement_seconds')
     self:after(seconds,'base.settle')
-    local elapsed = math.max(0, self:now() - (self.state.last_time or self:now()))
-    self.state.last_time = self:now()
     local circuit = self:related('base.procures','out')[1]
     if circuit then
         for _, supplier in self:related('base.sells_to','in') do
