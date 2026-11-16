@@ -641,6 +641,101 @@ void rebind_trade_keeps_current_custody_at_full_capacity() {
               space::capacity(f.world).native_available == 0,
           "rebinding trade goods undid custody, retained confirmations or changed money/capacity");
 }
+void offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox() {
+  Fixture f;
+  f.players.mailbox_max = 2;
+  net::Profiles profiles;
+  net::put_profile(profiles, {2,
+                              "Mailbox recipient",
+                              f.bodies[1],
+                              {},
+                              net::Mode::Play | net::Mode::Watch,
+                              {net::hash_key("mailbox-fixture")}});
+  net::Sessions sessions(profiles);
+  const auto connect = [&](net::SessionId id, const char *mode) {
+    sessions.accept(net::Connected{id});
+    sessions.accept(net::Control{id, Json{{"t", "hello"},
+                                          {"version", 1},
+                                          {"key", "mailbox-fixture"},
+                                          {"mode", mode},
+                                          {"binary", false}}
+                                         .dump()});
+    require(sessions.principal(id).has_value(), "mailbox fixture authenticates actual sessions");
+  };
+  connect(10, "watch");
+  cm::notify(f.players, sessions, 0, {{"kind", "ignored"}});
+  for (int i = 0; i < 3; ++i)
+    cm::notify(f.players, sessions, 2,
+               {{"kind", "changed"}, {"plot", 2}, {"sequence", i}, {"cleared", {"g:1"}}});
+  const auto grant = perm::create_grant(
+      f.grants, f.players, perm::Holder::player(2),
+      {2, perm::Holder::player(1), perm::Scope::plot(2), 1, 0, 0, 500},
+      {perm::Scope::plot(2), 2, 31, 2, true}, {perm::Holder::player(1), 1, false}, 1);
+  require(bool(grant), "offline former owner has an actual land grant to remove");
+  // The market's plot transfer is Phase 5. Exercise its mailbox contract with
+  // the plain owner write and actual grant revocation, without adding a market here.
+  const auto former_owner = f.plots.rows[2].owner;
+  f.plots.rows[2].owner = 1;
+  const auto removed = perm::revoke(f.grants, f.players, grant.grant);
+  require(removed == std::vector<GrantId>{grant.grant}, "plot transition removes the actual grant");
+  cm::notify(f.players, sessions, former_owner,
+             {{"kind", "changed"},
+              {"plot", 2},
+              {"sequence", 3},
+              {"cleared", {"g:" + std::to_string(removed[0])}}});
+  require(f.players.rows[0].notices.empty() && f.players.rows[2].notices.size() == 2 &&
+              f.players.rows[2].notices[0]["sequence"] == 2 &&
+              f.players.rows[2].notices_dropped == 2,
+          "watch sessions do not consume offline notices; overflow keeps the newest notices");
+  const auto gift = f.item(1, {-4, 0, 0}, false);
+  f.delivery.present_bodies.erase(2);
+  require(f.call(f.ids.give, PlayerId{1}, {{"recipient", "p:2"}}, gift.root).changed &&
+              f.players.rows[2].mailbox == std::vector<Handle>{gift.root},
+          "a full notice mailbox must not prevent a valuable gift");
+  snap::Buffer bytes;
+  snap::Output output{bytes};
+  perm::write_players(output, f.players, f.ledger, f.plots, f.groups);
+  bytes.resize(output.adapter().writtenBytesCount());
+  perm::Players restored;
+  restored.mailbox_max = f.players.mailbox_max;
+  perm::Ledger ledger;
+  perm::Plots plots;
+  perm::Groups groups;
+  snap::Input input{bytes.data(), bytes.size()};
+  perm::read_players(input, restored, ledger, plots, groups);
+  snap::check_complete(input);
+  require(restored.rows[2].notices == f.players.rows[2].notices &&
+              restored.rows[2].notices_dropped == 2 &&
+              restored.rows[2].mailbox == f.players.rows[2].mailbox,
+          "waiting notices, overflow count and valuable goods survive snapshot restore");
+  f.players = std::move(restored);
+  connect(11, "play");
+  const auto delivered =
+      cm::deliver_mailbox(f.players, sessions, f.f.objects_state, f.world, 2, f.bodies[1], 22);
+  require(delivered.reply["delivered"] == 1 && f.players.rows[2].mailbox.empty() &&
+              f.players.rows[2].inventory == std::vector<Handle>{gift.root} &&
+              f.players.rows[2].notices.empty() && f.players.rows[2].notices_dropped == 0,
+          "login drains notices and goods independently and clears their waiting state");
+  cm::notify(f.players, sessions, 2, {{"kind", "live"}});
+  std::vector<net::Invocation> ready;
+  std::vector<net::SessionNotice> logins;
+  std::vector<net::SessionOutput> outputs;
+  sessions.drain(ready, logins, outputs);
+  std::vector<Json> events;
+  for (const auto &out : outputs)
+    if (const auto *sent = std::get_if<net::Send>(&out);
+        sent && sent->message.value("t", "") == "event") {
+      require(sent->session == 11, "waiting notices must only go to the play session");
+      events.push_back(sent->message);
+    }
+  require(events.size() == 3 && events[0]["sequence"] == 2 && events[0]["dropped"] == 2 &&
+              events[0]["cleared"] == Json::array({"g:1"}) && events[1]["sequence"] == 3 &&
+              events[1]["plot"] == 2 &&
+              events[1]["cleared"] == Json::array({"g:" + std::to_string(grant.grant)}) &&
+              !events[1].contains("dropped") && events[2]["kind"] == "live" &&
+              f.players.rows[2].notices.empty(),
+          "login sends restored notices oldest first, reports overflow once, then sends live");
+}
 void login_delivers_complete_mailbox_without_native_capacity_or_identity_changes() {
   Fixture f;
   const auto first = f.item(1, {-4, 0, 0}), second = f.item(1, {-8, 0, 0}, false);
@@ -650,9 +745,11 @@ void login_delivers_complete_mailbox_without_native_capacity_or_identity_changes
               f.call(f.ids.give, PlayerId{1}, {{"recipient", "p:2"}}, second.root).changed,
           "actual gifts create recipient's hidden mailbox custody");
   const auto mailbox = f.players.rows[2].mailbox;
+  net::Profiles profiles;
+  net::Sessions sessions(profiles);
   step::NativeCompletion delivered;
   auto deliver = [&](Handle body, Step now) {
-    delivered = cm::deliver_mailbox(f.players, f.f.objects_state, f.world, 2, body, now);
+    delivered = cm::deliver_mailbox(f.players, sessions, f.f.objects_state, f.world, 2, body, now);
     const auto custody = std::move(delivered.custody);
     cm::apply_custody(f.f.objects_state, f.space_state, {0, 0, 3, 0}, f.plots, custody, delivered);
     return delivered.reply.at("delivered").get<unsigned>();
@@ -723,6 +820,7 @@ void login_delivers_complete_mailbox_without_native_capacity_or_identity_changes
 } // namespace
 int main() {
   try {
+    offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox();
     wallet_native_authority_is_explicit();
     actual_assembly_sale_and_inventory_reveal_preserve_identity();
     ordinary_offer_expiry_releases_actual_assembly_without_moving_it();

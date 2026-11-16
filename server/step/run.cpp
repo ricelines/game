@@ -51,6 +51,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   catalog::State catalog_state;
   react::State react_state(settings.scripts);
   perm::State perm_state;
+  perm_state.players.mailbox_max = settings.mailbox_max;
   elaborate::State elaborate_state;
   net::State net_state({"127.0.0.1", launch.port, launch.client, launch.assets, settings.network,
                         settings.control_max});
@@ -367,7 +368,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                      : begin_frame(clock, settings.clock, costs, queues, timers, {}, frame_started);
     advance_permission_deadlines(perm_state, travel_access, sessions, journal, clock.step, hz,
                                  settings.grant_reminder_seconds, settings.deadlines_per_step);
-    expire_sale_offers(offers, ids, permission_flags(objects), session_views, sessions, journal,
+    expire_sale_offers(perm_state, ids, permission_flags(objects), session_views, sessions, journal,
                        clock.step, settings.deadlines_per_step);
 
     for (auto &result : fixture_worker.take())
@@ -398,8 +399,9 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
         if (const auto play =
                 connection_notice(notice, net_state, space_state, delivery, catalog_state,
                                   react_state, appearance, objects_state, clock, settings)) {
-          auto delivered = deliver_mailbox(players, objects_state, space, play->principal.player,
-                                           play->principal.body, clock.step);
+          auto delivered =
+              deliver_mailbox(players, sessions, objects_state, space, play->principal.player,
+                              play->principal.body, clock.step);
           change_custody(objects_state, space_state, relation_terms, plots, illumination_sources,
                          delivered);
           refresh_object_plots(space, objects_state, plots, react_state, {}, delivered);
@@ -503,10 +505,10 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                           timers, journal, settings.event_queue_max);
           if (completed.notification) {
             const auto &closed = *completed.notification;
-            sessions.event_for_player(closed.requester,
-                                      {{"kind", closed.kind},
-                                       {"request", "request:" + std::to_string(closed.request)},
-                                       {"text", closed.text}});
+            notify(players, sessions, closed.requester,
+                   {{"kind", closed.kind},
+                    {"request", "request:" + std::to_string(closed.request)},
+                    {"text", closed.text}});
             const auto target = requests.rows.at(closed.request).target;
             net::invalidate(session_views, std::span{&target, 1});
           }
@@ -663,7 +665,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             publish_object_changes(sessions, session_views, ids, auth, parent, model_text,
                                    instance_text, completed.changed_objects);
             for (const auto &[recipient, notice] : completed.notices)
-              sessions.event_for_player(recipient, notice);
+              notify(players, sessions, recipient, notice);
             for (auto ancestor = execution.rbegin(); ancestor != execution.rend(); ++ancestor)
               if (const auto *initiator = std::get_if<ActionRun>(&*ancestor))
                 if (const auto *player = std::get_if<PlayerId>(&initiator->call.request.caller)) {

@@ -1272,8 +1272,11 @@ struct Player {
   std::vector<GroupId> groups;
   std::vector<GrantId> grants_held, grants_given;
   std::vector<Handle> inventory, mailbox;
+  std::vector<nlohmann::json> notices;
+  std::uint32_t notices_dropped = 0;
 };
 struct Players {
+  std::size_t mailbox_max = 0;
   std::vector<Player> rows{Player{}};
 };
 struct Group {

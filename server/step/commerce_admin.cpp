@@ -566,7 +566,7 @@ void advance_permission_deadlines(amber::perm::State &perm_state, TravelAccess &
       grants, players, now, static_cast<Step>(std::llround(reminder_seconds * hz)), hz, limit);
   invalidate_travel(travel_access, grants, now);
   for (auto &notice : grant_updates.notices)
-    sessions.event_for_player(notice.recipient, std::move(notice.event));
+    notify(players, sessions, notice.recipient, std::move(notice.event));
   for (auto &event : grant_updates.records)
     journal.append(std::move(event));
 }

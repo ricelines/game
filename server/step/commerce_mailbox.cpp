@@ -1,7 +1,22 @@
 #include "commerce_private.hpp"
 
 namespace amber::step {
-step::NativeCompletion deliver_mailbox(perm::Players &players,
+void notify(perm::Players &players, net::Sessions &sessions, PlayerId player, Json notice) {
+  if (!player)
+    return;
+  for (auto id : sessions.sessions_for(player))
+    if (sessions.principal(id)->mode == net::Mode::Play) {
+      sessions.event_for_player(player, notice);
+      return;
+    }
+  auto &row = players.rows.at(player);
+  row.notices.push_back(std::move(notice));
+  if (row.notices.size() > players.mailbox_max) {
+    row.notices.erase(row.notices.begin());
+    ++row.notices_dropped;
+  }
+}
+step::NativeCompletion deliver_mailbox(perm::Players &players, net::Sessions &sessions,
                                        const amber::ObjectState &objects_state,
                                        const space::Space &space, PlayerId player, Handle body,
                                        Step now) {
@@ -13,7 +28,15 @@ step::NativeCompletion deliver_mailbox(perm::Players &players,
   if (!player || player >= players.rows.size() || !identity.valid(body) ||
       !(identity.flags[body.slot()] & Body) || authority.owner[body.slot()] != player)
     throw std::invalid_argument("mailbox delivery requires the authenticated player's live body");
-  const auto &mailbox = players.rows[player].mailbox;
+  auto &row = players.rows[player];
+  for (std::size_t i = 0; i < row.notices.size(); ++i) {
+    if (i == 0 && row.notices_dropped)
+      row.notices[i]["dropped"] = row.notices_dropped;
+    sessions.event_for_player(player, row.notices[i]);
+  }
+  row.notices.clear();
+  row.notices_dropped = 0;
+  const auto &mailbox = row.mailbox;
   if (mailbox.empty())
     return commerce_detail::result(false, {{"delivered", 0}});
   std::vector<Handle> things{body};

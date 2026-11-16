@@ -423,7 +423,6 @@ NativeCompletion native_elaboration(amber::catalog::State &catalog_state,
   auto &authored_text = catalog_state.authored_text;
 
   auto &profiles = net_state.profiles;
-  auto &sessions = net_state.sessions;
   auto &requests = elaborate_state.requests;
 
   auto &gap_counts = elaborate_state.gap_counts;
@@ -465,8 +464,8 @@ NativeCompletion native_elaboration(amber::catalog::State &catalog_state,
     const auto close = [&](AnswerCompletion completion) {
       if (completion.notification) {
         const auto &notice = *completion.notification;
-        sessions.event_for_player(notice.requester,
-                                  {{"kind", notice.kind},
+        completion.action.notices.emplace_back(
+            notice.requester, Json{{"kind", notice.kind},
                                    {"request", "request:" + std::to_string(notice.request)},
                                    {"text", notice.text}});
         const auto target = requests.rows.at(notice.request).target;

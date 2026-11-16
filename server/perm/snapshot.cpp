@@ -120,6 +120,15 @@ template <class S> void serialize(S &s, Player &v) {
   snap::field(s, v.grants_given);
   snap::field(s, v.inventory);
   snap::field(s, v.mailbox);
+  s.container(v.notices, snap::max_collection(), [](S &stream, nlohmann::json &notice) {
+    std::string text;
+    if constexpr (std::is_same_v<S, snap::Output>)
+      text = notice.dump();
+    snap::field(stream, text);
+    if constexpr (std::is_same_v<S, snap::Input>)
+      notice = nlohmann::json::parse(text);
+  });
+  s.value4b(v.notices_dropped);
 }
 template <class S> void serialize(S &s, Group &v) {
   s.value4b(v.id);

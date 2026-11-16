@@ -61,7 +61,7 @@ namespace amber::step {
 void advance_permission_deadlines(amber::perm::State &perm_state, TravelAccess &travel_access,
                                   net::Sessions &sessions, record::Journal &journal, Step now,
                                   double hz, double reminder_seconds, std::size_t limit);
-void expire_sale_offers(perm::Offers &offers, IdentityRead ids, PermissionFlags flags,
+void expire_sale_offers(perm::State &perm_state, IdentityRead ids, PermissionFlags flags,
                         net::SessionViews &session_views, net::Sessions &sessions,
                         record::Journal &journal, Step now, std::size_t limit);
 } // namespace amber::step

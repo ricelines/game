@@ -18,6 +18,8 @@ void round_trip_and_real_vm_continuation() {
   require(root_grant && perm::pay(original.ledger, original.grants, perm::Holder::player(1),
                                   perm::AccountTarget::player(0), perm::Account::player(3), 3, 5),
           "snapshot fixture spends part of an actual root allowance");
+  original.players.rows[1].notices = {{{"kind", "changed"}, {"cleared", {"g:3"}}}};
+  original.players.rows[1].notices_dropped = 4;
   snap::Buffer bytes;
   original.write(bytes);
   const std::array<std::string_view, 1> versions{"checkpoint-fixture"};
@@ -31,6 +33,9 @@ void round_trip_and_real_vm_continuation() {
               !perm::pay(loaded.ledger, loaded.grants, perm::Holder::player(1),
                          perm::AccountTarget::player(0), perm::Account::player(3), 8, 12),
           "plot kinds, root grant ownership and consumed root budget survive a snapshot");
+  require(loaded.players.rows[1].notices == original.players.rows[1].notices &&
+              loaded.players.rows[1].notices_dropped == 4,
+          "the complete checkpoint preserves pending player notices and overflow count");
   require(view.sections.size() == 13 && loaded.next_record == 31 &&
               loaded.inputs.rows.size() == 1 && loaded.motion.size() == 2 &&
               loaded.parts.get(original.f.b.slot()),
