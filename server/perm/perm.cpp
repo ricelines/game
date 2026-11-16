@@ -48,6 +48,13 @@ std::vector<Handle> update_plots(IdentityRead identity, TransformRead poses, Plo
     PlotId next = 0;
     if (in_world) {
       const auto point = poses.position[object.slot()];
+      const auto current = membership.plot[object.slot()];
+      if (current && current < plots.rows.size()) {
+        const auto &plot = plots.rows[current];
+        if (plot.id == current && point.x >= plot.bounds[0] && point.y >= plot.bounds[1] &&
+            point.x < plot.bounds[2] && point.y < plot.bounds[3])
+          continue;
+      }
       for (const auto &plot : plots.rows)
         if (plot.id && point.x >= plot.bounds[0] && point.y >= plot.bounds[1] &&
             point.x < plot.bounds[2] && point.y < plot.bounds[3]) {

@@ -50,6 +50,16 @@ void moved_goods_leave_plot_scoped_authority() {
                         selected, visible);
   };
   require(refresh(true) == std::vector<Handle>{item}, "plot refresh accepted stale generation");
+  objects.position[item.slot()].x = -2;
+  require(refresh(true).empty() && objects.plot[item.slot()] == 1,
+          "moving within a plot preserves membership");
+  plots.rows[1].id = 0;
+  plots.rows.push_back({3, 1, 0, 0, {-5, -5, 0, 5}, {}});
+  require(refresh(true) == std::vector<Handle>{item} && objects.plot[item.slot()] == 3,
+          "a cleared current row falls back to scanning live plots");
+  plots.rows.pop_back();
+  plots.rows[1].id = 1;
+  refresh(true);
   const auto script = Holder::script(7, Handle::make(30, 1));
   f.grant(1, script, Scope::owned_on_plot(1, 1), 1, bit(Verb::Move));
   auto allowed = [&] {
