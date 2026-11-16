@@ -345,7 +345,7 @@ step::NativeCompletion revoke(amber::perm::State &perm_state,
                           "have its issuer revoke it, or relinquish a grant held by this caller");
           ids.push_back(found->second);
         }
-      } else if (issuer.kind == perm::HolderKind::Player) {
+      } else if (issuer.kind == perm::HolderKind::Player && !issuer_is_architect) {
         for (auto id : players.rows[who].grants_given)
           if (grants.rows[id].holder == selected)
             ids.push_back(id);

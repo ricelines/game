@@ -422,6 +422,15 @@ int main() {
         !run(4, ids.revoke, {}, {{"grant", "g:" + std::to_string(root_grant.grant)}}).reply["ok"] &&
             grants.rows[root_grant.grant].live,
         "architect revocation cannot remove a root grant");
+    const auto ordinary_scope = perm::Scope::account(perm::Account::player(3));
+    const auto ordinary =
+        perm::create_grant(grants, players, perm::Holder::player(3),
+                           {3, perm::Holder::player(2), ordinary_scope, 1, 10, 100, 300},
+                           {ordinary_scope, 3, 1}, {}, 10);
+    require(
+        ordinary && run(4, ids.revoke, {}, {{"holder", "p:2"}}).changed &&
+            !grants.rows[ordinary.grant].live && grants.rows[root_grant.grant].live,
+        "architect holder revocation removes another issuer's grants while preserving root grants");
     const auto root_notices = ad::advance_grants(grants, players, 200, 20, 20, 1000);
     require(std::none_of(root_notices.notices.begin(), root_notices.notices.end(),
                          [](const auto &notice) { return notice.recipient == 0; }),
