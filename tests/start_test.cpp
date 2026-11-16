@@ -110,7 +110,8 @@ int main(int argc, char **argv) {
     struct stat info{};
     require(::stat((directory / "keys/2.key").c_str(), &info) == 0 && (info.st_mode & 0777) == 0600,
             "generated credentials must remain private");
-    const auto settings = amber::read_settings(AMBER_CONFIG_PATH);
+    auto settings = amber::read_settings(AMBER_CONFIG_PATH);
+    settings.land.way_group = plan.at("land").at("way_group").get<GroupId>();
     space::State land_space(settings.space, settings.light_cell_m);
     install_land(plan, perm_state, land_space, settings.land);
     perm::update_plots(identity(objects), transforms(objects), plot_membership(objects), plots,

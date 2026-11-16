@@ -48,18 +48,17 @@ void install_land(const Json &plan, perm::State &perm, space::State &space,
   }
   for (auto &player : players.rows)
     std::sort(player.groups.begin(), player.groups.end());
-  auto land = settings;
-  land.way_group = plan.at("land").at("way_group").get<GroupId>();
-  if (!land.way_group || land.way_group >= groups.rows.size() || !groups.rows[land.way_group].id)
+  if (!settings.way_group || settings.way_group >= groups.rows.size() ||
+      !groups.rows[settings.way_group].id)
     throw std::invalid_argument("unknown way group");
   for (const auto &row : plan.at("land").value("lots", Json::array())) {
     const auto at = row.at("at").get<std::array<float, 2>>();
     const auto depth =
-        int(std::floor((std::abs(at[1]) - land.street_width_m / 2) / land.block_m)) + 1;
+        int(std::floor((std::abs(at[1]) - settings.street_width_m / 2) / settings.block_m)) + 1;
     if (depth < 1)
       throw std::invalid_argument("initial lot is on the Street");
-    survey_block(perm, space, land,
-                 {int(std::floor(at[0] / land.block_m)), at[1] >= 0 ? depth : -depth});
+    survey_block(perm, space, settings,
+                 {int(std::floor(at[0] / settings.block_m)), at[1] >= 0 ? depth : -depth});
     const auto found = std::ranges::find_if(perm.plots.rows, [&](const auto &plot) {
       return plot.id && plot.kind == perm::PlotKind::Lot && plot.bounds[0] == at[0] &&
              plot.bounds[1] == at[1];
@@ -68,7 +67,7 @@ void install_land(const Json &plan, perm::State &perm, space::State &space,
       throw std::invalid_argument("initial lot must name a lot's minimum corner");
     found->owner = row.at("owner").get<PlayerId>();
   }
-  fill_pool(perm, space, land);
+  fill_pool(perm, space, settings);
 }
 void install_money(const Json &plan, const Symbols &symbols, IdentityRead identity,
                    AuthorityRead authority, const perm::Players &players,
