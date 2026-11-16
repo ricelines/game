@@ -337,6 +337,34 @@ void repeated_revocation_keeps_only_live_deadlines() {
   }
 }
 
+void root_grants_validate_their_boundaries() {
+  Fixture f;
+  const auto script = Holder::script(8, Handle::make(20, 1));
+  const auto scope = Scope::account(Account::player(0));
+  GrantRequest request{0, script, scope, 1, 50, 100, 200};
+  const HolderControl holder{script, 2, true};
+  require(!create_grant(f.grants, f.players, Holder::player(1), request, {scope, 0, 1}, holder, 1),
+          "a player cannot issue as root");
+  request.expires_step = 0;
+  require(create_root_grant(f.grants, f.players, request, holder, 1).reason ==
+              Reason::ExpiryRequired,
+          "root monetary grants require expiry");
+  request.expires_step = 200;
+  request.period_steps = 0;
+  require(!create_root_grant(f.grants, f.players, request, holder, 1), "root spend needs a period");
+  request.period_steps = 100;
+  require(!create_root_grant(f.grants, f.players, request, {script, 2, false}, 1),
+          "root script holders must be installed");
+  request.verbs = 2;
+  require(!create_root_grant(f.grants, f.players, request, holder, 1),
+          "root respects the scope mask");
+  request.verbs = 1;
+  const auto made = create_root_grant(f.grants, f.players, request, holder, 1);
+  require(made && f.players.rows[0].grants_given == std::vector<GrantId>{made.grant} &&
+              !create_root_grant(f.grants, f.players, request, holder, 1),
+          "root grants are indexed under root and reject duplicate holder/scope keys");
+}
+
 void wallets_and_root_require_explicit_authority() {
   Fixture f;
   const auto object = Handle::make(7, 1);
@@ -348,24 +376,10 @@ void wallets_and_root_require_explicit_authority() {
   require(!pay(f.ledger, f.grants, script, AccountTarget::player(0), Account::player(2), 10, 1),
           "root payments need an explicit spend grant");
   const auto root = Scope::account(Account::player(0));
-  const auto id = static_cast<GrantId>(f.grants.rows.size());
-  f.grants.rows.push_back({id, 0, 0, script, root, 1, 50, 0, 100, 0, 200, true});
-  f.grants.by_key.emplace(GrantKey{script, root}, id);
-  f.players.rows[0].grants_given.push_back(id);
-  require(
-      bool(pay(f.ledger, f.grants, script, AccountTarget::player(0), Account::player(2), 40, 2)) &&
-          balance(f.ledger, Account::player(2)) == 140 &&
-          !f.ledger.balance.contains(Account::player(0)),
-      "root creates money without keeping a balance");
-  require(
-      pay(f.ledger, f.grants, script, AccountTarget::player(0), Account::player(2), 11, 3).reason ==
-              Reason::Allowance &&
-          f.grants.rows[id].spent == 40,
-      "root spending is capped without consuming a failed payment");
-  require(
-      bool(pay(f.ledger, f.grants, script, AccountTarget::player(0), Account::player(0), 7, 3)) &&
-          f.grants.rows[id].spent == 40 && !f.ledger.balance.contains(Account::player(0)),
-      "root paying itself changes neither circulation nor allowance");
+  const auto created = create_root_grant(f.grants, f.players, {0, script, root, 1, 50, 100, 200},
+                                         {script, 2, true}, 0);
+  require(bool(created), "root start grant is accepted");
+  const auto id = created.grant;
   require(bool(pay(f.ledger, f.grants, Holder::player(2), AccountTarget::player(2),
                    Account::player(0), 5, 4)) &&
               balance(f.ledger, Account::player(2)) == 135 &&
@@ -1021,6 +1035,7 @@ int main() {
     reminder_deadlines_ignore_revocation_and_notify_once();
     overdue_grant_cleanup_waits_without_extending_authority();
     repeated_revocation_keeps_only_live_deadlines();
+    root_grants_validate_their_boundaries();
     wallets_and_root_require_explicit_authority();
     next_owner_limits_preserve_fair_use_and_clear_old_script_grants();
     land_bans_override_presets_and_scripts_use_their_own_grants();

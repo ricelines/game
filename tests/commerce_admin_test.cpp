@@ -403,6 +403,27 @@ int main() {
                 written[0]["grant"] == "g:" + std::to_string(expiring) && written[1]["id"] == 2 &&
                 written[1]["name"] == "grant_expired" && written[1]["agent"] == false,
             "grant deadline producer overwrote reserved S7 metadata");
+    const auto root_scope = perm::Scope::account(perm::Account::player(0));
+    const auto root_grant = perm::create_root_grant(
+        grants, players, {0, perm::Holder::player(2), root_scope, 1, 100, 100, 200}, {}, 10);
+    require(bool(root_grant), "operator start grants are accepted");
+    require(!run(4, ids.grant, {},
+                 {{"holder", "p:3"},
+                  {"scope", {{"account", "p:0"}}},
+                  {"rights", {"spend"}},
+                  {"cap", 100},
+                  {"period_s", 5},
+                  {"expires_s", 5}})
+                 .reply["ok"],
+            "an architect cannot give away root's money without root authority");
+    require(
+        !run(4, ids.revoke, {}, {{"grant", "g:" + std::to_string(root_grant.grant)}}).reply["ok"] &&
+            grants.rows[root_grant.grant].live,
+        "architect revocation cannot remove a root grant");
+    const auto root_notices = ad::advance_grants(grants, players, 200, 20, 20, 1000);
+    require(std::none_of(root_notices.notices.begin(), root_notices.notices.end(),
+                         [](const auto &notice) { return notice.recipient == 0; }),
+            "grant maintenance never sends notices to root");
     std::cout << "commerce administration passed: native discovery/validation, real installed and "
                  "rule holders, shared caps, nested revocation, inherited presets, groups, land "
                  "bans, stale/script denials; indexed listing mean "

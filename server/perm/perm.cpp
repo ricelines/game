@@ -321,6 +321,51 @@ std::int64_t allowance(const Grants &grants, GrantId id, Step now) {
   return remaining;
 }
 
+namespace {
+Reason validate_grant(const Grants &grants, const Players &players, const GrantRequest &request,
+                      const HolderControl &holder, bool needs_expiry, Step now) {
+  if (!request.holder.id ||
+      (request.holder.kind == HolderKind::Player && request.holder.id >= players.rows.size()))
+    return Reason::UnknownHolder;
+  if (!request.verbs)
+    return Reason::InvalidScope;
+  const Rights scope_mask = request.scope.kind == ScopeKind::Avatar ? Rights{3}
+                            : request.scope.kind == ScopeKind::Plot ? Rights{7}
+                            : monetary(request.scope)               ? Rights{1}
+                                                                    : all_rights;
+  if (request.verbs & ~scope_mask)
+    return Reason::InvalidScope;
+  if (grants.by_key.contains({request.holder, request.scope}))
+    return Reason::Duplicate;
+  if (request.holder.kind == HolderKind::Script &&
+      (holder.holder != request.holder || !holder.installed || !request.holder.installed_on))
+    return Reason::InvalidScope;
+  if (needs_expiry && request.expires_step == 0)
+    return Reason::ExpiryRequired;
+  if ((request.expires_step && request.expires_step <= now) || request.cap < 0 ||
+      (monetary(request.scope) && request.period_steps == 0))
+    return Reason::InvalidScope;
+  return Reason::Allowed;
+}
+GrantResult add_grant(Grants &grants, Players &players, const GrantRequest &request,
+                      GrantId parent_id, bool needs_expiry, Step now) {
+  const auto id = static_cast<GrantId>(grants.rows.size());
+  grants.rows.push_back({id, request.issuer, parent_id, request.holder, request.scope,
+                         request.verbs, request.cap, 0, request.period_steps, now,
+                         request.expires_step, true});
+  grants.by_key.emplace(GrantKey{request.holder, request.scope}, id);
+  if (request.expires_step) {
+    grants.expiring.emplace(request.expires_step, id);
+    if (needs_expiry)
+      grants.reminders.emplace(request.expires_step, id);
+  }
+  players.rows[request.issuer].grants_given.push_back(id);
+  if (request.holder.kind == HolderKind::Player)
+    players.rows[request.holder.id].grants_held.push_back(id);
+  return {Reason::Allowed, id};
+}
+
+} // namespace
 GrantResult create_grant(Grants &grants, Players &players, Holder issuer,
                          const GrantRequest &request, const ScopeControl &control,
                          const HolderControl &holder, Step now) {
@@ -331,31 +376,19 @@ GrantResult create_grant(Grants &grants, Players &players, Holder issuer,
     return {Reason::UnknownHolder};
   if (control.scope != request.scope || request.verbs == 0 ||
       (request.scope.kind == ScopeKind::Account &&
-       (!request.scope.subject || !control.controller ||
+       (((request.scope.subject == 0 || !control.controller) &&
+         request.scope.account() != Account::player(0)) ||
         (request.scope.account_kind == AccountKind::Player &&
          (request.scope.subject >= players.rows.size() ||
           control.controller != request.scope.subject)))))
     return {Reason::InvalidScope};
-  const Rights scope_mask = request.scope.kind == ScopeKind::Avatar ? Rights{3}
-                            : request.scope.kind == ScopeKind::Plot ? Rights{7}
-                            : monetary(request.scope)               ? Rights{1}
-                                                                    : all_rights;
-  if (request.verbs & ~scope_mask)
-    return {Reason::InvalidScope};
-  if ((request.verbs & control.available) != request.verbs)
-    return {Reason::InheritedLimit};
-  if (grants.by_key.contains({request.holder, request.scope}))
-    return {Reason::Duplicate};
-  if (request.holder.kind == HolderKind::Script &&
-      (holder.holder != request.holder || !holder.installed || !request.holder.installed_on))
-    return {Reason::InvalidScope};
   const bool needs_expiry = monetary(request.scope) || request.holder.kind == HolderKind::Script ||
                             issuer.kind == HolderKind::Script;
-  if (needs_expiry && request.expires_step == 0)
-    return {Reason::ExpiryRequired};
-  if ((request.expires_step && request.expires_step <= now) || request.cap < 0 ||
-      (monetary(request.scope) && request.period_steps == 0))
-    return {Reason::InvalidScope};
+  if (const auto why = validate_grant(grants, players, request, holder, needs_expiry, now);
+      why != Reason::Allowed)
+    return {why};
+  if ((request.verbs & control.available) != request.verbs)
+    return {Reason::InheritedLimit};
 
   GrantId parent_id = 0;
   const bool controls = issuer.kind == HolderKind::Player && request.issuer == control.controller;
@@ -376,20 +409,18 @@ GrantResult create_grant(Grants &grants, Players &players, Holder issuer,
       return {Reason::InvalidDelegation};
     parent_id = parent->id;
   }
-  const auto id = static_cast<GrantId>(grants.rows.size());
-  grants.rows.push_back({id, request.issuer, parent_id, request.holder, request.scope,
-                         request.verbs, request.cap, 0, request.period_steps, now,
-                         request.expires_step, true});
-  grants.by_key.emplace(GrantKey{request.holder, request.scope}, id);
-  if (request.expires_step) {
-    grants.expiring.emplace(request.expires_step, id);
-    if (needs_expiry)
-      grants.reminders.emplace(request.expires_step, id);
-  }
-  players.rows[request.issuer].grants_given.push_back(id);
-  if (request.holder.kind == HolderKind::Player)
-    players.rows[request.holder.id].grants_held.push_back(id);
-  return {Reason::Allowed, id};
+  return add_grant(grants, players, request, parent_id, needs_expiry, now);
+}
+
+GrantResult create_root_grant(Grants &grants, Players &players, const GrantRequest &request,
+                              const HolderControl &holder, Step now) {
+  if (request.issuer != 0)
+    return {Reason::UnknownHolder};
+  const bool needs_expiry = monetary(request.scope) || request.holder.kind == HolderKind::Script;
+  if (const auto why = validate_grant(grants, players, request, holder, needs_expiry, now);
+      why != Reason::Allowed)
+    return {why};
+  return add_grant(grants, players, request, 0, needs_expiry, now);
 }
 
 std::vector<GrantId> revoke(Grants &grants, Players &players, GrantId id) {

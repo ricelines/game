@@ -148,7 +148,9 @@ void install_grants(const Json &plan, const Symbols &symbols,
                                      detail::steps(row.value("period_s", 0.), hz),
                                      duration ? now + duration : 0};
     const auto created =
-        perm::create_grant(grants, players, caller.holder, request, control, recipient, now);
+        issuer == 0
+            ? perm::create_root_grant(grants, players, request, recipient, now)
+            : perm::create_grant(grants, players, caller.holder, request, control, recipient, now);
     if (!created)
       throw std::invalid_argument("initial grant denied by ordinary permissions: " +
                                   std::string(perm::reason_text(created.reason)));

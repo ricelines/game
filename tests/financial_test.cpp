@@ -228,10 +228,10 @@ void root_and_wallet_identity() {
   f.pay(args(10, false));
   const auto holder = perm::Holder::script(f.script, f.f.a);
   const auto root = perm::Scope::account(perm::Account::player(0));
-  const auto grant = static_cast<GrantId>(f.grants.rows.size());
-  f.grants.rows.push_back({grant, 0, 0, holder, root, 1, 30, 0, 100, 0, 1000, true});
-  f.grants.by_key.emplace(perm::GrantKey{holder, root}, grant);
-  f.players.rows[0].grants_given.push_back(grant);
+  const auto created = perm::create_root_grant(
+      f.grants, f.players, {0, holder, root, 1, 30, 100, 1000}, {holder, 2, true}, 0);
+  require(bool(created), "root grant is installed");
+  const auto grant = created.grant;
   f.pay(args(21, true));
   f.pay(args(10, false));
   require(perm::balance(f.ledger, perm::Account::player(3)) == 21 &&

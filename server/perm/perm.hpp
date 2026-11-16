@@ -42,6 +42,8 @@ std::int64_t allowance(const Grants &, GrantId, Step);
 
 GrantResult create_grant(Grants &, Players &, Holder issuer, const GrantRequest &,
                          const ScopeControl &, const HolderControl &, Step);
+GrantResult create_root_grant(Grants &, Players &, const GrantRequest &, const HolderControl &,
+                              Step);
 // Input bindings authorize issuer/architect before invoking mutation helpers.
 std::vector<GrantId> revoke(Grants &, Players &, GrantId);
 std::vector<GrantId> revoke_many(Grants &, Players &, std::span<const GrantId>);

@@ -211,10 +211,11 @@ GrantUpdates advance_grants(perm::Grants &grants, perm::Players &players, Step n
     details["kind"] = expired ? "grant_expired" : "grant_expiring";
     details["say"] = expired ? "The grant has expired."
                              : "This grant expires soon; renew it if it is still needed.";
-    updates.notices.push_back({grant.issuer, details});
+    if (grant.issuer)
+      updates.notices.push_back({grant.issuer, details});
     if (grant.parent) {
       const auto owner = grants.rows[grant.parent].issuer;
-      if (owner != grant.issuer)
+      if (owner && owner != grant.issuer)
         updates.notices.push_back({owner, details});
     }
     record::Event event;
@@ -311,7 +312,7 @@ step::NativeCompletion revoke(amber::perm::State &perm_state,
     }
     const auto allowed = [&](const perm::Grant &grant) {
       if (issuer.kind == perm::HolderKind::Player)
-        return grant.issuer == who || issuer_is_architect;
+        return grant.issuer != 0 && (grant.issuer == who || issuer_is_architect);
       return grant.holder == issuer || (grant.parent && grants.rows[grant.parent].holder == issuer);
     };
     std::vector<GrantId> ids;
