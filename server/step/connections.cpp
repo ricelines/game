@@ -1,4 +1,5 @@
 #include "run_private.hpp"
+#include "settings.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -64,8 +65,14 @@ connection_notice(const net::SessionNotice &notice, amber::net::State &net_state
                   amber::space::State &space_state, DeliveryTargets &delivery,
                   const amber::catalog::State &catalog_state,
                   const amber::react::State &react_state, net::MaterialAppearanceRoles appearance,
-                  const amber::ObjectState &objects_state, Step now, double hz, float cell_m,
-                  std::uint32_t repl_delay_ms) {
+                  const amber::ObjectState &objects_state, const amber::step::Clock &clock,
+                  const amber::Settings &settings) {
+  const auto cell_m = settings.network.cell_m;
+  const auto repl_delay_ms = settings.repl_delay_ms;
+
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &sessions = net_state.sessions;
   auto &views = net_state.session_views;
   auto &active = space_state.active_views;
@@ -146,14 +153,23 @@ bool queue_connection_mutation(Inputs &inputs, WorkQueues &queues, net::Invocati
   return true;
 }
 
-void answer_query(amber::net::State &net_state, net::Server &server,
-                  amber::space::State &space_state, record::Journal &journal,
-                  const amber::catalog::State &catalog_state,
-                  const amber::react::State &react_state, const react::ValueRead &values,
-                  const space::Space &space, const amber::ObjectState &objects_state,
-                  const Intents &intents, const amber::perm::State &perm_state,
-                  observe::Settings settings, std::size_t actions_page, Step now, double hz,
-                  const net::Invocation &request) {
+void answer_query(amber::net::State &net_state, amber::space::State &space_state,
+                  record::Journal &journal, const amber::catalog::State &catalog_state,
+                  const amber::react::State &react_state, const amber::ObjectState &objects_state,
+                  const amber::step::State &step_state, const amber::perm::State &perm_state,
+                  const amber::Settings &loaded_settings, const net::Invocation &request) {
+  auto &server = net_state.server;
+
+  const auto &clock = step_state.clock;
+  const auto &settings = loaded_settings.perception;
+
+  const auto values =
+      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+
+  auto &space = space_state.space;
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &sessions = net_state.sessions;
   auto &replication = net_state.replication;
   auto &views = net_state.session_views;
@@ -171,8 +187,8 @@ void answer_query(amber::net::State &net_state, net::Server &server,
   net::Reply reply;
   switch (request.request.kind) {
   case net::ControlKind::Look: {
-    reply = net::read_look(catalog_state, react_state, values, views, space_state, space,
-                           objects_state, intents, settings, now, hz, 0, request);
+    reply = net::read_look(catalog_state, react_state, views, space_state, objects_state,
+                           step_state, settings, 0, request);
     if (reply.fields.contains("step")) {
       record::Event event;
       event.step = now;
@@ -189,11 +205,11 @@ void answer_query(amber::net::State &net_state, net::Server &server,
   }
   case net::ControlKind::Inspect:
     reply = net::read_inspect(catalog_state, react_state, values, views, hearing, objects_state,
-                              perm_state, now, hz, settings.events_per_response, request);
+                              perm_state, clock, settings.events_per_response, request);
     break;
   case net::ControlKind::Actions:
-    reply = net::read_actions(catalog_state, react_state, values, views, hearing, actions_page,
-                              settings.events_per_response, authority, perm_state, now, request);
+    reply = net::read_actions(catalog_state, react_state, values, views, hearing, loaded_settings,
+                              authority, perm_state, now, request);
     break;
   case net::ControlKind::Events:
     reply = net::read_events(feed, views, settings.sight_m, settings.events_per_response, request);
@@ -253,9 +269,15 @@ void flush_connections(amber::net::State &net_state, net::Server &server,
 
 void refresh_connections(amber::net::State &net_state, amber::space::State &space_state,
                          amber::step::State &step_state, const amber::catalog::State &catalog_state,
-                         const amber::react::State &react_state, const react::ValueRead &values,
-                         const space::Space &space, const amber::ObjectState &objects_state,
-                         observe::Settings settings, Step now, double hz) {
+                         const amber::react::State &react_state,
+                         const amber::ObjectState &objects_state, observe::Settings settings,
+                         const amber::step::Clock &clock) {
+  const auto values =
+      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &sessions = net_state.sessions;
   auto &views = net_state.session_views;
   auto &active = space_state.active_views;
@@ -266,8 +288,6 @@ void refresh_connections(amber::net::State &net_state, amber::space::State &spac
   auto &assets = catalog_state.assets;
 
   auto poses = amber::transforms(std::as_const(objects_state.objects));
-
-  auto &intents = step_state.intents;
 
   listeners.clear();
   delivery.present_bodies.clear();
@@ -285,8 +305,7 @@ void refresh_connections(amber::net::State &net_state, amber::space::State &spac
     }
   for (auto session : observe::take_dirty_views(active))
     if (const auto principal = sessions.principal(session))
-      net::refresh_view(catalog_state, react_state, values, views, space_state, space,
-                        objects_state, intents, settings, now, hz, 0, session, *principal,
-                        settings.things_max);
+      net::refresh_view(catalog_state, react_state, views, space_state, objects_state, step_state,
+                        settings, 0, net::Authenticated{session, *principal}, settings.things_max);
 }
 } // namespace amber::step

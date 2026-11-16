@@ -78,8 +78,8 @@ struct Fixture : test_structural::Fixture {
       assets.rows.at(f.models.rows[3].asset).manifest["bindings"]["motion"]["mode"] = "invalid";
   }
   step::NativeCompletion revise(Caller caller = PlayerId{1}) {
-    return step::revise_model(f.objects_state, f.catalog_state, f.model_settings, {0, 0}, geometry,
-                              *f.projection, world, space_state, perm_state, {10, 11}, {.6f, 0},
+    return step::revise_model(f.objects_state, f.catalog_state, f.react_state, {0, 0}, geometry,
+                              space_state, perm_state, {.6f, 0},
                               call({}, {{"model", "m:1"}, {"proposal", "m:3"}}, caller));
   }
   void offered(Handle root) {
@@ -102,7 +102,7 @@ void two_owners_and_hidden_goods() {
   x.f.instance_settings.columns.resize(13);
   x.f.instance_settings.columns[12].set(first[1].slot(), Value(91.0));
 
-  require(space::custody(x.world, x.f.objects_state, second[0], x.f.a, x.space_state,
+  require(space::custody(x.f.objects_state, second[0], x.f.a, x.space_state,
                          std::span(second).subspan(1))
                   .status == space::Status::Ok,
           "second owner's goods enter actual hidden custody");
@@ -218,14 +218,14 @@ void two_edits_share_one_rigid_assembly() {
   step::install_physics(
       x.world, identity(x.f.objects), transforms(x.f.objects), space_flags(x.f.objects), parent,
       step::describe_physics(x.geometry, x.assets.rows.at(x.f.models.rows[2].asset),
-                             *x.f.projection, {2, 0, 8, 0, parent}, Dynamic, {10, 11}, {.6f, 0}, 0,
-                             20));
+                             *x.f.projection, {2, 0, 8, 0, parent}, Dynamic, {10, 11}, {.6f, 0},
+                             amber::step::Clock{.step = 0, .hz = 20}));
   x.parts.set(parent.slot(), std::vector<lifecycle::NamedPart>{{"first", a[0]}, {"second", b[0]}});
   x.f.objects.parent[a[0].slot()] = parent;
   x.f.objects.parent[b[0].slot()] = parent;
   lifecycle::rebuild_declared_parts(x.parts, identity(x.f.objects), x.declared);
   const std::array<Handle, 2> joined{a[0], b[0]};
-  step::install_declared_attachments(x.world, x.f.objects_state, x.space_state, joined);
+  step::install_declared_attachments(x.f.objects_state, x.space_state, joined);
   auto all = lifecycle::collect(x.parts, identity(x.f.objects), parent);
   require(space::assemble(x.world, identity(x.f.objects), transforms(x.f.objects), parent,
                           std::span(all).subspan(1), space::Motion::Dynamic)

@@ -8,7 +8,8 @@ namespace amber::step {
 void refresh_material(space::Space &space, const GeometryAssets &geometry,
                       const amber::catalog::State &catalog_state, const react::ValueRead &values,
                       PhysicsRoles roles, PhysicsDefaults defaults,
-                      std::span<const TermId> materials, Step now, double hz) {
+                      std::span<const TermId> materials, const amber::step::Clock &clock) {
+
   auto &models = catalog_state.models;
   auto &parameters = catalog_state.parameters;
   auto &assets = catalog_state.assets;
@@ -24,7 +25,7 @@ void refresh_material(space::Space &space, const GeometryAssets &geometry,
     const auto definition = describe_physics(
         geometry, assets.rows.at(asset.hash), values,
         {identity.model[slot], values.params[slot], identity.material[slot], values.plots[slot], h},
-        identity.flags[slot], roles, defaults, now, hz);
+        identity.flags[slot], roles, defaults, clock);
     const auto &spec = definition.body;
     if (!spec.geometry)
       continue;

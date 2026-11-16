@@ -1,3 +1,4 @@
+#include "step/step.hpp"
 #include "view_private.hpp"
 
 namespace amber::net {
@@ -149,12 +150,21 @@ void append_heard(Json &result, observe::Hearing &hearing, net::SessionId sessio
   result["events_omitted"] = result.value("events_omitted", std::size_t{}) + omitted;
 }
 void refresh_view(const amber::catalog::State &catalog_state,
-                  const amber::react::State &react_state, const react::ValueRead &values,
-                  SessionViews &sessions, amber::space::State &space_state,
-                  const space::Space &space, const amber::ObjectState &objects_state,
-                  const step::Intents &intents, observe::Settings settings, Step now, double hz,
-                  double world_ambient_lux, net::SessionId session, const net::Principal &principal,
-                  std::size_t limit) {
+                  const amber::react::State &react_state, SessionViews &sessions,
+                  amber::space::State &space_state, const amber::ObjectState &objects_state,
+                  const amber::step::State &step_state, observe::Settings settings,
+                  double world_ambient_lux, const Authenticated &recipient, std::size_t limit) {
+  const auto &intents = step_state.intents;
+  const auto &clock = step_state.clock;
+  const auto session = recipient.session;
+  const auto &principal = recipient.principal;
+
+  const auto values =
+      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &models = catalog_state.models;
   auto &parameters = catalog_state.parameters;
   auto &assets = catalog_state.assets;
@@ -186,8 +196,8 @@ void refresh_view(const amber::catalog::State &catalog_state,
         held = object;
         break;
       }
-  const auto scan = observe::scan(space, objects_state, observer, held, settings, space_state,
-                                  world_ambient_lux, limit);
+  const auto scan =
+      observe::scan(objects_state, observer, held, settings, space_state, world_ambient_lux, limit);
   auto &row = sessions.rows[session];
   row.player = principal.player;
   row.body = principal.body;
@@ -240,11 +250,15 @@ void refresh_view(const amber::catalog::State &catalog_state,
   active.dirty.erase(session);
 }
 net::Reply read_look(const amber::catalog::State &catalog_state,
-                     const amber::react::State &react_state, const react::ValueRead &values,
-                     SessionViews &sessions, amber::space::State &space_state,
-                     const space::Space &space, const amber::ObjectState &objects_state,
-                     const step::Intents &intents, observe::Settings settings, Step now, double hz,
+                     const amber::react::State &react_state, SessionViews &sessions,
+                     amber::space::State &space_state, const amber::ObjectState &objects_state,
+                     const amber::step::State &step_state, observe::Settings settings,
                      double world_ambient_lux, const net::Invocation &call) {
+
+  const auto &clock = step_state.clock;
+
+  const auto now = clock.step;
+  const auto hz = clock.hz;
 
   auto &active = space_state.active_views;
   auto &hearing = space_state.hearing;
@@ -254,8 +268,8 @@ net::Reply read_look(const amber::catalog::State &catalog_state,
     auto &row = sessions.rows[call.session];
     if (!row.pending.ready || row.pending.step != now || row.pending.limit < limit ||
         active.dirty.contains(call.session))
-      refresh_view(catalog_state, react_state, values, sessions, space_state, space, objects_state,
-                   intents, settings, now, hz, world_ambient_lux, call.session, call.principal,
+      refresh_view(catalog_state, react_state, sessions, space_state, objects_state, step_state,
+                   settings, world_ambient_lux, net::Authenticated{call.session, call.principal},
                    limit);
     auto &pending = row.pending;
     const auto things = std::span<const net::PreparedThing>(pending.things)

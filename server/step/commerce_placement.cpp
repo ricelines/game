@@ -14,12 +14,16 @@ space::Pose relative(space::Pose subject, space::Pose parent) {
 }
 } // namespace
 step::NativeCompletion
-place_existing(space::Space &space, amber::ObjectState &objects_state,
-               amber::space::State &space_state, std::array<TermId, 4> relation_terms,
-               amber::perm::State &perm_state, const GeometryAssets &geometry,
-               const amber::catalog::State &catalog_state, const react::ValueRead &values,
+place_existing(amber::ObjectState &objects_state, amber::space::State &space_state,
+               std::array<TermId, 4> relation_terms, amber::perm::State &perm_state,
+               const GeometryAssets &geometry, const amber::catalog::State &catalog_state,
                PhysicsRoles roles, PhysicsDefaults defaults, amber::react::State &react_state,
                const step::NativeCall &call) {
+  const auto values =
+      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+
+  auto &space = space_state.space;
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(objects_state.objects);
   auto parents = amber::parents(objects_state.objects);
@@ -105,10 +109,10 @@ place_existing(space::Space &space, amber::ObjectState &objects_state,
     const auto model = identity.model[h.slot()];
     const auto params = values.params[h.slot()];
     const auto hash = catalog::resolve_asset(models, parameters, model, params).hash;
-    const auto physics =
-        describe_physics(geometry, assets.rows.at(hash), values,
-                         {model, params, identity.material[h.slot()], plot->id, h},
-                         identity.flags[h.slot()], roles, defaults, call.step, call.hz);
+    const auto physics = describe_physics(geometry, assets.rows.at(hash), values,
+                                          {model, params, identity.material[h.slot()], plot->id, h},
+                                          identity.flags[h.slot()], roles, defaults,
+                                          amber::step::Clock{.step = call.step, .hz = call.hz});
     if (physics.body.geometry)
       bodies.push_back(physics.body);
     else
@@ -145,8 +149,8 @@ place_existing(space::Space &space, amber::ObjectState &objects_state,
   }
   parents.parent[item.root.object.slot()] = {};
   const auto changes_begin = space_state.relation_changes.size();
-  const auto installed = space::rebuild_assembly(space, objects_state, space_state, edit, bodies,
-                                                 logical, volumes, internal);
+  const auto installed =
+      space::rebuild_assembly(objects_state, space_state, edit, bodies, logical, volumes, internal);
   if (installed.status != space::Status::Ok)
     throw std::invalid_argument(space::status_text(installed.status));
   std::erase(players.rows[who].inventory, item.root.object);

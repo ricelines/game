@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
     plan["registry"] = native_registry.data;
     const auto directory = std::filesystem::current_path() / ".cache/start-test";
     std::filesystem::remove_all(directory);
-    amber::react::State react_state;
+    amber::react::State react_state{{4096, 50, 5, 64}};
     catalog::State catalog_state;
     perm::State perm_state;
     react::Terms &terms = react_state.terms;
@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
       if (row.at("world_rule").get<bool>())
         fixture_approvals.push_back(
             {row.at("key"), "isolated importer test authority; not a gameplay approval"});
-    react::Vm vm(vm_settings);
+    auto &vm = react_state.vm;
     catalog::Scripts &scripts = catalog_state.scripts;
     Symbols symbols;
     install_scripts(std::move(prepared), scripts, vm, symbols, fixture_approvals);
@@ -153,7 +153,7 @@ int main(int argc, char **argv) {
 
     perm::Grants &grants = perm_state.grants;
     install_grants(plan, symbols, values, authority(std::as_const(objects)), perm_state,
-                   catalog_state, react_state, profiles, 0, 20);
+                   catalog_state, react_state, profiles, amber::step::Clock{.step = 0, .hz = 20});
     require(grants.rows.size() == plan.at("grants").size() + 1,
             "every initial grant passed real permission creation");
     auto missing_body_choices = plan;
@@ -199,7 +199,8 @@ int main(int argc, char **argv) {
     rejects(
         [&] {
           install_grants(wrong_owner, symbols, values, authority(std::as_const(objects)),
-                         rejected_permissions, catalog_state, react_state, profiles, 0, 20);
+                         rejected_permissions, catalog_state, react_state, profiles,
+                         amber::step::Clock{.step = 0, .hz = 20});
         },
         "plan cannot forge current goods control");
     auto wrong_installation = plan;
@@ -208,7 +209,8 @@ int main(int argc, char **argv) {
     rejects(
         [&] {
           install_grants(wrong_installation, symbols, values, authority(std::as_const(objects)),
-                         rejected_permissions, catalog_state, react_state, profiles, 0, 20);
+                         rejected_permissions, catalog_state, react_state, profiles,
+                         amber::step::Clock{.step = 0, .hz = 20});
         },
         "plan cannot claim an uninstalled script is installed");
     step::WorkQueues queues;

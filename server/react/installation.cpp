@@ -5,9 +5,12 @@
 namespace amber::react {
 namespace {
 void install_with_mode(const amber::catalog::State &catalog_state, amber::react::State &react_state,
-                       const ValueRead &values, std::span<const Handle> objects, Step now,
-                       double hz, const record::Origin &origin, DeferredEffects &effects,
-                       react::SyncMode mode) {
+                       const ValueRead &values, std::span<const Handle> objects,
+                       const amber::step::Clock &clock, const record::Origin &origin,
+                       DeferredEffects &effects, react::SyncMode mode) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &models = catalog_state.models;
   auto &scripts_table = catalog_state.scripts;
   auto &instances = react_state.installations;
@@ -27,11 +30,11 @@ void install_with_mode(const amber::catalog::State &catalog_state, amber::react:
     for (const auto id : scripts) {
       const auto &script = scripts_table.rows.at(id);
       const auto allowed = react::rule_watch_terms(rules, values, h, id, now, hz);
-      auto changes = react::sync_watches(
-          react_state, values, {h, id}, script.declaration, now, hz, origin, mode,
-          script.declaration.kind == react::ScriptDeclaration::Kind::Rule
-              ? std::optional<std::span<const TermId>>(allowed)
-              : std::nullopt);
+      auto changes =
+          react::sync_watches(react_state, values, {h, id}, script.declaration, clock, origin, mode,
+                              script.declaration.kind == react::ScriptDeclaration::Kind::Rule
+                                  ? std::optional<std::span<const TermId>>(allowed)
+                                  : std::nullopt);
       for (auto &work : changes.dirty)
         effects.ordered.emplace_back(std::move(work));
       for (auto &timer : changes.timers)
@@ -44,14 +47,16 @@ void install_reactions(const amber::catalog::State &catalog_state, amber::react:
                        const ValueRead &values, std::span<const Handle> objects, Step now,
                        double hz, const record::Origin &origin, DeferredEffects &effects) {
 
-  install_with_mode(catalog_state, react_state, values, objects, now, hz, origin, effects,
+  install_with_mode(catalog_state, react_state, values, objects,
+                    amber::step::Clock{.step = now, .hz = hz}, origin, effects,
                     react::SyncMode::Initial);
 }
 void restore_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
                        const ValueRead &values, std::span<const Handle> objects, Step now,
                        double hz, const record::Origin &origin, DeferredEffects &effects) {
 
-  install_with_mode(catalog_state, react_state, values, objects, now, hz, origin, effects,
+  install_with_mode(catalog_state, react_state, values, objects,
+                    amber::step::Clock{.step = now, .hz = hz}, origin, effects,
                     react::SyncMode::Restore);
 }
 void rebind_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
@@ -60,7 +65,8 @@ void rebind_reactions(const amber::catalog::State &catalog_state, amber::react::
 
   auto &subscriptions = react_state.subscriptions;
 
-  install_with_mode(catalog_state, react_state, values, objects, now, hz, origin, effects,
+  install_with_mode(catalog_state, react_state, values, objects,
+                    amber::step::Clock{.step = now, .hz = hz}, origin, effects,
                     react::SyncMode::Change);
   // Binding changes can alter intrinsic, baked and default answers without a
   // state write. Include subscribers on other objects following this source;

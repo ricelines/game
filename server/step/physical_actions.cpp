@@ -265,11 +265,13 @@ step::NativeCompletion native_result(space::OperationResult result, Handle subje
   return out;
 }
 } // namespace
-step::NativeCompletion grasp_action(space::Space &world, amber::ObjectState &objects_state,
+step::NativeCompletion grasp_action(amber::ObjectState &objects_state,
                                     amber::space::State &space_state,
                                     const PhysicalRelationTerms &relation_terms, float reach_m,
                                     MechanicalCauses &causes, const perm::Plots &plots,
                                     const step::NativeCall &call) {
+  auto &world = space_state.space;
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(objects_state.objects);
   auto parents = amber::parents(objects_state.objects);
@@ -298,8 +300,7 @@ step::NativeCompletion grasp_action(space::Space &world, amber::ObjectState &obj
       return native_result(assembled, target, false);
   }
   const auto changes_begin = space_state.relation_changes.size();
-  auto result =
-      space::attach(world, objects_state, space_state, {target, body, local, true}, token);
+  auto result = space::attach(objects_state, space_state, {target, body, local, true}, token);
   auto out = native_result(result, target, true);
   relation_effects(out.effects, relation_terms,
                    std::span(space_state.relation_changes).subspan(changes_begin));
@@ -310,11 +311,13 @@ step::NativeCompletion grasp_action(space::Space &world, amber::ObjectState &obj
   }
   return out;
 }
-step::NativeCompletion attach_action(space::Space &world, amber::ObjectState &objects_state,
+step::NativeCompletion attach_action(amber::ObjectState &objects_state,
                                      amber::space::State &space_state,
                                      const PhysicalRelationTerms &relation_terms,
                                      const amber::perm::State &perm_state, float reach_m,
                                      MechanicalCauses &causes, const step::NativeCall &call) {
+  auto &world = space_state.space;
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(objects_state.objects);
 
@@ -339,7 +342,7 @@ step::NativeCompletion attach_action(space::Space &world, amber::ObjectState &ob
   auto token = causes.intern(call.origin);
   const auto changes_begin = space_state.relation_changes.size();
   auto result = space::attach(
-      world, objects_state, space_state,
+      objects_state, space_state,
       {subject, parent, input_pose(call.arguments.value("local_pose", Json::object())), false},
       token);
   auto out = native_result(result, subject, true);
@@ -353,11 +356,12 @@ step::NativeCompletion attach_action(space::Space &world, amber::ObjectState &ob
   }
   return out;
 }
-step::NativeCompletion release_action(space::Space &world, amber::ObjectState &objects_state,
+step::NativeCompletion release_action(amber::ObjectState &objects_state,
                                       amber::space::State &space_state,
                                       const PhysicalRelationTerms &relation_terms,
                                       const amber::perm::State &perm_state,
                                       MechanicalCauses &causes, const step::NativeCall &call) {
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(objects_state.objects);
   auto parents = amber::parents(objects_state.objects);
@@ -393,8 +397,7 @@ step::NativeCompletion release_action(space::Space &world, amber::ObjectState &o
   const auto changes_begin = space_state.relation_changes.size();
   const auto motion =
       identity.flags[target.slot()] & Body ? space::Motion::Character : space::Motion::Dynamic;
-  auto result =
-      space::detach(world, objects_state, space_state, {target, motion, linear, angular}, token);
+  auto result = space::detach(objects_state, space_state, {target, motion, linear, angular}, token);
   auto out = native_result(result, target, true);
   relation_effects(out.effects, relation_terms,
                    std::span(space_state.relation_changes).subspan(changes_begin));
@@ -729,10 +732,11 @@ int sound_binding(lua_State *L) {
   return 1;
 }
 } // namespace
-void bind_physical(react::Vm &vm, space::Space &space, amber::ObjectState &objects_state,
-                   amber::step::State &step_state, const amber::perm::State &perm_state,
-                   std::size_t part_batch_max, amber::space::State &space_state,
-                   const amber::catalog::State &catalog_state) {
+void bind_physical(react::Vm &vm, amber::ObjectState &objects_state, amber::step::State &step_state,
+                   const amber::perm::State &perm_state, std::size_t part_batch_max,
+                   amber::space::State &space_state, const amber::catalog::State &catalog_state) {
+  auto &space = space_state.space;
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(objects_state.objects);
   auto &declared_parts = objects_state.declared_parts;

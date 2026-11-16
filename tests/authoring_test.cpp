@@ -75,7 +75,7 @@ int main(int argc, char **argv) {
     const auto plan = step::start::read_plan(argv[1]);
     const auto directory = std::filesystem::current_path() / ".cache/authoring-test";
     std::filesystem::remove_all(directory);
-    amber::react::State react_state;
+    amber::react::State react_state{{4096, 50, 5, 64}};
     react::Terms &terms = react_state.terms;
     react::Materials &materials = react_state.materials;
     amber::catalog::State catalog_state;
@@ -214,7 +214,7 @@ int main(int argc, char **argv) {
                 parameters.rows.size() == params_before_batch + 1 &&
                 measured.parameter_rows.contains(params_before_batch),
             "one batched model install did not expose its complete measured parameter set");
-    react::Vm vm(limits);
+    auto &vm = react_state.vm;
     react::NativeActions &native = react_state.native_declarations;
     auto script_install = [&](catalog::PreparedScript script) {
       return install_script(std::move(script), 9, 12, scripts, vm, native, directory / "scripts");

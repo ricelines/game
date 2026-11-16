@@ -20,7 +20,7 @@ template <class Fn> void rejects(Fn run, const char *message) {
   throw std::runtime_error(message);
 }
 struct Fixture {
-  amber::react::State react_state;
+  amber::react::State react_state{{4096, 50, 5, 64}};
   amber::catalog::State catalog_state;
 
   react::Terms &terms = react_state.terms;

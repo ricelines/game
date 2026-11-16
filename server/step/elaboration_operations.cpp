@@ -90,9 +90,8 @@ AnswerCompletion refuse(elaborate::Requests &requests, catalog::AuthoredTexts &t
   return {std::move(out), closed};
 }
 step::NativeCompletion rule_activation(catalog::Scripts &scripts, amber::react::State &react_state,
-                                       step::WorkQueues &queues, react::Vm &vm,
-                                       const react::ValueRead &values, bool may_edit_rules,
-                                       const step::NativeCall &call) {
+                                       step::WorkQueues &queues, const react::ValueRead &values,
+                                       bool may_edit_rules, const step::NativeCall &call) {
 
   elaboration_detail::player(call);
   if (!may_edit_rules)
@@ -104,9 +103,9 @@ step::NativeCompletion rule_activation(catalog::Scripts &scripts, amber::react::
   auto out = elaboration_detail::result(false);
   const auto before = elaboration_detail::activation_state(scripts);
   const auto changed = react::update_rule(
-      scripts, react_state, queues, vm, values, id,
+      scripts, react_state, queues, values, id,
       call.arguments.at("active").get<bool>() ? react::RuleMode::Enable : react::RuleMode::Disable,
-      call.step, call.hz, call.origin, out.effects);
+      amber::step::Clock{.step = call.step, .hz = call.hz}, call.origin, out.effects);
   if (changed)
     out.changed_scripts = elaboration_detail::changed_activations(scripts, before);
   out.changed = out.effects.changed;

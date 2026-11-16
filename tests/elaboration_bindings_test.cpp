@@ -98,8 +98,8 @@ struct Fixture {
   step::FixtureCompletion complete(const elaborate::FixtureResult &result, Step now,
                                    bool has_role = true) {
     return step::complete_fixture(elaborate_state, step_state, reactive.scripts,
-                                  reactive.react_state, reactive.vm, reactive.values(),
-                                  {2, has_role}, result, now, 20);
+                                  reactive.react_state, reactive.values(), {2, has_role}, result,
+                                  amber::step::Clock{.step = now, .hz = 20});
   }
 };
 void synchronous_workflow() {
@@ -193,7 +193,7 @@ void async_submission(const std::filesystem::path &executable, const std::filesy
   auto change = f.call(2, {{"script", "s:1"}, {"active", true}});
   const auto activate = [&] {
     return step::rule_activation(f.reactive.scripts, f.reactive.react_state, f.queues,
-                                 f.reactive.vm, f.reactive.values(), true, change);
+                                 f.reactive.values(), true, change);
   };
   rejects(activate, "manual enable approved untested code");
   f.reactive.scripts.rows[f.candidate].declaration.approved = true;

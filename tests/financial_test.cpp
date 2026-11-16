@@ -1,3 +1,4 @@
+#include "net_fixture.hpp"
 #include "runtime_fixture.hpp"
 #include "space_fixture.hpp"
 #include "step/action_private.hpp"
@@ -10,7 +11,7 @@ using test_runtime::require;
 namespace {
 struct Fixture {
   amber::perm::State perm_state;
-  amber::net::State net_state{{}};
+  amber::net::State net_state{test_net::options()};
   amber::step::State step_state{8};
 
   test_runtime::Fixture f{1000};
@@ -18,7 +19,7 @@ struct Fixture {
 
   amber::react::State &react_state = f.react_state;
 
-  space::Space space{testspace::settings()};
+  space::State space_state{testspace::settings(), 8};
   perm::Players &players = perm_state.players;
   perm::Grants &grants = perm_state.grants;
   perm::OwnerLimits &limits = perm_state.owner_limits;
@@ -94,8 +95,8 @@ struct Fixture {
     const auto handlers =
         react::dispatch(f.triggers, f.values(), input.receiver, input.trigger, step, 20);
     require(handlers.size() == 1, "financial fixture uses its actual installed handler");
-    react::start_invocation(f.vm, f.react_state, f.values(), objects_state, 7, f.catalog_state,
-                            journal, handlers.front(), std::move(input), invocation, completed);
+    react::start_invocation(f.react_state, f.values(), objects_state, 7, f.catalog_state, journal,
+                            handlers.front(), std::move(input), invocation, completed);
     return completed.outcome;
   }
   step::ActionRun emitted() {
@@ -107,9 +108,11 @@ struct Fixture {
     call.arguments = completed.outcome.action->arguments;
     call.step = now;
     call.hz = 20;
-    auto run = step::begin_action(f.values(), f.catalog_state, f.react_state, profiles, perm_state,
-                                  f.objects_state, space, intents, journal, 2, std::move(call),
-                                  invocation.origin, invocation.deadline);
+    call.origin = invocation.origin;
+    call.deadline = invocation.deadline;
+    auto run =
+        step::begin_action(f.catalog_state, f.react_state, profiles, perm_state, f.objects_state,
+                           space_state, intents, journal, 2, std::move(call));
     require(!run.outcome, "the actual installed script's finance action is admitted");
     return run;
   }

@@ -47,8 +47,8 @@ struct Fixture : test_physical::Fixture {
   }
   void tick(std::span<const sp::MoveRequest> requests = {}) {
     sp::step(space, f.objects_state, physical, ++clock.step, .05f, requests, last);
-    bi::publish_physical(step_state, journal, {14, {20, 21, 22, 23}}, 10000, 20, f.objects_state,
-                         f.catalog_state, last, clock.step);
+    bi::publish_physical(step_state, journal, {14, {20, 21, 22, 23}}, 10000, f.objects_state,
+                         f.catalog_state, last, amber::step::Clock{.step = clock.step, .hz = 20});
     bi::collect_physical_causes(causes, space);
   }
 };
@@ -218,11 +218,9 @@ void pose_sleep_lifecycle_and_capture() {
   require(!sp::motion_cause(f.space, identity(f.f.objects), f.object),
           "stationary scripted pose cannot pollute a later unrelated walker");
 
-  require(sp::attach(f.space, f.f.objects_state, f.space_state,
-                     {f.object, f.body, {{3, 0, 1}, {}}, true})
+  require(sp::attach(f.f.objects_state, f.space_state, {f.object, f.body, {{3, 0, 1}, {}}, true})
                       .status == sp::Status::Ok &&
-              sp::detach(f.space, f.f.objects_state, f.space_state,
-                         {f.object, sp::Motion::Dynamic, {}, {}})
+              sp::detach(f.f.objects_state, f.space_state, {f.object, sp::Motion::Dynamic, {}, {}})
                       .status == sp::Status::Ok,
           "actual grasp/release creates dynamic motion");
   f.push();
@@ -276,8 +274,7 @@ void pose_sleep_lifecycle_and_capture() {
   // Restore back into the active fixture's table before its next publication/collection.
   bi::restore_motion_causes(f.causes, f.space, identity(f.f.objects), restored);
   std::vector<sp::RelationChange> changes;
-  require(sp::custody(f.space, f.f.objects_state, f.object, f.body, f.space_state).status ==
-              sp::Status::Ok,
+  require(sp::custody(f.f.objects_state, f.object, f.body, f.space_state).status == sp::Status::Ok,
           "uninstrumented real custody extracts the body");
   require(!sp::motion_cause(f.space, identity(f.f.objects), f.object),
           "custody cannot borrow earlier impulse cause");
@@ -332,8 +329,9 @@ void copied_pose_callbacks_and_compound_scope() {
   catalog::Models &models = catalog_state.models;
   models.rows.resize(2);
 
-  bi::publish_physical(step_state, journal, {14, {10, 11, 12, 13}}, 100, 20, scene.objects_state,
-                       catalog_state, scene.result, scene.clock);
+  bi::publish_physical(step_state, journal, {14, {10, 11, 12, 13}}, 100, scene.objects_state,
+                       catalog_state, scene.result,
+                       amber::step::Clock{.step = scene.clock, .hz = 20});
   bool captured = false;
   while (auto item = step::pop_foreground(queues))
     if (auto *event = std::get_if<step::EventWork>(&item->work);
@@ -354,13 +352,13 @@ void copied_pose_callbacks_and_compound_scope() {
   // to a one-step pose cause while the physical aggregate is still in flight.
   auto part = scene.box({.2f, .2f, .2f}, {2, 0, 2}, sp::Motion::Kinematic, 0, false);
 
-  require(sp::attach(scene.space, scene.objects_state, scene.space_state,
-                     {part, cargo, {{.5f, 0, 0}, {}}, false})
-                      .status == sp::Status::Ok &&
-              sp::assemble(scene.space, identity(scene.objects), transforms(scene.objects), cargo,
-                           std::span(&part, 1), sp::Motion::Dynamic)
-                      .status == sp::Status::Ok,
-          "actual physical-root compound created");
+  require(
+      sp::attach(scene.objects_state, scene.space_state, {part, cargo, {{.5f, 0, 0}, {}}, false})
+                  .status == sp::Status::Ok &&
+          sp::assemble(scene.space, identity(scene.objects), transforms(scene.objects), cargo,
+                       std::span(&part, 1), sp::Motion::Dynamic)
+                  .status == sp::Status::Ok,
+      "actual physical-root compound created");
   auto impulse = causes.intern(old);
   sp::impulse(scene.space, identity(scene.objects), cargo, {10, 0, 0}, {}, impulse);
   for (int i = 0; i < 4; ++i)
@@ -426,8 +424,8 @@ void character_contacts_and_fact_reduction() {
   auto other = causes.intern({93, 92, {3}, 5., false});
   physical.relations = {{sp::RelationKind::Contains, body, {999}, true, {token, 0}},
                         {sp::RelationKind::Contains, body, {998}, false, {other, 0}}};
-  bi::publish_physical(step_state, journal, {14, {10, 11, 12, 13}}, 100, 20, scene.objects_state,
-                       catalog_state, physical, scene.clock);
+  bi::publish_physical(step_state, journal, {14, {10, 11, 12, 13}}, 100, scene.objects_state,
+                       catalog_state, physical, amber::step::Clock{.step = scene.clock, .hz = 20});
   bool reduced = false;
   while (auto item = step::pop_foreground(queues))
     if (auto *watch = std::get_if<step::WatchWork>(&item->work);
@@ -440,8 +438,8 @@ void character_contacts_and_fact_reduction() {
     }
   require(reduced, "physics fact reduction actually queues watch");
   step::enqueue_watch(queues, {{body, 10}, origin});
-  bi::publish_physical(step_state, journal, {14, {10, 11, 12, 13}}, 100, 20, scene.objects_state,
-                       catalog_state, physical, scene.clock);
+  bi::publish_physical(step_state, journal, {14, {10, 11, 12, 13}}, 100, scene.objects_state,
+                       catalog_state, physical, amber::step::Clock{.step = scene.clock, .hz = 20});
   auto first = step::pop_foreground(queues);
   require(std::get<step::WatchWork>(first->work).origin == origin,
           "already queued watch retains its first scheduling cause by documented convention");
@@ -464,8 +462,8 @@ void contact_overflow_is_recorded() {
   sp::StepResult physical;
   const auto first = Handle::make(1, 1), second = Handle::make(2, 1);
   physical.contacts.push_back({first, second, {}, {1, 0, 0}, true, {token, 0}});
-  bi::publish_physical(step_state, journal, {14, {10, 11, 12, 13}}, 1, 20, objects_state,
-                       catalog_state, physical, 7);
+  bi::publish_physical(step_state, journal, {14, {10, 11, 12, 13}}, 1, objects_state, catalog_state,
+                       physical, amber::step::Clock{.step = 7, .hz = 20});
   const auto records = journal.take();
   require(queues.emitted_events == 1 && records.size() == 1 && records[0]["kind"] == "system" &&
               records[0]["name"] == "overflow" && records[0]["queue"] == "events" &&

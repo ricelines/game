@@ -84,8 +84,11 @@ void install_money(const Json &plan, const Symbols &symbols, IdentityRead identi
 void install_grants(const Json &plan, const Symbols &symbols, const react::ValueRead &values,
                     AuthorityRead authority, amber::perm::State &perm_state,
                     const amber::catalog::State &catalog_state,
-                    const amber::react::State &react_state, const net::Profiles &profiles, Step now,
-                    double hz) {
+                    const amber::react::State &react_state, const net::Profiles &profiles,
+                    const amber::step::Clock &clock) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &limits = perm_state.owner_limits;
   auto &models = catalog_state.models;
   auto &scripts = catalog_state.scripts;

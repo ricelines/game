@@ -33,16 +33,15 @@ struct ReplacementGeometry {
   std::size_t sensors = 0;
   bool in_scene = false, promote = false;
 };
-ReplacementGeometry replacement_geometry(const space::Space &,
+ReplacementGeometry replacement_geometry(const amber::space::State &space_state,
                                          const amber::ObjectState &objects_state,
                                          const std::vector<PlotId> &, const GeometryAssets &,
                                          const amber::catalog::State &catalog_state,
-                                         const react::ValueRead &, PhysicsRoles, PhysicsDefaults,
+                                         const react::ValueRead &, PhysicsDefaults,
                                          const NativeCall &, lifecycle::Replacement,
                                          bool preserve_defaults = false);
-void rebuild_instances(amber::ObjectState &objects_state, space::Space &,
-                       amber::space::State &space_state, const perm::Plots &,
-                       const amber::catalog::State &catalog_state, std::span<ReplacementGeometry *>,
-                       const space::AssemblyEdit &, PlayerId maker, const NativeCall &,
-                       NativeCompletion &);
+void rebuild_instances(amber::ObjectState &objects_state, amber::space::State &space_state,
+                       const perm::Plots &, const amber::catalog::State &catalog_state,
+                       std::span<ReplacementGeometry *>, const space::AssemblyEdit &,
+                       PlayerId maker, const NativeCall &, NativeCompletion &);
 } // namespace amber::step::structural_detail

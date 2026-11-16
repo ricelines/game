@@ -109,11 +109,13 @@ struct Scene {
   amber::ObjectState objects_state;
 
   sp::Settings config;
-  sp::Space space;
-  explicit Scene(sp::Settings value = settings()) : config(value), space(config) {}
   Objects &objects = objects_state.objects;
-  sp::State space_state{float(
-      toml::parse_file(AMBER_CONFIG_PATH)["perception"]["LIGHT_CELL_M"].value<double>().value())};
+  sp::State space_state{config,
+                        float(toml::parse_file(AMBER_CONFIG_PATH)["perception"]["LIGHT_CELL_M"]
+                                  .value<double>()
+                                  .value())};
+  sp::Space &space = space_state.space;
+  explicit Scene(sp::Settings value = settings()) : config(value) {}
   sp::PhysicalRelations &relations = space_state.physical_relations;
   sp::StepResult result;
   Step clock = 0;

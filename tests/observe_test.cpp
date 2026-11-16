@@ -16,14 +16,14 @@ void observation_geometry_and_live_light() {
   auto large = scene.box({10, 1, 10}, {10, 60, 0}, sp::Motion::Static, 0, false);
   auto held = scene.box({.2f, .2f, .2f}, {70, 70, 0}, sp::Motion::Static, 0, false);
   auto lamp = scene.box({.1f, .1f, .1f}, {0, 5, 3}, sp::Motion::Static, 0, false);
-  amber::space::State space_state(8);
+  auto &space_state = scene.space_state;
   ob::Lights &lights = (space_state.lights = ob::Lights(8));
 
   ob::set_light(lights, {lamp, {0, 0, 0}, 100., 20, .1f}, transforms(scene.objects));
   ob::Settings settings{30, 1.5f, 256, 1, .1f, .1, 40, 8, 40};
   auto scan = [&]() {
-    return ob::scan(scene.space, scene.objects_state, {body, {0, 0, 1}, {0, 1, 0}, 1000}, held,
-                    settings, space_state, 1, 0);
+    return ob::scan(scene.objects_state, {body, {0, 0, 1}, {0, 1, 0}, 1000}, held, settings,
+                    space_state, 1, 0);
   };
   auto first = scan();
   auto find = [](const auto &rows, Handle h) -> const ob::Seen * {
@@ -63,12 +63,12 @@ void far_salience_prefers_the_dome_over_nearer_chairs() {
     scene.box({.6f, .6f, 1.2f}, {float(i % 2 ? -10 : 10), 32.f + i * 1.4f, 0}, sp::Motion::Static,
               0, false);
   const auto dome = scene.box({20, 12, 15}, {0, 85, 0}, sp::Motion::Static, 0, false);
-  amber::space::State space_state(8);
+  auto &space_state = scene.space_state;
   space_state.lights = ob::Lights(8);
 
   const ob::Settings settings{30, 1.5f, 256, 1, .1f, .1, 40, 8, 40};
-  const auto scan = ob::scan(scene.space, scene.objects_state, {body, {0, 0, 1}, {0, 1, 0}, 10}, {},
-                             settings, space_state, 100, 0);
+  const auto scan = ob::scan(scene.objects_state, {body, {0, 0, 1}, {0, 1, 0}, 10}, {}, settings,
+                             space_state, 100, 0);
   const auto found =
       std::ranges::find_if(scan.far, [&](const auto &row) { return row.object == dome; });
   require(found != scan.far.end() && found->salience == ob::Seen::Salience::Large &&
@@ -139,7 +139,7 @@ void benchmark_inert_density() {
     config.max_bodies = 110000;
     Scene scene(config);
 
-    amber::space::State space_state(8);
+    auto &space_state = scene.space_state;
     space_state.lights = ob::Lights(8);
     auto observer = scene.character({0, -2, 0});
     for (int i = 0; i < 12; ++i)
@@ -163,9 +163,8 @@ void benchmark_inert_density() {
     std::vector<double> samples;
     for (int i = 0; i < 200; ++i) {
       auto start = std::chrono::steady_clock::now();
-      auto result =
-          ob::scan(scene.space, scene.objects_state, {observer, {0, -2, 1}, {0, 1, 0}, 10}, {},
-                   settings, space_state, 20, 0);
+      auto result = ob::scan(scene.objects_state, {observer, {0, -2, 1}, {0, 1, 0}, 10}, {},
+                             settings, space_state, 20, 0);
       require(!result.things.empty(), "benchmark must perform actual geometry look");
       samples.push_back(
           std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)

@@ -146,10 +146,10 @@ struct VisibleCustody {
 };
 OperationResult can_visible_custody(const Space &, IdentityRead, ParentRead, const VisibleCustody &,
                                     std::span<const Handle> declared_descendants = {});
-OperationResult visible_custody(Space &, amber::ObjectState &objects_state,
-                                amber::space::State &space_state, const VisibleCustody &,
+OperationResult visible_custody(amber::ObjectState &objects_state, amber::space::State &space_state,
+                                const VisibleCustody &,
                                 std::span<const Handle> declared_descendants = {});
-OperationResult custody(Space &, amber::ObjectState &objects_state, Handle, Handle custodian,
+OperationResult custody(amber::ObjectState &objects_state, Handle, Handle custodian,
                         amber::space::State &space_state,
                         std::span<const Handle> declared_descendants = {});
 OperationResult set_surface(Space &, IdentityRead, Handle, Surface);
@@ -216,9 +216,9 @@ struct Release {
   Motion motion;
   Vec3 linear_velocity_m_s, angular_velocity_rad_s;
 };
-OperationResult attach(Space &, amber::ObjectState &objects_state, amber::space::State &space_state,
+OperationResult attach(amber::ObjectState &objects_state, amber::space::State &space_state,
                        const Attachment &, CauseToken cause = 0);
-OperationResult detach(Space &, amber::ObjectState &objects_state, amber::space::State &space_state,
+OperationResult detach(amber::ObjectState &objects_state, amber::space::State &space_state,
                        const Release &, CauseToken cause = 0);
 OperationResult impulse(Space &, IdentityRead, Handle, Vec3 newton_seconds, Vec3 world_point,
                         CauseToken cause = 0);
@@ -325,7 +325,7 @@ BodyPreflight can_rebuild_assembly(const Space &, std::span<const BodySpec>,
                                    bool promoted, std::optional<Motion> root_motion = std::nullopt);
 AssemblyEdit extract_assembly(Space &, IdentityRead, Handle root,
                               std::span<const Handle> declared_descendants);
-OperationResult rebuild_assembly(Space &, amber::ObjectState &objects_state,
+OperationResult rebuild_assembly(amber::ObjectState &objects_state,
                                  amber::space::State &space_state, const AssemblyEdit &,
                                  std::span<const BodySpec>, std::span<const Handle> logical_roots,
                                  std::span<const VolumeSpec>,
@@ -458,9 +458,8 @@ struct Scan {
   std::vector<Seen> things, far;
   std::vector<Handle> zones;
 };
-Scan scan(const space::Space &, const amber::ObjectState &objects_state, const Observer &,
-          Handle held, const Settings &, amber::space::State &space_state, double world_ambient_lux,
-          std::size_t requested_limit);
+Scan scan(const amber::ObjectState &objects_state, const Observer &, Handle held, const Settings &,
+          amber::space::State &space_state, double world_ambient_lux, std::size_t requested_limit);
 struct Sound {
   Handle source;
   Vec3 at;
@@ -490,6 +489,7 @@ void remove_listener(Hearing &, std::uint64_t);
 
 namespace amber::space {
 struct State {
+  Space space;
   PhysicalRelations physical_relations;
   std::vector<RelationChange> relation_changes;
   observe::Hearing hearing;
@@ -500,7 +500,8 @@ struct State {
   observe::ActiveViews active_views;
   std::vector<observe::MotionSample> motion;
   SparseColumn<std::pair<Handle, Vec3>> previous_positions;
-  explicit State(float light_cell_m)
-      : lights(light_cell_m), light_subscriptions(light_cell_m), active_views(light_cell_m) {}
+  State(const Settings &settings, float light_cell_m)
+      : space(settings), lights(light_cell_m), light_subscriptions(light_cell_m),
+        active_views(light_cell_m) {}
 };
 } // namespace amber::space

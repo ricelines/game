@@ -1,4 +1,7 @@
 #pragma once
+namespace amber {
+struct Settings;
+}
 namespace amber::step {
 struct State;
 }
@@ -150,14 +153,15 @@ struct PhysicalDefinition {
 };
 PhysicalDefinition describe_physics(const GeometryAssets &, const catalog::Asset &,
                                     const react::ValueRead &, PhysicalSubject, std::uint32_t flags,
-                                    PhysicsRoles, PhysicsDefaults, Step, double hz);
+                                    PhysicsRoles, PhysicsDefaults, const amber::step::Clock &clock);
 // Install the current measured binding on the single writer.
 void install_physics(space::Space &, IdentityRead, TransformRead, SpaceFlags, Handle,
                      const PhysicalDefinition &);
 // Refresh actual bindings after an ordinary material edit; earlier writes are retained on error.
 void refresh_material(space::Space &, const GeometryAssets &,
                       const amber::catalog::State &catalog_state, const react::ValueRead &,
-                      PhysicsRoles, PhysicsDefaults, std::span<const TermId>, Step, double hz);
+                      PhysicsRoles, PhysicsDefaults, std::span<const TermId>,
+                      const amber::step::Clock &clock);
 
 struct CauseSummary {
   record::Origin origin;
@@ -189,8 +193,9 @@ struct PhysicalEventTerms {
   PhysicalRelationTerms relations;
 };
 void publish_physical(amber::step::State &step_state, record::Journal &, const PhysicalEventTerms &,
-                      std::size_t event_limit, double hz, const amber::ObjectState &objects_state,
-                      const amber::catalog::State &catalog_state, const space::StepResult &, Step);
+                      std::size_t event_limit, const amber::ObjectState &objects_state,
+                      const amber::catalog::State &catalog_state, const space::StepResult &,
+                      const amber::step::Clock &clock);
 void collect_physical_causes(MechanicalCauses &, const space::Space &);
 
 struct BodyCauseRow {
@@ -205,17 +210,17 @@ void write_motion_causes(snap::Output &, const std::vector<BodyCauseRow> &,
                          const snap::ObjectSelection & = {});
 void read_motion_causes(snap::Input &, std::vector<BodyCauseRow> &);
 
-step::NativeCompletion grasp_action(space::Space &world, amber::ObjectState &objects_state,
+step::NativeCompletion grasp_action(amber::ObjectState &objects_state,
                                     amber::space::State &space_state,
                                     const PhysicalRelationTerms &relation_terms, float reach_m,
                                     MechanicalCauses &causes, const perm::Plots &plots,
                                     const step::NativeCall &call);
-step::NativeCompletion attach_action(space::Space &world, amber::ObjectState &objects_state,
+step::NativeCompletion attach_action(amber::ObjectState &objects_state,
                                      amber::space::State &space_state,
                                      const PhysicalRelationTerms &relation_terms,
                                      const amber::perm::State &perm_state, float reach_m,
                                      MechanicalCauses &causes, const step::NativeCall &call);
-step::NativeCompletion release_action(space::Space &world, amber::ObjectState &objects_state,
+step::NativeCompletion release_action(amber::ObjectState &objects_state,
                                       amber::space::State &space_state,
                                       const PhysicalRelationTerms &relation_terms,
                                       const amber::perm::State &perm_state,
@@ -226,15 +231,14 @@ step::NativeCompletion transfer_action(amber::react::State &react_state,
                                        const amber::ObjectState &objects_state,
                                        const amber::perm::State &perm_state,
                                        const step::NativeCall &call);
-void bind_physical(react::Vm &, space::Space &, amber::ObjectState &objects_state,
-                   amber::step::State &step_state, const amber::perm::State &perm_state,
-                   std::size_t part_batch_max, amber::space::State &space_state,
-                   const amber::catalog::State &catalog_state);
+void bind_physical(react::Vm &, amber::ObjectState &objects_state, amber::step::State &step_state,
+                   const amber::perm::State &perm_state, std::size_t part_batch_max,
+                   amber::space::State &space_state, const amber::catalog::State &catalog_state);
 void declare_physical_actions(react::Terms &, react::NativeActions &);
 
-void bind_metadata(react::Vm &, const react::ValueRead &, const amber::ObjectState &objects_state,
-                   const amber::catalog::State &catalog_state,
-                   const amber::react::State &react_state, const perm::Plots &);
+void bind_metadata(const react::ValueRead &, const amber::ObjectState &objects_state,
+                   const amber::catalog::State &catalog_state, amber::react::State &react_state,
+                   const perm::Plots &);
 
 using Json = nlohmann::json;
 struct CommerceDeclarations {
@@ -305,10 +309,9 @@ step::NativeCompletion trade_cancel(perm::Trades &trades, perm::Offers &offers,
                                     PermissionFlags flags, IdentityRead identity,
                                     const lifecycle::Parts &parts, const step::NativeCall &call);
 step::NativeCompletion
-place_existing(space::Space &space, amber::ObjectState &objects_state,
-               amber::space::State &space_state, std::array<TermId, 4> relation_terms,
-               amber::perm::State &perm_state, const GeometryAssets &geometry,
-               const amber::catalog::State &catalog_state, const react::ValueRead &values,
+place_existing(amber::ObjectState &objects_state, amber::space::State &space_state,
+               std::array<TermId, 4> relation_terms, amber::perm::State &perm_state,
+               const GeometryAssets &geometry, const amber::catalog::State &catalog_state,
                PhysicsRoles roles, PhysicsDefaults defaults, amber::react::State &react_state,
                const step::NativeCall &call);
 
@@ -373,10 +376,10 @@ struct FixtureCompletion {
 };
 FixtureCompletion complete_fixture(amber::elaborate::State &elaborate_state,
                                    amber::step::State &step_state, catalog::Scripts &scripts,
-                                   amber::react::State &react_state, react::Vm &vm,
-                                   const react::ValueRead &values,
+                                   amber::react::State &react_state, const react::ValueRead &values,
                                    elaborate::RoleAccess current_role,
-                                   const elaborate::FixtureResult &result, Step now, double hz);
+                                   const elaborate::FixtureResult &result,
+                                   const amber::step::Clock &clock);
 std::string validate_request_model(const Json &);
 std::string validate_requests(const Json &);
 std::string validate_claim(const Json &);
@@ -405,9 +408,8 @@ AnswerCompletion answer_detail(elaborate::Requests &requests, catalog::AuthoredT
 AnswerCompletion refuse(elaborate::Requests &requests, catalog::AuthoredTexts &texts,
                         bool is_elaborator, const step::NativeCall &call);
 step::NativeCompletion rule_activation(catalog::Scripts &scripts, amber::react::State &react_state,
-                                       step::WorkQueues &queues, react::Vm &vm,
-                                       const react::ValueRead &values, bool may_edit_rules,
-                                       const step::NativeCall &call);
+                                       step::WorkQueues &queues, const react::ValueRead &values,
+                                       bool may_edit_rules, const step::NativeCall &call);
 
 using Json = nlohmann::json;
 std::uint32_t identifier(const Json &, std::string_view prefix);
@@ -491,7 +493,7 @@ step::NativeCompletion model_script(const step::NativeCall &call, amber::react::
                                     amber::perm::State &perm_state, TermId start_event);
 void rebind_scripts(const amber::catalog::State &catalog_state, amber::react::State &react_state,
                     const react::ValueRead &, amber::perm::State &perm_state, TermId start_event,
-                    Step, double hz, const record::Origin &, NativeCompletion &);
+                    const amber::step::Clock &clock, const record::Origin &, NativeCompletion &);
 
 } // namespace amber::step::editing
 
@@ -531,33 +533,29 @@ CatalogSelection catalog_selection(const catalog::Models &, const catalog::Param
                                    std::span<const Handle>);
 void encode_checkpoint(
     snap::Buffer &bytes, const snap::Header &header, const amber::ObjectState &objects_state,
-    const amber::react::State &react_state, const space::PhysicalRelations &physical_relations,
+    const amber::react::State &react_state, const amber::space::State &space_state,
     const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
-    const net::Profiles &profiles, const amber::step::State &step_state,
+    const amber::net::State &net_state, const amber::step::State &step_state,
     const amber::elaborate::State &elaborate_state, const std::vector<space::MotionRow> &motion,
     const std::vector<BodyCauseRow> &causes, std::uint64_t next_record,
     const CaptureSelection *selection);
 Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_state,
-                          amber::react::State &react_state,
-                          space::PhysicalRelations &physical_relations,
+                          amber::react::State &react_state, amber::space::State &space_state,
                           amber::catalog::State &catalog_state, amber::perm::State &perm_state,
-                          net::Profiles &profiles, amber::step::State &step_state,
+                          amber::net::State &net_state, amber::step::State &step_state,
                           amber::elaborate::State &elaborate_state);
-bool save_snapshot(snap::Writer &writer, SnapshotProgress &progress, const snap::Header &header,
+bool save_snapshot(snap::Writer &writer, const snap::Header &header,
                    const amber::ObjectState &objects_state, const amber::react::State &react_state,
-                   const space::PhysicalRelations &physical_relations,
+                   const amber::space::State &space_state,
                    const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
-                   const net::Profiles &profiles, const amber::step::State &step_state,
-                   const amber::elaborate::State &elaborate_state, const space::Space &space,
-                   std::uint64_t next_record);
+                   const amber::net::State &net_state, amber::step::State &step_state,
+                   const amber::elaborate::State &elaborate_state, std::uint64_t next_record);
 void flush_gaps(amber::step::State &step_state, record::Journal &journal,
                 elaborate::CaptureWriter &writer, const snap::Header &header,
-                std::size_t capture_limit, float radius_m, const react::ValueRead &values,
-                const amber::net::State &net_state, const amber::react::State &react_state,
-                const space::Space &space, const amber::ObjectState &objects_state,
-                const space::PhysicalRelations &physical_relations,
-                const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
-                amber::elaborate::State &elaborate_state);
+                const amber::Settings &settings, const amber::net::State &net_state,
+                const amber::react::State &react_state, const amber::ObjectState &objects_state,
+                const amber::space::State &space_state, const amber::catalog::State &catalog_state,
+                const amber::perm::State &perm_state, amber::elaborate::State &elaborate_state);
 CaptureSelection capture_selection(const GapDraft &gap, const react::ValueRead &values,
                                    const amber::ObjectState &objects_state,
                                    const amber::catalog::State &catalog_state,
@@ -574,20 +572,20 @@ struct IlluminationSources {
   std::unordered_map<std::uint64_t, TermId> lights, zones;
   std::unordered_set<std::uint64_t> running_lights, running_zones;
 };
-void register_illumination(IlluminationSources &, amber::space::State &space_state,
-                           const space::Space &, TransformRead,
+void register_illumination(IlluminationSources &, amber::space::State &space_state, TransformRead,
                            const amber::catalog::State &catalog_state, const react::ValueRead &,
-                           std::span<const Handle>, float default_source_radius_m, Step, double hz);
+                           std::span<const Handle>, float default_source_radius_m,
+                           const amber::step::Clock &clock);
 void move_illumination(observe::Lights &, observe::LightSubscriptions &, observe::ActiveViews &,
                        TransformRead, std::span<const Handle>);
 void retire_illumination(IlluminationSources &, observe::Lights &, observe::ZoneAmbients &,
                          observe::LightSubscriptions &, observe::ActiveViews &,
                          const space::Space &, std::span<const Handle>);
 void illumination_values_changed(IlluminationSources &, amber::space::State &space_state,
-                                 const space::Space &, const react::ValueRead &,
-                                 std::span<const FactKey>, Step, double hz);
+                                 const react::ValueRead &, std::span<const FactKey>, Step,
+                                 double hz);
 void advance_illumination(IlluminationSources &, amber::space::State &space_state,
-                          const space::Space &, const react::ValueRead &, Step, double hz);
+                          const react::ValueRead &, Step, double hz);
 void sync_illuminance_reads(observe::LightSubscriptions &, const react::Subscriptions &,
                             IdentityRead, TransformRead, TermId illuminance,
                             std::span<const Handle> consumers);
@@ -619,8 +617,9 @@ void refresh_mass(AssemblyMasses &, const react::ValueRead &, const Relation &de
                   react::DeferredEffects &);
 void retire_mass(AssemblyMasses &, react::RuntimeMeasurements &, Handle);
 void reconcile_mass(AssemblyMasses &, const react::ValueRead &, const Relation &declared_parts,
-                    react::RuntimeMeasurements &, std::span<const FactKey>, Step, double hz,
-                    const record::Origin &, react::DeferredEffects &);
+                    react::RuntimeMeasurements &, std::span<const FactKey>,
+                    const amber::step::Clock &clock, const record::Origin &,
+                    react::DeferredEffects &);
 
 void write_timers(snap::Output &, const TimerWheel &, const snap::ObjectSelection & = {});
 void read_timers(snap::Input &, TimerWheel &);
@@ -632,28 +631,27 @@ std::uint64_t read_queues(snap::Input &, WorkQueues &, Intents &);
 NativeCompletion replace_instance(amber::ObjectState &objects_state,
                                   const amber::catalog::State &catalog_state,
                                   const GeometryAssets &geometry, const react::ValueRead &values,
-                                  space::Space &space, amber::space::State &space_state,
-                                  const amber::perm::State &perm_state, PhysicsRoles roles,
-                                  PhysicsDefaults defaults, const NativeCall &call);
+                                  amber::space::State &space_state,
+                                  const amber::perm::State &perm_state, PhysicsDefaults defaults,
+                                  const NativeCall &call);
 
-void apply_custody(space::Space &, amber::ObjectState &objects_state,
-                   amber::space::State &space_state, std::array<TermId, 4> relation_terms,
-                   const perm::Plots &, std::span<const perm::CustodyChange>, NativeCompletion &);
-void change_custody(space::Space &, amber::ObjectState &objects_state,
-                    amber::space::State &space_state, std::array<TermId, 4>, const perm::Plots &,
-                    IlluminationSources &, NativeCompletion &);
+void apply_custody(amber::ObjectState &objects_state, amber::space::State &space_state,
+                   std::array<TermId, 4> relation_terms, const perm::Plots &,
+                   std::span<const perm::CustodyChange>, NativeCompletion &);
+void change_custody(amber::ObjectState &objects_state, amber::space::State &space_state,
+                    std::array<TermId, 4>, const perm::Plots &, IlluminationSources &,
+                    NativeCompletion &);
 void project_visibility(IlluminationSources &, amber::space::State &space_state,
-                        net::ReplicationIndex &, const space::Space &, TransformRead,
+                        net::ReplicationIndex &, TransformRead,
                         const amber::catalog::State &catalog_state, const react::ValueRead &,
-                        const NativeCompletion &, float source_radius_m, Step, double hz);
+                        const NativeCompletion &, float source_radius_m,
+                        const amber::step::Clock &clock);
 
-NativeCompletion revise_model(amber::ObjectState &objects_state,
-                              amber::catalog::State &catalog_state, react::ModelSettings &settings,
-                              catalog::MeasurementBindings measurement_roles,
-                              const GeometryAssets &geometry, const react::ValueRead &values,
-                              space::Space &space, amber::space::State &space_state,
-                              amber::perm::State &perm_state, PhysicsRoles roles,
-                              PhysicsDefaults defaults, const NativeCall &call);
+NativeCompletion
+revise_model(amber::ObjectState &objects_state, amber::catalog::State &catalog_state,
+             amber::react::State &react_state, catalog::MeasurementBindings measurement_roles,
+             const GeometryAssets &geometry, amber::space::State &space_state,
+             amber::perm::State &perm_state, PhysicsDefaults defaults, const NativeCall &call);
 std::string validate_model_edit(const nlohmann::json &);
 TermId declare_model_edit(react::Terms &, react::NativeActions &);
 // Direct lifecycle domain operations; callers compose existing owner functions in order.
@@ -678,7 +676,7 @@ void publish_object_changes(net::Sessions &, net::SessionViews &, IdentityRead, 
 
 void reconcile_effects(const react::ValueRead &values, amber::react::State &react_state,
                        amber::step::State &step_state, const Relation &declared_parts,
-                       const catalog::Scripts &scripts, Step now, double hz,
+                       const catalog::Scripts &scripts, const amber::step::Clock &clock,
                        react::DeferredEffects &effects, const record::Origin &origin);
 void record_send_overflow(record::Journal &, const net::SendOverflow &, Step);
 void publish_effects(react::DeferredEffects &&, const record::Origin &, Step, WorkQueues &,
@@ -739,7 +737,8 @@ void install_money(const Json &, const Symbols &, IdentityRead, AuthorityRead,
                    const perm::Players &, const perm::Groups &, perm::Ledger &);
 void install_grants(const Json &, const Symbols &, const react::ValueRead &, AuthorityRead,
                     amber::perm::State &perm_state, const amber::catalog::State &catalog_state,
-                    const amber::react::State &react_state, const net::Profiles &, Step, double hz);
+                    const amber::react::State &react_state, const net::Profiles &,
+                    const amber::step::Clock &clock);
 void install_script_state(const Json &, const Symbols &, react::ScriptStates &);
 void queue_bootstrap(const Json &, const Symbols &, const react::Terms &, step::WorkQueues &,
                      std::size_t event_limit);
@@ -783,23 +782,24 @@ InputReply submit_authoring(react::authoring::Worker &, const react::Terms &,
                             const catalog::RegistryDocument &, Input &);
 void deliver_input(Inputs &, net::Sessions &, observe::Hearing &, std::uint32_t event_limit,
                    std::uint64_t input, ActionOutcome);
-std::pair<NativeCompletion, record::Origin> complete_authoring(
-    amber::catalog::State &catalog_state, amber::react::State &react_state, react::Vm &vm,
-    GeometryAssets &geometry, space::Space &space, record::Journal &journal, const Input &input,
-    react::authoring::Completion completion, bool session_live, Step now, double hz,
-    const std::filesystem::path &asset_root, const std::filesystem::path &script_root);
+std::pair<NativeCompletion, record::Origin>
+complete_authoring(amber::catalog::State &catalog_state, amber::react::State &react_state,
+                   amber::step::State &step_state, space::Space &space, record::Journal &journal,
+                   const Input &input, react::authoring::Completion completion, bool session_live,
+                   const std::filesystem::path &asset_root,
+                   const std::filesystem::path &script_root);
 
 void declare_construction_actions(react::Terms &, react::NativeActions &);
 NativeCompletion create_instance(amber::ObjectState &objects_state,
                                  const amber::catalog::State &catalog_state,
                                  const GeometryAssets &geometry, const react::ValueRead &values,
-                                 space::Space &space, amber::space::State &space_state,
+                                 amber::space::State &space_state,
                                  const amber::perm::State &perm_state, PhysicsRoles roles,
                                  PhysicsDefaults defaults, const NativeCall &call);
 NativeCompletion remove_instance(const lifecycle::Parts &, const react::ValueRead &, AuthorityRead,
                                  AttributionRead, const perm::Ledger &, const catalog::Models &,
                                  const catalog::Scripts &, const NativeCall &);
-void install_declared_attachments(space::Space &space, amber::ObjectState &objects_state,
+void install_declared_attachments(amber::ObjectState &objects_state,
                                   amber::space::State &space_state,
                                   std::span<const Handle> objects);
 step::NativeCompletion issue(perm::Ledger &ledger, perm::Grants &grants,

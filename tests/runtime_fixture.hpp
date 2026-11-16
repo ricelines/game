@@ -42,8 +42,8 @@ struct Fixture {
   RandomStates &random = react_state.random;
   DeferredEffects effects;
   std::optional<ValueRead> projection;
-  Vm vm;
-  explicit Fixture(double handler_ms = 5) : vm({4096, 50, handler_ms, 64}) {
+  Vm &vm = react_state.vm;
+  explicit Fixture(double handler_ms = 5) : react_state({4096, 50, handler_ms, 64}) {
     ObjectInit init;
     init.model = 1;
     init.material = 8;
@@ -112,8 +112,8 @@ struct Fixture {
     set_state(properties, processes, terms.rows[term], object, Value(value), now, 20, effects);
   }
   void bind(ScriptId id, Handle object, SyncMode mode = SyncMode::Initial) {
-    (void)sync_watches(react_state, values(), {object, id}, scripts.rows[id].declaration, 0, 20, {},
-                       mode);
+    (void)sync_watches(react_state, values(), {object, id}, scripts.rows[id].declaration,
+                       amber::step::Clock{.step = 0, .hz = 20}, {}, mode);
   }
   std::vector<InvocationPlan> changed(FactKey fact, Step now = 0) {
     auto changes = refresh_dependencies(subscriptions, values(), fact, now, 20, {});

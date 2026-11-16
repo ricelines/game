@@ -138,9 +138,10 @@ WatchPlan plan_background(amber::react::State &react_state, const react::ValueRe
         const auto allowed = react::rule_watch_terms(rules, values, consumer, item.script, now, hz);
         if (std::find(allowed.begin(), allowed.end(), item.trigger) == allowed.end())
           continue;
-        auto changes = react::sync_watches(
-            react_state, values, {consumer, item.script}, declaration, now, hz, item.origin,
-            react::SyncMode::Change, std::span<const TermId>(allowed));
+        auto changes =
+            react::sync_watches(react_state, values, {consumer, item.script}, declaration,
+                                amber::step::Clock{.step = now, .hz = hz}, item.origin,
+                                react::SyncMode::Change, std::span<const TermId>(allowed));
         result.changes.dirty.insert(result.changes.dirty.end(), changes.dirty.begin(),
                                     changes.dirty.end());
         result.changes.timers.insert(result.changes.timers.end(), changes.timers.begin(),

@@ -10,8 +10,7 @@ using test_runtime::require;
 // Actual input tables for direct construction/replacement tests, without an execution stack.
 struct Fixture {
   amber::step::State step_state{8};
-  amber::space::State space_state{float(
-      toml::parse_file(AMBER_CONFIG_PATH)["perception"]["LIGHT_CELL_M"].value<double>().value())};
+  amber::space::State space_state;
   amber::perm::State perm_state;
 
   test_runtime::Fixture f;
@@ -28,7 +27,7 @@ struct Fixture {
   step::GeometryAssets &geometry = step_state.geometry;
   space::PhysicalRelations &physical = space_state.physical_relations;
   std::vector<space::RelationChange> &physical_changes = space_state.relation_changes;
-  space::Space world;
+  space::Space &world = space_state.space;
   perm::OwnerLimits &limits = perm_state.owner_limits;
   perm::Players &players = perm_state.players;
   perm::Grants &grants = perm_state.grants;
@@ -41,11 +40,16 @@ struct Fixture {
   ScriptId script = 0;
   space::GeometryId solid = 0;
   explicit Fixture(std::uint32_t capacity = 64)
-      : f(250), world([&] {
-          auto settings = testspace::settings();
-          settings.max_bodies = capacity;
-          return settings;
-        }()) {
+      : space_state(
+            [&] {
+              auto settings = testspace::settings();
+              settings.max_bodies = capacity;
+              return settings;
+            }(),
+            float(toml::parse_file(AMBER_CONFIG_PATH)["perception"]["LIGHT_CELL_M"]
+                      .value<double>()
+                      .value())),
+        f(250) {
     f.terms.rows.resize(32);
     for (auto [id, role] :
          {std::pair{30u, MeasurementRole::Mass}, std::pair{31u, MeasurementRole::Runtime}}) {
@@ -58,6 +62,8 @@ struct Fixture {
       f.terms.by_name[term.name] = id;
     }
     f.projection->density = 10;
+    f.catalog_state.mechanical.values = {{"physics", {{"density", 10}, {"transmission", 11}}},
+                                         {"measurements", {{"density", 10}}}};
     for (TermId id : {10u, 11u}) {
       f.terms.rows[id].id = id;
       f.terms.rows[id].name = id == 10 ? "novel.density" : "novel.transmission";
@@ -103,7 +109,7 @@ struct Fixture {
     f.assets.rows[1].volume = 1;
     f.assets.rows[2].volume = .016;
     step::declare_construction_actions(f.terms, declarations);
-    step::bind_metadata(f.vm, f.values(), f.objects_state, f.catalog_state, f.react_state, plots);
+    step::bind_metadata(f.values(), f.objects_state, f.catalog_state, f.react_state, plots);
     f.objects.position[f.a.slot()] = {0, -2, 0};
     f.state(f.a, 1, 10);
   }
@@ -121,13 +127,13 @@ struct Fixture {
     return {{caller, 0, target, {}}, std::move(arguments), f.a, 0, 20, {}};
   }
   step::NativeCompletion create(nlohmann::json arguments) {
-    return step::create_instance(f.objects_state, f.catalog_state, geometry, *f.projection, world,
+    return step::create_instance(f.objects_state, f.catalog_state, geometry, *f.projection,
                                  space_state, perm_state, {10, 11}, {.6f, 0},
                                  call({}, std::move(arguments)));
   }
   step::NativeCompletion replace(Handle target, nlohmann::json arguments) {
-    return step::replace_instance(f.objects_state, f.catalog_state, geometry, *f.projection, world,
-                                  space_state, perm_state, {10, 11}, {.6f, 0},
+    return step::replace_instance(f.objects_state, f.catalog_state, geometry, *f.projection,
+                                  space_state, perm_state, {.6f, 0},
                                   call(target, std::move(arguments)));
   }
   GrantId grant(Handle object, perm::Rights rights) {

@@ -143,9 +143,10 @@ record::Event birth_record(const step::NativeCall &call, Handle object,
 }
 } // namespace structural_detail
 using namespace structural_detail;
-void install_declared_attachments(space::Space &space, amber::ObjectState &objects_state,
+void install_declared_attachments(amber::ObjectState &objects_state,
                                   amber::space::State &space_state,
                                   std::span<const Handle> objects) {
+
   auto transforms = amber::transforms(objects_state.objects);
   auto parents = amber::parents(objects_state.objects);
 
@@ -156,7 +157,7 @@ void install_declared_attachments(space::Space &space, amber::ObjectState &objec
     const auto *declared = declared_parts.in.get(h.slot());
     if (!parent || !declared || std::ranges::find(*declared, parent) == declared->end())
       continue;
-    const auto result = space::attach(space, objects_state, space_state,
+    const auto result = space::attach(objects_state, space_state,
                                       {h, parent, relative_pose(transforms, h, parent), false});
     if (result.status != space::Status::Ok)
       throw std::logic_error("declared attachment installation failed: " +
@@ -166,9 +167,11 @@ void install_declared_attachments(space::Space &space, amber::ObjectState &objec
 NativeCompletion create_instance(amber::ObjectState &objects_state,
                                  const amber::catalog::State &catalog_state,
                                  const GeometryAssets &geometry, const react::ValueRead &values,
-                                 space::Space &space, amber::space::State &space_state,
+                                 amber::space::State &space_state,
                                  const amber::perm::State &perm_state, PhysicsRoles roles,
                                  PhysicsDefaults defaults, const NativeCall &call) {
+  auto &space = space_state.space;
+
   auto &objects = objects_state.objects;
   auto &parts = objects_state.parts;
   auto &declared_parts = objects_state.declared_parts;
@@ -231,7 +234,7 @@ NativeCompletion create_instance(amber::ObjectState &objects_state,
     const auto &asset = assets.rows.at(effective.hash);
     auto definition =
         describe_physics(geometry, asset, values, {model, params, material, plot->id, {}}, Static,
-                         roles, defaults, call.step, call.hz);
+                         roles, defaults, amber::step::Clock{.step = call.step, .hz = call.hz});
     if (part) {
       definition.body.motion = space::Motion::Kinematic;
       definition.mode_flags = ScriptedMotion;
@@ -260,7 +263,7 @@ NativeCompletion create_instance(amber::ObjectState &objects_state,
   auto created = lifecycle::instantiate(objects, parts, declared_parts, assembly, init);
   for (std::size_t i = 0; i < created.objects.size(); ++i)
     install_physics(space, identity, transforms, flags, created.objects[i], definitions[i]);
-  install_declared_attachments(space, objects_state, space_state, created.objects);
+  install_declared_attachments(objects_state, space_state, created.objects);
   perm::update_plots(identity, transforms, membership, plots, created.objects, true);
   out.created_objects = created.objects;
   out.visible_objects = created.objects;

@@ -61,7 +61,10 @@ void import_geometry_asset(GeometryAssets &geometries, space::Space &space,
 PhysicalDefinition describe_physics(const GeometryAssets &geometries, const catalog::Asset &asset,
                                     const react::ValueRead &values, PhysicalSubject subject,
                                     std::uint32_t flags, PhysicsRoles roles,
-                                    PhysicsDefaults defaults, Step now, double hz) {
+                                    PhysicsDefaults defaults, const amber::step::Clock &clock) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   const auto &geometry = geometries.rows.at(asset.hash);
   auto intrinsic = [&](TermId id) {
     const auto &term = values.terms.rows.at(id);
@@ -183,13 +186,22 @@ void install_physics(space::Space &space, IdentityRead identity, TransformRead t
   }
 }
 std::vector<Handle>
-initialize_physics(space::Space &space, amber::step::State &step_state,
-                   const amber::catalog::State &catalog_state, const react::ValueRead &values,
-                   amber::ObjectState &objects_state, const perm::Players &players,
-                   amber::space::State &space_state, std::span<const Handle> initial,
-                   std::span<const space::MotionRow> restored_motion,
-                   std::span<const BodyCauseRow> restored_causes, PhysicsRoles roles,
-                   PhysicsDefaults defaults, bool restored, Step now, double hz) {
+initialize_physics(amber::step::State &step_state, const amber::catalog::State &catalog_state,
+                   const amber::react::State &react_state, amber::ObjectState &objects_state,
+                   const perm::Players &players, amber::space::State &space_state,
+                   std::span<const Handle> initial, const checkpoint::Decoded &decoded,
+                   PhysicsDefaults defaults, bool restored) {
+  const auto values = react::value_read(objects_state, catalog_state, react_state, space_state);
+  const auto &clock = step_state.clock;
+  const auto &restored_motion = decoded.motion;
+  const auto &restored_causes = decoded.causes;
+  const auto &physics = catalog_state.mechanical.values.at("physics");
+  const PhysicsRoles roles{
+      physics.at("density").get<TermId>(), physics.at("transmission").get<TermId>(),
+      physics.value("friction", TermId{}), physics.value("restitution", TermId{})};
+
+  auto &space = space_state.space;
+
   auto &geometry = step_state.geometry;
   auto &models = catalog_state.models;
   auto &parameters = catalog_state.parameters;
@@ -221,7 +233,7 @@ initialize_physics(space::Space &space, amber::step::State &step_state,
     auto definition = describe_physics(geometry, asset, values,
                                        {identity.model[slot], values.params[slot],
                                         identity.material[slot], values.plots[slot], object},
-                                       identity.flags[slot], roles, defaults, now, hz);
+                                       identity.flags[slot], roles, defaults, clock);
     if (declared_parts.in.get(slot)) {
       definition.body.motion = space::Motion::Kinematic;
       definition.mode_flags = ScriptedMotion;
@@ -230,7 +242,7 @@ initialize_physics(space::Space &space, amber::step::State &step_state,
     visible.push_back(object);
   }
   if (!restored)
-    install_declared_attachments(space, objects_state, space_state, initial);
+    install_declared_attachments(objects_state, space_state, initial);
   if (restored) {
     space::rebuild_attachments(space, identity, transforms, parents, physical.attached_to);
     for (auto root : initial)

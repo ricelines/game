@@ -12,7 +12,8 @@ namespace re = react;
 using testspace::require;
 void actual_lighting_watch_sampling() {
   test_runtime::Fixture f;
-  space::Space world(testspace::settings());
+  space::State space_state(testspace::settings(), 8);
+  auto &world = space_state.space;
   f.terms.rows[2].source = re::Source::Measured;
   f.terms.rows[2].measurement = re::MeasurementRole::Runtime;
   f.terms.rows[5].kind = re::Kind::Quantity;
@@ -41,7 +42,6 @@ void actual_lighting_watch_sampling() {
   const auto watcher = f.add(R"(return {kind='model',watches={'novel.result'},
     on={['novel.result']=function(self)end}})");
   f.bind(watcher, f.a);
-  space::State space_state(8);
   auto &points = space_state.light_subscriptions;
   auto &views = space_state.active_views;
   ob::track_view(views, 1, {30, 0, 1}, 1);
@@ -65,8 +65,9 @@ void actual_lighting_watch_sampling() {
       {"site", {0, 0, 0}}, {"intensity", "novel.heat"}, {"range", 40}};
   assets.rows["3"].manifest["bindings"]["zone"] = {{"ambient", "novel.ready"}, {"priority", 1}};
   auto install = [&](Handle object, Step now) {
-    bi::register_illumination(sources, space_state, world, transforms(f.objects), f.catalog_state,
-                              values, std::span(&object, 1), .1f, now, 20);
+    bi::register_illumination(sources, space_state, transforms(f.objects), f.catalog_state, values,
+                              std::span(&object, 1), .1f,
+                              amber::step::Clock{.step = now, .hz = 20});
   };
   install(f.c, 0);
   install(zone, 0);
@@ -99,13 +100,13 @@ void actual_lighting_watch_sampling() {
   require(near(sample(2), 12), "moving actual occluder away restores subscribed lux");
   const auto changed = [&](Handle object, TermId term, Step now) {
     const FactKey fact{object, term};
-    bi::illumination_values_changed(sources, space_state, world, values, std::span(&fact, 1), now,
-                                    20);
+    bi::illumination_values_changed(sources, space_state, values, std::span(&fact, 1), now, 20);
   };
   const auto advance = [&](Step now) {
-    bi::advance_illumination(sources, space_state, world, values, now, 20);
+    bi::advance_illumination(sources, space_state, values, now, 20);
   };
-  re::set_rate(f.react_state, f.terms.rows[1], f.c, -9000, 0, 9000, 0, 20, f.effects);
+  re::set_rate(f.react_state, f.terms.rows[1], f.c, -9000, 0, 9000,
+               amber::step::Clock{.step = 0, .hz = 20}, f.effects);
   install(f.c, 0);
   require(sources.running_lights.contains(f.c.bits),
           "restored active light process is indexed without needing a new state mutation");
@@ -115,7 +116,8 @@ void actual_lighting_watch_sampling() {
   advance(20);
   require(sources.running_lights.empty() && near(sample(20), 2),
           "terminal process sample publishes darkness before stopping periodic work");
-  re::set_rate(f.react_state, f.terms.rows[1], f.c, 9000, 0, 9000, 20, 20, f.effects);
+  re::set_rate(f.react_state, f.terms.rows[1], f.c, 9000, 0, 9000,
+               amber::step::Clock{.step = 20, .hz = 20}, f.effects);
   changed(f.c, 1, 20);
   advance(30);
   require(!sources.running_lights.empty() && near(sample(30), 7),
@@ -125,7 +127,8 @@ void actual_lighting_watch_sampling() {
   f.state(zone, 5, 20, 40);
   changed(zone, 5, 40);
   require(near(sample(40), 30), "live zone ambient state invalidates its real sensor region");
-  re::set_rate(f.react_state, f.terms.rows[5], zone, 20, 0, 40, 40, 20, f.effects);
+  re::set_rate(f.react_state, f.terms.rows[5], zone, 20, 0, 40,
+               amber::step::Clock{.step = 40, .hz = 20}, f.effects);
   install(zone, 40);
   require(sources.running_zones.contains(zone.bits),
           "restored or rebound ambient process is indexed from current binding");

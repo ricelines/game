@@ -17,8 +17,7 @@ template <class F> void rejects(F action, const char *message) {
   throw std::runtime_error(message);
 }
 struct Fixture {
-  amber::space::State space_state{float(
-      toml::parse_file(AMBER_CONFIG_PATH)["perception"]["LIGHT_CELL_M"].value<double>().value())};
+  amber::space::State space_state;
   amber::perm::State perm_state;
   amber::step::State step_state{8};
 
@@ -27,7 +26,7 @@ struct Fixture {
   amber::react::State &react_state = f.react_state;
   amber::catalog::State &catalog_state = f.catalog_state;
 
-  space::Space world;
+  space::Space &world = space_state.space;
   lifecycle::Parts &parts = objects_state.parts;
   Relation &declared = objects_state.declared_parts;
   std::vector<space::RelationChange> &physical_changes = space_state.relation_changes;
@@ -50,11 +49,15 @@ struct Fixture {
   std::size_t mailbox_max = 1;
   std::array<Handle, 2> bodies;
   explicit Fixture(std::uint32_t capacity = 64)
-      : world([&] {
-          auto s = testspace::settings();
-          s.max_bodies = capacity;
-          return s;
-        }()) {
+      : space_state(
+            [&] {
+              auto s = testspace::settings();
+              s.max_bodies = capacity;
+              return s;
+            }(),
+            float(toml::parse_file(AMBER_CONFIG_PATH)["perception"]["LIGHT_CELL_M"]
+                      .value<double>()
+                      .value())) {
     players.rows.resize(4);
     ledger.balance = {{perm::Account::player(1), 100}, {perm::Account::player(2), 100}};
     plots.rows.resize(3);
@@ -70,6 +73,7 @@ struct Fixture {
       f.terms.rows[id].measurement = role;
     }
     f.projection->density = 10;
+    catalog_state.mechanical.values["measurements"] = {{"density", 10}};
     f.assets.rows[1].volume = 1;
     f.assets.rows[2].volume = .016;
     for (auto id : {10u, 11u}) {
@@ -145,9 +149,9 @@ struct Fixture {
     for (auto h : created.objects) {
       const auto model = f.objects.model[h.slot()];
       const auto &asset = assets.rows.at(f.models.rows[model].asset);
-      const auto definition =
-          step::describe_physics(geometry, asset, *f.projection, {model, 0, 8, init.plot, h},
-                                 Static, {10, 11}, {.6f, 0}, 0, 20);
+      const auto definition = step::describe_physics(
+          geometry, asset, *f.projection, {model, 0, 8, init.plot, h}, Static, {10, 11}, {.6f, 0},
+          amber::step::Clock{.step = 0, .hz = 20});
       step::install_physics(world, identity(f.objects), transforms(f.objects),
                             space_flags(f.objects), h, definition);
       permission_flags(f.objects).set(h.slot(), NoCopy);
@@ -155,10 +159,10 @@ struct Fixture {
 
         const auto relative =
             f.objects.position[h.slot()] - f.objects.position[created.root.slot()];
-        require(space::attach(world, f.objects_state, space_state,
-                              {h, created.root, {relative, {}}, false})
-                        .status == space::Status::Ok,
-                "declared fixture part attaches");
+        require(
+            space::attach(f.objects_state, space_state, {h, created.root, {relative, {}}, false})
+                    .status == space::Status::Ok,
+            "declared fixture part attaches");
       }
     }
     return created;
@@ -172,23 +176,21 @@ struct Fixture {
         step::native_exchange(objects_state, perm_state, world, delivery, mailbox_max, operation,
                               {{actor, action, target, {}}, std::move(args), {}, 20, 20, {}});
     const auto custody = std::move(out.custody);
-    step::apply_custody(world, f.objects_state, space_state, {0, 0, 3, 0}, plots, custody, out);
+    step::apply_custody(f.objects_state, space_state, {0, 0, 3, 0}, plots, custody, out);
     return out;
   }
   step::NativeCompletion place(Caller actor, nlohmann::json args, Handle target) {
     return step::place_existing(
-        world, f.objects_state, space_state, {0, 0, 3, 0}, perm_state, geometry, f.catalog_state,
-        *f.projection, {10, 11}, {.6f, 0}, f.react_state,
+        f.objects_state, space_state, {0, 0, 3, 0}, perm_state, geometry, f.catalog_state, {10, 11},
+        {.6f, 0}, f.react_state,
         {{actor, ids.place_existing, target, {}}, std::move(args), {}, 20, 20, {}});
   }
 
   bool visible(Handle h) { return space::bounds(world, identity(f.objects), h).has_value(); }
   void store(Handle h, PlayerId owner) {
     auto closure = lifecycle::collect(parts, identity(f.objects), h);
-    amber::space::State space_state{float(
-        toml::parse_file(AMBER_CONFIG_PATH)["perception"]["LIGHT_CELL_M"].value<double>().value())};
 
-    require(space::custody(world, f.objects_state, h, bodies[owner - 1], space_state,
+    require(space::custody(f.objects_state, h, bodies[owner - 1], space_state,
                            std::span{closure}.subspan(1))
                     .status == space::Status::Ok,
             "fixture inventory custody");
@@ -405,7 +407,7 @@ void gifts_bounce_and_keep_unrelated_seated_bodies_alive() {
   Fixture f;
   const auto item = f.item(1, {-4, 0, 0});
 
-  require(space::attach(f.world, f.f.objects_state, f.space_state,
+  require(space::attach(f.f.objects_state, f.space_state,
                         {f.bodies[1], item.root, {{0, 0, 1}, {}}, false})
                   .status == space::Status::Ok,
           "unrelated occupant really attaches to gifted furniture");
@@ -427,7 +429,7 @@ void cancelling_a_visible_held_trade_keeps_its_escrow_pose() {
   Fixture f;
   const auto item = f.item(1, {-4, 0, 0}, false);
 
-  require(space::attach(f.world, f.f.objects_state, f.space_state,
+  require(space::attach(f.f.objects_state, f.space_state,
                         {item.root, f.bodies[0], {{.5f, 0, 1}, {}}, true})
                   .status == space::Status::Ok,
           "visible held fixture is a real physical grasp");
@@ -567,10 +569,10 @@ void rebind_invalidates_only_affected_sales_with_actual_new_parts() {
   f.parts.set(item.root.slot(), std::move(parts));
   lifecycle::rebuild_declared_parts(f.parts, identity(f.f.objects), f.declared);
 
-  require(space::attach(f.world, f.f.objects_state, f.space_state,
-                        {added, item.root, {{0, 1, 0}, {}}, false})
-                  .status == space::Status::Ok,
-          "new definition part has real native geometry and attachment");
+  require(
+      space::attach(f.f.objects_state, f.space_state, {added, item.root, {{0, 1, 0}, {}}, false})
+              .status == space::Status::Ok,
+      "new definition part has real native geometry and attachment");
   permission_flags(f.f.objects).set(added.slot(), Escrow);
   const auto old_pose = f.f.objects.position[item.root.slot()];
   const auto balances = f.ledger.balance;
@@ -606,7 +608,7 @@ void rebind_trade_keeps_current_custody_at_full_capacity() {
   const auto stored = f.item(2, {4, 0, 0});
   f.store(stored.root, 2);
 
-  require(space::attach(f.world, f.f.objects_state, f.space_state,
+  require(space::attach(f.f.objects_state, f.space_state,
                         {held.root, f.bodies[0], {{.5f, 0, 1}, {}}, true})
                   .status == space::Status::Ok,
           "trade fixture uses a visible physical grasp");
@@ -652,8 +654,7 @@ void login_delivers_complete_mailbox_without_native_capacity_or_identity_changes
   auto deliver = [&](Handle body, Step now) {
     delivered = cm::deliver_mailbox(f.players, f.f.objects_state, f.world, 2, body, now);
     const auto custody = std::move(delivered.custody);
-    cm::apply_custody(f.world, f.f.objects_state, f.space_state, {0, 0, 3, 0}, f.plots, custody,
-                      delivered);
+    cm::apply_custody(f.f.objects_state, f.space_state, {0, 0, 3, 0}, f.plots, custody, delivered);
     return delivered.reply.at("delivered").get<unsigned>();
   };
   bool wrong_body = false;

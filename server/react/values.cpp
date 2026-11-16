@@ -6,6 +6,30 @@
 #include <stdexcept>
 
 namespace amber::react {
+ValueRead value_read(const ObjectState &objects, const catalog::State &catalog, const State &react,
+                     const space::State &) {
+  // The relation projection is already bound to the authored and physical owner tables.
+  const auto measurements =
+      catalog.mechanical.values.value("measurements", nlohmann::json::object());
+  return {react.terms,
+          identity(objects.objects),
+          objects.objects.plot,
+          objects.objects.params,
+          react.materials,
+          catalog.baked_measurements,
+          react.properties,
+          react.processes,
+          react.instance_settings,
+          react.model_settings,
+          react.plot_settings,
+          react.world_settings,
+          react.shared,
+          react.relations,
+          react.runtime_measurements,
+          measurements.value("density", TermId{}),
+          measurements.value("capacity", TermId{})};
+}
+
 namespace {
 Answer lookup(const Values &values, TermId term) {
   auto found = values.find(term);
@@ -163,7 +187,10 @@ bool set_state(Properties &props, Processes &processes, const Term &term, Handle
   return changed;
 }
 bool set_rate(amber::react::State &react_state, const Term &term, Handle self, double rate,
-              double lo, double hi, Step now, double hz, DeferredEffects &effects) {
+              double lo, double hi, const amber::step::Clock &clock, DeferredEffects &effects) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &props = react_state.properties;
   auto &processes = react_state.processes;
 
@@ -385,7 +412,11 @@ std::vector<Demand> divide(const Shared &supply, const Shared &demand, Combine c
 std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, Combine combine,
                                     const PriorityValues &priority, Handle subject,
                                     TermId supply_term, TermId demand_term,
-                                    amber::react::State &react_state, Step now, double hz) {
+                                    amber::react::State &react_state,
+                                    const amber::step::Clock &clock) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &allocations = react_state.allocations;
   auto &meters = react_state.meters;
 

@@ -245,9 +245,11 @@ std::vector<std::uint64_t> take_dirty_views(ActiveViews &views) {
   views.dirty.clear();
   return out;
 }
-Scan scan(const space::Space &world, const amber::ObjectState &objects_state,
-          const Observer &observer, Handle held, const Settings &settings,
-          amber::space::State &space_state, double world_lux, std::size_t requested) {
+Scan scan(const amber::ObjectState &objects_state, const Observer &observer, Handle held,
+          const Settings &settings, amber::space::State &space_state, double world_lux,
+          std::size_t requested) {
+  auto &world = space_state.space;
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(std::as_const(objects_state.objects));
   auto &parts = objects_state.declared_parts;

@@ -1,3 +1,4 @@
+#include "settings.hpp"
 #include "step.hpp"
 #include <algorithm>
 #include <set>
@@ -259,12 +260,15 @@ CatalogSelection catalog_selection(const catalog::Models &models,
 }
 void encode_checkpoint(
     snap::Buffer &bytes, const snap::Header &header, const amber::ObjectState &objects_state,
-    const amber::react::State &react_state, const space::PhysicalRelations &physical_relations,
+    const amber::react::State &react_state, const amber::space::State &space_state,
     const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
-    const net::Profiles &profiles, const amber::step::State &step_state,
+    const amber::net::State &net_state, const amber::step::State &step_state,
     const amber::elaborate::State &elaborate_state, const std::vector<space::MotionRow> &motion,
     const std::vector<BodyCauseRow> &causes, std::uint64_t next_record,
     const CaptureSelection *selection) {
+  auto &physical_relations = space_state.physical_relations;
+  auto &profiles = net_state.profiles;
+
   auto &objects = objects_state.objects;
 
   auto &authored_relations = react_state.authored_relations;
@@ -377,11 +381,13 @@ void encode_checkpoint(
   snap::finish(out, bytes);
 }
 Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_state,
-                          amber::react::State &react_state,
-                          space::PhysicalRelations &physical_relations,
+                          amber::react::State &react_state, amber::space::State &space_state,
                           amber::catalog::State &catalog_state, amber::perm::State &perm_state,
-                          net::Profiles &profiles, amber::step::State &step_state,
+                          amber::net::State &net_state, amber::step::State &step_state,
                           amber::elaborate::State &elaborate_state) {
+  auto &physical_relations = space_state.physical_relations;
+  auto &profiles = net_state.profiles;
+
   auto &objects = objects_state.objects;
   auto &properties = react_state.properties;
   auto &processes = react_state.processes;
@@ -493,13 +499,16 @@ Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_st
   }
   return result;
 }
-bool save_snapshot(snap::Writer &writer, SnapshotProgress &progress, const snap::Header &header,
+bool save_snapshot(snap::Writer &writer, const snap::Header &header,
                    const amber::ObjectState &objects_state, const amber::react::State &react_state,
-                   const space::PhysicalRelations &physical_relations,
+                   const amber::space::State &space_state,
                    const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
-                   const net::Profiles &profiles, const amber::step::State &step_state,
-                   const amber::elaborate::State &elaborate_state, const space::Space &space,
-                   std::uint64_t next_record) {
+                   const amber::net::State &net_state, amber::step::State &step_state,
+                   const amber::elaborate::State &elaborate_state, std::uint64_t next_record) {
+
+  auto &space = space_state.space;
+  auto &progress = step_state.snapshot_progress;
+
   auto &objects = objects_state.objects;
 
   auto &mechanical_causes = step_state.mechanical_causes;
@@ -512,8 +521,8 @@ bool save_snapshot(snap::Writer &writer, SnapshotProgress &progress, const snap:
   std::vector<space::MotionRow> motion;
   std::vector<BodyCauseRow> causes;
   sample_motion(space, mechanical_causes, identity(objects), nullptr, motion, causes);
-  encode_checkpoint(*bytes, header, objects_state, react_state, physical_relations, catalog_state,
-                    perm_state, profiles, step_state, elaborate_state, motion, causes, next_record,
+  encode_checkpoint(*bytes, header, objects_state, react_state, space_state, catalog_state,
+                    perm_state, net_state, step_state, elaborate_state, motion, causes, next_record,
                     nullptr);
   progress.pause_max_ms =
       std::max(progress.pause_max_ms,
@@ -575,18 +584,21 @@ CaptureSelection capture_selection(const GapDraft &gap, const react::ValueRead &
 }
 void flush_gaps(amber::step::State &step_state, record::Journal &journal,
                 elaborate::CaptureWriter &writer, const snap::Header &header,
-                std::size_t capture_limit, float radius_m, const react::ValueRead &values,
-                const amber::net::State &net_state, const amber::react::State &react_state,
-                const space::Space &space, const amber::ObjectState &objects_state,
-                const space::PhysicalRelations &physical_relations,
-                const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
-                amber::elaborate::State &elaborate_state) {
+                const amber::Settings &settings, const amber::net::State &net_state,
+                const amber::react::State &react_state, const amber::ObjectState &objects_state,
+                const amber::space::State &space_state, const amber::catalog::State &catalog_state,
+                const amber::perm::State &perm_state, amber::elaborate::State &elaborate_state) {
+  const auto values =
+      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+
+  auto &space = space_state.space;
+  const auto capture_limit = settings.gap_captures;
+  const auto radius_m = settings.capture_m;
+
   auto &pending = step_state.gaps;
 
   auto &mechanical_causes = step_state.mechanical_causes;
   auto &objects = objects_state.objects;
-
-  auto &profiles = net_state.profiles;
 
   auto &requests = elaborate_state.requests;
   auto &gap_counts = elaborate_state.gap_counts;
@@ -619,9 +631,9 @@ void flush_gaps(amber::step::State &step_state, record::Journal &journal,
         std::vector<BodyCauseRow> causes;
         sample_motion(space, mechanical_causes, id, &selected, motion, causes);
         snap::Buffer bytes;
-        encode_checkpoint(bytes, header, objects_state, react_state, physical_relations,
-                          catalog_state, perm_state, profiles, step_state, elaborate_state, motion,
-                          causes, journal.next_id(), &selected);
+        encode_checkpoint(bytes, header, objects_state, react_state, space_state, catalog_state,
+                          perm_state, net_state, step_state, elaborate_state, motion, causes,
+                          journal.next_id(), &selected);
         const auto hash = writer.submit(std::move(bytes));
         captures.rows.try_emplace(
             hash, elaborate::CaptureRef{hash, {}, elaborate::CaptureStatus::Pending, {}});

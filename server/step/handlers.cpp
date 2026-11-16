@@ -1,8 +1,7 @@
 #include "action_private.hpp"
 namespace amber::step {
-ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &execution, react::Vm &vm,
-                                  react::State &react_state, const react::ValueRead &values,
-                                  const ObjectState &objects_state,
+ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &execution, react::State &react_state,
+                                  const react::ValueRead &values, const ObjectState &objects_state,
                                   const catalog::State &catalog_state, record::Journal &journal) {
   while (!execution.empty()) {
     if (auto *action = std::get_if<ActionRun>(&execution.back())) {
@@ -16,8 +15,8 @@ ExecutionFrame *advance_execution(std::deque<ExecutionFrame> &execution, react::
     auto &handler = std::get<HandlerRun>(execution.back());
     if (!handler.started) {
       handler.started = true;
-      if (!react::start_invocation(vm, react_state, values, objects_state, 0, catalog_state,
-                                   journal, handler.plan.handler, std::move(handler.plan.input),
+      if (!react::start_invocation(react_state, values, objects_state, 0, catalog_state, journal,
+                                   handler.plan.handler, std::move(handler.plan.input),
                                    handler.invocation, handler.completed)) {
         execution.pop_back();
         continue;
@@ -101,8 +100,10 @@ void invalidate_execution(std::deque<ExecutionFrame> &execution, IdentityRead id
 
 void reconcile_effects(const react::ValueRead &values, amber::react::State &react_state,
                        amber::step::State &step_state, const Relation &declared_parts,
-                       const catalog::Scripts &scripts, Step now, double hz,
+                       const catalog::Scripts &scripts, const amber::step::Clock &clock,
                        react::DeferredEffects &effects, const record::Origin &origin) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
 
   auto &masses = step_state.masses;
   auto &runtime_measurements = react_state.runtime_measurements;
@@ -114,7 +115,7 @@ void reconcile_effects(const react::ValueRead &values, amber::react::State &reac
   for (const auto &effect : effects.ordered)
     if (const auto *watch = std::get_if<WatchWork>(&effect))
       facts.push_back(watch->source);
-  reconcile_mass(masses, values, declared_parts, runtime_measurements, facts, now, hz, origin,
+  reconcile_mass(masses, values, declared_parts, runtime_measurements, facts, clock, origin,
                  effects);
   auto changes =
       react::sync_rule_watches(react_state, values, scripts, effects.ordered, now, hz, origin);

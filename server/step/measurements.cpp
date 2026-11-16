@@ -77,8 +77,11 @@ void retire_mass(AssemblyMasses &masses, react::RuntimeMeasurements &measurement
 }
 void reconcile_mass(AssemblyMasses &masses, const react::ValueRead &values,
                     const Relation &declared_parts, react::RuntimeMeasurements &measurements,
-                    std::span<const FactKey> facts, Step now, double hz,
+                    std::span<const FactKey> facts, const amber::step::Clock &clock,
                     const record::Origin &origin, react::DeferredEffects &effects) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   std::vector<Handle> changed;
   for (const auto key : facts) {
     if (!values.identity.valid(key.subject) || !key.term || key.term >= values.terms.rows.size())

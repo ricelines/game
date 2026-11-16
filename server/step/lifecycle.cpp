@@ -23,10 +23,10 @@ void changed_relations(react::DeferredEffects &effects,
 }
 } // namespace
 
-void apply_custody(space::Space &space, amber::ObjectState &objects_state,
-                   amber::space::State &space_state, std::array<TermId, 4> terms,
-                   const perm::Plots &plots, std::span<const perm::CustodyChange> custody,
-                   NativeCompletion &out) {
+void apply_custody(amber::ObjectState &objects_state, amber::space::State &space_state,
+                   std::array<TermId, 4> terms, const perm::Plots &plots,
+                   std::span<const perm::CustodyChange> custody, NativeCompletion &out) {
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(objects_state.objects);
 
@@ -40,10 +40,10 @@ void apply_custody(space::Space &space, amber::ObjectState &objects_state,
     const space::VisibleCustody visible{change.goods, change.parent,
                                         change.parent &&
                                             bool(identity.flags[change.parent.slot()] & Body)};
-    const auto result = change.in_world ? space::visible_custody(space, objects_state, space_state,
-                                                                 visible, descendants)
-                                        : space::custody(space, objects_state, change.goods,
-                                                         change.parent, space_state, descendants);
+    const auto result =
+        change.in_world
+            ? space::visible_custody(objects_state, space_state, visible, descendants)
+            : space::custody(objects_state, change.goods, change.parent, space_state, descendants);
     if (result.status != space::Status::Ok)
       throw std::invalid_argument(space::status_text(result.status));
     perm::update_plots(identity, transforms, membership, plots, closure, change.in_world);
@@ -64,9 +64,11 @@ void apply_custody(space::Space &space, amber::ObjectState &objects_state,
   space_state.relation_changes.resize(changes_begin);
 }
 
-void change_custody(space::Space &space, amber::ObjectState &objects_state,
-                    amber::space::State &space_state, std::array<TermId, 4> terms,
-                    const perm::Plots &plots, IlluminationSources &sources, NativeCompletion &out) {
+void change_custody(amber::ObjectState &objects_state, amber::space::State &space_state,
+                    std::array<TermId, 4> terms, const perm::Plots &plots,
+                    IlluminationSources &sources, NativeCompletion &out) {
+  auto &space = space_state.space;
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
 
   auto &parts = objects_state.parts;
@@ -87,14 +89,16 @@ void change_custody(space::Space &space, amber::ObjectState &objects_state,
   unique(hiding);
   // Zone bounds must dirty their old observers before custody removes the sensor.
   retire_illumination(sources, lights, zones, points, views, space, hiding);
-  apply_custody(space, objects_state, space_state, terms, plots, custody, out);
+  apply_custody(objects_state, space_state, terms, plots, custody, out);
 }
 
 void project_visibility(IlluminationSources &sources, amber::space::State &space_state,
-                        net::ReplicationIndex &replication, const space::Space &space,
-                        TransformRead transforms, const amber::catalog::State &catalog_state,
-                        const react::ValueRead &values, const NativeCompletion &out,
-                        float source_radius_m, Step now, double hz) {
+                        net::ReplicationIndex &replication, TransformRead transforms,
+                        const amber::catalog::State &catalog_state, const react::ValueRead &values,
+                        const NativeCompletion &out, float source_radius_m,
+                        const amber::step::Clock &clock) {
+  auto &space = space_state.space;
+
   auto &lights = space_state.lights;
   auto &zones = space_state.zones;
   auto &points = space_state.light_subscriptions;
@@ -106,8 +110,8 @@ void project_visibility(IlluminationSources &sources, amber::space::State &space
   retire_illumination(sources, lights, zones, points, views, space, out.hidden_objects);
   for (auto object : out.hidden_objects)
     net::retire_replication(replication, object);
-  register_illumination(sources, space_state, space, transforms, catalog_state, values,
-                        out.visible_objects, source_radius_m, now, hz);
+  register_illumination(sources, space_state, transforms, catalog_state, values,
+                        out.visible_objects, source_radius_m, clock);
   for (auto object : out.visible_objects)
     net::register_replication(replication, object, values.identity, transforms, models, parameters,
                               assets, values);

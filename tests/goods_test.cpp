@@ -12,7 +12,7 @@ namespace re = amber::react;
 struct Fixture {
 
   amber::catalog::State catalog_state;
-  amber::react::State react_state;
+  amber::react::State react_state{{4096, 100, 5, 64}};
 
   Scene scene;
   ObjectState &objects_state = scene.objects_state;
@@ -43,7 +43,7 @@ struct Fixture {
   react::RuntimeMeasurements &runtime = react_state.runtime_measurements;
   react::Properties &properties = react_state.properties;
   react::Processes &processes = react_state.processes;
-  re::Vm vm{{4096, 100, 5, 64}};
+  re::Vm &vm = react_state.vm;
   re::ScriptState state;
   re::DeferredEffects effects;
   re::NativeActions &declarations = react_state.native_declarations;
@@ -80,10 +80,10 @@ struct Fixture {
     parts.out.set(root.slot(), std::vector<Handle>{child});
     parts.in.set(child.slot(), std::vector<Handle>{root});
     named_parts.set(root.slot(), std::vector<lifecycle::NamedPart>{{"part", child}});
-    require(sp::attach(scene.space, scene.objects_state, scene.space_state,
-                       {child, root, {{0, 0, .5f}, {}}, false})
-                    .status == sp::Status::Ok,
-            "fixture declared child attachment");
+    require(
+        sp::attach(scene.objects_state, scene.space_state, {child, root, {{0, 0, .5f}, {}}, false})
+                .status == sp::Status::Ok,
+        "fixture declared child attachment");
     const react::ValueRead values{terms,
                                   identity(scene.objects),
                                   scene.objects.plot,
@@ -101,7 +101,7 @@ struct Fixture {
                                   runtime,
                                   0,
                                   0};
-    step::bind_metadata(vm, values, scene.objects_state, catalog_state, react_state, plots);
+    step::bind_metadata(values, scene.objects_state, catalog_state, react_state, plots);
     st::declare_hold_goods_action(terms, declarations);
     action = terms.by_name.at("engine.hold_goods");
     auto code = re::compile_script(R"(
@@ -145,8 +145,7 @@ struct Fixture {
     call.step = step;
     call.hz = 20;
     auto result = st::hold_goods(perm_state, scene.objects_state, delivery, scene.space, 1, call);
-    st::apply_custody(scene.space, scene.objects_state, scene.space_state, {}, plots,
-                      result.custody, result);
+    st::apply_custody(scene.objects_state, scene.space_state, {}, plots, result.custody, result);
     hidden = result.hidden_objects;
     changed = result.changed;
     reply = std::move(result.reply);
@@ -165,7 +164,7 @@ void explicit_authority_and_online_assembly() {
   const auto id =
       f.grant(pe::Scope::object(f.root), pe::bit(pe::Verb::Transfer) | pe::bit(pe::Verb::Destroy));
   f.delivery.present_bodies[1] = f.body;
-  require(sp::attach(f.scene.space, f.scene.objects_state, f.scene.space_state,
+  require(sp::attach(f.scene.objects_state, f.scene.space_state,
                      {f.body, f.root, {{0, 0, .5f}, {}}, false})
                   .status == sp::Status::Ok,
           "owner seated on collected goods");

@@ -90,9 +90,13 @@ next_work(WorkQueues &queues, Frame &frame, std::deque<elaborate::FixtureResult>
   return {};
 }
 void write_state_report(const std::filesystem::path &path, const react::ValueRead &values,
-                        std::span<const TermId> inspection_terms, TransformRead poses, Step now,
-                        double hz, std::size_t script_errors, const TimerWheel &pending_timers,
+                        std::span<const TermId> inspection_terms, TransformRead poses,
+                        const amber::step::Clock &clock, std::size_t script_errors,
+                        const TimerWheel &pending_timers,
                         const react::AllocationRows &allocations) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   using Json = nlohmann::json;
   Json rows = Json::array();
   for (std::uint32_t slot = 1; slot < values.identity.model.size(); ++slot) {

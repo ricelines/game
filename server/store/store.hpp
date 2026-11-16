@@ -1555,7 +1555,8 @@ struct Settings {
 };
 struct Clock {
   Step step = 0;
-  Monotonic::time_point next_start;
+  double hz = 0;
+  Monotonic::time_point next_start{};
   std::uint64_t overruns = 0;
 };
 struct Frame {
@@ -1620,6 +1621,7 @@ struct NativeCall {
   double hz = 0;
   record::Origin origin;
   std::optional<InputOrder> order{};
+  Monotonic::time_point deadline{};
 };
 struct NativeCompletion {
   record::Result result = record::Result::NoEffect;

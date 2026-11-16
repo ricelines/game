@@ -78,7 +78,8 @@ void test_mass_provider() {
   require(effects.ordered.empty(), "inert mass provider does no recurring work");
   objects.material[first.slot()] = 11;
   const std::array<FactKey, 1> changed_own{{{first, 2}}};
-  bi::reconcile_mass(masses, values, parts, runtime, changed_own, 20, 20, origin, effects);
+  bi::reconcile_mass(masses, values, parts, runtime, changed_own,
+                     amber::step::Clock{.step = 20, .hz = 20}, origin, effects);
   require(read(first, 3) == 15 && read(root, 3) == 25,
           "material edit updates only changed node and ancestors");
   require(effects.ordered.size() == 2, "clean sibling is reused without a watch effect");
@@ -96,21 +97,25 @@ void test_mass_provider() {
   effects = {};
   materials.rows[11][1] = Value(4000.);
   const std::array<FactKey, 1> density_changed{{{first, 1}}};
-  bi::reconcile_mass(masses, values, parts, runtime, density_changed, 20, 20, origin, effects);
+  bi::reconcile_mass(masses, values, parts, runtime, density_changed,
+                     amber::step::Clock{.step = 20, .hz = 20}, origin, effects);
   require(read(root, 3) == 30 && read(first, 3) == 20,
           "intrinsic density notification immediately updates source resolver and ancestor mass");
   materials.rows[11][1] = Value(3000.);
-  bi::reconcile_mass(masses, values, parts, runtime, density_changed, 20, 20, origin, effects);
+  bi::reconcile_mass(masses, values, parts, runtime, density_changed,
+                     amber::step::Clock{.step = 20, .hz = 20}, origin, effects);
   effects = {};
   const std::array<FactKey, 1> aggregate_feedback{{{first, 3}}};
-  bi::reconcile_mass(masses, values, parts, runtime, aggregate_feedback, 20, 20, origin, effects);
+  bi::reconcile_mass(masses, values, parts, runtime, aggregate_feedback,
+                     amber::step::Clock{.step = 20, .hz = 20}, origin, effects);
   require(effects.ordered.empty() && masses.dirty.empty(),
           "derived assembly answer does not create feedback sampling work");
   effects = {};
   bi::invalidate_mass(masses, identity(objects), parts, std::span(&second, 1));
   parts.out.set(root.slot(), std::vector<Handle>{first});
   parts.in.erase(second.slot());
-  bi::reconcile_mass(masses, values, parts, runtime, {}, 20, 20, origin, effects);
+  bi::reconcile_mass(masses, values, parts, runtime, {}, amber::step::Clock{.step = 20, .hz = 20},
+                     origin, effects);
   require(read(root, 3) == 15 && read(second, 3) == 10,
           "old ancestor invalidation follows removed topology");
   bi::retire_mass(masses, runtime, second);

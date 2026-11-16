@@ -1,4 +1,10 @@
 #pragma once
+namespace amber::step {
+struct State;
+}
+namespace amber {
+struct Settings;
+}
 namespace amber::net {
 struct State;
 }
@@ -389,28 +395,25 @@ void remove_session(SessionViews &views, observe::ActiveViews &active, observe::
                     SessionId session);
 void append_heard(Json &result, observe::Hearing &hearing, SessionId session, std::size_t limit);
 void refresh_view(const amber::catalog::State &catalog_state,
-                  const amber::react::State &react_state, const react::ValueRead &values,
-                  SessionViews &sessions, amber::space::State &space_state,
-                  const space::Space &space, const amber::ObjectState &objects_state,
-                  const step::Intents &intents, observe::Settings settings, Step now, double hz,
-                  double world_ambient_lux, SessionId session, const Principal &principal,
-                  std::size_t limit);
+                  const amber::react::State &react_state, SessionViews &sessions,
+                  amber::space::State &space_state, const amber::ObjectState &objects_state,
+                  const amber::step::State &step_state, observe::Settings settings,
+                  double world_ambient_lux, const Authenticated &recipient, std::size_t limit);
 Reply read_look(const amber::catalog::State &catalog_state, const amber::react::State &react_state,
-                const react::ValueRead &values, SessionViews &sessions,
-                amber::space::State &space_state, const space::Space &space,
-                const amber::ObjectState &objects_state, const step::Intents &intents,
-                observe::Settings settings, Step now, double hz, double world_ambient_lux,
-                const Invocation &call);
+                SessionViews &sessions, amber::space::State &space_state,
+                const amber::ObjectState &objects_state, const amber::step::State &step_state,
+                observe::Settings settings, double world_ambient_lux, const Invocation &call);
 Reply read_actions(const amber::catalog::State &catalog_state,
                    const amber::react::State &react_state, const react::ValueRead &values,
-                   SessionViews &sessions, observe::Hearing &hearing, std::size_t page_size,
-                   std::size_t events_per_response, AuthorityRead authority,
+                   SessionViews &sessions, observe::Hearing &hearing,
+                   const amber::Settings &settings, AuthorityRead authority,
                    const amber::perm::State &perm_state, Step now, const Invocation &call);
 Reply read_inspect(const amber::catalog::State &catalog_state,
                    const amber::react::State &react_state, const react::ValueRead &values,
                    SessionViews &sessions, observe::Hearing &hearing,
                    const amber::ObjectState &objects_state, const amber::perm::State &perm_state,
-                   Step now, double hz, std::size_t events_per_response, const Invocation &call);
+                   const amber::step::Clock &clock, std::size_t events_per_response,
+                   const Invocation &call);
 void append_records(RecordFeed &feed, std::span<const Json> records, IdentityRead identity,
                     TransformRead transforms);
 Reply read_events(const RecordFeed &feed, const SessionViews &sessions, float radius_m,
@@ -461,6 +464,9 @@ struct State {
   SessionViews session_views;
   ReplicationIndex replication;
   RecordFeed feed;
-  explicit State(Settings settings) : sessions(profiles), replication(settings), feed{{}, 4096} {}
+  Server server;
+  explicit State(ServerOptions options)
+      : sessions(profiles), replication(options.replication), feed{{}, 4096},
+        server(std::move(options)) {}
 };
 } // namespace amber::net

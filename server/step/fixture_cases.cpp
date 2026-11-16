@@ -78,12 +78,18 @@ void extend_vocabulary(react::Terms &terms, react::Materials &materials,
     if (id >= previous_size)
       materials.rows.emplace(id, std::move(data));
 }
-react::RuleChange
-install_candidate(catalog::Scripts &scripts, react::Vm &vm, amber::react::State &react_state,
-                  const catalog::RuntimePins &pins, const std::filesystem::path &source_root,
-                  const std::filesystem::path &destination_root, const catalog::Hash &artifact,
-                  const catalog::Hash &registry_pin, PlayerId author, bool active, Step now,
-                  double hz) {
+react::RuleChange install_candidate(catalog::Scripts &scripts, amber::react::State &react_state,
+                                    const catalog::RuntimePins &pins,
+                                    const std::filesystem::path &source_root,
+                                    const std::filesystem::path &destination_root,
+                                    const catalog::Hash &artifact,
+                                    const catalog::Hash &registry_pin, PlayerId author, bool active,
+                                    const amber::step::Clock &clock) {
+  auto &vm = react_state.vm;
+
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &rules = react_state.rules;
   auto &terms = react_state.terms;
 
@@ -144,8 +150,10 @@ void apply_given(amber::react::State &react_state, const react::ValueRead &value
 }
 void initialize_case(const Case &test, amber::react::State &react_state,
                      const react::ValueRead &values, const catalog::Scripts &scripts,
-                     const react::RuleChange &activated, WorkQueues &queues, Step now, double hz,
-                     react::DeferredEffects &effects) {
+                     const react::RuleChange &activated, WorkQueues &queues,
+                     const amber::step::Clock &clock, react::DeferredEffects &effects) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
 
   auto &shared = react_state.shared;
 

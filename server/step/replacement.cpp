@@ -27,12 +27,20 @@ std::string edit_rights(IdentityRead identity, AuthorityRead authority,
 } // namespace
 
 namespace structural_detail {
-ReplacementGeometry
-replacement_geometry(const space::Space &space, const amber::ObjectState &objects_state,
-                     const std::vector<PlotId> &plots, const GeometryAssets &geometry,
-                     const amber::catalog::State &catalog_state, const react::ValueRead &values,
-                     PhysicsRoles roles, PhysicsDefaults defaults, const step::NativeCall &call,
-                     lifecycle::Replacement plan, bool preserve_defaults) {
+ReplacementGeometry replacement_geometry(const amber::space::State &space_state,
+                                         const amber::ObjectState &objects_state,
+                                         const std::vector<PlotId> &plots,
+                                         const GeometryAssets &geometry,
+                                         const amber::catalog::State &catalog_state,
+                                         const react::ValueRead &values, PhysicsDefaults defaults,
+                                         const step::NativeCall &call, lifecycle::Replacement plan,
+                                         bool preserve_defaults) {
+  auto &space = space_state.space;
+  const auto &physics = catalog_state.mechanical.values.at("physics");
+  const PhysicsRoles roles{
+      physics.at("density").get<TermId>(), physics.at("transmission").get<TermId>(),
+      physics.value("friction", TermId{}), physics.value("restitution", TermId{})};
+
   auto &parts = objects_state.parts;
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(std::as_const(objects_state.objects));
@@ -65,7 +73,8 @@ replacement_geometry(const space::Space &space, const amber::ObjectState &object
     auto definition = describe_physics(geometry, assets.rows.at(effective.hash), values,
                                        {binding.model, binding.params, binding.material, plot, h,
                                         preserve_defaults && h ? identity.model[h.slot()] : 0},
-                                       flags, roles, defaults, call.step, call.hz);
+                                       flags, roles, defaults,
+                                       amber::step::Clock{.step = call.step, .hz = call.hz});
     if (new_part) {
       definition.body.motion = space::Motion::Kinematic;
       definition.mode_flags = ScriptedMotion;
@@ -116,12 +125,12 @@ replacement_geometry(const space::Space &space, const amber::ObjectState &object
   }
   return prepared;
 }
-void rebuild_instances(amber::ObjectState &objects_state, space::Space &space,
-                       amber::space::State &space_state, const perm::Plots &land,
-                       const amber::catalog::State &catalog_state,
+void rebuild_instances(amber::ObjectState &objects_state, amber::space::State &space_state,
+                       const perm::Plots &land, const amber::catalog::State &catalog_state,
                        std::span<ReplacementGeometry *> replacements,
                        const space::AssemblyEdit &edit, PlayerId maker, const NativeCall &call,
                        NativeCompletion &out) {
+
   auto &objects = objects_state.objects;
   auto &parts = objects_state.parts;
   auto &declared_parts = objects_state.declared_parts;
@@ -177,8 +186,8 @@ void rebuild_instances(amber::ObjectState &objects_state, space::Space &space,
               : space::Attachment{h, parent, relative_pose(transforms, h, parent), false});
     }
   }
-  const auto rebuilt = space::rebuild_assembly(space, objects_state, space_state, edit, bodies,
-                                               logical, volumes, attachments);
+  const auto rebuilt = space::rebuild_assembly(objects_state, space_state, edit, bodies, logical,
+                                               volumes, attachments);
   if (rebuilt.status != space::Status::Ok)
     throw std::invalid_argument(space::status_text(rebuilt.status));
   perm::update_plots(identity(objects), transforms, membership, land, after, edit.in_scene);
@@ -232,9 +241,10 @@ void rebuild_instances(amber::ObjectState &objects_state, space::Space &space,
 NativeCompletion replace_instance(amber::ObjectState &objects_state,
                                   const amber::catalog::State &catalog_state,
                                   const GeometryAssets &geometry, const react::ValueRead &values,
-                                  space::Space &space, amber::space::State &space_state,
-                                  const amber::perm::State &perm_state, PhysicsRoles roles,
-                                  PhysicsDefaults defaults, const NativeCall &call) {
+                                  amber::space::State &space_state,
+                                  const amber::perm::State &perm_state, PhysicsDefaults defaults,
+                                  const NativeCall &call) {
+  auto &space = space_state.space;
 
   auto &parts = objects_state.parts;
 
@@ -272,9 +282,8 @@ NativeCompletion replace_instance(amber::ObjectState &objects_state,
   out.reply = {{"ok", true}, {"effect", "none"}};
   if (rows.retained.front().before == rows.retained.front().after)
     return out;
-  auto replacement =
-      replacement_geometry(space, objects_state, authority.plot, geometry, catalog_state, values,
-                           roles, defaults, call, std::move(rows));
+  auto replacement = replacement_geometry(space_state, objects_state, authority.plot, geometry,
+                                          catalog_state, values, defaults, call, std::move(rows));
   const auto capacity = space::can_rebuild_assembly(space, replacement.bodies, replacement.sensors,
                                                     replacement.before, replacement.promote);
   if (capacity.status != space::Status::Ok &&
@@ -293,8 +302,8 @@ NativeCompletion replace_instance(amber::ObjectState &objects_state,
   auto edit = space::extract_assembly(space, identity, replacement.mechanical_root,
                                       std::span(replacement.before).subspan(1));
   ReplacementGeometry *row = &replacement;
-  rebuild_instances(objects_state, space, space_state, plots, catalog_state, std::span(&row, 1),
-                    edit, maker, call, out);
+  rebuild_instances(objects_state, space_state, plots, catalog_state, std::span(&row, 1), edit,
+                    maker, call, out);
   return out;
 }
 } // namespace amber::step

@@ -11,7 +11,8 @@ using test_runtime::require;
 namespace {
 void mass_light_replication_lifetimes() {
   test_runtime::Fixture f;
-  space::Space space{testspace::settings()};
+  space::State space_state{testspace::settings(), 8};
+  auto &space = space_state.space;
   auto &parts = f.objects_state.parts;
   auto &declared = f.objects_state.declared_parts;
   auto &assets = f.catalog_state.assets;
@@ -82,12 +83,12 @@ void mass_light_replication_lifetimes() {
                         {}})
                     .status == space::Status::Ok,
             "real projection fixture collision import failed");
-  amber::space::State space_state{8};
   space::PhysicalRelations &physical = space_state.physical_relations;
 
-  require(space::attach(space, f.objects_state, space_state, {child, root, {{1, 0, 0}, {}}, false})
-                  .status == space::Status::Ok,
-          "real declared child attachment failed");
+  require(
+      space::attach(f.objects_state, space_state, {child, root, {{1, 0, 0}, {}}, false}).status ==
+          space::Status::Ok,
+      "real declared child attachment failed");
   const auto sensor = space::sensor_box_geometry(space, {4, 4, 4});
   require(space::add_volume(space, identity(f.objects), transforms(f.objects),
                             {root, sensor, {{0, 0, 2}, {}}, space::VolumeKind::Zone})
@@ -109,8 +110,9 @@ void mass_light_replication_lifetimes() {
   const auto capacity = space::capacity(space).native_available;
   step::NativeCompletion born;
   born.visible_objects = assembly.objects;
-  step::project_visibility(illumination, space_state, replicas, space, transforms(f.objects),
-                           f.catalog_state, *f.projection, born, .05f, 0, 20);
+  step::project_visibility(illumination, space_state, replicas, transforms(f.objects),
+                           f.catalog_state, *f.projection, born, .05f,
+                           amber::step::Clock{.step = 0, .hz = 20});
   require(masses.rows.at(root.bits).total_kg == 6 && lights.rows.size() == 1 &&
               zones.rows.value.size() == 1 && space::capacity(space).native_available == capacity,
           "projections lost assembled mass or duplicated native geometry");
@@ -134,8 +136,9 @@ void mass_light_replication_lifetimes() {
   f.objects.params[root.slot()] = 1;
   step::invalidate_mass(masses, identity(f.objects), declared, std::span(&root, 1));
   step::refresh_mass(masses, *f.projection, declared, f.runtime, 1, 20, {}, effects);
-  step::register_illumination(illumination, space_state, space, transforms(f.objects),
-                              f.catalog_state, *f.projection, std::span(&root, 1), .05f, 1, 20);
+  step::register_illumination(illumination, space_state, transforms(f.objects), f.catalog_state,
+                              *f.projection, std::span(&root, 1), .05f,
+                              amber::step::Clock{.step = 1, .hz = 20});
   net::register_replication(replicas, root, identity(f.objects), transforms(f.objects), f.models,
                             parameters, assets, *f.projection);
   require(masses.rows.at(root.bits).total_kg == 10 &&
@@ -155,14 +158,15 @@ void mass_light_replication_lifetimes() {
   (void)observe::take_dirty(points);
   step::NativeCompletion hidden;
   hidden.custody = {{root, {}, false}};
-  step::change_custody(space, f.objects_state, space_state, {}, {}, illumination, hidden);
+  step::change_custody(f.objects_state, space_state, {}, {}, illumination, hidden);
   const auto dirty = observe::take_dirty(points);
   require(std::ranges::any_of(dirty, [&](const auto &point) { return point.subject == f.c; }) &&
               !space::volume_bounds(space, root, space::VolumeKind::Zone),
           "custody must dirty old zone observers before removing the real Jolt sensor");
   step::refresh_object_plots(space, f.objects_state, {}, f.react_state, {}, hidden);
-  step::project_visibility(illumination, space_state, replicas, space, transforms(f.objects),
-                           f.catalog_state, *f.projection, hidden, .05f, 1, 20);
+  step::project_visibility(illumination, space_state, replicas, transforms(f.objects),
+                           f.catalog_state, *f.projection, hidden, .05f,
+                           amber::step::Clock{.step = 1, .hz = 20});
   require(hidden.visible_objects.empty() && hidden.hidden_objects.size() == 2 &&
               lights.rows.empty() && zones.rows.value.empty() && replicas.rows.empty() &&
               masses.rows.at(root.bits).total_kg == 10 &&
@@ -192,8 +196,9 @@ void mass_light_replication_lifetimes() {
           "new object reused a retired identity");
   step::invalidate_mass(masses, identity(f.objects), declared, std::span(&reused, 1));
   step::refresh_mass(masses, *f.projection, declared, f.runtime, 2, 20, {}, effects);
-  step::register_illumination(illumination, space_state, space, transforms(f.objects),
-                              f.catalog_state, *f.projection, std::span(&reused, 1), .05f, 2, 20);
+  step::register_illumination(illumination, space_state, transforms(f.objects), f.catalog_state,
+                              *f.projection, std::span(&reused, 1), .05f,
+                              amber::step::Clock{.step = 2, .hz = 20});
   require(masses.rows.at(reused.bits).total_kg == 4 && lights.rows.empty() &&
               zones.rows.value.empty() && !replicas.rows.contains(root.bits),
           "reused slot inherited retired light/zone/mass or replication identity");

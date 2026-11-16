@@ -1336,7 +1336,8 @@ int rate_binding(lua_State *L) {
     luaL_error(L, "stale process target");
   try {
     set_rate(binding.react_state, binding.terms.rows[id], target, luaL_checknumber(L, 3),
-             luaL_checknumber(L, 4), luaL_checknumber(L, 5), inv.step, inv.hz, *inv.effects);
+             luaL_checknumber(L, 4), luaL_checknumber(L, 5),
+             amber::step::Clock{.step = inv.step, .hz = inv.hz}, *inv.effects);
   } catch (const std::exception &e) {
     luaL_error(L, "%s", e.what());
   }

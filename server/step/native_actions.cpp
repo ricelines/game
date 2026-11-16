@@ -2,13 +2,12 @@
 #include <stdexcept>
 
 namespace amber::step {
-NativeCompletion native_mechanics(amber::ObjectState &objects_state,
-                                  amber::react::State &react_state,
-                                  const amber::perm::State &perm_state, space::Space &space,
-                                  amber::space::State &space_state,
-                                  MechanicalCauses &mechanical_causes,
-                                  PhysicalRelationTerms physical_terms, float reach_m,
-                                  react::MechanicAction operation, const NativeCall &call) {
+NativeCompletion
+native_mechanics(amber::ObjectState &objects_state, amber::react::State &react_state,
+                 const amber::perm::State &perm_state, amber::space::State &space_state,
+                 MechanicalCauses &mechanical_causes, PhysicalRelationTerms physical_terms,
+                 float reach_m, react::MechanicAction operation, const NativeCall &call) {
+  auto &space = space_state.space;
 
   auto &plots = perm_state.plots;
 
@@ -17,17 +16,17 @@ NativeCompletion native_mechanics(amber::ObjectState &objects_state,
   NativeCompletion out;
   switch (operation) {
   case react::MechanicAction::Grasp: {
-    out = grasp_action(space, objects_state, space_state, physical_terms, reach_m,
-                       mechanical_causes, plots, call);
+    out = grasp_action(objects_state, space_state, physical_terms, reach_m, mechanical_causes,
+                       plots, call);
     break;
   }
   case react::MechanicAction::Release: {
-    out = release_action(space, objects_state, space_state, physical_terms, perm_state,
-                         mechanical_causes, call);
+    out = release_action(objects_state, space_state, physical_terms, perm_state, mechanical_causes,
+                         call);
     break;
   }
   case react::MechanicAction::Attach: {
-    out = attach_action(space, objects_state, space_state, physical_terms, perm_state, reach_m,
+    out = attach_action(objects_state, space_state, physical_terms, perm_state, reach_m,
                         mechanical_causes, call);
     break;
   }
@@ -44,21 +43,31 @@ NativeCompletion native_mechanics(amber::ObjectState &objects_state,
 }
 NativeCompletion native_construction(amber::ObjectState &objects_state,
                                      amber::catalog::State &catalog_state,
-                                     const react::ValueRead &values,
                                      amber::react::State &react_state,
                                      amber::perm::State &perm_state, const GeometryAssets &geometry,
-                                     space::Space &space, amber::space::State &space_state,
-                                     std::array<TermId, 4> relation_terms,
-                                     PhysicsRoles physics_roles, PhysicsDefaults physics_defaults,
-                                     catalog::MeasurementBindings measurement_roles,
+                                     amber::space::State &space_state,
+                                     PhysicsDefaults physics_defaults,
                                      react::ConstructionAction operation, const NativeCall &call) {
+  const auto &physics = catalog_state.mechanical.values.at("physics");
+  const PhysicsRoles physics_roles{
+      physics.at("density").get<TermId>(), physics.at("transmission").get<TermId>(),
+      physics.value("friction", TermId{}), physics.value("restitution", TermId{})};
+  const auto &relations = catalog_state.mechanical.values.at("relations");
+  const std::array<TermId, 4> relation_terms{
+      relations.at("contains").get<TermId>(), relations.at("supports").get<TermId>(),
+      relations.at("attached_to").get<TermId>(), relations.at("in_zone").get<TermId>()};
+  const auto &measurements = catalog_state.mechanical.values.at("measurements");
+  const catalog::MeasurementBindings measurement_roles{measurements.at("volume").get<TermId>(),
+                                                       measurements.at("capacity").get<TermId>()};
+
+  const auto values =
+      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+
   auto &objects = objects_state.objects;
   auto &parts = objects_state.parts;
 
   auto &models = catalog_state.models;
   auto &scripts = catalog_state.scripts;
-
-  auto &model_settings = react_state.model_settings;
 
   auto &ledger = perm_state.ledger;
 
@@ -67,8 +76,8 @@ NativeCompletion native_construction(amber::ObjectState &objects_state,
   NativeCompletion out;
   switch (operation) {
   case react::ConstructionAction::Create: {
-    out = create_instance(objects_state, catalog_state, geometry, values, space, space_state,
-                          perm_state, physics_roles, physics_defaults, call);
+    out = create_instance(objects_state, catalog_state, geometry, values, space_state, perm_state,
+                          physics_roles, physics_defaults, call);
     break;
   }
   case react::ConstructionAction::Destroy: {
@@ -77,23 +86,22 @@ NativeCompletion native_construction(amber::ObjectState &objects_state,
     break;
   }
   case react::ConstructionAction::Reconfigure: {
-    out = replace_instance(objects_state, catalog_state, geometry, values, space, space_state,
-                           perm_state, physics_roles, physics_defaults, call);
+    out = replace_instance(objects_state, catalog_state, geometry, values, space_state, perm_state,
+                           physics_defaults, call);
     break;
   }
   case react::ConstructionAction::ReviseModel: {
     if (const auto error = validate_model_edit(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out =
-        revise_model(objects_state, catalog_state, model_settings, measurement_roles, geometry,
-                     values, space, space_state, perm_state, physics_roles, physics_defaults, call);
+    out = revise_model(objects_state, catalog_state, react_state, measurement_roles, geometry,
+                       space_state, perm_state, physics_defaults, call);
     break;
   }
   case react::ConstructionAction::PlaceExisting: {
     if (const auto error = validate_place_existing(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = place_existing(space, objects_state, space_state, relation_terms, perm_state, geometry,
-                         catalog_state, values, physics_roles, physics_defaults, react_state, call);
+    out = place_existing(objects_state, space_state, relation_terms, perm_state, geometry,
+                         catalog_state, physics_roles, physics_defaults, react_state, call);
     break;
   }
   }
@@ -367,12 +375,18 @@ NativeCompletion native_writing(const catalog::Models &models, catalog::ModelTex
   }
   return out;
 }
-NativeCompletion
-native_registry(amber::catalog::State &catalog_state, amber::react::State &react_state,
-                const std::filesystem::path &registry_directory, const react::ValueRead &values,
-                const GeometryAssets &geometry, space::Space &space, PhysicsRoles physics_roles,
-                PhysicsDefaults physics_defaults, std::span<const std::string> roles,
-                react::RegistryAction operation, const NativeCall &call) {
+NativeCompletion native_registry(amber::catalog::State &catalog_state,
+                                 amber::react::State &react_state,
+                                 const std::filesystem::path &registry_directory,
+                                 const react::ValueRead &values, const GeometryAssets &geometry,
+                                 amber::space::State &space_state, PhysicsDefaults physics_defaults,
+                                 std::span<const std::string> roles,
+                                 react::RegistryAction operation, const NativeCall &call) {
+  auto &space = space_state.space;
+  const auto &physics = catalog_state.mechanical.values.at("physics");
+  const PhysicsRoles physics_roles{
+      physics.at("density").get<TermId>(), physics.at("transmission").get<TermId>(),
+      physics.value("friction", TermId{}), physics.value("restitution", TermId{})};
 
   auto &terms = react_state.terms;
   auto &materials = react_state.materials;
@@ -400,12 +414,19 @@ native_registry(amber::catalog::State &catalog_state, amber::react::State &react
   return out;
 }
 NativeCompletion native_elaboration(amber::catalog::State &catalog_state,
-                                    const react::ValueRead &values, react::Vm &vm,
+                                    const react::ValueRead &values,
                                     amber::react::State &react_state, amber::net::State &net_state,
                                     WorkQueues &queues, amber::elaborate::State &elaborate_state,
-                                    elaborate::FixtureWorker &fixture_worker, bool architect,
-                                    bool elaborator, elaborate::FixtureLimits fixture_limits,
+                                    elaborate::FixtureWorker &fixture_worker,
+                                    elaborate::FixtureLimits fixture_limits,
                                     react::ElaborationAction operation, const NativeCall &call) {
+  std::span<const std::string> roles;
+  if (const auto *player = std::get_if<PlayerId>(&call.request.caller);
+      player && *player < net_state.profiles.rows.size())
+    roles = net_state.profiles.rows[*player].roles;
+  const bool architect = std::ranges::find(roles, "architect") != roles.end();
+  const bool elaborator = std::ranges::find(roles, "elaborator") != roles.end();
+
   auto &scripts = catalog_state.scripts;
   auto &authored_text = catalog_state.authored_text;
 
@@ -439,7 +460,7 @@ NativeCompletion native_elaboration(amber::catalog::State &catalog_state,
   case react::ElaborationAction::RuleActivation: {
     if (const auto error = validate_rule_activation(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = rule_activation(scripts, react_state, queues, vm, values, architect || elaborator, call);
+    out = rule_activation(scripts, react_state, queues, values, architect || elaborator, call);
     break;
   }
   case react::ElaborationAction::Answer:

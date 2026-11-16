@@ -122,7 +122,9 @@ void install_catalog(const Json &plan, amber::react::State &react_state,
                      const catalog::Hash &registry, const catalog::RuntimePins &pins,
                      react::VmSettings limits, const std::filesystem::path &asset_root,
                      const std::filesystem::path &script_root, amber::catalog::State &catalog_state,
-                     react::Vm &vm, Symbols &symbols) {
+                     Symbols &symbols) {
+  auto &vm = react_state.vm;
+
   auto &terms = react_state.terms;
   auto &assets = catalog_state.assets;
   auto &models = catalog_state.models;

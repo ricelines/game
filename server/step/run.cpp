@@ -49,11 +49,12 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   const auto hz = settings.clock.step_hz;
   ObjectState objects_state;
   catalog::State catalog_state;
-  react::State react_state;
+  react::State react_state(settings.scripts);
   perm::State perm_state;
   elaborate::State elaborate_state;
-  net::State net_state(settings.network);
-  space::State space_state(settings.light_cell_m);
+  net::State net_state({"127.0.0.1", launch.port, launch.client, launch.assets, settings.network,
+                        settings.control_max});
+  space::State space_state(settings.space, settings.light_cell_m);
   step::State step_state(settings.authors_max);
 
   const auto plan = start::read_plan(launch.plan);
@@ -117,13 +118,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &authored_text = catalog_state.authored_text;
   auto &baked_measurements = catalog_state.baked_measurements;
   auto &runtime_measurements = react_state.runtime_measurements;
-  auto &properties = react_state.properties;
+
   auto &processes = react_state.processes;
-  auto &instance_settings = react_state.instance_settings;
-  auto &model_settings = react_state.model_settings;
-  auto &plot_settings = react_state.plot_settings;
-  auto &world_settings = react_state.world_settings;
-  auto &shared = react_state.shared;
 
   auto &allocations = react_state.allocations;
 
@@ -132,23 +128,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &physical_relations = space_state.physical_relations;
   start::bind_relation_reads(relations, authored_relations, terms, physical_relations,
                              relation_terms);
-  const react::ValueRead values{terms,
-                                ids,
-                                objects.plot,
-                                objects.params,
-                                materials,
-                                baked_measurements,
-                                properties,
-                                processes,
-                                instance_settings,
-                                model_settings,
-                                plot_settings,
-                                world_settings,
-                                shared,
-                                relations,
-                                runtime_measurements,
-                                role("measurements", "density"),
-                                role("measurements", "capacity")};
+  const auto values = react::value_read(objects_state, catalog_state, react_state, space_state);
   auto &states = react_state.states;
   auto &triggers = react_state.triggers;
   auto &rules = react_state.rules;
@@ -174,7 +154,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &fixtures = elaborate_state.fixtures;
 
   auto &clock = step_state.clock;
-  space::Space space(settings.space);
+  clock.hz = hz;
+  auto &space = space_state.space;
   auto &mechanical_causes = step_state.mechanical_causes;
   auto &geometry = step_state.geometry;
   auto &relation_changes = space_state.relation_changes;
@@ -192,13 +173,13 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &session_views = net_state.session_views;
   auto &illumination_sources = step_state.illumination_sources;
   auto &navigation_requests = step_state.navigation_requests;
-  react::Vm vm(settings.scripts);
+  auto &vm = react_state.vm;
 
   react::bind_values(vm, values, react_state);
   react::bind_events(vm, terms);
-  bind_metadata(vm, values, objects_state, catalog_state, react_state, plots);
-  bind_physical(vm, space, objects_state, step_state, perm_state, settings.part_batch_max,
-                space_state, catalog_state);
+  bind_metadata(values, objects_state, catalog_state, react_state, plots);
+  bind_physical(vm, objects_state, step_state, perm_state, settings.part_batch_max, space_state,
+                catalog_state);
   if (!restored)
     registry = catalog::read_registry(
         registry_directory,
@@ -207,15 +188,12 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   std::vector<Handle> initial;
   react::DeferredEffects setup;
   std::uint64_t next_record = 1;
-  std::vector<space::MotionRow> restored_motion;
-  std::vector<BodyCauseRow> restored_causes;
+  checkpoint::Decoded decoded{};
   if (restored) {
-    auto decoded = checkpoint::decode_checkpoint(*restored, objects_state, react_state,
-                                                 physical_relations, catalog_state, perm_state,
-                                                 profiles, step_state, elaborate_state);
+    decoded = checkpoint::decode_checkpoint(*restored, objects_state, react_state, space_state,
+                                            catalog_state, perm_state, net_state, step_state,
+                                            elaborate_state);
     next_record = decoded.next_record;
-    restored_motion = std::move(decoded.motion);
-    restored_causes = std::move(decoded.causes);
 
     clock.step = restored->header.step;
     checkpoint::restore_pending_work(inputs, captures, catalog_root);
@@ -229,7 +207,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
         initial.push_back(ids.at(slot));
   } else {
     start::install_catalog(plan, react_state, registry.hash, settings.pins, settings.scripts,
-                           launch.assets, launch.data / "scripts", catalog_state, vm, symbols);
+                           launch.assets, launch.data / "scripts", catalog_state, symbols);
     initial =
         start::install_objects(plan, symbols, catalog_state, terms, objects_state, clock.step);
     start::install_properties(plan, symbols, react_state, clock.step, hz);
@@ -239,7 +217,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     start::install_land(plan, plots, groups, players);
     start::install_money(plan, symbols, ids, auth, players, groups, ledger);
     start::install_grants(plan, symbols, values, auth, perm_state, catalog_state, react_state,
-                          profiles, clock.step, hz);
+                          profiles, clock);
     start::provision_body_grants(plan, symbols, catalog_state, objects_state, perm_state, profiles,
                                  clock.step, hz);
   }
@@ -247,9 +225,9 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   react::RuleChange fixture_rule_change;
   if (fixture_case)
     fixture_rule_change = fixture::install_candidate(
-        scripts, vm, react_state, settings.pins, catalog_root / "scripts", launch.data / "scripts",
+        scripts, react_state, settings.pins, catalog_root / "scripts", launch.data / "scripts",
         launch.candidate, launch.candidate_registry, launch.candidate_author,
-        launch.candidate_active, clock.step, hz);
+        launch.candidate_active, clock);
   for (const auto &model : models.rows)
     if (model.id) {
       catalog::project_measurements(
@@ -268,19 +246,12 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     (void)hash;
     import_geometry_asset(geometry, space, entry, launch.assets);
   }
-  const auto &physics_bindings = mechanical.values.at("physics");
-  const PhysicsRoles physics_roles{role("physics", "density"), role("physics", "transmission"),
-                                   physics_bindings.value("friction", TermId{}),
-                                   physics_bindings.value("restitution", TermId{})};
   const PhysicsDefaults physics_defaults{settings.default_friction, settings.default_restitution};
   const PhysicalRelationTerms physical_terms{relation_terms[0], relation_terms[1],
                                              relation_terms[2], relation_terms[3]};
-  const catalog::MeasurementBindings measurement_roles{role("measurements", "volume"),
-                                                       role("measurements", "capacity")};
   auto visible =
-      initialize_physics(space, step_state, catalog_state, values, objects_state, players,
-                         space_state, initial, restored_motion, restored_causes, physics_roles,
-                         physics_defaults, restored.has_value(), clock.step, hz);
+      initialize_physics(step_state, catalog_state, react_state, objects_state, players,
+                         space_state, initial, decoded, physics_defaults, restored.has_value());
   std::vector<PlayerId> seed_authors;
   for (const auto &row : plan.at("objects"))
     seed_authors.push_back(row.at("maker").get<PlayerId>());
@@ -317,21 +288,20 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   refresh_mass(masses, values, declared_parts, runtime_measurements, clock.step, hz, {}, setup);
   sync_illuminance_reads(light_subscriptions, subscriptions, ids, poses,
                          role("measurements", "illuminance"), initial);
-  register_illumination(illumination_sources, space_state, space, poses, catalog_state, values,
-                        visible, settings.light_source_radius_m, clock.step, hz);
+  register_illumination(illumination_sources, space_state, poses, catalog_state, values, visible,
+                        settings.light_source_radius_m, clock);
   for (auto object : visible)
     net::register_replication(replication, object, ids, poses, models, parameters, assets, values);
   if (fixture_case)
     fixture::initialize_case(*fixture_case, react_state, values, scripts, fixture_rule_change,
-                             queues, clock.step, hz, setup);
+                             queues, clock, setup);
   sample_illuminance(light_subscriptions, space, ids, lights, zones, runtime_measurements, 0,
                      setup);
   publish_effects(std::move(setup), {}, clock.step, queues, timers, journal,
                   settings.event_queue_max);
   if (!restored)
     start::queue_bootstrap(plan, symbols, terms, queues, settings.event_queue_max);
-  net::Server server({"127.0.0.1", launch.port, launch.client, launch.assets, settings.network,
-                      settings.control_max});
+  auto &server = net_state.server;
   auto &sessions = net_state.sessions;
   elaborate::FixtureWorker fixture_worker(std::filesystem::canonical("/proc/self/exe"),
                                           launch.data / "fixtures", settings.fixture_workers);
@@ -426,44 +396,43 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       std::vector<net::SessionOutput> outputs;
       sessions.drain(ready, notices, outputs);
       for (const auto &notice : notices)
-        if (const auto play = connection_notice(
-                notice, net_state, space_state, delivery, catalog_state, react_state, appearance,
-                objects_state, clock.step, hz, settings.network.cell_m, settings.repl_delay_ms)) {
+        if (const auto play =
+                connection_notice(notice, net_state, space_state, delivery, catalog_state,
+                                  react_state, appearance, objects_state, clock, settings)) {
           auto delivered = deliver_mailbox(players, objects_state, space, play->principal.player,
                                            play->principal.body, clock.step);
-          change_custody(space, objects_state, space_state, relation_terms, plots,
-                         illumination_sources, delivered);
+          change_custody(objects_state, space_state, relation_terms, plots, illumination_sources,
+                         delivered);
           refresh_object_plots(space, objects_state, plots, react_state, {}, delivered);
           invalidate_mass(masses, ids, declared_parts, delivered.changed_objects);
           refresh_mass(masses, values, declared_parts, runtime_measurements, clock.step, hz, {},
                        delivered.effects);
-          project_visibility(illumination_sources, space_state, replication, space, poses,
-                             catalog_state, values, delivered, settings.light_source_radius_m,
-                             clock.step, hz);
+          project_visibility(illumination_sources, space_state, replication, poses, catalog_state,
+                             values, delivered, settings.light_source_radius_m, clock);
           publish_object_changes(sessions, session_views, ids, auth, parent, model_text,
                                  instance_text, delivered.changed_objects);
           record::Origin delivery_origin;
           for (auto &record : delivered.records)
             delivery_origin = journal.append(std::move(record));
-          reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock.step,
-                            hz, delivered.effects, delivery_origin);
+          reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
+                            delivered.effects, delivery_origin);
           publish_effects(std::move(delivered.effects), delivery_origin, clock.step, queues, timers,
                           journal, settings.event_queue_max);
         }
       for (auto &request : ready)
         if (!queue_connection_mutation(inputs, queues, request))
-          answer_query(net_state, server, space_state, journal, catalog_state, react_state, values,
-                       space, objects_state, intents, perm_state, settings.perception,
-                       settings.actions_page, clock.step, hz, request);
+          answer_query(net_state, space_state, journal, catalog_state, react_state, objects_state,
+                       step_state, perm_state, settings, request);
       send_connection_outputs(outputs, server, net_state, objects_state, catalog_state);
     }
 
     std::deque<ExecutionFrame> execution;
     if (fixture_action) {
-      execution.emplace_back(begin_action(values, catalog_state, react_state, profiles, perm_state,
-                                          objects_state, space, intents, journal,
-                                          settings.perception.reach_m, std::move(*fixture_action),
-                                          {}, handler_deadline(settings.scripts.handler_ms)));
+      fixture_action->origin = {};
+      fixture_action->deadline = handler_deadline(settings.scripts.handler_ms);
+      execution.emplace_back(begin_action(catalog_state, react_state, profiles, perm_state,
+                                          objects_state, space_state, intents, journal,
+                                          settings.perception.reach_m, std::move(*fixture_action)));
       fixture_action.reset();
     }
     for (;;) {
@@ -485,12 +454,13 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             auto &input = found->second;
             auto prepared = prepare_input(authoring, react_state, registry, step_state, journal,
                                           input, clock.step, hz);
-            if (auto *call = std::get_if<NativeCall>(&prepared))
-              execution.emplace_back(begin_action(
-                  values, catalog_state, react_state, profiles, perm_state, objects_state, space,
-                  intents, journal, settings.perception.reach_m, std::move(*call), input.origin,
-                  handler_deadline(settings.scripts.handler_ms)));
-            else {
+            if (auto *call = std::get_if<NativeCall>(&prepared)) {
+              call->origin = input.origin;
+              call->deadline = handler_deadline(settings.scripts.handler_ms);
+              execution.emplace_back(begin_action(catalog_state, react_state, profiles, perm_state,
+                                                  objects_state, space_state, intents, journal,
+                                                  settings.perception.reach_m, std::move(*call)));
+            } else {
               auto reply = std::move(std::get<InputReply>(prepared));
               if (!reply.deferred)
                 deliver_input(inputs, sessions, hearing, settings.perception.events_per_response,
@@ -517,8 +487,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
               actor < profiles.rows.size() &&
               std::find(profiles.rows[actor].roles.begin(), profiles.rows[actor].roles.end(),
                         "elaborator") != profiles.rows[actor].roles.end();
-          auto completed = complete_fixture(elaborate_state, step_state, scripts, react_state, vm,
-                                            values, {actor, elaborator}, *result, clock.step, hz);
+          auto completed = complete_fixture(elaborate_state, step_state, scripts, react_state,
+                                            values, {actor, elaborator}, *result, clock);
           if (!completed.changed_scripts.empty()) {
             registry = catalog::read_registry(
                 registry_directory,
@@ -528,8 +498,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
               row.pending.ready = false;
             }
           }
-          reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock.step,
-                            hz, completed.effects, completed.origin);
+          reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
+                            completed.effects, completed.origin);
           publish_effects(std::move(completed.effects), completed.origin, clock.step, queues,
                           timers, journal, settings.event_queue_max);
           if (completed.notification) {
@@ -552,11 +522,10 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             continue;
           }
           const auto input = found->second;
-          auto [installed, origin] =
-              complete_authoring(catalog_state, react_state, vm, geometry, space, journal, input,
-                                 std::move(*completion),
-                                 !input.session || sessions.principal(input.session).has_value(),
-                                 clock.step, hz, launch.assets, launch.data / "scripts");
+          auto [installed, origin] = complete_authoring(
+              catalog_state, react_state, step_state, space, journal, input, std::move(*completion),
+              !input.session || sessions.principal(input.session).has_value(), launch.assets,
+              launch.data / "scripts");
           for (auto model : installed.changed_models)
             react::project_model(triggers, models, scripts, terms, model);
           publish_catalog_changes(sessions, session_views, models, model_text, terms, materials,
@@ -588,8 +557,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
         if (execution.empty())
           continue;
       }
-      auto *selected = advance_execution(execution, vm, react_state, values, objects_state,
-                                         catalog_state, journal);
+      auto *selected =
+          advance_execution(execution, react_state, values, objects_state, catalog_state, journal);
       if (!selected)
         continue;
       if (auto *action = std::get_if<ActionRun>(selected)) {
@@ -601,20 +570,18 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                 player && *player < profiles.rows.size())
               roles = profiles.rows[*player].roles;
             const bool architect = std::ranges::find(roles, "architect") != roles.end();
-            const bool elaborator = std::ranges::find(roles, "elaborator") != roles.end();
             try {
               completed = std::visit(
                   [&](auto operation) {
                     using Operation = decltype(operation);
                     if constexpr (std::is_same_v<Operation, react::MechanicAction>) {
-                      return native_mechanics(objects_state, react_state, perm_state, space,
-                                              space_state, mechanical_causes, physical_terms,
+                      return native_mechanics(objects_state, react_state, perm_state, space_state,
+                                              mechanical_causes, physical_terms,
                                               settings.perception.reach_m, operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::ConstructionAction>) {
-                      return native_construction(objects_state, catalog_state, values, react_state,
-                                                 perm_state, geometry, space, space_state,
-                                                 relation_terms, physics_roles, physics_defaults,
-                                                 measurement_roles, operation, action->call);
+                      return native_construction(objects_state, catalog_state, react_state,
+                                                 perm_state, geometry, space_state,
+                                                 physics_defaults, operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::ExchangeAction>) {
                       return native_exchange(objects_state, perm_state, space, delivery,
                                              settings.mailbox_max, operation, action->call);
@@ -633,13 +600,12 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                             operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::RegistryAction>) {
                       return native_registry(catalog_state, react_state, registry_directory, values,
-                                             geometry, space, physics_roles, physics_defaults,
-                                             roles, operation, action->call);
+                                             geometry, space_state, physics_defaults, roles,
+                                             operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::ElaborationAction>) {
-                      return native_elaboration(catalog_state, values, vm, react_state, net_state,
-                                                queues, elaborate_state, fixture_worker, architect,
-                                                elaborator, settings.fixture_limits, operation,
-                                                action->call);
+                      return native_elaboration(catalog_state, values, react_state, net_state,
+                                                queues, elaborate_state, fixture_worker,
+                                                settings.fixture_limits, operation, action->call);
                     }
                   },
                   action->resolution.native_operation);
@@ -652,8 +618,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                   {"signature", react::action_signature(terms, native_declarations,
                                                         action->call.request.action)}};
             }
-            change_custody(space, objects_state, space_state, relation_terms, plots,
-                           illumination_sources, completed);
+            change_custody(objects_state, space_state, relation_terms, plots, illumination_sources,
+                           completed);
             auto &removed = completed.removed_objects;
             std::sort(removed.begin(), removed.end());
             removed.erase(std::unique(removed.begin(), removed.end()), removed.end());
@@ -678,8 +644,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
               lifecycle::release_rows(objects, parts, declared_parts, removed);
             }
             editing::rebind_scripts(catalog_state, react_state, values, perm_state,
-                                    role("events", "start"), clock.step, hz, action->call.origin,
-                                    completed);
+                                    role("events", "start"), clock, action->call.origin, completed);
             invalidate_execution(execution, ids, states);
             refresh_object_plots(space, objects_state, plots, react_state, action->call.origin,
                                  completed);
@@ -693,9 +658,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                    role("measurements", "illuminance"), completed.changed_objects);
             move_illuminance_reads(light_subscriptions, poses, role("measurements", "illuminance"),
                                    completed.changed_objects);
-            project_visibility(illumination_sources, space_state, replication, space, poses,
-                               catalog_state, values, completed, settings.light_source_radius_m,
-                               clock.step, hz);
+            project_visibility(illumination_sources, space_state, replication, poses, catalog_state,
+                               values, completed, settings.light_source_radius_m, clock);
             publish_catalog_changes(sessions, session_views, models, model_text, terms, materials,
                                     appearance, completed);
             publish_object_changes(sessions, session_views, ids, auth, parent, model_text,
@@ -718,8 +682,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
               completed.effects.ordered.emplace_back(
                   EventWork{object, {}, role("events", "start"), {}, action->call.origin});
             const auto first_changed = mutated.size();
-            reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock.step,
-                              hz, completed.effects, action->call.origin);
+            reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
+                              completed.effects, action->call.origin);
             publish_value_changes(replication, session_views, processes,
                                   std::span(mutated).subspan(first_changed));
             action->changed = completed.changed || completed.effects.changed;
@@ -740,17 +704,18 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       }
       auto &handler = std::get<HandlerRun>(*selected);
       const auto first_changed = mutated.size();
-      reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock.step, hz,
+      reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
                         handler.completed.effects, handler.completed.origin);
       publish_value_changes(replication, session_views, processes,
                             std::span(mutated).subspan(first_changed));
       if (auto call = finish_handler_segment(execution, journal, queues, timers, clock.step, hz,
                                              settings.event_queue_max)) {
         const auto &waiting = std::get<HandlerRun>(execution.back());
-        execution.emplace_back(begin_action(values, catalog_state, react_state, profiles,
-                                            perm_state, objects_state, space, intents, journal,
-                                            settings.perception.reach_m, std::move(*call),
-                                            waiting.completed.origin, waiting.invocation.deadline));
+        call->origin = waiting.completed.origin;
+        call->deadline = waiting.invocation.deadline;
+        execution.emplace_back(begin_action(catalog_state, react_state, profiles, perm_state,
+                                            objects_state, space_state, intents, journal,
+                                            settings.perception.reach_m, std::move(*call)));
       }
     }
     if (fixture_action_phase) {
@@ -758,18 +723,17 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       continue;
     }
     const snap::Header header{runtime_version, clock.step, hash_bytes(registry.hash)};
-    checkpoint::flush_gaps(step_state, journal, capture_writer, header, settings.gap_captures,
-                           settings.capture_m, values, net_state, react_state, space, objects_state,
-                           physical_relations, catalog_state, perm_state, elaborate_state);
+    checkpoint::flush_gaps(step_state, journal, capture_writer, header, settings, net_state,
+                           react_state, objects_state, space_state, catalog_state, perm_state,
+                           elaborate_state);
     const auto physics_start = Monotonic::now();
     const auto installed_tiles = space::install_ready_navigation(space);
     for (auto &notice : publish_navigation(navigation_requests, space, ids, poses, installed_tiles))
       sessions.event_for_player(notice.author, std::move(notice.event));
     for (const auto &error : installed_tiles.errors)
       std::cerr << "navigation: " << error << '\n';
-    auto physics =
-        advance_motion(space, objects_state, physical_relations, step_state, perm_state, clock.step,
-                       hz, settings.goal_tolerance_m, settings.perception.reach_m);
+    auto physics = advance_motion(space, objects_state, physical_relations, step_state, perm_state,
+                                  clock, settings.goal_tolerance_m, settings.perception.reach_m);
     const auto crossed_plots =
         perm::update_plots(ids, poses, plot_membership(objects), plots, physics.moved, true);
     for (const auto object : crossed_plots) {
@@ -778,8 +742,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       for (const auto &term : terms.rows)
         if (term.source == react::Source::Setting)
           effects.ordered.emplace_back(step::WatchWork{{object, term.id}, origin});
-      reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock.step, hz,
-                        effects, origin);
+      reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock, effects,
+                        origin);
       publish_effects(std::move(effects), origin, clock.step, queues, timers, journal,
                       settings.event_queue_max);
     }
@@ -790,8 +754,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                      {role("events", "contact"),
                       {role("relations", "contains"), role("relations", "supports"),
                        role("relations", "attached_to"), role("relations", "in_zone")}},
-                     settings.event_queue_max, hz, objects_state, catalog_state, physics,
-                     clock.step);
+                     settings.event_queue_max, objects_state, catalog_state, physics, clock);
     collect_physical_causes(mechanical_causes, space);
     publish_intent_endings(step_state, terms, role("events", "arrived"), role("events", "blocked"),
                            role("events", "cancelled"), objects_state, sessions, journal,
@@ -801,17 +764,17 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     for (auto object : physics.moved)
       net::moved(replication, object, poses);
     react::DeferredEffects light_effects;
-    update_frame_illumination(illumination_sources, space_state, space, poses, values, react_state,
-                              physics.moved, physics.dirty_bounds, mutated,
-                              role("measurements", "illuminance"), clock.step, hz, light_effects);
-    reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock.step, hz,
+    update_frame_illumination(step_state, space_state, poses, values, react_state, physics.moved,
+                              physics.dirty_bounds, role("measurements", "illuminance"),
+                              light_effects);
+    reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
                       light_effects, {});
     publish_effects(std::move(light_effects), {}, clock.step, queues, timers, journal,
                     settings.event_queue_max);
     publish_value_changes(replication, session_views, processes, mutated);
     mutated.clear();
-    refresh_connections(net_state, space_state, step_state, catalog_state, react_state, values,
-                        space, objects_state, settings.perception, clock.step, hz);
+    refresh_connections(net_state, space_state, step_state, catalog_state, react_state,
+                        objects_state, settings.perception, clock);
     if (launch.network && clock.step % settings.repl_every == 0)
       server.publish(net::publication(replication, ids, poses, values, clock.step, hz));
     flush_connections(net_state, server, step_state, objects_state, catalog_state);
@@ -819,10 +782,9 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     if ((snapshot_every && clock.step % snapshot_every == 0) ||
         (launch.snapshot_at_end && clock.step == final_step)) {
       if (!checkpoint::save_snapshot(
-              snapshot_writer, snapshot_progress,
-              snap::Header{runtime_version, clock.step, hash_bytes(registry.hash)}, objects_state,
-              react_state, physical_relations, catalog_state, perm_state, profiles, step_state,
-              elaborate_state, space, journal.next_id())) {
+              snapshot_writer, snap::Header{runtime_version, clock.step, hash_bytes(registry.hash)},
+              objects_state, react_state, space_state, catalog_state, perm_state, net_state,
+              step_state, elaborate_state, journal.next_id())) {
         record::Event dropped;
         dropped.step = clock.step;
         dropped.kind = record::Kind::System;
@@ -857,10 +819,9 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   if (!fixture_case && (launch.network || launch.snapshot_at_end) &&
       snapshot_progress.last_step != clock.step)
     while (!checkpoint::save_snapshot(
-        snapshot_writer, snapshot_progress,
-        snap::Header{runtime_version, clock.step, hash_bytes(registry.hash)}, objects_state,
-        react_state, physical_relations, catalog_state, perm_state, profiles, step_state,
-        elaborate_state, space, journal.next_id()))
+        snapshot_writer, snap::Header{runtime_version, clock.step, hash_bytes(registry.hash)},
+        objects_state, react_state, space_state, catalog_state, perm_state, net_state, step_state,
+        elaborate_state, journal.next_id()))
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
   snapshot_writer.finish();
   capture_writer.finish();
@@ -872,8 +833,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   if (fixture_case)
     fixture::write_report(launch.report, values, *fixture_case, clock.step, hz, script_errors);
   else if (!launch.report.empty()) {
-    write_state_report(launch.report, values, inspection_terms, poses, clock.step, hz,
-                       script_errors, timers, allocations);
+    write_state_report(launch.report, values, inspection_terms, poses, clock, script_errors, timers,
+                       allocations);
   }
   std::sort(phase_ms.begin(), phase_ms.end());
   const auto percentile = [&](double p) {

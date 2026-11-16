@@ -78,10 +78,10 @@ void hidden_reconfiguration_stays_hidden_and_destroy_needs_no_reach() {
   for (auto h : objects)
     x.grant(h, perm::bit(perm::Verb::Edit));
 
-  require(space::custody(x.world, x.f.objects_state, root, x.f.a, x.space_state,
-                         std::span(objects).subspan(1))
-                  .status == space::Status::Ok,
-          "fixture stores assembly in hidden inventory");
+  require(
+      space::custody(x.f.objects_state, root, x.f.a, x.space_state, std::span(objects).subspan(1))
+              .status == space::Status::Ok,
+      "fixture stores assembly in hidden inventory");
   x.f.objects.preset[root.slot()] |= perm::bit(perm::Verb::Edit);
   auto edited = x.replace(root, {{"model", "m:1"}, {"params", 1}});
   require(edited.changed && !space::bounds(x.world, identity(x.f.objects), root),

@@ -22,7 +22,7 @@ template <class F> void rejects(F run, const char *message) {
 }
 struct Fixture {
   amber::catalog::State catalog_state;
-  amber::react::State react_state;
+  amber::react::State react_state{{4096, 50, 5, 64}};
 
   Models &models = catalog_state.models;
   ParameterBlocks &parameters = catalog_state.parameters;

@@ -109,9 +109,12 @@ void remove_watches(Subscriptions &subscriptions, ScriptKey consumer) {
   }
 }
 WatchChanges sync_watches(amber::react::State &react_state, const react::ValueRead &values,
-                          ScriptKey consumer, const react::ScriptDeclaration &declaration, Step now,
-                          double hz, const record::Origin &origin, SyncMode mode,
-                          std::optional<std::span<const TermId>> allowed_terms) {
+                          ScriptKey consumer, const react::ScriptDeclaration &declaration,
+                          const amber::step::Clock &clock, const record::Origin &origin,
+                          SyncMode mode, std::optional<std::span<const TermId>> allowed_terms) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &subscriptions = react_state.subscriptions;
   auto &allocations = react_state.allocations;
 
@@ -241,7 +244,8 @@ WatchChanges sync_rule_watches(amber::react::State &react_state, const react::Va
     }
     auto changes =
         sync_watches(react_state, values, consumer, scripts.rows.at(consumer.script).declaration,
-                     now, hz, origin, SyncMode::Change, std::span<const TermId>(allowed));
+                     amber::step::Clock{.step = now, .hz = hz}, origin, SyncMode::Change,
+                     std::span<const TermId>(allowed));
     result.dirty.insert(result.dirty.end(), std::make_move_iterator(changes.dirty.begin()),
                         std::make_move_iterator(changes.dirty.end()));
     result.timers.insert(result.timers.end(), std::make_move_iterator(changes.timers.begin()),

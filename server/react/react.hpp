@@ -6,6 +6,10 @@ namespace amber::react {
 struct State;
 }
 
+namespace amber::space {
+struct State;
+}
+
 #include "record/record.hpp"
 #include "snap/snap.hpp"
 #include "store/store.hpp"
@@ -25,6 +29,9 @@ struct Scripts;
 } // namespace amber::catalog
 
 namespace amber::react {
+
+ValueRead value_read(const ObjectState &, const catalog::State &, const State &,
+                     const space::State &);
 
 Answer read_intrinsic(const Materials &, TermId material, const Term &);
 Answer read_baked(const AssetMeasurements &, ModelId, const Term &, std::uint32_t params = 0);
@@ -71,8 +78,8 @@ bool reconcile_allocation(const ValueRead &, amber::react::State &react_state, F
 double metered(const Meter &, Step now, double hz);
 std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, Combine,
                                     const PriorityValues &, Handle subject, TermId supply_term,
-                                    TermId demand_term, amber::react::State &react_state, Step now,
-                                    double hz);
+                                    TermId demand_term, amber::react::State &react_state,
+                                    const amber::step::Clock &clock);
 double get_share(const AllocationRows &, Handle subject, TermId demand_term, Handle contributor);
 double live_share(const ValueRead &, Handle subject, TermId demand_term, Handle contributor,
                   Step now, double hz);
@@ -81,7 +88,7 @@ void retire_allocations(AllocationRows &, MeterRows &, Handle);
 bool set_state(Properties &, Processes &, const Term &, Handle, Value, Step, double hz,
                DeferredEffects &);
 bool set_rate(amber::react::State &react_state, const Term &, Handle, double rate, double lo,
-              double hi, Step, double hz, DeferredEffects &);
+              double hi, const amber::step::Clock &clock, DeferredEffects &);
 bool transfer_state(amber::react::State &react_state, const Term &, Handle from, Handle to,
                     double amount, Step, double hz, DeferredEffects &);
 bool set_contribution(SharedColumns &, GivesTo &, const Term &, Handle from, Handle subject,
@@ -100,7 +107,7 @@ void consult_object(const Invocation &, Handle);
 
 class Vm;
 // Direct VM execution.
-bool start_invocation(Vm &, amber::react::State &react_state, const ValueRead &,
+bool start_invocation(amber::react::State &react_state, const ValueRead &,
                       const amber::ObjectState &objects_state, std::uint64_t initial_seed,
                       const amber::catalog::State &catalog_state, record::Journal &,
                       const HandlerRef &, InvocationInput, Invocation &, CompletedInvocation &);
@@ -164,8 +171,9 @@ std::vector<TermId> rule_watch_terms(const RuleVersions &, const ValueRead &, Ha
                                      Step, double hz);
 
 WatchChanges sync_watches(amber::react::State &react_state, const ValueRead &, ScriptKey,
-                          const ScriptDeclaration &, Step, double hz, const record::Origin &,
-                          SyncMode, std::optional<std::span<const TermId>> allowed_terms = {});
+                          const ScriptDeclaration &, const amber::step::Clock &clock,
+                          const record::Origin &, SyncMode,
+                          std::optional<std::span<const TermId>> allowed_terms = {});
 void remove_watches(Subscriptions &, ScriptKey);
 WatchChanges refresh_dependencies(Subscriptions &, const ValueRead &, FactKey changed, Step,
                                   double hz, const record::Origin &);
@@ -211,9 +219,9 @@ void retire_reactions(const catalog::Models &, const ValueRead &, amber::react::
                       DeferredEffects &);
 
 // True means cached rule state changed and the caller must persist its registry pin.
-bool update_rule(catalog::Scripts &, amber::react::State &react_state, step::WorkQueues &, Vm &,
-                 const ValueRead &, ScriptId, RuleMode, Step, double hz, const record::Origin &,
-                 DeferredEffects &);
+bool update_rule(catalog::Scripts &, amber::react::State &react_state, step::WorkQueues &,
+                 const ValueRead &, ScriptId, RuleMode, const amber::step::Clock &clock,
+                 const record::Origin &, DeferredEffects &);
 void reconcile_allocations(const ValueRead &, amber::react::State &react_state, DeferredEffects &,
                            Step, double hz);
 void reconcile_priority(const ValueRead &, amber::react::State &react_state, SettingKey,
@@ -403,6 +411,7 @@ struct State {
 
 namespace amber::react {
 struct State {
+  explicit State(VmSettings settings) : vm(settings) {}
   Terms terms;
   Materials materials;
   Properties properties;
@@ -426,5 +435,6 @@ struct State {
   InstanceScripts installations;
   NativeActions native_declarations;
   std::vector<TermId> inspection_terms;
+  Vm vm;
 };
 } // namespace amber::react

@@ -335,12 +335,14 @@ AssemblyEdit extract_assembly(Space &space, IdentityRead identity, Handle root,
   return edit;
 }
 
-OperationResult rebuild_assembly(Space &space, amber::ObjectState &objects_state,
+OperationResult rebuild_assembly(amber::ObjectState &objects_state,
                                  amber::space::State &space_state, const AssemblyEdit &edit,
                                  std::span<const BodySpec> bodies,
                                  std::span<const Handle> logical_roots,
                                  std::span<const VolumeSpec> volumes,
                                  std::span<const Attachment> internal) {
+  auto &space = space_state.space;
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(objects_state.objects);
   auto parents = amber::parents(objects_state.objects);
@@ -425,7 +427,7 @@ OperationResult rebuild_assembly(Space &space, amber::ObjectState &objects_state
                   ? Motion::Kinematic
                   : Motion::Static);
   for (const auto &attachment : internal) {
-    auto result = attach(space, objects_state, space_state, attachment);
+    auto result = attach(objects_state, space_state, attachment);
     if (result.status != Status::Ok)
       return result;
   }

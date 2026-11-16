@@ -156,7 +156,7 @@ define_material(const step::NativeCall &call, std::span<const std::string> roles
     const auto pin =
         persist_registry(document, directory, values.terms, materials, rules, mechanical);
     refresh_material(space, geometry, catalog_state, values, physical_roles, defaults,
-                     std::span(&material, 1), call.step, call.hz);
+                     std::span(&material, 1), amber::step::Clock{.step = call.step, .hz = call.hz});
     auto out = detail::result(
         true,
         {{"material", material}, {"name", values.terms.rows[material].name}, {"registry", pin}});

@@ -1,3 +1,4 @@
+#include "settings.hpp"
 #include "space_fixture.hpp"
 #include "step/step.hpp"
 #include <toml++/toml.hpp>
@@ -115,17 +116,17 @@ int main(int argc, char **argv) {
     const auto held = scene.box({.2f, .2f, .2f}, {2, 0, 0}, space::Motion::Dynamic, 0, false);
     auto &space_state = scene.space_state;
 
-    require(space::attach(scene.space, scene.objects_state, scene.space_state,
-                          {held, body, {{0, .3f, 1}, {}}, true})
-                    .status == space::Status::Ok,
-            "actual grasp for held observation");
+    require(
+        space::attach(scene.objects_state, scene.space_state, {held, body, {{0, .3f, 1}, {}}, true})
+                .status == space::Status::Ok,
+        "actual grasp for held observation");
     scene.objects.owner[body.slot()] = 2;
     scene.objects.owner[visible.slot()] = 3;
     scene.objects.model[far.slot()] = 3;
     scene.objects.model[held.slot()] = 4;
     for (const auto h : {body, visible, far, held})
       scene.objects.material[h.slot()] = 2;
-    amber::react::State react_state;
+    amber::react::State react_state{{4096, 50, 5, 64}};
     react::Terms &terms = react_state.terms;
     terms.rows.resize(17);
     for (TermId id = 1; id < 5; ++id) {
@@ -225,7 +226,7 @@ int main(int argc, char **argv) {
 
     catalog::Scripts &scripts = catalog_state.scripts;
     const react::VmSettings vm_settings{4096, 50, 5, 64};
-    react::Vm vm(vm_settings);
+    auto &vm = react_state.vm;
     observe::Hearing &hearing = space_state.hearing;
     std::vector<observe::Listener> &listeners =
         (space_state.listeners =
@@ -272,13 +273,15 @@ int main(int argc, char **argv) {
     observe::ActiveViews &active = (space_state.active_views = observe::ActiveViews(8));
     space_state.lights = observe::Lights(8);
 
-    step::Intents intents;
+    step::State step_state{8};
 
     Step now = 0;
     const observe::Settings perception{30, 1.5f, 256, 1, .1f, .1, 40, 8, 40};
     const auto look = [&](const net::Invocation &request) {
-      return vi::read_look(catalog_state, react_state, values, views, space_state, scene.space,
-                           scene.objects_state, intents, perception, now, 20, 120, request);
+      step_state.clock.step = now;
+      step_state.clock.hz = 20;
+      return vi::read_look(catalog_state, react_state, views, space_state, scene.objects_state,
+                           step_state, perception, 120, request);
     };
     net::Invocation call;
     call.session = 11;
@@ -297,8 +300,15 @@ int main(int argc, char **argv) {
     perm::Grants &grants = perm_state.grants;
 
     const auto offered = [&](const net::Invocation &request) {
-      return vi::read_actions(catalog_state, react_state, values, views, hearing, 10, 40,
-                              authority(scene.objects), perm_state, now, request);
+      return vi::read_actions(
+          catalog_state, react_state, values, views, hearing,
+          [&] {
+            amber::Settings s{};
+            s.actions_page = 10;
+            s.perception.events_per_response = 40;
+            return s;
+          }(),
+          authority(scene.objects), perm_state, now, request);
     };
     auto action_call = call;
     action_call.request.fields = {{"name", "test.t3"}};
@@ -462,7 +472,8 @@ int main(int argc, char **argv) {
 
     const auto inspect = [&](const net::Invocation &request) {
       return vi::read_inspect(catalog_state, react_state, values, views, hearing,
-                              scene.objects_state, perm_state, now, 20, 40, request);
+                              scene.objects_state, perm_state,
+                              amber::step::Clock{.step = now, .hz = 20}, 40, request);
     };
     auto grant_call = call;
     grant_call.request.fields = {{"target", "grants"}};

@@ -122,10 +122,13 @@ void relation_effects(react::DeferredEffects &effects, const PhysicalRelationTer
   }
 }
 void publish_physical(amber::step::State &step_state, record::Journal &journal,
-                      const PhysicalEventTerms &terms, std::size_t event_limit, double hz,
+                      const PhysicalEventTerms &terms, std::size_t event_limit,
                       const amber::ObjectState &objects_state,
                       const amber::catalog::State &catalog_state, const space::StepResult &physics,
-                      Step now) {
+                      const amber::step::Clock &clock) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &causes = step_state.mechanical_causes;
   auto &queues = step_state.queues;
 
@@ -182,8 +185,12 @@ void collect_physical_causes(MechanicalCauses &causes, const space::Space &space
 space::StepResult advance_motion(space::Space &space, amber::ObjectState &objects_state,
                                  space::PhysicalRelations &physical_relations,
                                  amber::step::State &step_state,
-                                 const amber::perm::State &perm_state, Step now, double hz,
-                                 float goal_tolerance_m, float reach_m) {
+                                 const amber::perm::State &perm_state,
+                                 const amber::step::Clock &clock, float goal_tolerance_m,
+                                 float reach_m) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto ids = amber::identity(std::as_const(objects_state.objects));
 
   auto &intents = step_state.intents;

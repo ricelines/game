@@ -1024,9 +1024,10 @@ OperationResult can_custody(const Space &space, IdentityRead identity, Handle ob
       std::ranges::any_of(n.volumes, [&](const Volume &v) { return member(v.spec.owner); });
   return can_release_occupants(space, object, descendants, retiring_body);
 }
-OperationResult custody(Space &space, amber::ObjectState &objects_state, Handle object,
-                        Handle custodian, amber::space::State &space_state,
-                        std::span<const Handle> descendants) {
+OperationResult custody(amber::ObjectState &objects_state, Handle object, Handle custodian,
+                        amber::space::State &space_state, std::span<const Handle> descendants) {
+  auto &space = space_state.space;
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto parents = amber::parents(objects_state.objects);
   auto flags = amber::space_flags(objects_state.objects);
@@ -1265,9 +1266,10 @@ double illuminance(const Space &space, IdentityRead identity, Handle receiver, V
   }
   return result;
 }
-OperationResult attach(Space &space, amber::ObjectState &objects_state,
-                       amber::space::State &space_state, const Attachment &attachment,
-                       CauseToken cause) {
+OperationResult attach(amber::ObjectState &objects_state, amber::space::State &space_state,
+                       const Attachment &attachment, CauseToken cause) {
+  auto &space = space_state.space;
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(objects_state.objects);
   auto parents = amber::parents(objects_state.objects);
@@ -1332,8 +1334,10 @@ OperationResult attach(Space &space, amber::ObjectState &objects_state,
     n.dirty_objects.insert(attachment.subject.bits);
   return {Status::Ok, {}};
 }
-OperationResult detach(Space &space, amber::ObjectState &objects_state,
-                       amber::space::State &space_state, const Release &release, CauseToken cause) {
+OperationResult detach(amber::ObjectState &objects_state, amber::space::State &space_state,
+                       const Release &release, CauseToken cause) {
+  auto &space = space_state.space;
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(objects_state.objects);
   auto parents = amber::parents(objects_state.objects);

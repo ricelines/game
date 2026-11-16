@@ -103,9 +103,10 @@ void threshold_restore_and_selected_instance_codec() {
   set_instances(f.installed, f.a, ids, f.scripts);
   set_instances(f.installed, f.b, ids, f.scripts);
   project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
-  set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 10, 0, 20, f.effects);
+  set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 10, amber::step::Clock{.step = 0, .hz = 20},
+           f.effects);
   auto changes = sync_watches(f.react_state, f.values(), {f.a, id}, f.scripts.rows[id].declaration,
-                              0, 20, {}, SyncMode::Initial);
+                              amber::step::Clock{.step = 0, .hz = 20}, {}, SyncMode::Initial);
   require(changes.timers.size() == 1 && changes.timers[0].due == 41,
           "real process threshold schedules strict boundary");
   const auto timer = changes.timers[0];
@@ -119,7 +120,7 @@ void threshold_restore_and_selected_instance_codec() {
   write_script_states(out, f.states, f.subscriptions, SnapshotSelection(chosen));
   out.adapter().flush();
   bytes.resize(out.adapter().writtenBytesCount());
-  amber::react::State react_state;
+  amber::react::State react_state{{4096, 50, 5, 64}};
   InstanceScripts &loaded = react_state.installations;
   ScriptStates &loaded_states = react_state.states;
   Subscriptions &loaded_subs = react_state.subscriptions;
@@ -130,7 +131,7 @@ void threshold_restore_and_selected_instance_codec() {
   require(loaded.get(f.a.slot()) && !loaded.get(f.b.slot()),
           "selected installation snapshot excludes unrelated object");
   auto restored = sync_watches(react_state, f.values(), {f.a, id}, f.scripts.rows[id].declaration,
-                               0, 20, {}, SyncMode::Restore);
+                               amber::step::Clock{.step = 0, .hz = 20}, {}, SyncMode::Restore);
   require(
       restored.dirty.empty() && restored.timers.empty() &&
           valid_threshold(*timer.threshold, identity(f.objects), f.processes, loaded_subs, 41, 20),
@@ -144,7 +145,8 @@ void threshold_restore_and_selected_instance_codec() {
   require(std::get<bool>(f.states.at({f.a, id}).at(StateKey{std::string("crossed")})),
           "threshold invokes real Luau after restore");
   check_changed(loaded_subs, f.values(), f.allocations, {f.a, 1}, 41, 20, {});
-  set_rate(f.react_state, f.terms.rows[1], f.a, -1, 0, 10, 41, 20, f.effects);
+  set_rate(f.react_state, f.terms.rows[1], f.a, -1, 0, 10, amber::step::Clock{.step = 41, .hz = 20},
+           f.effects);
   require(!valid_threshold(*timer.threshold, identity(f.objects), f.processes, loaded_subs, 41, 20),
           "unchanged predicate suppresses a previously delivered crossing");
   require(
@@ -193,8 +195,9 @@ void rule_versions_partial_replacement_and_catchup() {
   const auto allowed = rule_watch_terms(f.rules, f.values(), f.a, old, 0, 20);
   require(allowed == std::vector<TermId>{4},
           "partial replacement preserves old script's other active trigger");
-  sync_watches(f.react_state, f.values(), {f.a, old}, f.scripts.rows[old].declaration, 0, 20, {},
-               SyncMode::Change, std::span<const TermId>(allowed));
+  sync_watches(f.react_state, f.values(), {f.a, old}, f.scripts.rows[old].declaration,
+               amber::step::Clock{.step = 0, .hz = 20}, {}, SyncMode::Change,
+               std::span<const TermId>(allowed));
   require(f.subscriptions.rows.size() == 1 && f.subscriptions.rows.begin()->second.size() == 1 &&
               f.subscriptions.rows.begin()->second[0].index == 1,
           "only retired watch removed, original watch index retained");

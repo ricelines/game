@@ -24,7 +24,7 @@ Term term(TermId id, const char *name, Source source = Source::State,
 }
 struct Fixture {
   amber::ObjectState objects_state;
-  amber::react::State react_state;
+  amber::react::State react_state{{4096, 50, 5, 64}};
   amber::catalog::State catalog_state;
 
   Objects &objects = objects_state.objects;
@@ -105,13 +105,15 @@ void process_thresholds_and_transfer() {
   t.conserved = true;
   set_state(f.properties, f.processes, t, f.a, Value(10.0), 0, 20, effects);
   set_state(f.properties, f.processes, t, f.b, Value(1.0), 0, 20, effects);
-  set_rate(f.react_state, t, f.a, -2, 0, 10, 0, 20, effects);
-  require(!set_rate(f.react_state, t, f.a, -2, 0, 10, 0, 20, effects),
-          "same effective process rate/bounds is unchanged");
+  set_rate(f.react_state, t, f.a, -2, 0, 10, amber::step::Clock{.step = 0, .hz = 20}, effects);
+  require(
+      !set_rate(f.react_state, t, f.a, -2, 0, 10, amber::step::Clock{.step = 0, .hz = 20}, effects),
+      "same effective process rate/bounds is unchanged");
 
   auto p = *f.processes[1].get(f.a.slot());
   const auto effect_count = effects.ordered.size();
-  require(!set_rate(f.react_state, t, f.a, -2, 0, 10, 20, 20, effects) &&
+  require(!set_rate(f.react_state, t, f.a, -2, 0, 10, amber::step::Clock{.step = 20, .hz = 20},
+                    effects) &&
               f.processes[1].get(f.a.slot())->step0 == p.step0 &&
               effects.ordered.size() == effect_count,
           "repeating an unchanged process later preserves its closed form and armed timers");
@@ -132,7 +134,7 @@ void process_thresholds_and_transfer() {
        "settled source debit");
   near(read_state(f.properties, f.processes, f.b, 1, 50, 20).value.numeric(), 3,
        "equal destination credit");
-  set_rate(f.react_state, t, f.c, -1, 0, 10, 50, 20, effects);
+  set_rate(f.react_state, t, f.c, -1, 0, 10, amber::step::Clock{.step = 50, .hz = 20}, effects);
   auto current = read_state(f.properties, f.processes, f.c, 1, 50, 20).value;
   require(set_state(f.properties, f.processes, t, f.c, current, 50, 20, effects),
           "stopping current nonzero process rate counts as change");
@@ -140,7 +142,7 @@ void process_thresholds_and_transfer() {
           "transfer preserves ongoing source rate/bounds");
   near(read_state(f.properties, f.processes, f.a, 1, 60, 20).value.numeric(), 2,
        "source process continues after conserved transfer");
-  set_rate(f.react_state, t, f.b, 0.5, 0, 4, 50, 20, effects);
+  set_rate(f.react_state, t, f.b, 0.5, 0, 4, amber::step::Clock{.step = 50, .hz = 20}, effects);
   const auto source_before = *f.processes[1].get(f.a.slot());
   const auto destination_before = *f.processes[1].get(f.b.slot());
   bool bounded = false;
@@ -217,7 +219,7 @@ void subscription_rebind_and_relations() {
 }
 void allocation_rows_track_current_nonzero_shares_only() {
   Fixture f;
-  amber::react::State react_state;
+  amber::react::State react_state{{4096, 50, 5, 64}};
   AllocationRows &allocations = react_state.allocations;
   MeterRows &meters = react_state.meters;
   const Shared supply{2, {{f.a, 2}}};
@@ -228,17 +230,20 @@ void allocation_rows_track_current_nonzero_shares_only() {
     init.model = 1;
     const auto consumer = create(f.objects, init);
     const Shared demand{1, {{consumer, 1}}};
-    allocate(supply, demand, Combine::ShareEqual, priority, f.b, 1, 2, react_state, i * 2, 20);
+    allocate(supply, demand, Combine::ShareEqual, priority, f.b, 1, 2, react_state,
+             amber::step::Clock{.step = i * 2, .hz = 20});
     require(allocations.values.size() == 2,
             "current allocation rows grew with withdrawn contributors");
   }
-  allocate(empty, empty, Combine::ShareEqual, priority, f.b, 1, 2, react_state, 512, 20);
+  allocate(empty, empty, Combine::ShareEqual, priority, f.b, 1, 2, react_state,
+           amber::step::Clock{.step = 512, .hz = 20});
   require(allocations.values.empty() && !meters.empty(),
           "zero shares retained current-state rows or discarded earned integrals");
   retire_allocations(allocations, meters, f.b);
   require(meters.empty(), "retiring a fully withdrawn subject retained historical meters");
   const Shared demand{1, {{f.c, 1}}};
-  allocate(empty, demand, Combine::ShareEqual, priority, f.b, 1, 2, react_state, 513, 20);
+  allocate(empty, demand, Combine::ShareEqual, priority, f.b, 1, 2, react_state,
+           amber::step::Clock{.step = 513, .hz = 20});
   require(allocations.values.empty() && meters.empty(),
           "never-served zero demand allocated redundant rows and meters");
 }
@@ -246,7 +251,7 @@ void allocation_rows_track_current_nonzero_shares_only() {
 void contribution_and_metering() {
   Fixture f;
   DeferredEffects effects;
-  amber::react::State react_state;
+  amber::react::State react_state{{4096, 50, 5, 64}};
   GivesTo &reverse = react_state.gives_to;
   auto &t = f.terms.rows[1];
   t.combine = Combine::Sum;
@@ -267,17 +272,20 @@ void contribution_and_metering() {
   MeterRows &meters = react_state.meters;
   PriorityValues priorities;
   Shared supply{100, {{f.a, 100}}}, demand{30, {{f.b, 10}, {f.c, 20}}};
-  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, react_state, 0, 20);
+  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, react_state,
+           amber::step::Clock{.step = 0, .hz = 20});
   near(get_share(allocations, f.a, 2, f.b), 10, "satisfied small demand");
   near(get_share(allocations, f.a, 2, f.c), 20, "satisfied larger demand");
   near(metered(meters.at({f.a, f.a, 1, true}), 20, 20), 30,
        "supplier meters actual served rather than offered");
   demand = {0, {}};
-  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, react_state, 20, 20);
+  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, react_state,
+           amber::step::Clock{.step = 20, .hz = 20});
   near(metered(meters.at({f.a, f.a, 1, true}), 40, 20), 30, "unused supply not metered");
   supply = {12, {{f.a, 12}}};
   demand = {25, {{f.b, 5}, {f.c, 20}}};
-  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, react_state, 40, 20);
+  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, react_state,
+           amber::step::Clock{.step = 40, .hz = 20});
   near(get_share(allocations, f.a, 2, f.b), 5, "waterfill caps small demand");
   near(get_share(allocations, f.a, 2, f.c), 7, "waterfill redistributes surplus");
 }
@@ -675,8 +683,8 @@ void candidate_start_uses_current_installation() {
     input.receiver = f.a;
     input.trigger = 6;
     input.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-    return start_invocation(f.vm, f.react_state, f.values(), objects_state, 7, f.catalog_state,
-                            journal, handler, std::move(input), inv, done);
+    return start_invocation(f.react_state, f.values(), objects_state, 7, f.catalog_state, journal,
+                            handler, std::move(input), inv, done);
   };
   Invocation broad;
   CompletedInvocation broad_result;
@@ -735,8 +743,8 @@ void suspended_handler_sees_replaced_parts() {
   CompletedInvocation completed;
   record::Journal journal(8, {});
   const auto handlers = dispatch(f.triggers, f.values(), root, 6, 0, 20);
-  require(start_invocation(f.vm, f.react_state, f.values(), objects_state, 7, f.catalog_state,
-                           journal, handlers.front(), std::move(input), invocation, completed) &&
+  require(start_invocation(f.react_state, f.values(), objects_state, 7, f.catalog_state, journal,
+                           handlers.front(), std::move(input), invocation, completed) &&
               completed.outcome.status == RunOutcome::Status::Action,
           "actual script suspends while its assembly still has the old part");
   const auto plan =

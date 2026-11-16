@@ -46,10 +46,13 @@ step::NativeCompletion answer_rule(amber::elaborate::State &elaborate_state,
 }
 FixtureCompletion complete_fixture(amber::elaborate::State &elaborate_state,
                                    amber::step::State &step_state, catalog::Scripts &scripts,
-                                   amber::react::State &react_state, react::Vm &vm,
-                                   const react::ValueRead &values,
+                                   amber::react::State &react_state, const react::ValueRead &values,
                                    elaborate::RoleAccess current_role,
-                                   const elaborate::FixtureResult &result, Step now, double hz) {
+                                   const elaborate::FixtureResult &result,
+                                   const amber::step::Clock &clock) {
+
+  const auto now = clock.step;
+
   auto &requests = elaborate_state.requests;
   auto &pending = elaborate_state.fixtures;
   auto &inputs = step_state.inputs;
@@ -87,8 +90,8 @@ FixtureCompletion complete_fixture(amber::elaborate::State &elaborate_state,
       throw std::invalid_argument("immutable candidate identity or tests changed");
     if (error.empty()) {
       const auto before = elaboration_detail::activation_state(scripts);
-      if (react::update_rule(scripts, react_state, queues, vm, values, script.id,
-                             react::RuleMode::Validated, now, hz, out.origin, out.effects))
+      if (react::update_rule(scripts, react_state, queues, values, script.id,
+                             react::RuleMode::Validated, clock, out.origin, out.effects))
         out.changed_scripts = elaboration_detail::changed_activations(scripts, before);
       out.notification = elaborate::close_rule_answer(requests, pending, check, now);
       out.effects.changed = true;

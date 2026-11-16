@@ -7,16 +7,16 @@ namespace amber::step::fixture {
 void extend_vocabulary(react::Terms &, react::Materials &, const catalog::MechanicalBindings &,
                        const std::filesystem::path &registry_root,
                        const catalog::Hash &candidate_registry);
-react::RuleChange install_candidate(catalog::Scripts &, react::Vm &,
-                                    amber::react::State &react_state, const catalog::RuntimePins &,
+react::RuleChange install_candidate(catalog::Scripts &, amber::react::State &react_state,
+                                    const catalog::RuntimePins &,
                                     const std::filesystem::path &source_root,
                                     const std::filesystem::path &destination_root,
                                     const catalog::Hash &artifact,
                                     const catalog::Hash &registry_pin, PlayerId author, bool active,
-                                    Step now, double hz);
+                                    const amber::step::Clock &clock);
 void initialize_case(const Case &, amber::react::State &react_state, const react::ValueRead &,
-                     const catalog::Scripts &, const react::RuleChange &, WorkQueues &, Step now,
-                     double hz, react::DeferredEffects &);
+                     const catalog::Scripts &, const react::RuleChange &, WorkQueues &,
+                     const amber::step::Clock &clock, react::DeferredEffects &);
 std::optional<NativeCall> prepare_action(const Case &, const react::Terms &,
                                          const react::NativeActions &, IdentityRead, AuthorityRead,
                                          const net::Profiles &, Step now, double hz);
@@ -28,18 +28,18 @@ namespace amber::step {
 space::StepResult advance_motion(space::Space &space, amber::ObjectState &objects_state,
                                  space::PhysicalRelations &physical_relations,
                                  amber::step::State &step_state,
-                                 const amber::perm::State &perm_state, Step now, double hz,
-                                 float goal_tolerance_m, float reach_m);
+                                 const amber::perm::State &perm_state,
+                                 const amber::step::Clock &clock, float goal_tolerance_m,
+                                 float reach_m);
 void publish_intent_endings(amber::step::State &step_state, const react::Terms &terms,
                             TermId arrived, TermId blocked, TermId cancelled,
                             const amber::ObjectState &objects_state, net::Sessions &sessions,
                             record::Journal &journal, Step now, std::size_t event_queue_max);
-void update_frame_illumination(IlluminationSources &, amber::space::State &space_state,
-                               const space::Space &, TransformRead, const react::ValueRead &,
+void update_frame_illumination(amber::step::State &step_state, amber::space::State &space_state,
+                               TransformRead, const react::ValueRead &,
                                amber::react::State &react_state, std::span<const Handle> moved,
-                               std::span<const space::Bounds> dirty_bounds,
-                               std::span<const FactKey> changed, TermId illuminance, Step now,
-                               double hz, react::DeferredEffects &);
+                               std::span<const space::Bounds> dirty_bounds, TermId illuminance,
+                               react::DeferredEffects &);
 void sample_motion(std::vector<observe::MotionSample> &motion,
                    SparseColumn<std::pair<Handle, Vec3>> &previous_positions,
                    std::span<const Handle> moved, const space::Space &space, IdentityRead ids,
@@ -48,9 +48,9 @@ void sample_motion(std::vector<observe::MotionSample> &motion,
 
 namespace amber::step {
 void write_state_report(const std::filesystem::path &path, const react::ValueRead &values,
-                        std::span<const TermId> inspection_terms, TransformRead poses, Step now,
-                        double hz, std::size_t script_errors, const TimerWheel &pending_timers,
-                        const react::AllocationRows &allocations);
+                        std::span<const TermId> inspection_terms, TransformRead poses,
+                        const amber::step::Clock &clock, std::size_t script_errors,
+                        const TimerWheel &pending_timers, const react::AllocationRows &allocations);
 void publish_value_changes(net::ReplicationIndex &, net::SessionViews &, const react::Processes &,
                            std::span<const FactKey>);
 void record_frame(record::Journal &journal, record::Writer &writer, net::RecordFeed &feed,
@@ -72,19 +72,16 @@ connection_notice(const net::SessionNotice &notice, amber::net::State &net_state
                   amber::space::State &space_state, DeliveryTargets &delivery,
                   const amber::catalog::State &catalog_state,
                   const amber::react::State &react_state, net::MaterialAppearanceRoles appearance,
-                  const amber::ObjectState &objects_state, Step now, double hz, float cell_m,
-                  std::uint32_t repl_delay_ms);
+                  const amber::ObjectState &objects_state, const amber::step::Clock &clock,
+                  const amber::Settings &settings);
 
 bool queue_connection_mutation(Inputs &inputs, WorkQueues &queues, net::Invocation &request);
 
-void answer_query(amber::net::State &net_state, net::Server &server,
-                  amber::space::State &space_state, record::Journal &journal,
-                  const amber::catalog::State &catalog_state,
-                  const amber::react::State &react_state, const react::ValueRead &values,
-                  const space::Space &space, const amber::ObjectState &objects_state,
-                  const Intents &intents, const amber::perm::State &perm_state,
-                  observe::Settings settings, std::size_t actions_page, Step now, double hz,
-                  const net::Invocation &request);
+void answer_query(amber::net::State &net_state, amber::space::State &space_state,
+                  record::Journal &journal, const amber::catalog::State &catalog_state,
+                  const amber::react::State &react_state, const amber::ObjectState &objects_state,
+                  const amber::step::State &step_state, const amber::perm::State &perm_state,
+                  const amber::Settings &loaded_settings, const net::Invocation &request);
 
 void send_connection_outputs(std::span<net::SessionOutput> outputs, net::Server &server,
                              amber::net::State &net_state, const amber::ObjectState &objects_state,
@@ -96,9 +93,9 @@ void flush_connections(amber::net::State &net_state, net::Server &server,
 
 void refresh_connections(amber::net::State &net_state, amber::space::State &space_state,
                          amber::step::State &step_state, const amber::catalog::State &catalog_state,
-                         const amber::react::State &react_state, const react::ValueRead &values,
-                         const space::Space &space, const amber::ObjectState &objects_state,
-                         observe::Settings settings, Step now, double hz);
+                         const amber::react::State &react_state,
+                         const amber::ObjectState &objects_state, observe::Settings settings,
+                         const amber::step::Clock &clock);
 } // namespace amber::step
 
 namespace amber::step::start {
@@ -106,7 +103,7 @@ void install_catalog(const Json &, amber::react::State &react_state, const catal
                      const catalog::RuntimePins &, react::VmSettings,
                      const std::filesystem::path &asset_root,
                      const std::filesystem::path &script_root, amber::catalog::State &catalog_state,
-                     react::Vm &, Symbols &);
+                     Symbols &);
 void bind_relation_reads(react::RelationsRead &, react::AuthoredRelations &, const react::Terms &,
                          const space::PhysicalRelations &, std::array<TermId, 4> physical_terms);
 void record_seed(record::Journal &journal, const react::Terms &terms, const catalog::Models &models,
@@ -116,13 +113,11 @@ void record_seed(record::Journal &journal, const react::Terms &terms, const cata
 
 namespace amber::step {
 std::vector<Handle>
-initialize_physics(space::Space &space, amber::step::State &step_state,
-                   const amber::catalog::State &catalog_state, const react::ValueRead &values,
-                   amber::ObjectState &objects_state, const perm::Players &players,
-                   amber::space::State &space_state, std::span<const Handle> initial,
-                   std::span<const space::MotionRow> restored_motion,
-                   std::span<const BodyCauseRow> restored_causes, PhysicsRoles roles,
-                   PhysicsDefaults defaults, bool restored, Step now, double hz);
+initialize_physics(amber::step::State &step_state, const amber::catalog::State &catalog_state,
+                   const amber::react::State &react_state, amber::ObjectState &objects_state,
+                   const perm::Players &players, amber::space::State &space_state,
+                   std::span<const Handle> initial, const checkpoint::Decoded &decoded,
+                   PhysicsDefaults defaults, bool restored);
 } // namespace amber::step
 
 namespace amber::step::checkpoint {

@@ -241,7 +241,8 @@ int main() {
       f.models.rows[f.objects.model[object.slot()]].asset = asset.hash;
       const auto definition = step::describe_physics(
           geometry, asset, values, {f.objects.model[object.slot()], 0, 8, 0, object},
-          f.objects.flags[object.slot()], {density, transmission}, {.6f, 0}, 0, 20);
+          f.objects.flags[object.slot()], {density, transmission}, {.6f, 0},
+          amber::step::Clock{.step = 0, .hz = 20});
       step::install_physics(physics, identity(f.objects), transforms(f.objects),
                             space_flags(f.objects), object, definition);
     }

@@ -85,9 +85,10 @@ OperationResult can_visible_custody(const Space &space, IdentityRead identity, P
   }
   return can_release_occupants(space, change.goods, descendants, false);
 }
-OperationResult visible_custody(Space &space, amber::ObjectState &objects_state,
-                                amber::space::State &space_state, const VisibleCustody &change,
-                                std::span<const Handle> descendants) {
+OperationResult visible_custody(amber::ObjectState &objects_state, amber::space::State &space_state,
+                                const VisibleCustody &change, std::span<const Handle> descendants) {
+  auto &space = space_state.space;
+
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(std::as_const(objects_state.objects));
   auto parents = amber::parents(objects_state.objects);

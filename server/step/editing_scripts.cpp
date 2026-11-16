@@ -50,8 +50,11 @@ void withdraw_removed(react::SharedColumns &shared, react::GivesTo &gives,
 bool synchronize(amber::react::State &react_state, const react::ValueRead &values,
                  const catalog::Scripts &scripts, amber::perm::State &perm_state,
                  TermId start_event, Handle object, std::span<const ScriptId> before,
-                 std::span<const ScriptId> after, Step now, double hz, const record::Origin &origin,
-                 react::DeferredEffects &effects) {
+                 std::span<const ScriptId> after, const amber::step::Clock &clock,
+                 const record::Origin &origin, react::DeferredEffects &effects) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &subscriptions = react_state.subscriptions;
   auto &states = react_state.states;
   auto &shared = react_state.shared;
@@ -83,8 +86,9 @@ bool synchronize(amber::react::State &react_state, const react::ValueRead &value
     if (std::find(before.begin(), before.end(), added) == before.end()) {
       const auto &declaration = scripts.rows[added].declaration;
       detail::watches(effects,
-                      react::sync_watches(react_state, values, {object, added}, declaration, now,
-                                          hz, origin, react::SyncMode::Change));
+                      react::sync_watches(react_state, values, {object, added}, declaration,
+                                          amber::step::Clock{.step = now, .hz = hz}, origin,
+                                          react::SyncMode::Change));
       if (start_event && declaration.active &&
           std::find(declaration.handlers.begin(), declaration.handlers.end(), start_event) !=
               declaration.handlers.end())
@@ -263,9 +267,9 @@ install_script(const step::NativeCall &call, amber::react::State &react_state,
       react::set_instances(instances, object, ids, scripts);
       react::project_instance(triggers, instances, scripts, values.terms, object);
       const auto after = react::installed_scripts(models, instances, values.identity, object);
-      out.permissions_changed |=
-          synchronize(react_state, values, scripts, perm_state, start_event, object, before, after,
-                      call.step, call.hz, call.origin, out.effects);
+      out.permissions_changed |= synchronize(
+          react_state, values, scripts, perm_state, start_event, object, before, after,
+          amber::step::Clock{.step = call.step, .hz = call.hz}, call.origin, out.effects);
       out.changed = true;
     }
     auto granted = detail::fill_slots(source, requested, authority, players, grants, call);
@@ -307,7 +311,7 @@ step::NativeCompletion uninstall_script(const step::NativeCall &call,
     auto out = detail::result(true);
     out.permissions_changed |=
         synchronize(react_state, values, scripts, perm_state, start_event, object, before, after,
-                    call.step, call.hz, call.origin, out.effects);
+                    amber::step::Clock{.step = call.step, .hz = call.hz}, call.origin, out.effects);
     out.changed_objects.push_back(object);
     return out;
   } catch (const std::exception &error) {
@@ -342,9 +346,9 @@ step::NativeCompletion model_script(const step::NativeCall &call, amber::react::
     for (std::size_t index = 0; index < objects.size(); ++index) {
       const auto after =
           react::installed_scripts(models, instances, values.identity, objects[index]);
-      out.permissions_changed |=
-          synchronize(react_state, values, scripts, perm_state, start_event, objects[index],
-                      before[index], after, call.step, call.hz, call.origin, out.effects);
+      out.permissions_changed |= synchronize(
+          react_state, values, scripts, perm_state, start_event, objects[index], before[index],
+          after, amber::step::Clock{.step = call.step, .hz = call.hz}, call.origin, out.effects);
     }
     out.changed_objects = objects;
     out.changed_models.push_back(model);
@@ -355,8 +359,11 @@ step::NativeCompletion model_script(const step::NativeCall &call, amber::react::
 }
 void rebind_scripts(const amber::catalog::State &catalog_state, amber::react::State &react_state,
                     const react::ValueRead &values, amber::perm::State &perm_state,
-                    TermId start_event, Step now, double hz, const record::Origin &origin,
-                    NativeCompletion &out) {
+                    TermId start_event, const amber::step::Clock &clock,
+                    const record::Origin &origin, NativeCompletion &out) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &models = catalog_state.models;
   auto &scripts = catalog_state.scripts;
   auto &instances = react_state.installations;
@@ -404,7 +411,7 @@ void rebind_scripts(const amber::catalog::State &catalog_state, amber::react::St
       const auto after = react::installed_scripts(models, instances, identity, binding.object);
       out.permissions_changed |=
           synchronize(react_state, values, scripts, perm_state, start_event, binding.object, before,
-                      after, now, hz, origin, out.effects);
+                      after, clock, origin, out.effects);
     }
     react::rebind_reactions(catalog_state, react_state, values, rebound, now, hz, origin,
                             out.effects);

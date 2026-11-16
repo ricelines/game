@@ -40,13 +40,20 @@ bool installed_caller(const catalog::Models &models, const catalog::Scripts &scr
   return std::ranges::find(installed, caller.script) != installed.end();
 }
 } // namespace
-ActionRun begin_action(const react::ValueRead &values, const amber::catalog::State &catalog_state,
+ActionRun begin_action(const amber::catalog::State &catalog_state,
                        const amber::react::State &react_state, const net::Profiles &profiles,
                        const amber::perm::State &perm_state,
-                       const amber::ObjectState &objects_state, const space::Space &space,
-                       const Intents &intents, record::Journal &journal, float reach_m,
-                       NativeCall call, const record::Origin &parent,
-                       Monotonic::time_point deadline) {
+                       const amber::ObjectState &objects_state,
+                       const amber::space::State &space_state, const Intents &intents,
+                       record::Journal &journal, float reach_m, NativeCall call) {
+  const auto parent = call.origin;
+  const auto deadline = call.deadline;
+
+  const auto values =
+      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+
+  auto &space = space_state.space;
+
   auto &models = catalog_state.models;
   auto &scripts = catalog_state.scripts;
   auto &installations = react_state.installations;
@@ -62,7 +69,6 @@ ActionRun begin_action(const react::ValueRead &values, const amber::catalog::Sta
 
   ActionRun run;
   run.call = std::move(call);
-  run.deadline = deadline;
   auto &request = run.call.request;
   auto event = action_record(run.call, values.terms, scripts);
   const auto deny = [&](nlohmann::json reply) {

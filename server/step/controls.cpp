@@ -164,11 +164,19 @@ void deliver_input(Inputs &inputs, net::Sessions &sessions, observe::Hearing &he
     sessions.complete(completed.session, completed.sequence, completed.fields);
 }
 
-std::pair<NativeCompletion, record::Origin> complete_authoring(
-    amber::catalog::State &catalog_state, amber::react::State &react_state, react::Vm &vm,
-    GeometryAssets &geometry, space::Space &space, record::Journal &journal, const Input &input,
-    react::authoring::Completion completion, bool session_live, Step now, double hz,
-    const std::filesystem::path &asset_root, const std::filesystem::path &script_root) {
+std::pair<NativeCompletion, record::Origin>
+complete_authoring(amber::catalog::State &catalog_state, amber::react::State &react_state,
+                   amber::step::State &step_state, space::Space &space, record::Journal &journal,
+                   const Input &input, react::authoring::Completion completion, bool session_live,
+                   const std::filesystem::path &asset_root,
+                   const std::filesystem::path &script_root) {
+  auto &geometry = step_state.geometry;
+  const auto &clock = step_state.clock;
+
+  auto &vm = react_state.vm;
+
+  const auto now = clock.step;
+  const auto hz = clock.hz;
 
   auto &models = catalog_state.models;
   auto &scripts = catalog_state.scripts;

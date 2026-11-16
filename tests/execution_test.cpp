@@ -13,7 +13,7 @@ void require(bool ok, const char *message) {
 }
 struct Fixture {
   amber::ObjectState objects_state;
-  amber::react::State react_state;
+  amber::react::State react_state{{4096, 50, 5, 64}};
   amber::catalog::State catalog_state;
 
   Objects &objects = objects_state.objects;
@@ -34,7 +34,7 @@ struct Fixture {
   react::RandomStates &random = react_state.random;
   Relation &parts = objects_state.declared_parts;
   record::Journal journal{8, {}};
-  react::Vm vm{{4096, 50, 5, 64}};
+  react::Vm &vm = react_state.vm;
   react::ValueRead values;
   react::GivesTo &gives_to = react_state.gives_to;
   catalog::Models &definitions = catalog_state.models;
@@ -121,7 +121,7 @@ struct Fixture {
     input.action_caller = PlayerId{7};
     react::Invocation invocation;
     react::CompletedInvocation completed;
-    react::start_invocation(vm, react_state, values, objects_state, 971, catalog_state, journal,
+    react::start_invocation(react_state, values, objects_state, 971, catalog_state, journal,
                             {script, terms.rows[term].name, script + 10, 1, true}, std::move(input),
                             invocation, completed);
     react::finish_invocation(identity(objects), attribution(objects), definitions, scripts, journal,
@@ -240,8 +240,8 @@ void model_rebind_retires_only_removed_installations() {
     lifecycle::apply_replacement(f.objects, parts, declared, plan, 1, 12);
     step::NativeCompletion completed;
     completed.rebound_objects = plan.retained;
-    step::editing::rebind_scripts(f.catalog_state, f.react_state, f.values(), perm_state, 6, 12, 20,
-                                  {}, completed);
+    step::editing::rebind_scripts(f.catalog_state, f.react_state, f.values(), perm_state, 6,
+                                  amber::step::Clock{.step = 12, .hz = 20}, {}, completed);
     return std::pair{completed.permissions_changed, std::move(completed.effects)};
   };
   const auto [changed, effects] = replace(f.a);

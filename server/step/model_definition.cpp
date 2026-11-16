@@ -90,13 +90,17 @@ std::string validate_model_edit(const nlohmann::json &value) {
     return "expected {model:'m:N',proposal:'m:N'}";
   return {};
 }
-NativeCompletion revise_model(amber::ObjectState &objects_state,
-                              amber::catalog::State &catalog_state, react::ModelSettings &settings,
-                              catalog::MeasurementBindings measurement_roles,
-                              const GeometryAssets &geometry, const react::ValueRead &values,
-                              space::Space &space, amber::space::State &space_state,
-                              amber::perm::State &perm_state, PhysicsRoles roles,
-                              PhysicsDefaults defaults, const NativeCall &call) {
+NativeCompletion
+revise_model(amber::ObjectState &objects_state, amber::catalog::State &catalog_state,
+             amber::react::State &react_state, catalog::MeasurementBindings measurement_roles,
+             const GeometryAssets &geometry, amber::space::State &space_state,
+             amber::perm::State &perm_state, PhysicsDefaults defaults, const NativeCall &call) {
+  const auto values =
+      amber::react::value_read(objects_state, catalog_state, react_state, space_state);
+
+  auto &settings = react_state.model_settings;
+
+  auto &space = space_state.space;
 
   auto &parts = objects_state.parts;
 
@@ -154,8 +158,8 @@ NativeCompletion revise_model(amber::ObjectState &objects_state,
       auto assembly = lifecycle::expand(models, parameters, assets, proposal, mapped->after);
       auto rows = lifecycle::plan_replace(models, parts, identity, transforms, params, root,
                                           assembly, identity.material[root.slot()]);
-      replacements.push_back(replacement_geometry(space, objects_state, authority.plot, geometry,
-                                                  catalog_state, values, roles, defaults, call,
+      replacements.push_back(replacement_geometry(space_state, objects_state, authority.plot,
+                                                  geometry, catalog_state, values, defaults, call,
                                                   std::move(rows), true));
     }
     std::vector<Handle> removed;
@@ -192,8 +196,8 @@ NativeCompletion revise_model(amber::ObjectState &objects_state,
         space::extract_assembly(space, identity, group.root, std::span(first.before).subspan(1)));
   }
   for (std::size_t i = 0; i < groups.size(); ++i)
-    rebuild_instances(objects_state, space, space_state, plots, catalog_state,
-                      groups[i].replacements, extracted[i], *author, call, out);
+    rebuild_instances(objects_state, space_state, plots, catalog_state, groups[i].replacements,
+                      extracted[i], *author, call, out);
   out.changed = true;
   out.result = record::Result::Applied;
   out.reply.erase("reason");

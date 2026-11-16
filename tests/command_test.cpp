@@ -11,7 +11,7 @@ void require(bool value, const char *message) {
 }
 struct Fixture {
   amber::ObjectState objects_state;
-  amber::react::State react_state;
+  amber::react::State react_state{{4096, 50, 5, 64}};
   amber::catalog::State catalog_state;
 
   Objects &objects = objects_state.objects;

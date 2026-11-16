@@ -15,8 +15,8 @@ react::CompletedInvocation invoke(test_runtime::Fixture &f, const step::PlannedI
                                   record::Journal &journal) {
   react::Invocation invocation;
   react::CompletedInvocation completed;
-  react::start_invocation(f.vm, f.react_state, f.values(), f.objects_state, 7, f.catalog_state,
-                          journal, plan.handler, plan.input, invocation, completed);
+  react::start_invocation(f.react_state, f.values(), f.objects_state, 7, f.catalog_state, journal,
+                          plan.handler, plan.input, invocation, completed);
   require(completed.outcome.status == react::RunOutcome::Status::Ok,
           "single-segment test must complete actual Lua without an action continuation");
   react::finish_invocation(identity(f.objects), attribution(f.objects), f.models, f.scripts,
@@ -43,9 +43,9 @@ void a_watch_is_acknowledged_only_when_its_handler_starts() {
   react::Invocation invocation;
   react::CompletedInvocation completed;
   const auto &candidate = plan.invocations.front();
-  require(!react::start_invocation(f.vm, f.react_state, f.values(), objects_state, 7,
-                                   f.catalog_state, journal, candidate.handler, candidate.input,
-                                   invocation, completed),
+  require(!react::start_invocation(f.react_state, f.values(), objects_state, 7, f.catalog_state,
+                                   journal, candidate.handler, candidate.input, invocation,
+                                   completed),
           "disabled planned handler does not start");
   require(!f.states.contains({f.a, script}) && journal.take().empty(),
           "skipping a planned handler changes no script state or journal");
@@ -103,12 +103,13 @@ void chosen_actions_and_typed_inputs() {
   step::WorkQueues queues;
   step::TimerWheel timers;
   record::Journal journal(8, {});
-  space::Space space{testspace::settings()};
+  space::State space_state{testspace::settings(), 8};
+  auto &space = space_state.space;
   const auto deadline = step::Monotonic::now() + std::chrono::seconds(2);
   auto root = step::begin_action(
-      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
-      intents, journal, 2, {{PlayerId{1}, 7, f.a, Value{}}, {{"amount", 2.5}}, {}, 12, 20, {}}, {},
-      deadline);
+      f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space_state, intents,
+      journal, 2,
+      {{PlayerId{1}, 7, f.a, Value{}}, {{"amount", 2.5}}, {}, 12, 20, {}, {}, deadline});
   require(!root.outcome && root.handlers.size() == 1 && root.call.body == f.b,
           "current player body and actual installed receiver determine the action plan");
   auto completed = invoke(f, root.handlers.front(), journal);
@@ -131,11 +132,16 @@ void chosen_actions_and_typed_inputs() {
                   "omitted",
           "raw typed inputs reach actual Lua with optional inputs absent");
 
-  auto child = step::begin_action(
-      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
-      intents, journal, 2,
-      {{ScriptHolder{script, f.a}, 7, f.a, Value{}}, {{"amount", 3}}, {}, 12, 20, {}},
-      handler_origin, deadline);
+  auto child = step::begin_action(f.catalog_state, f.react_state, profiles, perm_state,
+                                  f.objects_state, space_state, intents, journal, 2,
+                                  {{ScriptHolder{script, f.a}, 7, f.a, Value{}},
+                                   {{"amount", 3}},
+                                   {},
+                                   12,
+                                   20,
+                                   handler_origin,
+                                   {},
+                                   deadline});
   require(!child.outcome && child.call.body == Handle{} && child.handlers.size() == 1 &&
               !child.handlers.front().input.action_body,
           "ScriptHolder calls have no inherited player body or authority");
@@ -152,15 +158,19 @@ void chosen_actions_and_typed_inputs() {
               records[1]["cause"] == records[0]["id"],
           "script action retains actual actor/cause/root while remaining nonchosen");
   perm::revoke(grants, players, grant.grant);
-  auto denied = step::begin_action(
-      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
-      intents, journal, 2,
-      {{ScriptHolder{script, f.a}, 7, f.a, Value{}}, {{"amount", 4}}, {}, 12, 20, {}},
-      handler_origin, deadline);
+  auto denied = step::begin_action(f.catalog_state, f.react_state, profiles, perm_state,
+                                   f.objects_state, space_state, intents, journal, 2,
+                                   {{ScriptHolder{script, f.a}, 7, f.a, Value{}},
+                                    {{"amount", 4}},
+                                    {},
+                                    12,
+                                    20,
+                                    handler_origin,
+                                    {},
+                                    deadline});
   auto foreign = step::begin_action(
-      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
-      intents, journal, 2, {{PlayerId{2}, 7, f.a, Value{}}, {{"amount", 4}}, {}, 12, 20, {}}, {},
-      deadline);
+      f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space_state, intents,
+      journal, 2, {{PlayerId{2}, 7, f.a, Value{}}, {{"amount", 4}}, {}, 12, 20, {}, {}, deadline});
   require(denied.outcome && foreign.outcome && denied.handlers.empty() && foreign.handlers.empty(),
           "revocation and foreign-owner denial happen before handler invocation");
   for (const auto &outcome : {denied.outcome, foreign.outcome})
@@ -216,9 +226,12 @@ void chosen_actions_and_typed_inputs() {
   const auto parsed = step::parse_action_input(input, f.terms, native, journal, 12, 20);
   require(std::holds_alternative<step::NativeCall>(parsed),
           "an absent required field reaches action declaration validation");
-  const auto malformed = step::begin_action(f.values(), f.catalog_state, f.react_state, profiles,
-                                            perm_state, f.objects_state, space, intents, journal, 2,
-                                            std::get<step::NativeCall>(parsed), {}, deadline);
+  auto malformed_call = std::get<step::NativeCall>(parsed);
+  malformed_call.origin = {};
+  malformed_call.deadline = deadline;
+  const auto malformed =
+      step::begin_action(f.catalog_state, f.react_state, profiles, perm_state, f.objects_state,
+                         space_state, intents, journal, 2, std::move(malformed_call));
   require(malformed.outcome && malformed.outcome->reply["error"] == "bad_input" &&
               malformed.outcome->reply["signature"] == signature && malformed.handlers.empty(),
           "missing required input fails before Lua and includes the actual signature");
@@ -245,7 +258,8 @@ void canonical_results_and_actual_bounds() {
       f.add(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={}})");
   f.models.rows[1].script = script;
   react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
-  space::Space space{testspace::settings()};
+  space::State space_state{testspace::settings(), 8};
+  auto &space = space_state.space;
   testspace::Box shape({.6f, .6f, 1.8f});
   const auto geometry = space::import_geometry(space, shape.source());
   space::BodySpec body{
@@ -276,9 +290,9 @@ void canonical_results_and_actual_bounds() {
   std::vector<step::GapDraft> gaps;
   const auto deadline = step::Monotonic::now() + std::chrono::seconds(2);
   auto declared = step::begin_action(
-      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
-      intents, journal, 2, {{PlayerId{1}, 7, {}, Value{}}, nlohmann::json::object(), {}, 0, 20, {}},
-      {}, deadline);
+      f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space_state, intents,
+      journal, 2,
+      {{PlayerId{1}, 7, {}, Value{}}, nlohmann::json::object(), {}, 0, 20, {}, {}, deadline});
   require(!declared.outcome && declared.handlers.empty(),
           "declared action has no fabricated handler");
   auto result = step::finish_action(declared, intents, space, identity(f.objects),
@@ -289,9 +303,9 @@ void canonical_results_and_actual_bounds() {
   f.models.rows[1].script = 0;
   react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
   auto fallback = step::begin_action(
-      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
-      intents, journal, 2,
-      {{PlayerId{1}, 7, f.b, Value{}}, nlohmann::json::object(), {}, 0, 20, {}}, {}, deadline);
+      f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space_state, intents,
+      journal, 2,
+      {{PlayerId{1}, 7, f.b, Value{}}, nlohmann::json::object(), {}, 0, 20, {}, {}, deadline});
   require(!fallback.outcome && fallback.resolution.route == react::Route::Fallback,
           "nearby undeclared action remains a real open-use attempt");
   result = step::finish_action(fallback, intents, space, identity(f.objects), transforms(f.objects),
@@ -302,9 +316,9 @@ void canonical_results_and_actual_bounds() {
                   .status == space::Status::Ok,
           "move actual Jolt target beyond reach");
   auto remote = step::begin_action(
-      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
-      intents, journal, 2,
-      {{PlayerId{1}, 7, f.b, Value{}}, nlohmann::json::object(), {}, 0, 20, {}}, {}, deadline);
+      f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space_state, intents,
+      journal, 2,
+      {{PlayerId{1}, 7, f.b, Value{}}, nlohmann::json::object(), {}, 0, 20, {}, {}, deadline});
   require(remote.outcome && remote.outcome->reply["denied"]["need"] == "reach" && gaps.size() == 1,
           "fallback cannot create remote gap captures outside actual target bounds");
   require(step::in_reach({0, 0, 0}, {{-.5f, -1, -1}, {100, 1, 1}}, 2),
@@ -314,9 +328,9 @@ void canonical_results_and_actual_bounds() {
   f.models.rows[1].script = script;
   react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
   auto moving = step::begin_action(
-      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
-      intents, journal, 2, {{PlayerId{1}, 7, {}, Value{}}, nlohmann::json::object(), {}, 0, 20, {}},
-      {}, deadline);
+      f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space_state, intents,
+      journal, 2,
+      {{PlayerId{1}, 7, {}, Value{}}, nlohmann::json::object(), {}, 0, 20, {}, {}, deadline});
   step::start_move(intents, f.a, Vec3{9, 0, 0}, moving.call.origin, 9);
   result = step::finish_action(moving, intents, space, identity(f.objects), transforms(f.objects),
                                journal, gaps);
@@ -324,9 +338,9 @@ void canonical_results_and_actual_bounds() {
               std::abs(result.reply["eta_s"].get<double>() - 5) < 1e-5,
           "movement estimate clamps requested speed to the actual character configuration");
   auto slower = step::begin_action(
-      f.values(), f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space,
-      intents, journal, 2, {{PlayerId{1}, 7, {}, Value{}}, nlohmann::json::object(), {}, 0, 20, {}},
-      {}, deadline);
+      f.catalog_state, f.react_state, profiles, perm_state, f.objects_state, space_state, intents,
+      journal, 2,
+      {{PlayerId{1}, 7, {}, Value{}}, nlohmann::json::object(), {}, 0, 20, {}, {}, deadline});
   step::start_move(intents, f.a, Vec3{9, 0, 0}, slower.call.origin, .3f);
   result = step::finish_action(slower, intents, space, identity(f.objects), transforms(f.objects),
                                journal, gaps);
@@ -337,7 +351,8 @@ void canonical_results_and_actual_bounds() {
 void threshold_plans_use_current_subscriptions(bool benchmark) {
   test_runtime::Fixture f(250);
   f.state(f.a, 1, 0);
-  react::set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 20, 0, 20, f.effects);
+  react::set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 20,
+                  amber::step::Clock{.step = 0, .hz = 20}, f.effects);
   const auto direct = f.add(R"(return {kind='instance',watches={{term='novel.heat',thresholds={
     {predicate='above',value=1},{predicate='above',value=2},{predicate='above',value=3}}}},on={
     ['novel.heat']=function(self,source,value)

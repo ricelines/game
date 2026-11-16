@@ -93,8 +93,9 @@ bool reconcile_allocation(const ValueRead &values, amber::react::State &react_st
       if (value.present && value.value.is_numeric())
         priority.values.emplace(part.from.bits, value.value.numeric());
     }
-  const auto changed = allocate(row(term.paired), demand, term.combine, priority, pair.subject,
-                                term.paired, term.id, react_state, now, hz);
+  const auto changed =
+      allocate(row(term.paired), demand, term.combine, priority, pair.subject, term.paired, term.id,
+               react_state, amber::step::Clock{.step = now, .hz = hz});
   return std::any_of(changed.begin(), changed.end(), [](const auto &key) { return !key.supplier; });
 }
 } // namespace amber::react

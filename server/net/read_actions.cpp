@@ -1,3 +1,4 @@
+#include "settings.hpp"
 #include "view_private.hpp"
 
 namespace amber::net {
@@ -96,10 +97,13 @@ bool available(const amber::catalog::State &catalog_state, const amber::react::S
 } // namespace
 net::Reply read_actions(const amber::catalog::State &catalog_state,
                         const amber::react::State &react_state, const react::ValueRead &values,
-                        SessionViews &sessions, observe::Hearing &hearing, std::size_t page_size,
-                        std::size_t events_per_response, AuthorityRead authority,
+                        SessionViews &sessions, observe::Hearing &hearing,
+                        const amber::Settings &settings, AuthorityRead authority,
                         const amber::perm::State &perm_state, Step now,
                         const net::Invocation &call) {
+  const auto page_size = settings.actions_page;
+  const auto events_per_response = settings.perception.events_per_response;
+
   auto &models = catalog_state.models;
   auto &scripts = catalog_state.scripts;
   auto &instances = react_state.installations;

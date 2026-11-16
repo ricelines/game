@@ -1,13 +1,17 @@
 #pragma once
 
+#include "net_fixture.hpp"
+
 #include "runtime_fixture.hpp"
+#include "space_fixture.hpp"
 #include "step/step.hpp"
 
 namespace amber::checkpoint_test {
 namespace cp = step::checkpoint;
 struct Fixture {
+  space::State space_state{testspace::settings(), 8};
   amber::perm::State perm_state;
-  amber::net::State net_state{{}};
+  amber::net::State net_state{test_net::options()};
   amber::step::State step_state{8};
   amber::elaborate::State elaborate_state;
 
@@ -18,7 +22,7 @@ struct Fixture {
 
   lifecycle::Parts &parts = objects_state.parts;
   Relation &declared = objects_state.declared_parts;
-  space::PhysicalRelations physical;
+  space::PhysicalRelations &physical = space_state.physical_relations;
   catalog::ParameterBlocks &parameters = catalog_state.parameters;
   catalog::ModelTexts &model_text = catalog_state.model_text;
   catalog::InstanceTexts &instance_text = catalog_state.instance_text;
@@ -92,10 +96,11 @@ struct Fixture {
     physical.attached_to.in.set(f.b.slot(), std::vector<Handle>{part});
     f.state(f.a, 1, 0);
     f.state(f.c, 1, 20);
-    set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 100, 0, 20, f.effects);
-    auto armed = react::sync_watches(f.react_state, f.values(), {f.a, script},
-                                     f.scripts.rows[script].declaration, 0, 20, {},
-                                     react::SyncMode::Initial);
+    set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 100,
+             amber::step::Clock{.step = 0, .hz = 20}, f.effects);
+    auto armed = react::sync_watches(
+        f.react_state, f.values(), {f.a, script}, f.scripts.rows[script].declaration,
+        amber::step::Clock{.step = 0, .hz = 20}, {}, react::SyncMode::Initial);
     for (auto &timer : armed.timers)
       step::schedule(timers, std::move(timer));
     f.bind(unrelated, f.c);
@@ -232,14 +237,14 @@ struct Fixture {
       filter->catalog = *catalog;
       filter->permissions = *permission;
     }
-    cp::encode_checkpoint(bytes, header, f.objects_state, f.react_state, physical, f.catalog_state,
-                          perm_state, profiles, step_state, elaborate_state, motion, causes,
-                          next_record, filter ? &*filter : nullptr);
+    cp::encode_checkpoint(bytes, header, f.objects_state, f.react_state, space_state,
+                          f.catalog_state, perm_state, net_state, step_state, elaborate_state,
+                          motion, causes, next_record, filter ? &*filter : nullptr);
   }
   void read(const snap::View &view) {
     auto decoded =
-        cp::decode_checkpoint(view, f.objects_state, f.react_state, physical, f.catalog_state,
-                              perm_state, profiles, step_state, elaborate_state);
+        cp::decode_checkpoint(view, f.objects_state, f.react_state, space_state, f.catalog_state,
+                              perm_state, net_state, step_state, elaborate_state);
     next_record = decoded.next_record;
     motion = std::move(decoded.motion);
     causes = std::move(decoded.causes);

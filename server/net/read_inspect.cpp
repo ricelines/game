@@ -127,8 +127,11 @@ Json state_record(const react::ScriptState &state) {
 Json object_record(const amber::catalog::State &catalog_state,
                    const amber::react::State &react_state, const react::ValueRead &values,
                    SessionViews &sessions, const amber::ObjectState &objects_state,
-                   const amber::perm::State &perm_state, Step now, double hz, Handle object,
-                   const net::Invocation &call) {
+                   const amber::perm::State &perm_state, const amber::step::Clock &clock,
+                   Handle object, const net::Invocation &call) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &models = catalog_state.models;
 
   auto &scripts = catalog_state.scripts;
@@ -220,8 +223,11 @@ net::Reply read_inspect(const amber::catalog::State &catalog_state,
                         const amber::react::State &react_state, const react::ValueRead &values,
                         SessionViews &sessions, observe::Hearing &hearing,
                         const amber::ObjectState &objects_state,
-                        const amber::perm::State &perm_state, Step now, double hz,
+                        const amber::perm::State &perm_state, const amber::step::Clock &clock,
                         std::size_t events_per_response, const net::Invocation &call) {
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &models = catalog_state.models;
   auto &parameters = catalog_state.parameters;
   auto &assets = catalog_state.assets;
@@ -249,11 +255,11 @@ net::Reply read_inspect(const amber::catalog::State &catalog_state,
       for (const auto h : player.inventory)
         if (values.identity.valid(h))
           result["inventory"].push_back(object_record(catalog_state, react_state, values, sessions,
-                                                      objects_state, perm_state, now, hz, h, call));
+                                                      objects_state, perm_state, clock, h, call));
       for (const auto h : player.mailbox)
         if (values.identity.valid(h))
           result["mailbox"].push_back(object_record(catalog_state, react_state, values, sessions,
-                                                    objects_state, perm_state, now, hz, h, call));
+                                                    objects_state, perm_state, clock, h, call));
       result["balance"] = perm::balance(ledger, perm::Account::player(call.principal.player));
     } else if (name == "grants") {
       result = {{"held", Json::array()}, {"given", Json::array()}};
@@ -292,7 +298,7 @@ net::Reply read_inspect(const amber::catalog::State &catalog_state,
     } else {
       const auto object = view_detail::target(values.identity, call);
       result = object_record(catalog_state, react_state, values, sessions, objects_state,
-                             perm_state, now, hz, object, call);
+                             perm_state, clock, object, call);
       if (name == "self")
         result["balance"] = perm::balance(ledger, perm::Account::player(call.principal.player));
     }

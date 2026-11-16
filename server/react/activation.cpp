@@ -5,9 +5,14 @@
 
 namespace amber::react {
 bool update_rule(catalog::Scripts &scripts, amber::react::State &react_state,
-                 step::WorkQueues &queues, Vm &vm, const ValueRead &values, ScriptId id,
-                 RuleMode mode, Step now, double hz, const record::Origin &origin,
+                 step::WorkQueues &queues, const ValueRead &values, ScriptId id, RuleMode mode,
+                 const amber::step::Clock &clock, const record::Origin &origin,
                  DeferredEffects &effects) {
+  auto &vm = react_state.vm;
+
+  const auto now = clock.step;
+  const auto hz = clock.hz;
+
   auto &rules = react_state.rules;
   auto &triggers = react_state.triggers;
   auto &subscriptions = react_state.subscriptions;
@@ -79,7 +84,7 @@ bool update_rule(catalog::Scripts &scripts, amber::react::State &react_state,
         continue;
       }
       auto changes = react::sync_watches(react_state, values, consumer,
-                                         scripts.rows.at(script).declaration, now, hz, origin,
+                                         scripts.rows.at(script).declaration, clock, origin,
                                          react::SyncMode::Change, std::span<const TermId>(allowed));
       for (auto &dirty : changes.dirty)
         effects.ordered.emplace_back(std::move(dirty));

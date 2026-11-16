@@ -12,7 +12,7 @@ void require(bool ok, const char *message) {
 struct Fixture {
   amber::ObjectState objects_state;
   amber::catalog::State catalog_state;
-  amber::react::State react_state;
+  amber::react::State react_state{{4096, 50, 250, 64}};
   amber::perm::State perm_state;
 
   Objects &objects = objects_state.objects;
@@ -39,7 +39,7 @@ struct Fixture {
   react::SharedColumns &shared = react_state.shared;
   react::RelationsRead &relations = react_state.relations;
   react::RuntimeMeasurements &runtime = react_state.runtime_measurements;
-  react::Vm vm{{4096, 50, 250, 64}};
+  react::Vm &vm = react_state.vm;
   react::ScriptState state;
   react::DeferredEffects effects;
   ScriptId next = 100;
@@ -129,7 +129,7 @@ struct Fixture {
                                   runtime,
                                   1,
                                   6};
-    step::bind_metadata(vm, values, objects_state, catalog_state, react_state, plots);
+    step::bind_metadata(values, objects_state, catalog_state, react_state, plots);
   }
   react::RunOutcome run(std::string_view body) {
     const auto source = "return {on={run=function(self,from,args) " + std::string(body) + " end}}";
