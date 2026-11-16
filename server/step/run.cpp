@@ -42,7 +42,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       throw std::invalid_argument("fixture child requires restore, no network, unpaced and report");
     fixture_case = fixture::read_case(launch.fixture_case);
   }
-  const auto settings = read_settings(launch.config);
+  auto settings = read_settings(launch.config);
   const auto hz = settings.clock.step_hz;
   ObjectState objects_state;
   catalog::State catalog_state;
@@ -55,6 +55,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   step::State step_state(settings.authors_max);
 
   const auto plan = start::read_plan(launch.plan);
+  settings.land.way_group = plan.at("land").at("way_group").get<GroupId>();
   std::filesystem::create_directories(launch.data);
   auto &terms = react_state.terms;
   auto &materials = react_state.materials;
