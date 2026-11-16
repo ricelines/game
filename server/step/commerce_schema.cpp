@@ -82,6 +82,40 @@ std::string validate_offer(const Json &row) {
       throw std::invalid_argument("expires_s must be finite nonnegative seconds");
   });
 }
+std::string validate_abandon_plot(const Json &row) {
+  return validate([&] {
+    fields(row, {"plot"});
+    if (!row["plot"].is_number_integer() || row["plot"].get<std::int64_t>() <= 0 ||
+        row["plot"].get<std::uint64_t>() > UINT32_MAX)
+      throw std::invalid_argument("plot must be a positive integer");
+  });
+}
+std::string validate_split_plot(const Json &row) {
+  return validate([&] {
+    fields(row, {"plot"}, {"x", "y"});
+    const auto error = validate_abandon_plot({{"plot", row["plot"]}});
+    if (!error.empty())
+      throw std::invalid_argument(error);
+    if (row.contains("x") == row.contains("y"))
+      throw std::invalid_argument("name exactly one cut axis");
+    const auto &cut = row.at(row.contains("x") ? "x" : "y");
+    if (!cut.is_number() || !std::isfinite(cut.get<float>()) ||
+        std::floor(cut.get<double>()) != cut.get<double>())
+      throw std::invalid_argument("cut must be a whole metre");
+  });
+}
+std::string validate_join_plots(const Json &row) {
+  return validate([&] {
+    fields(row, {"plots"});
+    if (!row["plots"].is_array() || row["plots"].size() != 2)
+      throw std::invalid_argument("name two plots");
+    for (const auto &id : row["plots"]) {
+      const auto error = validate_abandon_plot({{"plot", id}});
+      if (!error.empty())
+        throw std::invalid_argument(error);
+    }
+  });
+}
 std::string validate_offer_plot(const Json &row) {
   return validate([&] {
     auto input = row;
@@ -204,6 +238,20 @@ CommerceDeclarations declare_commerce(react::Terms &terms, react::NativeActions 
       schema(
           {{"price", money}, {"buyer", str}, {"expires_s", {{"type", "number"}, {"minimum", 0}}}},
           {"price"}, {{"price", 1}}));
+  const Json plot = {{"type", "integer"}, {"minimum", 1}, {"maximum", UINT32_MAX}};
+  ids.abandon_plot = add(react::ExchangeAction::AbandonPlot, "engine.abandon_plot",
+                         "Return a lot to the pool and return its contents to their owners.", "",
+                         schema({{"plot", plot}}, {"plot"}, {{"plot", 1}}));
+  ids.split_plot =
+      add(react::ExchangeAction::SplitPlot, "engine.split_plot",
+          "Split a lot at one whole-metre x or y coordinate.", "",
+          schema({{"plot", plot}, {"x", {{"type", "integer"}}}, {"y", {{"type", "integer"}}}},
+                 {"plot"}, {{"plot", 1}, {"x", 16}}));
+  ids.join_plots = add(
+      react::ExchangeAction::JoinPlots, "engine.join_plots",
+      "Join two same-owner lots sharing a whole edge into one rectangle.", "",
+      schema({{"plots", {{"type", "array"}, {"items", plot}, {"minItems", 2}, {"maxItems", 2}}}},
+             {"plots"}, {{"plots", {1, 2}}}));
   ids.return_goods = add(
       react::ExchangeAction::ReturnGoods, "engine.return",
       "Return another owner's complete item from your land. A live Build grant protects its owner.",

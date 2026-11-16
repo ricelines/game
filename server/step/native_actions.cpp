@@ -130,6 +130,24 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
 
   NativeCompletion out;
   switch (operation) {
+  case react::ExchangeAction::AbandonPlot: {
+    if (const auto error = validate_abandon_plot(call.arguments); !error.empty())
+      throw std::invalid_argument(error);
+    out = abandon_plot(perm_state, objects_state, delivery, space, call);
+    break;
+  }
+  case react::ExchangeAction::SplitPlot: {
+    if (const auto error = validate_split_plot(call.arguments); !error.empty())
+      throw std::invalid_argument(error);
+    out = split_plot(perm_state, objects_state, call);
+    break;
+  }
+  case react::ExchangeAction::JoinPlots: {
+    if (const auto error = validate_join_plots(call.arguments); !error.empty())
+      throw std::invalid_argument(error);
+    out = join_plots(perm_state, objects_state, call);
+    break;
+  }
   case react::ExchangeAction::ReturnGoods: {
     if (const auto error = validate_inventory(call.arguments); !error.empty())
       throw std::invalid_argument(error);

@@ -504,7 +504,8 @@ using Json = nlohmann::json;
 struct CommerceDeclarations {
   TermId pay = 0, balance = 0, inventory = 0, give = 0, offer = 0, offers = 0, accept = 0,
          cancel_offer = 0, trade_open = 0, trade_change = 0, trade_confirm = 0, trade_cancel = 0,
-         place_existing = 0, offer_plot = 0, set_offer_price = 0, return_goods = 0;
+         place_existing = 0, offer_plot = 0, set_offer_price = 0, return_goods = 0,
+         abandon_plot = 0, split_plot = 0, join_plots = 0;
 };
 CommerceDeclarations declare_commerce(react::Terms &, react::NativeActions &);
 struct OfferExpired {
@@ -1068,6 +1069,13 @@ NativeCompletion remove_instance(const lifecycle::Parts &, const react::ValueRea
 void install_declared_attachments(amber::ObjectState &objects_state,
                                   amber::space::State &space_state,
                                   std::span<const Handle> objects);
+std::string validate_abandon_plot(const Json &);
+std::string validate_split_plot(const Json &);
+std::string validate_join_plots(const Json &);
+NativeCompletion abandon_plot(perm::State &, ObjectState &, const DeliveryTargets &,
+                              const space::Space &, const NativeCall &);
+NativeCompletion split_plot(perm::State &, ObjectState &, const NativeCall &);
+NativeCompletion join_plots(perm::State &, ObjectState &, const NativeCall &);
 step::NativeCompletion return_goods(perm::State &, ObjectState &, const DeliveryTargets &,
                                     const space::Space &, const NativeCall &, bool forced = false);
 step::NativeCompletion hold_goods(amber::perm::State &perm_state, amber::ObjectState &objects_state,

@@ -12,6 +12,7 @@ namespace cm = step;
 using test_runtime::require;
 template <class F> void rejects(F action, const char *message) {
   try {
+    land_editing_preserves_grants_and_refreshes_objects();
     action();
   } catch (const std::invalid_argument &) {
     return;
@@ -819,6 +820,34 @@ void login_delivers_complete_mailbox_without_native_capacity_or_identity_changes
           "login delivery emits one causal derived System record");
   require(deliver(f.bodies[1], 23) == 0 && delivered.records.empty(),
           "repeated authenticated hello cannot duplicate delivered goods or records");
+}
+void land_editing_preserves_grants_and_refreshes_objects() {
+  Fixture f;
+  auto item = f.item(1, {-4, 0, 0});
+  const auto old = f.objects_state.objects.plot[item.root.slot()];
+  require(old == 1, "land fixture plot");
+  const auto grant =
+      perm::create_grant(f.grants, f.players, perm::Holder::player(1),
+                         {1, perm::Holder::player(3), perm::Scope::plot(1), 1, 0, 0, 1000},
+                         {perm::Scope::plot(1), 1, 31}, {perm::Holder::player(3), 3, false}, 1);
+  require(bool(grant), "split grant fixture");
+  f.call(f.ids.offer_plot, PlayerId{1}, {{"plot", 1}, {"price", 10}});
+  const auto split = f.call(f.ids.split_plot, PlayerId{1}, {{"plot", 1}, {"x", -10}});
+  require(
+      split.changed && f.plots.rows.size() == 4 && f.plots.rows[1].bounds[2] == -10 &&
+          f.plots.rows[3].bounds[0] == -10 && f.objects_state.objects.plot[item.root.slot()] == 3 &&
+          !f.offers.rows[1].live &&
+          bool(perm::check_scope(perm::Holder::player(3), perm::Scope::plot(3), 1, f.grants, 20)),
+      "split failed bounds, offers, grant copy or membership");
+  const auto joined = f.call(f.ids.join_plots, PlayerId{1}, {{"plots", {3, 1}}});
+  require(joined.changed && f.plots.rows[3].id == 0 && f.plots.rows[1].bounds[2] == 0 &&
+              f.objects_state.objects.plot[item.root.slot()] == 1 && !joined.notices.empty() &&
+              !perm::check_scope(perm::Holder::player(3), perm::Scope::plot(3), 1, f.grants, 20),
+          "join failed tombstone, grants, notice or membership");
+  const auto abandoned = f.call(f.ids.abandon_plot, PlayerId{1}, {{"plot", 1}});
+  require(abandoned.changed && f.plots.rows[1].owner == 0 && !f.visible(item.root) &&
+              !f.grants.rows[grant.grant].live,
+          "abandon did not return goods or clear authority");
 }
 } // namespace
 int main() {
