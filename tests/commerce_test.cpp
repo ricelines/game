@@ -1,5 +1,6 @@
 #include "catalog/catalog.hpp"
 #include "settings.hpp"
+#include "space/private.hpp"
 #include "space_fixture.hpp"
 #include <toml++/toml.hpp>
 
@@ -820,6 +821,42 @@ void login_delivers_complete_mailbox_without_native_capacity_or_identity_changes
   require(deliver(f.bodies[1], 23) == 0 && delivered.records.empty(),
           "repeated authenticated hello cannot duplicate delivered goods or records");
 }
+void returns_use_inventory_with_static_occupants_and_ignore_full_mailboxes() {
+  Fixture f;
+  f.players.rows[2].mailbox.push_back(Handle::make(900, 1));
+  f.delivery.present_bodies.erase(2);
+  auto absent = f.item(2, {-4, 0, 0});
+  const auto returned = f.call(f.ids.return_goods, PlayerId{1}, {}, absent.root);
+  require(returned.reply.at("location") == "mailbox" && f.players.rows[2].mailbox.size() == 2,
+          "an absent owner with a full mailbox cannot receive a return");
+  f.delivery.present_bodies[2] = f.bodies[1];
+  auto present = f.item(2, {-8, 0, 0});
+  testspace::Box mesh({1, 1, 1});
+  const auto geometry =
+      space::import_geometry(f.world, {mesh.mesh, {}, mesh.triangles, mesh.bounds});
+  ObjectInit init;
+  init.model = 1;
+  init.owner = 2;
+  init.position = {-6, 0, 0};
+  init.flags = Static;
+  const auto ornament = create(f.f.objects, init);
+  require(
+      space::add(
+          f.world, identity(f.f.objects), transforms(f.f.objects),
+          {ornament, geometry.geometry, space::Motion::Static, {.6f, 0, 0}, 1, false, false, {}})
+              .status == space::Status::Ok,
+      "triangle-only return occupant");
+  f.world.native->attachments.emplace(
+      ornament.bits, space::Attachment{ornament, present.root, {{2, 0, 0}, {}}, false});
+  f.f.objects.parent[ornament.slot()] = present.root;
+  const auto inventory = f.call(f.ids.return_goods, PlayerId{1}, {}, present.root);
+  require(inventory.reply.at("location") == "inventory" &&
+              f.players.rows[2].inventory == std::vector<Handle>{present.root} &&
+              f.players.rows[2].mailbox.size() == 2 && !f.f.objects.parent[ornament.slot()] &&
+              space::body_motion(f.world, identity(f.f.objects), ornament)->motion ==
+                  space::Motion::Static,
+          "a present owner's return fell back to the mailbox for a static occupant");
+}
 void land_refusals_have_fixes_and_denial_records() {
   Fixture f;
   auto denied = [&](const step::NativeCompletion &out, std::string_view fix) {
@@ -905,6 +942,7 @@ void land_editing_preserves_grants_and_refreshes_objects() {
 } // namespace
 int main() {
   try {
+    returns_use_inventory_with_static_occupants_and_ignore_full_mailboxes();
     land_refusals_have_fixes_and_denial_records();
     land_editing_preserves_grants_and_refreshes_objects();
     offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox();

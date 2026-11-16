@@ -246,6 +246,7 @@ struct SwapResult {
   Reason reason = Reason::OfferGone;
   std::vector<CustodyChange> custody;
   std::vector<GrantId> revoked;
+  std::vector<OfferId> closed{};
   explicit operator bool() const { return reason == Reason::Allowed; }
 };
 using TradeId = std::uint32_t;
@@ -269,6 +270,7 @@ struct TradeResult {
   bool completed = false;
   std::vector<CustodyChange> custody;
   std::vector<GrantId> revoked;
+  std::vector<OfferId> closed{};
   explicit operator bool() const { return reason == Reason::Allowed; }
 };
 struct SnapshotSelection {

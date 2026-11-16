@@ -142,9 +142,13 @@ void returns_respect_build_grants_and_ignore_mailbox_limits() {
   require(return_goods(state, request, 2).reason == Reason::MissingRight,
           "build grantee was returned");
   revoke(state.grants, state.players, build);
+  auto &offered = state.offers.rows.emplace_back();
+  offered.id = 1;
+  offered.goods = item.object;
+  offered.live = true;
   const auto returned = return_goods(state, request, 2);
-  require(bool(returned) && returned.custody[0].stay_static &&
-              state.players.rows[2].mailbox.size() == 2,
+  require(bool(returned) && returned.closed == std::vector<OfferId>{1} &&
+              returned.custody[0].stay_static && state.players.rows[2].mailbox.size() == 2,
           "full mailbox blocked return or return did not preserve physical fallback");
   auto own = request;
   own.actor = Holder::player(2);

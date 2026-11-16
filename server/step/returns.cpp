@@ -12,13 +12,9 @@ NativeCompletion return_goods(perm::State &permissions, ObjectState &objects,
                              permissions.owner_limits, permissions.plots, call.request.target);
   auto body = commerce_detail::present(delivery, ids, item.root.owner);
   if (space::can_custody(space, ids, item.root.object, body, parents,
-                         std::span(item.closure).subspan(1))
+                         std::span(item.closure).subspan(1), true)
           .status != space::Status::Ok)
     body = {};
-  std::vector<perm::OfferId> live_offers;
-  for (const auto &offer : permissions.offers.rows)
-    if (offer.live)
-      live_offers.push_back(offer.id);
   const auto returned = perm::return_goods(permissions,
                                            {commerce_detail::actor(call), item.root, item.parts,
                                             item.root.plot, body, bool(body), forced},
@@ -41,18 +37,18 @@ NativeCompletion return_goods(perm::State &permissions, ObjectState &objects,
   auto flags = permission_flags(objects.objects);
   std::vector<Handle> cleared;
   // Returning one side cancels a trade as a whole, releasing the other side's escrow.
-  for (auto id : live_offers)
-    if (const auto &offer = permissions.offers.rows[id]; !offer.live) {
-      if (ids.valid(offer.goods)) {
-        flags.set(offer.goods.slot(), flags.get(offer.goods.slot()) & ~Escrow);
-        cleared.push_back(offer.goods);
-      }
-      for (auto part : offer.parts)
-        if (ids.valid(part)) {
-          flags.set(part.slot(), flags.get(part.slot()) & ~Escrow);
-          cleared.push_back(part);
-        }
+  for (auto id : returned.closed) {
+    const auto &offer = permissions.offers.rows[id];
+    if (ids.valid(offer.goods)) {
+      flags.set(offer.goods.slot(), flags.get(offer.goods.slot()) & ~Escrow);
+      cleared.push_back(offer.goods);
     }
+    for (auto part : offer.parts)
+      if (ids.valid(part)) {
+        flags.set(part.slot(), flags.get(part.slot()) & ~Escrow);
+        cleared.push_back(part);
+      }
+  }
   auto out = commerce_detail::result(true, {{"object", to_string(item.root.object)},
                                             {"recipient", "p:" + std::to_string(item.root.owner)},
                                             {"location", body ? "inventory" : "mailbox"}});
