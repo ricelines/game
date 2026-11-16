@@ -642,6 +642,7 @@ void rebind_trade_keeps_current_custody_at_full_capacity() {
           "rebinding trade goods undid custody, retained confirmations or changed money/capacity");
 }
 void offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox() {
+  using Json = nlohmann::json;
   Fixture f;
   f.players.mailbox_max = 2;
   net::Profiles profiles;
