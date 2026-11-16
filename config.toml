@@ -136,7 +136,8 @@ MERGE_REGION_CELLS = 64
 NODES_PER_QUERY = 8192
 POLYGONS_PER_PATH = 4096
 # Detour uses 64-bit references; reserve capacity for the initial terrain with small rebuild tiles.
-MAX_TILES = 8192
+# 1600 tiles per 256 m terrain tile; room for 40 terrain tiles.
+MAX_TILES = 65536
 POLYGONS_PER_TILE = 4096
 # Two tile workers keep navigation construction off the writer.
 WORKERS = 2
