@@ -177,7 +177,7 @@ def main():
         "--journey", type=Path, default=Path(".cache/integration/live-authoring-report.json")
     )
     parser.add_argument("--source-data", type=Path, default=Path(".cache/final-world-2026-11-15"))
-    parser.add_argument("--server", type=Path, default=Path(".build/debug/amb-server"))
+    parser.add_argument("--server", type=Path, default=Path(".build/release/amb-server"))
     parser.add_argument("--plan", type=Path, default=Path(".cache/content/seeded-plan.json"))
     parser.add_argument("--port", type=int, default=18084)
     parser.add_argument("--author-key", type=Path, default=Path(".runtime/keys/mira.key"))
