@@ -1,0 +1,14 @@
+https://{$AMB_HOST} {
+	reverse_proxy 127.0.0.1:8080
+}
+
+https://{$AMB_HOST}:8443 {
+	@join {
+		method POST
+		path /join
+	}
+	basic_auth @join {
+		playtest {$AMB_JOIN_HASH}
+	}
+	reverse_proxy 127.0.0.1:8081
+}

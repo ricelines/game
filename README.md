@@ -20,7 +20,7 @@ python3 tools/bootstrap.py --build --godot
 UV_CACHE_DIR="$PWD/.cache/uv" uv sync --python 3.12
 .venv/bin/python -m bake.setup
 .tools/bin/cmake -S bake/native -B .build/bake -G Ninja \
-  --toolchain "$PWD/cmake/NativeToolchain.cmake" -DCMAKE_BUILD_TYPE=Debug
+  --toolchain "$PWD/cmake/NativeToolchain.cmake" -DCMAKE_BUILD_TYPE=Release
 .tools/bin/cmake --build .build/bake
 .tools/bin/cmake --preset dev
 .tools/bin/cmake --build --preset dev
@@ -73,6 +73,31 @@ Native administrative actions use the same `do` operation. Known actions can be 
 
 The authoring service also supports ready parameter variants and live definition edits. `amb variant MODEL --params JSON --wait` bakes a parameter block for an existing model. `amb edit-model MODEL source.py --wait` bakes a proposed definition and returns the arguments for the ordinary `base.revise_model` action. Applying that action updates the model's current instances together, preserving ownership and matching named-part identities.
 
+## Host a world
+
+Install [Caddy](https://caddyserver.com/docs/install) on the Linux host. Keep the
+server and gateway on their default loopback addresses. Prepare the playtest
+with `--stakes off`, then start the server with `--profile development` and the
+gateway as above. In another terminal:
+
+```sh
+export AMB_HOST=world.example.com
+export AMB_JOIN_HASH="$(caddy hash-password)"
+caddy run --config deploy/Caddyfile
+```
+
+Open `https://HOST/` to watch. Give players the join password, then they can use:
+
+```sh
+AMBERGRIS_JOIN_AUTH=playtest:PASSWORD bin/amb --gateway https://HOST:8443 join NAME --key-file KEY
+bin/amb --gateway https://HOST:8443 --key-file KEY look
+```
+
+Caddy protects the gateway's join endpoint; the native WebSocket join remains
+public as specified by the game protocol. Use the host's operator key to issue
+roles or replace a lost player key: `bin/amb operator role p:N architect on` or
+`bin/amb operator key p:N`.
+
 ## Records, checkpoints and fixtures
 
 S7 records are compressed JSON Lines. Filters preserve the header and stream the records without a network connection or player credential:
@@ -90,7 +115,7 @@ Snapshots are written under the selected data directory. Starting again with the
   --catalog .runtime --data .runtime-resumed
 ```
 
-The current runtime is `ambergris-0.4`. Earlier snapshot layouts are incompatible
+The current runtime is `ambergris-0.8`. Earlier snapshot layouts are incompatible
 and are rejected before decoding. Use a fresh data directory for a new world;
 existing saves are not migrated.
 

@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import sys
+from base64 import b64encode
 from pathlib import Path
 
 from aiohttp import ClientSession
@@ -103,10 +104,17 @@ async def join_world(options):
     try:
         with os.fdopen(fd, "w") as key_file:
             os.fchmod(key_file.fileno(), 0o600)
+            credential = os.environ.get("AMBERGRIS_JOIN_AUTH")
+            headers = (
+                {"Authorization": "Basic " + b64encode(credential.encode()).decode()}
+                if credential
+                else {}
+            )
             async with ClientSession() as client:
                 async with client.post(
                     options.gateway.rstrip("/") + "/join",
                     json={"name": options.name},
+                    headers=headers,
                 ) as response:
                     if response.status == 401:
                         return {"error": "unauthorized", "status": 401}

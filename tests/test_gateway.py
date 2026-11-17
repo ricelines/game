@@ -5,6 +5,7 @@ import json
 from copy import deepcopy
 
 import pytest
+from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from websockets.asyncio.server import serve
 
@@ -107,6 +108,39 @@ def test_join_cli_saves_private_key_and_continues_the_joined_session(tmp_path, m
                         )
                     )
                 assert names == {"New player"}
+
+    asyncio.run(run())
+
+
+def test_join_password_is_sent_only_to_join(tmp_path, monkeypatch):
+    async def run():
+        async def join(request):
+            if request.headers.get("Authorization") != "Basic cGxheWVyOmZpeHR1cmUtcGFzc3dvcmQ=":
+                raise web.HTTPUnauthorized()
+            return web.json_response({"player": "p:9", "key": "fixture-new-key"})
+
+        async def look(request):
+            assert request.headers["Authorization"] == "Bearer fixture-new-key"
+            return web.json_response({"things": []})
+
+        app = web.Application()
+        app.router.add_post("/join", join)
+        app.router.add_post("/tools/look", look)
+        async with TestClient(TestServer(app)) as client:
+            address = str(client.make_url("/")).rstrip("/")
+            path = tmp_path / "new.key"
+            arguments = ["--gateway", address, "join", "New player", "--key-file", str(path)]
+            monkeypatch.delenv("AMBERGRIS_JOIN_AUTH", raising=False)
+            assert await cli.run(cli.parser().parse_args(arguments)) == {
+                "error": "unauthorized",
+                "status": 401,
+            }
+            assert not path.exists()
+            monkeypatch.setenv("AMBERGRIS_JOIN_AUTH", "player:fixture-password")
+            assert (await cli.run(cli.parser().parse_args(arguments)))["player"] == "p:9"
+            assert await cli.run(
+                cli.parser().parse_args(["--gateway", address, "--key-file", str(path), "look"])
+            ) == {"things": []}
 
     asyncio.run(run())
 
