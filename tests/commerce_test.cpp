@@ -866,11 +866,15 @@ void returns_use_inventory_with_static_occupants_and_ignore_full_mailboxes() {
   f.players.rows[2].mailbox.push_back(Handle::make(900, 1));
   f.delivery.present_bodies.erase(2);
   auto absent = f.item(2, {-4, 0, 0});
+  for (auto h : absent.objects)
+    f.f.objects.plot[h.slot()] = 1;
   const auto returned = f.call(f.ids.return_goods, PlayerId{1}, {}, absent.root);
   require(returned.reply.at("location") == "mailbox" && f.players.rows[2].mailbox.size() == 2,
           "an absent owner with a full mailbox cannot receive a return");
   f.delivery.present_bodies[2] = f.bodies[1];
   auto present = f.item(2, {-8, 0, 0});
+  for (auto h : present.objects)
+    f.f.objects.plot[h.slot()] = 1;
   testspace::Box mesh({1, 1, 1});
   const auto geometry =
       space::import_geometry(f.world, {mesh.mesh, {}, mesh.triangles, mesh.bounds});
@@ -929,6 +933,8 @@ void land_refusals_have_fixes_and_denial_records() {
   auto own = f.item(1, {-4, 0, 0});
   denied(f.call(f.ids.return_goods, PlayerId{1}, {}, own.root), "pick it up instead");
   auto other = f.item(2, {-6, 0, 0});
+  for (auto h : other.objects)
+    f.f.objects.plot[h.slot()] = 1;
   const auto grant =
       perm::create_grant(f.grants, f.players, perm::Holder::player(1),
                          {1, perm::Holder::player(2), perm::Scope::plot(1), 1, 0, 0, 100},
@@ -945,11 +951,11 @@ void land_refusals_have_fixes_and_denial_records() {
   denied(f.call(f.ids.accept, PlayerId{2}, {{"offer", name}, {"max_price", 9}}),
          "inspect the offer and accept again with a max_price of at least its price");
   f.plots.rows[1].owner = 0;
-  require(
-      bool(perm::create_root_grant(
-          f.grants, f.players, {0, perm::Holder::player(1), perm::Scope::all_land(), 8, 0, 0, 100},
-          {perm::Holder::player(1), 1, false}, 1)),
-      "pool transfer grant");
+  require(bool(perm::create_root_grant(f.grants, f.players,
+                                       {0, perm::Holder::player(1), perm::Scope::all_land(),
+                                        perm::Rights{8} << 8, 0, 0, 100},
+                                       {perm::Holder::player(1), 1, false}, 1)),
+          "pool transfer grant");
   denied(f.call(f.ids.abandon_plot, PlayerId{1}, {{"plot", 1}}),
          "this lot already belongs to the pool");
 }

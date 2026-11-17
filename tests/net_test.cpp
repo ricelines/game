@@ -25,7 +25,11 @@ void require(bool value, const char *text) {
 void pending_views_track_only_their_current_contents() {
   testspace::Scene scene;
   catalog::State catalog;
-  react::State react;
+  react::State react({4096, 50, 5, 64});
+  react.terms.rows.resize(2);
+  react.terms.rows[1].id = 1;
+  react.terms.rows[1].name = "test.material";
+  react.terms.rows[1].kind = react::Kind::Material;
   step::State step{8};
   step.clock.hz = 20;
   scene.space_state.active_views = observe::ActiveViews(8);
@@ -64,8 +68,11 @@ void pending_views_track_only_their_current_contents() {
   nt::invalidate(views, std::span(&thing, 1));
   require(!views.rows[1].pending.ready && views.rows[2].pending.ready,
           "unrelated view invalidated");
-  // Turning around removes the thing from the pending view while keeping authority to name it.
-  scene.objects.rotation[first.slot()] = {0, 0, 1, 0};
+  // Move the thing beyond sight while keeping the session's authority to name it.
+  require(space::set_pose(scene.space, identity(scene.objects), transforms(scene.objects), thing,
+                          {{10000, 0, 0}, {}})
+                  .status == space::Status::Ok,
+          "move thing out of sight");
   refresh(1, first);
   require(!views.shown_in.contains(thing.bits) && views.rows[1].acquired.contains(thing.bits),
           "refresh kept a departed thing or removed acquired authority");
