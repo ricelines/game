@@ -497,8 +497,11 @@ step::NativeCompletion group_member(const perm::Groups &groups, perm::Players &p
     return bad_input(error.what());
   }
 }
-step::NativeCompletion plot_permissions(perm::Plots &plots, const perm::Players &players,
-                                        const perm::Groups &groups, const step::NativeCall &call) {
+step::NativeCompletion plot_permissions(perm::State &state, const step::NativeCall &call,
+                                        TermId plot_changed) {
+  auto &plots = state.plots;
+  const auto &players = state.players;
+  const auto &groups = state.groups;
   if (!std::holds_alternative<PlayerId>(call.request.caller))
     return denied("player_caller", "plot presets", "this action requires a current player caller",
                   "have the player perform this administrative action directly");
@@ -532,6 +535,8 @@ step::NativeCompletion plot_permissions(perm::Plots &plots, const perm::Players 
       std::sort(banned.begin(), banned.end());
       banned.erase(std::unique(banned.begin(), banned.end()), banned.end());
     }
+    const bool entry_changed =
+        (preset ^ plot.preset) & (perm::Rights{1} << unsigned(perm::LandVerb::Enter));
     const bool changed = preset != plot.preset || assigned != plot.group || banned != plot.banned;
     plot.preset = preset;
     plot.group = assigned;
@@ -540,7 +545,15 @@ step::NativeCompletion plot_permissions(perm::Plots &plots, const perm::Players 
     details["banned"] = Json::array();
     for (auto player : plot.banned)
       details["banned"].push_back("p:" + std::to_string(player));
-    return result(changed, {{"plot", id}, {"permissions", details}});
+    auto out = result(changed, {{"plot", id}, {"permissions", details}});
+    if (entry_changed) {
+      const auto holders = perm::plot_holders(plot, state.grants, call.step);
+      const auto &bounds = plot.bounds;
+      const auto area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]);
+      commerce_detail::plot_changed(out, holders, plot_changed, call,
+                                    {"permissions", id, 0, plot.owner, plot.owner, area, 0});
+    }
+    return out;
   } catch (const std::exception &error) {
     return bad_input(error.what());
   }

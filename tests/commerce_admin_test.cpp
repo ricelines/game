@@ -34,6 +34,12 @@ int main() {
     set_plot(f.objects, f.a.slot(), 1);
     set_plot(f.objects, f.b.slot(), 1);
     set_plot(f.objects, f.c.slot(), 1);
+    react::Term plot_changed;
+    plot_changed.id = f.terms.rows.size();
+    plot_changed.name = "base.plot_changed";
+    plot_changed.kind = react::Kind::Event;
+    f.terms.by_name.emplace(plot_changed.name, plot_changed.id);
+    f.terms.rows.push_back(std::move(plot_changed));
     react::NativeActions native;
     const auto ids = ad::declare_admin(f.terms, native);
     const auto count = f.terms.rows.size();

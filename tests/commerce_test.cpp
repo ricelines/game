@@ -966,6 +966,13 @@ void land_refusals_have_fixes_and_denial_records() {
 }
 void plot_changes_dispatch_before_authority_is_removed() {
   Fixture f;
+  const auto admin = step::declare_admin(f.f.terms, f.declarations);
+  const auto permissions = [&](nlohmann::json arguments) {
+    return step::native_permissions(
+        f.catalog_state, f.react_state, f.perm_state, f.objects_state, false,
+        std::get<react::PermissionAction>(f.declarations.rows.at(admin.plot_permissions).operation),
+        {{PlayerId{1}, admin.plot_permissions, {}, {}}, std::move(arguments), {}, 20, 20, {}});
+  };
   const auto observer = R"(return {kind='instance',on={['base.plot_changed']=function(self,_,event)
     self.state.count=(self.state.count or 0)+1
     self.state.op=event.op;self.state.plot=event.plot;self.state.other=event.other
@@ -1032,6 +1039,23 @@ void plot_changes_dispatch_before_authority_is_removed() {
     }
     require(!f.f.states.contains({f.f.c, builder}), "build-only observer received a plot event");
   };
+  deliver(permissions({{"plot", 1}, {"everyone", {"enter"}}}), "permissions", 0, "p:1", "p:1", 800,
+          0);
+  auto unchanged = permissions({{"plot", 1}, {"everyone", {"enter"}}});
+  require(unchanged.reply.at("ok") && !unchanged.changed && unchanged.effects.ordered.empty(),
+          "unchanged public entry emitted a plot event");
+  for (auto arguments : {nlohmann::json{{"plot", 1}, {"everyone", {"build", "enter"}}},
+                         nlohmann::json{{"plot", 1}, {"group_rights", {"enter"}}},
+                         nlohmann::json{{"plot", 1}, {"banned", {"p:3"}}}}) {
+    const auto unrelated = permissions(std::move(arguments));
+    require(unrelated.changed && unrelated.effects.ordered.empty(),
+            "administrative edits without a public-entry change emitted a plot event");
+  }
+  deliver(permissions({{"plot", 1}, {"everyone", {"build"}}}), "permissions", 0, "p:1", "p:1", 800,
+          0);
+  unchanged = permissions({{"plot", 1}, {"everyone", {"build"}}});
+  require(unchanged.reply.at("ok") && !unchanged.changed && unchanged.effects.ordered.empty(),
+          "unchanged closed entry emitted a plot event");
   deliver(f.call(f.ids.split_plot, PlayerId{1}, {{"plot", 1}, {"x", -15}}), "split", 3, "p:1",
           "p:1", 200, 600);
   deliver(f.call(f.ids.join_plots, PlayerId{1}, {{"plots", {1, 3}}}), "join", 3, "p:1", "p:1", 200,

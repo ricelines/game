@@ -626,8 +626,8 @@ step::NativeCompletion group_create(perm::Groups &groups, perm::Players &players
                                     const step::NativeCall &call);
 step::NativeCompletion group_member(const perm::Groups &groups, perm::Players &players,
                                     const step::NativeCall &call);
-step::NativeCompletion plot_permissions(perm::Plots &plots, const perm::Players &players,
-                                        const perm::Groups &groups, const step::NativeCall &call);
+step::NativeCompletion plot_permissions(perm::State &, const step::NativeCall &,
+                                        TermId plot_changed);
 
 using Json = nlohmann::json;
 struct ElaborationDeclarations {

@@ -256,7 +256,6 @@ NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
 
   auto &players = perm_state.players;
   auto &groups = perm_state.groups;
-  auto &plots = perm_state.plots;
   auto &grants = perm_state.grants;
 
   auto &object_presets = objects_state.objects.preset;
@@ -302,7 +301,7 @@ NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
   case react::PermissionAction::PlotPermissions: {
     if (const auto error = validate_plot_permissions(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = plot_permissions(plots, players, groups, call);
+    out = plot_permissions(perm_state, call, react_state.terms.by_name.at("base.plot_changed"));
     break;
   }
   }
