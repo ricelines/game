@@ -531,6 +531,95 @@ void real_stair_navigation() {
   require(unreachable.status == sp::PathStatus::Unreachable,
           "new wall did not invalidate navigation");
 }
+void crowd_deviation_respects_retained_plot_boundaries() {
+  Scene scene;
+  scene.box({20, 12, .2f}, {0, 0, -.2f});
+  const auto first = scene.character({-4, -.15f, 0});
+  const auto second = scene.character({4, .15f, 0});
+  scene.wait_navigation();
+  for (int i = 0; i < 4; ++i)
+    scene.tick();
+  const std::array<sp::TravelBoundary, 2> closed{
+      {{{{-2, -.25f, 0}, {2, -.25f, 0}, {2, -3, 0}, {-2, -3, 0}}, -1, 5},
+       {{{-2, .25f, 0}, {2, .25f, 0}, {2, 3, 0}, {-2, 3, 0}}, -1, 5}}};
+  std::vector<sp::MoveRequest> moves{{first, 1, sp::PointGoal{{4, -.15f, 0}, .1f}},
+                                     {second, 2, sp::PointGoal{{-4, .15f, 0}, .1f}}};
+  bool stopped = false;
+  for (int i = 0; i < 160 && !stopped; ++i) {
+    scene.tick(moves, closed);
+    for (const auto &progress : scene.result.intents)
+      stopped |= progress.path_status == sp::PathStatus::AccessDenied;
+    for (const auto body : {first, second}) {
+      const auto p = scene.objects.position[body.slot()];
+      require(p.x <= -2 || p.x >= 2 || std::abs(p.y) <= .25f,
+              "crowd avoidance cannot carry a walker into a forbidden plot");
+    }
+  }
+  require(stopped && scene.objects.position[first.slot()].x > -3.5f,
+          "a legal walk advances and then stops when crowd motion reaches a closed lot edge");
+}
+void displaced_walk_replans_with_fresh_boundaries() {
+  Scene scene;
+  scene.box({24, 14, .2f}, {0, 0, -.2f});
+  const auto walker = scene.character({-5, 0, 0});
+  scene.wait_navigation();
+  for (int i = 0; i < 4; ++i)
+    scene.tick();
+  sp::TravelBoundary closed{{{0, 1, 0}, {1, 1, 0}, {1, 4, 0}, {0, 4, 0}}, -1, 5};
+  const sp::MoveRequest move{walker, 1, sp::PointGoal{{5, 0, 0}, .1f}};
+  scene.tick({&move, 1}, {&closed, 1});
+  require(scene.result.intents[0].path_status == sp::PathStatus::Ready,
+          "the first route passes beside the closed plot");
+  sp::set_pose(scene.space, identity(scene.objects), transforms(scene.objects), walker,
+               {{-2, 3, 0}, {}});
+  const auto plans = scene.planned_moves;
+  scene.tick({&move, 1}, {&closed, 1});
+  require(
+      scene.planned_moves == plans + 1 &&
+          scene.result.intents[0].path_status == sp::PathStatus::AccessDenied &&
+          scene.objects.position[walker.slot()].x < 0,
+      "displacement outside the route footprint replans and checks a newly relevant closed lot");
+}
+void waiting_navigation_finishes_after_unrelated_tiles() {
+  Scene scene;
+  scene.box({4, 6, .2f}, {-5, 0, -.2f});
+  const auto walker = scene.character({-5, 0, 0});
+  scene.wait_navigation();
+  for (int i = 0; i < 4; ++i)
+    scene.tick();
+  scene.box({1, 1, .2f}, {50, 50, 0});
+  const sp::MoveRequest move{walker, 1, sp::PointGoal{{5, 0, 0}, .1f}};
+  sp::plan_move(scene.space, identity(scene.objects), move, {});
+  require(!sp::needs_plan(scene.space, identity(scene.objects), move),
+          "an unchanged pending route does not repeat its path query");
+  scene.wait_navigation();
+  require(sp::needs_plan(scene.space, identity(scene.objects), move),
+          "finishing the unrelated pending tiles releases the waiting attempt");
+  scene.tick({&move, 1});
+  require(scene.result.intents[0].state == sp::IntentState::Blocked,
+          "a genuinely unreachable goal ends after pending navigation finishes");
+}
+void object_goal_uses_reachable_side() {
+  Scene scene;
+  scene.box({12, 12, .2f}, {-4, 0, -.2f});
+  const auto target = scene.box({2, 2, 2}, {2, 0, 0});
+  const auto walker = scene.character({-6, 0, 0});
+  scene.wait_navigation();
+  for (int i = 0; i < 4; ++i)
+    scene.tick();
+  const sp::MoveRequest move{walker, 1, sp::ObjectGoal{target, 1.5f}};
+  const auto route = sp::path(scene.space, identity(scene.objects), walker, move.goal, {});
+  require(route.status == sp::PathStatus::Ready && route.corners.back().x < 1,
+          "an object with its far side off the floor retains the reachable near-side route");
+  bool arrived = false;
+  for (int i = 0; i < 200 && !arrived; ++i) {
+    scene.tick({&move, 1});
+    arrived = scene.result.intents[0].state == sp::IntentState::Arrived;
+  }
+  require(arrived && scene.objects.position[walker.slot()].x > -.5f &&
+              scene.objects.position[walker.slot()].x < 1,
+          "the walker reaches the supported side within reach of the object");
+}
 template <class Function> void benchmark(const char *label, int count, Function function) {
   std::vector<double> times;
   times.reserve(count);
@@ -588,7 +677,7 @@ void requested_speed_respects_authored_profile() {
   scene.box({40, 20, .2f}, {0, 0, -.2f});
   auto walker = scene.character({-5, 0, 0});
   scene.wait_navigation();
-  sp::MoveRequest request{walker, 1, sp::PointGoal{{10, 0, 0}, .1f}, {}, .2f};
+  sp::MoveRequest request{walker, 1, sp::PointGoal{{10, 0, 0}, .1f}, .2f};
   for (int i = 0; i < 15; ++i)
     scene.tick({&request, 1});
   const auto slow = scene.objects.position[walker.slot()].x + 5;
@@ -1221,6 +1310,10 @@ int main(int argc, char **argv) {
     terrain_sweep();
     attachments_and_sweep();
     real_stair_navigation();
+    crowd_deviation_respects_retained_plot_boundaries();
+    displaced_walk_replans_with_fresh_boundaries();
+    waiting_navigation_finishes_after_unrelated_tiles();
+    object_goal_uses_reachable_side();
     snapshot_continuation_and_fixed_parts();
     crowd_doorway_and_stale_tiles();
     predicted_sensor_crossings_and_containment();

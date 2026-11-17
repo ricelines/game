@@ -131,7 +131,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &groups = perm_state.groups;
   auto &plots = perm_state.plots;
 
-  auto &travel_access = step_state.travel_access;
   auto &ledger = perm_state.ledger;
 
   auto &profiles = net_state.profiles;
@@ -362,7 +361,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                              0,
                              0}
                      : begin_frame(clock, settings.clock, costs, queues, timers, {}, frame_started);
-    advance_permission_deadlines(perm_state, travel_access, sessions, journal, clock.step, hz,
+    advance_permission_deadlines(perm_state, sessions, journal, clock.step, hz,
                                  settings.grant_reminder_seconds, settings.deadlines_per_step,
                                  settings.mailbox_max);
     expire_sale_offers(perm_state, ids, permission_flags(objects), session_views, sessions, journal,

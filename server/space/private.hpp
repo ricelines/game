@@ -74,6 +74,9 @@ struct Mirror {
   int agent = -1;
   std::uint64_t intent = 0, path_revision = 0;
   std::vector<Vec3> route;
+  std::vector<TravelBoundary> forbidden;
+  Bounds route_bounds;
+  bool route_dirty = true;
   std::size_t waypoint = 0;
   float stuck_s = 0;
   Vec3 last_goal;

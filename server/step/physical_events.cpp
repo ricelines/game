@@ -86,7 +86,6 @@ space::StepResult advance_motion(space::Space &space, amber::ObjectState &object
   auto ids = amber::identity(std::as_const(objects_state.objects));
 
   auto &intents = step_state.intents;
-  auto &travel_access = step_state.travel_access;
   auto &plots = perm_state.plots;
   auto &players = perm_state.players;
   auto &grants = perm_state.grants;
@@ -100,13 +99,22 @@ space::StepResult advance_motion(space::Space &space, amber::ObjectState &object
       goal = space::PointGoal{*point, goal_tolerance_m};
     else
       goal = space::ObjectGoal{std::get<Handle>(intent.goal), reach_m};
-    moving.push_back(
-        {Handle{bits}, intent.id, std::move(goal),
-         travel_boundaries(travel_access, ids, auth, Handle{bits}, plots, players, grants, now),
-         intent.speed_m_s});
+    const space::MoveRequest request{Handle{bits}, intent.id, std::move(goal), intent.speed_m_s};
+    if (space::needs_plan(space, ids, request)) {
+      std::vector<space::TravelBoundary> forbidden;
+      const auto player = perm::Holder::player(auth.owner[request.body.slot()]);
+      for (const auto &plot : plots.rows)
+        if (plot.id &&
+            !perm::check_land(player, perm::LandVerb::Enter, plot, players, grants, now)) {
+          const auto [x0, y0, x1, y1] = plot.bounds;
+          forbidden.push_back({{{x0, y0, 0}, {x1, y0, 0}, {x1, y1, 0}, {x0, y1, 0}},
+                               std::numeric_limits<float>::lowest(),
+                               std::numeric_limits<float>::max()});
+        }
+      space::plan_move(space, ids, request, forbidden);
+    }
+    moving.push_back(request);
   }
-  std::erase_if(travel_access.bodies,
-                [&](const auto &row) { return !intents.moving.contains(row.first); });
   space::StepResult physics;
   space::step(space, objects_state, physical_relations, now, 1.0f / hz, moving, physics);
   return physics;

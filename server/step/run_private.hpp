@@ -55,9 +55,9 @@ void publish_value_changes(net::ReplicationIndex &, net::SessionViews &, const r
 void record_frame(record::Journal &journal, record::Writer &writer, net::RecordFeed &feed,
                   IdentityRead ids, TransformRead poses, std::size_t &script_errors);
 
-void advance_permission_deadlines(amber::perm::State &perm_state, TravelAccess &travel_access,
-                                  net::Sessions &sessions, record::Journal &journal, Step now,
-                                  double hz, double reminder_seconds, std::size_t limit,
+void advance_permission_deadlines(amber::perm::State &perm_state, net::Sessions &sessions,
+                                  record::Journal &journal, Step now, double hz,
+                                  double reminder_seconds, std::size_t limit,
                                   std::size_t mailbox_max);
 void expire_sale_offers(perm::State &perm_state, IdentityRead ids, PermissionFlags flags,
                         net::SessionViews &session_views, net::Sessions &sessions,

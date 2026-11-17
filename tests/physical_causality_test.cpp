@@ -42,6 +42,10 @@ struct Fixture : test_physical::Fixture {
     return result;
   }
   void tick(std::span<const sp::MoveRequest> requests = {}) {
+    sp::install_ready_navigation(space);
+    for (const auto &request : requests)
+      if (sp::needs_plan(space, identity(f.objects), request))
+        sp::plan_move(space, identity(f.objects), request, {});
     sp::step(space, f.objects_state, physical, ++clock.step, .05f, requests, last);
     bi::publish_physical(step_state, journal, {14, {20, 21, 22, 23}}, 10000, last,
                          amber::step::Clock{.step = clock.step, .hz = 20});
@@ -184,7 +188,7 @@ void character_contacts_and_fact_reduction() {
   const amber::Origin origin{91, 90, {2}, 8.5, false};
   const Vec3 goal{3, 0, 0};
   const auto started = bi::start_move(state.intents, body, goal, origin);
-  sp::MoveRequest move{body, started.id, sp::PointGoal{goal, .1f}, {}, {}};
+  sp::MoveRequest move{body, started.id, sp::PointGoal{goal, .1f}, {}};
   record::Journal journal(3, {});
   bool contact = false;
   for (int i = 0; i < 80 && !contact; ++i) {

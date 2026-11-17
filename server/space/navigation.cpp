@@ -15,6 +15,21 @@
 namespace amber::space {
 namespace {
 template <class T, void (*Free)(T *)> using Rc = std::unique_ptr<T, decltype(Free)>;
+Vec3 goal_position(const Space &space, IdentityRead identity, const Goal &goal) {
+  if (const auto *point = std::get_if<PointGoal>(&goal))
+    return point->point;
+  const auto target = bounds(space, identity, std::get<ObjectGoal>(goal).target);
+  return target ? (target->min + target->max) * .5f : Vec3{};
+}
+void include(Bounds &bounds, Vec3 point) {
+  bounds.min = {std::min(bounds.min.x, point.x), std::min(bounds.min.y, point.y),
+                std::min(bounds.min.z, point.z)};
+  bounds.max = {std::max(bounds.max.x, point.x), std::max(bounds.max.y, point.y),
+                std::max(bounds.max.z, point.z)};
+}
+bool overlaps_xy(Bounds a, Bounds b) {
+  return a.min.x <= b.max.x && a.max.x >= b.min.x && a.min.y <= b.max.y && a.max.y >= b.min.y;
+}
 Bounds instance_bounds(const NavInstance &entry) {
   const auto &b = entry.geometry->bounds;
   Bounds result{{INFINITY, INFINITY, INFINITY}, {-INFINITY, -INFINITY, -INFINITY}};
@@ -351,6 +366,98 @@ std::uint64_t navigation_revision(const Space &space) {
   return space.native->revision;
 }
 
+bool needs_plan(const Space &space, IdentityRead identity, const MoveRequest &request) {
+  const auto &n = *space.native;
+  const auto found = n.bodies.find(request.body.bits);
+  if (!identity.valid(request.body) || found == n.bodies.end() || !found->second.character ||
+      n.attachments.contains(request.body.bits))
+    return false;
+  if (const auto *target = std::get_if<ObjectGoal>(&request.goal);
+      target && !identity.valid(target->target))
+    return false;
+  const auto &body = found->second;
+  if (body.intent != request.intent)
+    return true;
+  if (body.character->GetGroundState() != JPH::CharacterBase::EGroundState::OnGround)
+    return false;
+  const auto position = body.pose.position;
+  return body.route_dirty || body.path_revision != n.revision ||
+         (body.last_goal - goal_position(space, identity, request.goal)).length() >
+             n.settings.crowd_correction_m ||
+         position.x < body.route_bounds.min.x || position.x > body.route_bounds.max.x ||
+         position.y < body.route_bounds.min.y || position.y > body.route_bounds.max.y ||
+         (body.path_status == PathStatus::PendingTiles && n.dirty_tiles.empty());
+}
+void plan_move(Space &space, IdentityRead identity, const MoveRequest &request,
+               std::span<const TravelBoundary> forbidden) {
+  auto &n = *space.native;
+  auto &body = n.bodies.at(request.body.bits);
+  if (body.intent != request.intent)
+    body.stuck_s = 0;
+  auto result = path(space, identity, request.body, request.goal, forbidden);
+  body.route = std::move(result.corners);
+  body.waypoint = 0;
+  body.path_status = result.status;
+  body.intent = request.intent;
+  body.path_revision = n.revision;
+  body.route_dirty = false;
+  body.last_goal = goal_position(space, identity, request.goal);
+  body.membership.due = 0;
+
+  body.route_bounds = {body.pose.position, body.pose.position};
+  include(body.route_bounds, body.last_goal);
+  for (auto point : body.route)
+    include(body.route_bounds, point);
+  // Plot boundaries and navigation tiles are vertical columns. A point-only
+  // box has zero width on a straight walk, and Detour's floor Z differs from
+  // Jolt's. Use the character's footprint so ordinary crowd/floor motion fits.
+  const auto &c = *body.spec.character;
+  body.route_bounds.min.x -= c.radius_m;
+  body.route_bounds.min.y -= c.radius_m;
+  body.route_bounds.max.x += c.radius_m;
+  body.route_bounds.max.y += c.radius_m;
+  body.forbidden.clear();
+  for (const auto &boundary : forbidden) {
+    Bounds region{{INFINITY, INFINITY, 0}, {-INFINITY, -INFINITY, 0}};
+    for (auto point : boundary.polygon)
+      include(region, point);
+    if (overlaps_xy(body.route_bounds, region))
+      body.forbidden.push_back(boundary);
+  }
+  if (body.path_status != PathStatus::Ready) {
+    if (body.agent >= 0)
+      n.crowd->resetMoveTarget(body.agent);
+    return;
+  }
+  if (body.agent < 0) {
+    auto position = nav(body.pose.position);
+    dtCrowdAgentParams params{};
+    params.radius = c.radius_m;
+    params.height = c.height_m;
+    params.maxAcceleration = c.acceleration_m_s2;
+    params.maxSpeed = c.max_speed_m_s;
+    params.collisionQueryRange = c.radius_m * n.settings.crowd_query_radius_multiplier;
+    params.pathOptimizationRange = c.radius_m * n.settings.crowd_optimize_radius_multiplier;
+    params.updateFlags = DT_CROWD_ANTICIPATE_TURNS | DT_CROWD_OBSTACLE_AVOIDANCE |
+                         DT_CROWD_SEPARATION | DT_CROWD_OPTIMIZE_VIS | DT_CROWD_OPTIMIZE_TOPO;
+    params.separationWeight = n.settings.crowd_separation_weight;
+    body.agent = n.crowd->addAgent(&position.x, &params);
+  }
+  while (body.waypoint + 1 < body.route.size() &&
+         (body.route[body.waypoint] - body.pose.position).length() < c.radius_m)
+    ++body.waypoint;
+  if (body.agent < 0)
+    return;
+  auto target = nav(body.route[body.waypoint]);
+  dtPolyRef ref = 0;
+  float nearest[3], extents[]{n.settings.navigation.radius_m, n.settings.navigation.height_m,
+                              n.settings.navigation.radius_m};
+  dtQueryFilter filter;
+  n.query->findNearestPoly(&target.x, extents, &filter, &ref, nearest);
+  if (ref)
+    n.crowd->requestMoveTarget(body.agent, ref, nearest);
+}
+
 bool travel_blocked(Vec3 a, Vec3 b, std::span<const TravelBoundary> regions) {
   for (const auto &region : regions) {
     if (region.polygon.size() < 3)
@@ -392,11 +499,12 @@ Path path(const Space &space, IdentityRead identity, Handle body, const Goal &go
     return result;
   const Vec3 from = found->second.pose.position;
   std::vector<Vec3> candidates;
+  const auto *object = std::get_if<ObjectGoal>(&goal);
+  std::optional<Bounds> target;
   if (const auto *point = std::get_if<PointGoal>(&goal))
     candidates.push_back(point->point);
   else {
-    const auto &object = std::get<ObjectGoal>(goal);
-    auto target = bounds(space, identity, object.target);
+    target = bounds(space, identity, object->target);
     if (!target)
       return result;
     const auto b = *target;
@@ -413,12 +521,10 @@ Path path(const Space &space, IdentityRead identity, Handle body, const Goal &go
   bool denied = false;
   for (auto to : candidates) {
     auto attempt = route(n, from, to);
-    if (attempt.status != PathStatus::Ready) {
-      result.status = attempt.status;
+    if (attempt.status != PathStatus::Ready)
       continue;
-    }
-    if (const auto *object = std::get_if<ObjectGoal>(&goal)) {
-      auto b = *bounds(space, identity, object->target);
+    if (object) {
+      const auto &b = *target;
       auto p = attempt.corners.back();
       Vec3 nearest{std::clamp(p.x, b.min.x, b.max.x), std::clamp(p.y, b.min.y, b.max.y),
                    std::clamp(p.z, b.min.z, b.max.z)};

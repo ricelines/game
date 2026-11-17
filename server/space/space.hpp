@@ -239,9 +239,12 @@ struct MoveRequest {
   Handle body;
   std::uint64_t intent;
   Goal goal;
-  std::span<const TravelBoundary> forbidden;
   std::optional<float> speed_m_s = {};
 };
+// Install ready navigation before preparing requested moves. Permission boundaries
+// are supplied only for a new plan; ordinary steps use the retained route data.
+bool needs_plan(const Space &, IdentityRead, const MoveRequest &);
+void plan_move(Space &, IdentityRead, const MoveRequest &, std::span<const TravelBoundary>);
 enum class PathStatus { Ready, PendingTiles, NoSurface, Unreachable, AccessDenied };
 struct Path {
   PathStatus status;

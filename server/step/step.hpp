@@ -303,20 +303,6 @@ void queue_navigation(NavigationRequests &, const space::Space &, IdentityRead, 
 std::vector<NavigationNotice> publish_navigation(NavigationRequests &, const space::Space &,
                                                  IdentityRead, TransformRead,
                                                  const space::NavigationInstall &);
-struct TravelAccess {
-  struct Row {
-    PlayerId player;
-    std::vector<space::TravelBoundary> forbidden;
-  };
-  std::unordered_map<std::uint64_t, Row> bodies;
-  Step next_expiry = 0;
-};
-void invalidate_travel(TravelAccess &, const perm::Grants &, Step);
-std::span<const space::TravelBoundary> travel_boundaries(TravelAccess &, IdentityRead,
-                                                         AuthorityRead, Handle body,
-                                                         const perm::Plots &, const perm::Players &,
-                                                         const perm::Grants &, Step);
-
 void append_inputs(WorkQueues &, std::vector<Work>);
 void promote_due(TimerWheel &, Step now, WorkQueues &);
 std::optional<ForegroundItem> pop_foreground(WorkQueues &);
@@ -1065,7 +1051,6 @@ struct State {
   std::vector<IntentEnding> intent_endings;
   Clock clock;
   GeometryAssets geometry;
-  TravelAccess travel_access;
   DeliveryTargets delivery;
   AssemblyMasses masses;
   IlluminationSources illumination_sources;

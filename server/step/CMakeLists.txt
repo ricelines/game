@@ -51,7 +51,6 @@ add_library(amber_step STATIC
   physical_actions.cpp
   physical_events.cpp
   navigation.cpp
-  travel.cpp
   start_catalog.cpp
   start_objects.cpp
   land.cpp

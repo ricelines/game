@@ -120,6 +120,7 @@ struct Scene {
   sp::PhysicalRelations &relations = space_state.physical_relations;
   sp::StepResult result;
   Step clock = 0;
+  std::size_t planned_moves = 0;
   float dt =
       float(1. / toml::parse_file(AMBER_CONFIG_PATH)["clock"]["STEP_HZ"].value<double>().value());
   Handle box(Vec3 size, Vec3 position, sp::Motion motion = sp::Motion::Static,
@@ -159,7 +160,14 @@ struct Scene {
         "character add failed");
     return h;
   }
-  void tick(std::span<const sp::MoveRequest> moves = {}) {
+  void tick(std::span<const sp::MoveRequest> moves = {},
+            std::span<const sp::TravelBoundary> forbidden = {}) {
+    sp::install_ready_navigation(space);
+    for (const auto &move : moves)
+      if (sp::needs_plan(space, identity(objects), move)) {
+        sp::plan_move(space, identity(objects), move, forbidden);
+        ++planned_moves;
+      }
     sp::step(space, objects_state, relations, ++clock, dt, moves, result);
   }
   void wait_navigation() {

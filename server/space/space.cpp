@@ -1034,6 +1034,8 @@ OperationResult set_pose(Space &space, IdentityRead identity, TransformWrite tra
     return {Status::Ok, {}};
   }
   auto old = n.world_bounds(*body);
+  if (body->character && body->pose.position != pose.position)
+    body->route_dirty = true;
   native_pose(n, *body, pose);
   if (body->kinematic_start) {
     body->kinematic_start.reset();
@@ -1416,6 +1418,8 @@ OperationResult attach(amber::ObjectState &objects_state, amber::space::State &s
   if (body && body->agent >= 0) {
     n.crowd->removeAgent(body->agent);
     body->agent = -1;
+    body->route_dirty = true;
+    body->membership.due = 0;
   }
   if (body)
     n.physics.GetBodyInterface().SetObjectLayer(
@@ -1621,7 +1625,6 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
   ZoneValue(requests.size());
   auto &n = *space.native;
   out = {};
-  install_ready_navigation(space);
   std::set<std::uint64_t> touched = n.dirty_objects;
   touched.insert(n.character_handles.begin(), n.character_handles.end());
   auto include_active = [&] {
@@ -1649,70 +1652,22 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
         n.crowd->resetMoveTarget(body.agent);
       body.intent = 0;
       body.route.clear();
+      body.forbidden.clear();
+      body.membership.due = 0;
       continue;
     }
     const auto &request = *input->second;
-    Vec3 goal = std::holds_alternative<PointGoal>(request.goal)
-                    ? std::get<PointGoal>(request.goal).point
-                    : Vec3{};
-    if (const auto *target = std::get_if<ObjectGoal>(&request.goal)) {
-      if (!identity.valid(target->target)) {
-        out.intents.push_back(
-            {request.body, request.intent, IntentState::TargetGone, 0, PathStatus::Unreachable});
-        target_gone.insert(bits);
-        body.route.clear();
-        body.path_status = PathStatus::Unreachable;
-        if (body.agent >= 0)
-          n.crowd->resetMoveTarget(body.agent);
-        continue;
-      }
-      auto b = bounds(space, identity, target->target);
-      if (b)
-        goal = (b->min + b->max) * .5f;
-    }
-    if (body.intent != request.intent)
-      body.stuck_s = 0;
-    if (body.intent != request.intent || body.path_revision != n.revision ||
-        (body.last_goal - goal).length() > n.settings.crowd_correction_m || body.route.empty()) {
-      auto result = path(space, identity, request.body, request.goal, request.forbidden);
-      body.route = std::move(result.corners);
-      body.waypoint = 0;
-      body.path_status = result.status;
-      body.intent = request.intent;
-      body.path_revision = n.revision;
-      body.last_goal = goal;
-      if (body.path_status == PathStatus::Ready) {
-        if (body.agent < 0) {
-          auto position = nav(body.pose.position);
-          dtCrowdAgentParams params{};
-          const auto &c = *body.spec.character;
-          params.radius = c.radius_m;
-          params.height = c.height_m;
-          params.maxAcceleration = c.acceleration_m_s2;
-          params.maxSpeed = c.max_speed_m_s;
-          params.collisionQueryRange = c.radius_m * n.settings.crowd_query_radius_multiplier;
-          params.pathOptimizationRange = c.radius_m * n.settings.crowd_optimize_radius_multiplier;
-          params.updateFlags = DT_CROWD_ANTICIPATE_TURNS | DT_CROWD_OBSTACLE_AVOIDANCE |
-                               DT_CROWD_SEPARATION | DT_CROWD_OPTIMIZE_VIS | DT_CROWD_OPTIMIZE_TOPO;
-          params.separationWeight = n.settings.crowd_separation_weight;
-          body.agent = n.crowd->addAgent(&position.x, &params);
-        }
-        if (body.agent >= 0) {
-          while (body.waypoint + 1 < body.route.size() &&
-                 (body.route[body.waypoint] - body.pose.position).length() <
-                     body.spec.character->radius_m)
-            ++body.waypoint;
-          auto target = nav(body.route[body.waypoint]);
-          dtPolyRef ref = 0;
-          float nearest[3],
-              extents[]{n.settings.navigation.radius_m, n.settings.navigation.height_m,
-                        n.settings.navigation.radius_m};
-          dtQueryFilter filter;
-          n.query->findNearestPoly(&target.x, extents, &filter, &ref, nearest);
-          if (ref)
-            n.crowd->requestMoveTarget(body.agent, ref, nearest);
-        }
-      }
+    if (const auto *target = std::get_if<ObjectGoal>(&request.goal);
+        target && !identity.valid(target->target)) {
+      out.intents.push_back(
+          {request.body, request.intent, IntentState::TargetGone, 0, PathStatus::Unreachable});
+      target_gone.insert(bits);
+      body.route.clear();
+      body.path_status = PathStatus::Unreachable;
+      body.membership.due = 0;
+      if (body.agent >= 0)
+        n.crowd->resetMoveTarget(body.agent);
+      continue;
     }
     if (body.agent >= 0) {
       auto parameters = n.crowd->getAgent(body.agent)->params;
@@ -1747,8 +1702,7 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
       auto *agent = n.crowd->getAgent(body.agent);
       desired = world({agent->vel[0], 0, agent->vel[2]});
     }
-    if (input != active.end() &&
-        travel_blocked(old, old + desired * seconds, input->second->forbidden)) {
+    if (input != active.end() && travel_blocked(old, old + desired * seconds, body.forbidden)) {
       desired = {};
       body.path_status = PathStatus::AccessDenied;
     }
@@ -1773,6 +1727,8 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
       n.crowd->removeAgent(body.agent);
       body.agent = -1;
       body.route.clear();
+      body.route_dirty = true;
+      body.membership.due = 0;
     }
     if (input != active.end() && !target_gone.contains(bits)) {
       const auto &request = *input->second;
@@ -1790,6 +1746,7 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
             {{bits}, request.intent, IntentState::Arrived, remaining, body.path_status});
         n.crowd->resetMoveTarget(body.agent);
         body.route.clear();
+        body.membership.due = 0;
       } else {
         if ((body.pose.position - old).length() < n.settings.contact_slop_m)
           body.stuck_s += seconds;
