@@ -35,7 +35,7 @@ void pending_views_track_only_their_current_contents() {
   scene.space_state.active_views = observe::ActiveViews(8);
   scene.space_state.lights = observe::Lights(8);
   const auto first = scene.character({0, 0, 0});
-  const auto second = scene.character({100, 0, 0});
+  const auto second = scene.character({1000, 0, 0});
   const auto thing = scene.box({1, 1, 1}, {0, 4, 0});
   catalog.models.rows.resize(3);
   for (ModelId id : {1u, 2u}) {

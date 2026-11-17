@@ -132,7 +132,7 @@ struct Fixture {
 };
 void stored_scripts_keep_data_and_restart_without_a_saved_execution() {
   Fixture f;
-  const auto key = react::ScriptKey{f.object, 2};
+  const auto key = ScriptKey{f.object, 2};
   auto first = f.run(2, 4);
   require(first.outcome.status == react::RunOutcome::Status::Ok, "script started");
   const auto count = f.states.at(key).at(std::string("count"));
