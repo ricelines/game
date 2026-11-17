@@ -96,7 +96,7 @@ void mass_light_replication_lifetimes() {
                   .status == space::Status::Ok,
           "real authored zone sensor failed");
   f.state(root, 4, 100.);
-  amber::step::State step_state{8};
+  amber::step::State step_state;
   step::AssemblyMasses &masses = (step_state.masses = step::AssemblyMasses{{2, 3}, {}, {}});
   step::IlluminationSources &illumination = step_state.illumination_sources;
   observe::Lights &lights = (space_state.lights = observe::Lights{8});

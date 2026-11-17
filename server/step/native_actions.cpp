@@ -4,11 +4,12 @@
 #include <stdexcept>
 
 namespace amber::step {
-NativeCompletion
-native_mechanics(amber::ObjectState &objects_state, amber::react::State &react_state,
-                 const amber::perm::State &perm_state, amber::space::State &space_state,
-                 MechanicalCauses &mechanical_causes, PhysicalRelationTerms physical_terms,
-                 float reach_m, react::MechanicAction operation, const NativeCall &call) {
+NativeCompletion native_mechanics(amber::ObjectState &objects_state,
+                                  amber::react::State &react_state,
+                                  const amber::perm::State &perm_state,
+                                  amber::space::State &space_state,
+                                  PhysicalRelationTerms physical_terms, float reach_m,
+                                  react::MechanicAction operation, const NativeCall &call) {
   auto &space = space_state.space;
 
   auto &plots = perm_state.plots;
@@ -18,22 +19,19 @@ native_mechanics(amber::ObjectState &objects_state, amber::react::State &react_s
   NativeCompletion out;
   switch (operation) {
   case react::MechanicAction::Grasp: {
-    out = grasp_action(objects_state, space_state, physical_terms, reach_m, mechanical_causes,
-                       plots, call);
+    out = grasp_action(objects_state, space_state, physical_terms, reach_m, plots, call);
     break;
   }
   case react::MechanicAction::Release: {
-    out = release_action(objects_state, space_state, physical_terms, perm_state, mechanical_causes,
-                         call);
+    out = release_action(objects_state, space_state, physical_terms, perm_state, call);
     break;
   }
   case react::MechanicAction::Attach: {
-    out = attach_action(objects_state, space_state, physical_terms, perm_state, reach_m,
-                        mechanical_causes, call);
+    out = attach_action(objects_state, space_state, physical_terms, perm_state, reach_m, call);
     break;
   }
   case react::MechanicAction::Impulse: {
-    out = impulse_action(space, identity, mechanical_causes, call);
+    out = impulse_action(space, identity, call);
     break;
   }
   case react::MechanicAction::Transfer: {

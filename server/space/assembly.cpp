@@ -7,8 +7,7 @@
 namespace amber::space {
 namespace {
 OperationResult assemble_at(Space &space, IdentityRead identity, Pose root_pose, Handle root,
-                            std::span<const Handle> descendants, std::optional<Motion> mode,
-                            CauseToken cause = 0) {
+                            std::span<const Handle> descendants, std::optional<Motion> mode) {
   auto &n = *space.native;
   if (!identity.valid(root))
     return {Status::StaleHandle, {}};
@@ -103,16 +102,12 @@ OperationResult assemble_at(Space &space, IdentityRead identity, Pose root_pose,
                     solid_mass > 0};
   if (combined.motion == Motion::Character)
     return {Status::UnsupportedMotion, root};
-  for (auto child : descendants)
-    clear_cause(n, child);
-  stamp_cause(n, root, cause, CauseScope::Step);
   if (own == n.bodies.end()) {
     Mirror aggregate{};
     aggregate.spec = combined;
     aggregate.pose = root_pose;
     aggregate.body = create_rigid(n, aggregate, combined.motion);
     if (aggregate.body.IsInvalid()) {
-      clear_cause(n, root);
       return {Status::Capacity, {}};
     }
     n.handles[aggregate.body.GetIndexAndSequenceNumber()] = root;
@@ -125,7 +120,6 @@ OperationResult assemble_at(Space &space, IdentityRead identity, Pose root_pose,
     combined_body.pose = root_pose;
     combined_body.body = create_rigid(n, combined_body, combined.motion);
     if (combined_body.body.IsInvalid()) {
-      clear_cause(n, root);
       return {Status::Capacity, {}};
     }
     const auto previous = own->second.spec;
@@ -161,13 +155,12 @@ OperationResult assemble_at(Space &space, IdentityRead identity, Pose root_pose,
 }
 } // namespace
 OperationResult assemble(Space &space, IdentityRead identity, TransformRead transforms, Handle root,
-                         std::span<const Handle> descendants, std::optional<Motion> mode,
-                         CauseToken cause) {
+                         std::span<const Handle> descendants, std::optional<Motion> mode) {
   if (!identity.valid(root))
     return {Status::StaleHandle, {}};
   return assemble_at(space, identity,
                      {transforms.position[root.slot()], transforms.rotation[root.slot()]}, root,
-                     descendants, mode, cause);
+                     descendants, mode);
 }
 
 void remove_compound_member(Space &space, IdentityRead identity, SpaceFlags flags, Handle member) {

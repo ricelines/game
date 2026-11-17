@@ -9,7 +9,7 @@ using namespace react;
 using test_runtime::require;
 // Actual input tables for direct construction/replacement tests, without an execution stack.
 struct Fixture {
-  amber::step::State step_state{8};
+  amber::step::State step_state;
   amber::space::State space_state;
   amber::perm::State perm_state;
 

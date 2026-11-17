@@ -22,7 +22,7 @@ template <class F> void rejects(F action, const char *message) {
 struct Fixture {
   amber::space::State space_state;
   amber::perm::State perm_state;
-  amber::step::State step_state{8};
+  amber::step::State step_state;
 
   test_runtime::Fixture f;
   amber::ObjectState &objects_state = f.objects_state;

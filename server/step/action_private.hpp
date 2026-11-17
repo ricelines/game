@@ -46,11 +46,12 @@ std::optional<NativeCall> finish_handler_segment(std::deque<ExecutionFrame> &, r
                                                  std::size_t event_limit);
 void invalidate_execution(std::deque<ExecutionFrame> &, IdentityRead, const react::ScriptStates &);
 
-NativeCompletion
-native_mechanics(amber::ObjectState &objects_state, amber::react::State &react_state,
-                 const amber::perm::State &perm_state, amber::space::State &space_state,
-                 MechanicalCauses &mechanical_causes, PhysicalRelationTerms physical_terms,
-                 float reach_m, react::MechanicAction operation, const NativeCall &call);
+NativeCompletion native_mechanics(amber::ObjectState &objects_state,
+                                  amber::react::State &react_state,
+                                  const amber::perm::State &perm_state,
+                                  amber::space::State &space_state,
+                                  PhysicalRelationTerms physical_terms, float reach_m,
+                                  react::MechanicAction operation, const NativeCall &call);
 NativeCompletion native_construction(amber::ObjectState &objects_state,
                                      amber::catalog::State &catalog_state,
                                      amber::react::State &react_state,

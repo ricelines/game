@@ -23,7 +23,6 @@ struct SweepBinding {
   IdentityRead identity;
   TransformWrite transforms;
   const Relation &declared_parts;
-  MechanicalCauses &causes;
   Objects &objects;
   const perm::Plots &plots;
 };
@@ -32,7 +31,6 @@ struct PartPoseBinding {
   IdentityRead identity;
   TransformWrite transforms;
   const Relation &declared_parts;
-  MechanicalCauses &causes;
   Objects &objects;
   const perm::Plots &plots;
   std::size_t batch_max;
@@ -269,8 +267,7 @@ step::NativeCompletion native_result(space::OperationResult result, Handle subje
 step::NativeCompletion grasp_action(amber::ObjectState &objects_state,
                                     amber::space::State &space_state,
                                     const PhysicalRelationTerms &relation_terms, float reach_m,
-                                    MechanicalCauses &causes, const perm::Plots &plots,
-                                    const step::NativeCall &call) {
+                                    const perm::Plots &plots, const step::NativeCall &call) {
   auto &world = space_state.space;
 
   auto identity = amber::identity(std::as_const(objects_state.objects));
@@ -290,17 +287,15 @@ step::NativeCompletion grasp_action(amber::ObjectState &objects_state,
   for (auto parent = body; parent; parent = parents.parent[parent.slot()])
     if (parent == target)
       return native_denied("acyclic_attachment", target, Reason::InvalidScope);
-  auto token = causes.intern(call.origin);
   auto objects = closure(declared_parts, target);
   if (objects.size() > 1 || space::is_logical_root(world, identity, target)) {
-    const auto assembled =
-        space::assemble(world, identity, transforms, target, std::span(objects).subspan(1),
-                        space::Motion::Kinematic, token);
+    const auto assembled = space::assemble(world, identity, transforms, target,
+                                           std::span(objects).subspan(1), space::Motion::Kinematic);
     if (assembled.status != space::Status::Ok)
       return native_result(assembled, target, false);
   }
   const auto changes_begin = space_state.relation_changes.size();
-  auto result = space::attach(objects_state, space_state, {target, body, local, true}, token);
+  auto result = space::attach(objects_state, space_state, {target, body, local, true});
   auto out = native_result(result, target, true);
   relation_effects(out.effects, relation_terms,
                    std::span(space_state.relation_changes).subspan(changes_begin));
@@ -315,7 +310,7 @@ step::NativeCompletion attach_action(amber::ObjectState &objects_state,
                                      amber::space::State &space_state,
                                      const PhysicalRelationTerms &relation_terms,
                                      const amber::perm::State &perm_state, float reach_m,
-                                     MechanicalCauses &causes, const step::NativeCall &call) {
+                                     const step::NativeCall &call) {
   auto &world = space_state.space;
 
   auto identity = amber::identity(std::as_const(objects_state.objects));
@@ -338,12 +333,10 @@ step::NativeCompletion attach_action(amber::ObjectState &objects_state,
   const auto body = actor_body(call);
   if (!identity.valid(body) || !within_reach(world, identity, transforms, reach_m, body, parent))
     return native_denied("reach", parent, Reason::InvalidScope);
-  auto token = causes.intern(call.origin);
   const auto changes_begin = space_state.relation_changes.size();
   auto result = space::attach(
       objects_state, space_state,
-      {subject, parent, input_pose(call.arguments.value("local_pose", Json::object())), false},
-      token);
+      {subject, parent, input_pose(call.arguments.value("local_pose", Json::object())), false});
   auto out = native_result(result, subject, true);
   relation_effects(out.effects, relation_terms,
                    std::span(space_state.relation_changes).subspan(changes_begin));
@@ -359,7 +352,7 @@ step::NativeCompletion release_action(amber::ObjectState &objects_state,
                                       amber::space::State &space_state,
                                       const PhysicalRelationTerms &relation_terms,
                                       const amber::perm::State &perm_state,
-                                      MechanicalCauses &causes, const step::NativeCall &call) {
+                                      const step::NativeCall &call) {
 
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto parents = amber::parents(objects_state.objects);
@@ -391,11 +384,10 @@ step::NativeCompletion release_action(amber::ObjectState &objects_state,
       call.arguments.contains("linear") ? input_vector(call.arguments.at("linear")) : Vec3{};
   const auto angular =
       call.arguments.contains("angular") ? input_vector(call.arguments.at("angular")) : Vec3{};
-  auto token = causes.intern(call.origin);
   const auto changes_begin = space_state.relation_changes.size();
   const auto motion =
       identity.flags[target.slot()] & Body ? space::Motion::Character : space::Motion::Dynamic;
-  auto result = space::detach(objects_state, space_state, {target, motion, linear, angular}, token);
+  auto result = space::detach(objects_state, space_state, {target, motion, linear, angular});
   auto out = native_result(result, target, true);
   relation_effects(out.effects, relation_terms,
                    std::span(space_state.relation_changes).subspan(changes_begin));
@@ -408,12 +400,11 @@ step::NativeCompletion release_action(amber::ObjectState &objects_state,
   return out;
 }
 step::NativeCompletion impulse_action(space::Space &world, IdentityRead identity,
-                                      MechanicalCauses &causes, const step::NativeCall &call) {
+                                      const step::NativeCall &call) {
   const auto target = call.request.target;
   const auto momentum = input_vector(call.arguments.at("momentum"));
   const auto point = input_vector(call.arguments.at("point"));
-  auto token = causes.intern(call.origin, space::motion_cause(world, identity, target));
-  auto out = native_result(space::impulse(world, identity, target, momentum, point, token), target,
+  auto out = native_result(space::impulse(world, identity, target, momentum, point), target,
                            momentum != Vec3{});
   if (out.changed)
     out.changed_objects.push_back(target);
@@ -544,7 +535,6 @@ int move_part_binding(lua_State *L) {
   auto &b = *static_cast<PartPoseBinding *>(react::binding_data(L));
   auto &i = react::invocation(L);
   std::size_t moved = 0;
-  space::CauseToken token = 0;
   const auto move = [&](Handle part, space::Pose target) {
     if (part == i.self.object || !part_of(b.declared_parts, i.self.object, part))
       luaL_error(L, "move_part requires a declared part of this object");
@@ -555,9 +545,7 @@ int move_part_binding(lua_State *L) {
     if (b.transforms.position[part.slot()] == target.position &&
         b.transforms.rotation[part.slot()] == target.rotation)
       return;
-    if (!token)
-      token = b.causes.intern(i.origin);
-    const auto result = space::set_pose(b.space, b.identity, b.transforms, part, target, token);
+    const auto result = space::set_pose(b.space, b.identity, b.transforms, part, target);
     if (!moved)
       mechanical_result(i, result.status == space::Status::Ok);
     react::consult_object(i, part);
@@ -608,10 +596,9 @@ int sweep_binding(lua_State *L) {
   auto translation = vec(L, 3);
   if (!own(i, b.declared_parts, subject))
     return denied(L, "self_or_part", subject);
-  auto token = b.causes.intern(i.origin);
   const auto before = b.transforms.position[subject.slot()];
-  auto result = space::translate(b.space, b.identity, b.transforms, subject, translation,
-                                 float(1 / i.hz), token);
+  auto result =
+      space::translate(b.space, b.identity, b.transforms, subject, translation, float(1 / i.hz));
   mechanical_result(i, before != b.transforms.position[subject.slot()], std::span(&subject, 1));
   const auto objects = closure(b.declared_parts, subject);
   perm::update_plots(b.objects, b.plots, objects, true);
@@ -738,7 +725,6 @@ void bind_physical(react::Vm &vm, amber::ObjectState &objects_state, amber::step
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(objects_state.objects);
   auto &declared_parts = objects_state.declared_parts;
-  auto &causes = step_state.mechanical_causes;
   auto &plots = perm_state.plots;
   auto &intents = step_state.intents;
   auto &endings = step_state.intent_endings;
@@ -751,11 +737,10 @@ void bind_physical(react::Vm &vm, amber::ObjectState &objects_state, amber::step
 
   const auto navigation = std::make_shared<NavigationBinding>(
       NavigationBinding{intents, endings, identity, players, grants, plots});
-  const auto sweep = std::make_shared<SweepBinding>(SweepBinding{
-      space, identity, transforms, declared_parts, causes, objects_state.objects, plots});
-  const auto parts = std::make_shared<PartPoseBinding>(
-      PartPoseBinding{space, identity, transforms, declared_parts, causes, objects_state.objects,
-                      plots, part_batch_max});
+  const auto sweep = std::make_shared<SweepBinding>(
+      SweepBinding{space, identity, transforms, declared_parts, objects_state.objects, plots});
+  const auto parts = std::make_shared<PartPoseBinding>(PartPoseBinding{
+      space, identity, transforms, declared_parts, objects_state.objects, plots, part_batch_max});
   const auto query = std::make_shared<QueryBinding>(QueryBinding{space, identity, transforms});
   const auto sound = std::make_shared<SoundBinding>(
       SoundBinding{hearing, identity, transforms, listeners, instance_texts, model_texts});

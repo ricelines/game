@@ -52,7 +52,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   net::State net_state({"127.0.0.1", launch.port, launch.client, launch.assets, settings.network,
                         settings.control_max});
   space::State space_state(settings.space, settings.light_cell_m);
-  step::State step_state(settings.authors_max);
+  step::State step_state;
 
   const auto plan = start::read_plan(launch.plan);
   settings.land.way_group = plan.at("land").at("way_group").get<GroupId>();
@@ -147,7 +147,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &clock = step_state.clock;
   clock.hz = hz;
   auto &space = space_state.space;
-  auto &mechanical_causes = step_state.mechanical_causes;
   auto &geometry = step_state.geometry;
   auto &relation_changes = space_state.relation_changes;
   auto &hearing = space_state.hearing;
@@ -575,8 +574,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                     using Operation = decltype(operation);
                     if constexpr (std::is_same_v<Operation, react::MechanicAction>) {
                       return native_mechanics(objects_state, react_state, perm_state, space_state,
-                                              mechanical_causes, physical_terms,
-                                              settings.perception.reach_m, operation, action->call);
+                                              physical_terms, settings.perception.reach_m,
+                                              operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::ConstructionAction>) {
                       return native_construction(objects_state, catalog_state, react_state,
                                                  perm_state, geometry, space_state,
@@ -752,7 +751,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                   clock, settings.goal_tolerance_m, settings.perception.reach_m);
     const auto crossed_plots = perm::update_plots(objects, plots, physics.moved, true);
     for (const auto object : crossed_plots) {
-      const auto origin = mechanical_causes.lookup(space::motion_cause(space, ids, object)).origin;
+      const auto origin = move_origin(intents, object);
       react::DeferredEffects effects;
       for (const auto &term : terms.rows)
         if (term.source == react::Source::Setting)
@@ -769,8 +768,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                      {role("events", "contact"),
                       {role("relations", "contains"), role("relations", "supports"),
                        role("relations", "attached_to"), role("relations", "in_zone")}},
-                     settings.event_queue_max, objects_state, catalog_state, physics, clock);
-    collect_physical_causes(mechanical_causes, space);
+                     settings.event_queue_max, physics, clock);
+    finish_motion(step_state, physics.intents);
     publish_intent_endings(step_state, terms, role("events", "arrived"), role("events", "blocked"),
                            role("events", "cancelled"), objects_state, sessions, journal,
                            clock.step, settings.event_queue_max);

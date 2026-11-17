@@ -50,7 +50,6 @@ add_library(amber_step STATIC
   metadata.cpp
   physical_actions.cpp
   physical_events.cpp
-  physical_snapshot.cpp
   navigation.cpp
   travel.cpp
   start_catalog.cpp

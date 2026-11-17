@@ -12,7 +12,7 @@ struct Fixture {
   space::State space_state{testspace::settings(), 8};
   amber::perm::State perm_state;
   amber::net::State net_state{test_net::options()};
-  amber::step::State step_state{8};
+  amber::step::State step_state;
   amber::elaborate::State elaborate_state;
 
   test_runtime::Fixture f;
@@ -48,7 +48,6 @@ struct Fixture {
   elaborate::LastGaps &last = elaborate_state.last_gaps;
   elaborate::CaptureRefs &captures = elaborate_state.captures;
   std::vector<space::MotionRow> motion;
-  std::vector<step::BodyCauseRow> causes;
   std::uint64_t next_record = 31;
   Handle part;
   ScriptId script = 0, unrelated = 0;
@@ -238,7 +237,7 @@ struct Fixture {
     }
     cp::encode_checkpoint(bytes, header, f.objects_state, f.react_state, space_state,
                           f.catalog_state, perm_state, net_state, step_state, elaborate_state,
-                          motion, causes, next_record, filter ? &*filter : nullptr);
+                          motion, next_record, filter ? &*filter : nullptr);
   }
   void read(const snap::View &view) {
     auto decoded =
@@ -246,7 +245,6 @@ struct Fixture {
                               perm_state, net_state, step_state, elaborate_state);
     next_record = decoded.next_record;
     motion = std::move(decoded.motion);
-    causes = std::move(decoded.causes);
     f.relation_view.columns.clear();
     for (const auto &[term, relation] : f.relations)
       f.relation_view.columns[term] = &relation;

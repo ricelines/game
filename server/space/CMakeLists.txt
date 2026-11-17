@@ -5,7 +5,6 @@ add_library(amber_space STATIC
   properties.cpp
   navigation.cpp
   snapshot.cpp
-  causality.cpp
   perception.cpp
 )
 target_include_directories(amber_space PUBLIC ${PROJECT_SOURCE_DIR}/server)

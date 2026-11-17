@@ -152,21 +152,6 @@ void read_reqs(snap::Input &in, elaborate::Requests &requests, elaborate::GapCou
   elaborate::read_capture_refs(in, captures);
 }
 
-void sample_motion(const space::Space &space, const MechanicalCauses &causes, IdentityRead identity,
-                   const CaptureSelection *selection, std::vector<space::MotionRow> &motion,
-                   std::vector<BodyCauseRow> &origins) {
-  if (selection) {
-    space::capture_motion(space, identity, selection->objects, motion);
-    capture_motion_causes(causes, space, identity, selection->objects, origins);
-  } else {
-    space::capture_motion(space, identity, motion);
-    std::vector<Handle> moving;
-    moving.reserve(motion.size());
-    for (const auto &row : motion)
-      moving.push_back(row.object);
-    capture_motion_causes(causes, space, identity, moving, origins);
-  }
-}
 } // namespace
 std::vector<Handle> neighborhood(IdentityRead identity, ParentRead parents,
                                  const lifecycle::Parts &parts,
@@ -266,8 +251,7 @@ void encode_checkpoint(
     const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
     const amber::net::State &net_state, const amber::step::State &step_state,
     const amber::elaborate::State &elaborate_state, const std::vector<space::MotionRow> &motion,
-    const std::vector<BodyCauseRow> &causes, std::uint64_t next_record,
-    const CaptureSelection *selection) {
+    std::uint64_t next_record, const CaptureSelection *selection) {
   auto &physical_relations = space_state.physical_relations;
   auto &profiles = net_state.profiles;
 
@@ -374,7 +358,6 @@ void encode_checkpoint(
   {
     const auto marker = snap::begin_section(out, snap::tags[12]);
     space::write_motion(out, motion, selected);
-    write_motion_causes(out, causes, selected);
     snap::end_section(out, marker);
   }
   snap::finish(out, bytes);
@@ -490,7 +473,6 @@ Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_st
   {
     auto in = snap::section_input(view, snap::tags[12]);
     space::read_motion(in, result.motion);
-    read_motion_causes(in, result.causes);
     snap::check_complete(in);
   }
   return result;
@@ -507,18 +489,15 @@ bool save_snapshot(snap::Writer &writer, const snap::Header &header,
 
   auto &objects = objects_state.objects;
 
-  auto &mechanical_causes = step_state.mechanical_causes;
-
   ZoneScopedN("snapshot capture");
   auto bytes = writer.acquire();
   if (!bytes)
     return false;
   const auto started = std::chrono::steady_clock::now();
   std::vector<space::MotionRow> motion;
-  std::vector<BodyCauseRow> causes;
-  sample_motion(space, mechanical_causes, identity(objects), nullptr, motion, causes);
+  space::capture_motion(space, identity(objects), motion);
   encode_checkpoint(*bytes, header, objects_state, react_state, space_state, catalog_state,
-                    perm_state, net_state, step_state, elaborate_state, motion, causes, next_record,
+                    perm_state, net_state, step_state, elaborate_state, motion, next_record,
                     nullptr);
   progress.pause_max_ms =
       std::max(progress.pause_max_ms,
@@ -598,7 +577,6 @@ void flush_gaps(amber::step::State &step_state, record::Journal &journal,
 
   auto &pending = step_state.gaps;
 
-  auto &mechanical_causes = step_state.mechanical_causes;
   auto &objects = objects_state.objects;
 
   auto &requests = elaborate_state.requests;
@@ -628,11 +606,10 @@ void flush_gaps(amber::step::State &step_state, record::Journal &journal,
         const auto selected = capture_selection(gap, objects_state, catalog_state, react_state,
                                                 perm_state, net_state, space, radius_m);
         std::vector<space::MotionRow> motion;
-        std::vector<BodyCauseRow> causes;
-        sample_motion(space, mechanical_causes, id, &selected, motion, causes);
+        space::capture_motion(space, id, selected.objects, motion);
         snap::Buffer bytes;
         encode_checkpoint(bytes, header, objects_state, react_state, space_state, catalog_state,
-                          perm_state, net_state, step_state, elaborate_state, motion, causes,
+                          perm_state, net_state, step_state, elaborate_state, motion,
                           journal.next_id(), &selected);
         const auto hash = writer.submit(std::move(bytes));
         captures.rows.try_emplace(

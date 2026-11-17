@@ -1,77 +1,13 @@
-#include "catalog/catalog.hpp"
 #include "step.hpp"
 
 #include <algorithm>
-#include <array>
-#include <map>
 #include <tuple>
-#include <unordered_map>
-#include <unordered_set>
 
 namespace amber::step {
-struct MechanicalCauses::Data {
-  std::size_t authors_max;
-  space::CauseToken next = 1;
-  std::unordered_map<space::CauseToken, CauseSummary> entries;
-  std::unordered_map<std::uint64_t, space::CauseToken> interned;
-};
-MechanicalCauses::MechanicalCauses(std::size_t authors_max) : data(std::make_unique<Data>()) {
-  data->authors_max = authors_max;
-}
-MechanicalCauses::~MechanicalCauses() = default;
-space::CauseToken MechanicalCauses::intern(const amber::Origin &origin,
-                                           space::CauseToken previous) {
-  if (previous)
-    return restore(combine(lookup(previous), {origin, false}));
-  if (!origin.cause && !origin.root)
-    return 0;
-  if (auto found = data->interned.find(origin.cause);
-      found != data->interned.end() && lookup(found->second).origin == origin)
-    return found->second;
-  auto token = restore({origin, false});
-  data->interned[origin.cause] = token;
-  return token;
-}
-space::CauseToken MechanicalCauses::restore(CauseSummary summary) {
-  auto token = data->next++;
-  data->entries.emplace(token, std::move(summary));
-  return token;
-}
-CauseSummary MechanicalCauses::lookup(space::CauseToken token) const {
-  return token ? data->entries.at(token) : CauseSummary{};
-}
-CauseSummary MechanicalCauses::combine(const CauseSummary &a, const CauseSummary &b) const {
-  const auto empty = [](const CauseSummary &v) {
-    return !v.ambiguous && !v.origin.cause && !v.origin.root;
-  };
-  if (empty(a))
-    return b;
-  if (empty(b))
-    return a;
-  CauseSummary result = a.origin.cause > b.origin.cause ? a : b;
-  result.ambiguous = a.ambiguous || b.ambiguous || a.origin.root != b.origin.root;
-  result.origin.authors = a.origin.authors;
-  result.origin.authors.insert(result.origin.authors.end(), b.origin.authors.begin(),
-                               b.origin.authors.end());
-  auto &authors = result.origin.authors;
-  std::sort(authors.begin(), authors.end());
-  authors.erase(std::unique(authors.begin(), authors.end()), authors.end());
-  result.origin.more = a.origin.more || b.origin.more || authors.size() > data->authors_max;
-  if (authors.size() > data->authors_max)
-    authors.resize(data->authors_max);
-  if (a.origin.oldest && b.origin.oldest)
-    result.origin.oldest = std::min(*a.origin.oldest, *b.origin.oldest);
-  else
-    result.origin.oldest = a.origin.oldest ? a.origin.oldest : b.origin.oldest;
-  if (result.ambiguous)
-    result.origin.cause = result.origin.root = 0;
-  return result;
-}
-void MechanicalCauses::retain(std::span<const space::CauseToken> tokens) {
-  std::unordered_set<space::CauseToken> live(tokens.begin(), tokens.end());
-  std::erase_if(data->entries, [&](const auto &row) { return !live.contains(row.first); });
-  std::erase_if(data->interned,
-                [&](const auto &row) { return !data->entries.contains(row.second); });
+const amber::Origin &move_origin(const Intents &intents, Handle body) {
+  static const amber::Origin empty;
+  const auto found = intents.moving.find(body.bits);
+  return found == intents.moving.end() ? empty : found->second.origin;
 }
 namespace {
 TermId relation_term(const PhysicalRelationTerms &terms, space::RelationKind kind) {
@@ -87,31 +23,9 @@ TermId relation_term(const PhysicalRelationTerms &terms, space::RelationKind kin
   }
   std::terminate();
 }
-amber::Origin published_origin(record::Journal &journal, const amber::ObjectState &objects_state,
-                               const amber::catalog::State &catalog_state, double hz,
-                               const CauseSummary &summary, Step step,
-                               std::span<const Handle> things) {
-  auto identity = amber::identity(std::as_const(objects_state.objects));
-  auto attribution = amber::attribution(std::as_const(objects_state.objects));
-  auto &models = catalog_state.models;
-  auto &scripts = catalog_state.scripts;
-
-  if (!summary.ambiguous) {
-    auto origin = summary.origin;
-    const auto credits = record::credits(identity, attribution, models, scripts, things, 0, hz);
-    journal.include_credits(origin, credits);
-    return origin;
-  }
-  record::Event event;
-  event.step = step;
-  event.kind = record::Kind::System;
-  event.name = "physical_interaction";
-  event.result = record::Result::NoEffect;
-  event.changed = false;
-  event.things.assign(things.begin(), things.end());
-  event.detail["causal_ambiguity"] = true;
-  event.credits = record::credits(identity, attribution, models, scripts, things, 0, hz);
-  return journal.append(std::move(event), summary.origin);
+const amber::Origin &interaction_origin(const Intents &intents, Handle body, Handle other) {
+  const auto found = intents.moving.find(body.bits);
+  return found == intents.moving.end() ? move_origin(intents, other) : found->second.origin;
 }
 } // namespace
 void relation_effects(react::DeferredEffects &effects, const PhysicalRelationTerms &terms,
@@ -124,24 +38,16 @@ void relation_effects(react::DeferredEffects &effects, const PhysicalRelationTer
 }
 void publish_physical(amber::step::State &step_state, record::Journal &journal,
                       const PhysicalEventTerms &terms, std::size_t event_limit,
-                      const amber::ObjectState &objects_state,
-                      const amber::catalog::State &catalog_state, const space::StepResult &physics,
-                      const amber::step::Clock &clock) {
+                      const space::StepResult &physics, const amber::step::Clock &clock) {
   const auto now = clock.step;
-  const auto hz = clock.hz;
-
-  auto &causes = step_state.mechanical_causes;
+  const auto &intents = step_state.intents;
   auto &queues = step_state.queues;
 
   for (const auto &contact : physics.contacts) {
-    const auto summary =
-        causes.combine(causes.lookup(contact.causes.first), causes.lookup(contact.causes.second));
-    const std::array<Handle, 2> things{contact.first, contact.second};
-    const auto origin =
-        published_origin(journal, objects_state, catalog_state, hz, summary, now, things);
     for (const auto &[receiver, sender, normal] :
          {std::tuple{contact.first, contact.second, contact.normal},
           std::tuple{contact.second, contact.first, contact.normal * -1}}) {
+      const auto &origin = interaction_origin(intents, receiver, sender);
       const auto result = step::enqueue_event(
           queues,
           {receiver, sender, terms.contact,
@@ -161,27 +67,12 @@ void publish_physical(amber::step::State &step_state, record::Journal &journal,
       }
     }
   }
-  std::map<std::pair<std::uint64_t, TermId>, CauseSummary> facts;
   for (const auto &change : physics.relations) {
-    const auto summary =
-        causes.combine(causes.lookup(change.causes.first), causes.lookup(change.causes.second));
     const auto term = relation_term(terms.relations, change.kind);
-    for (auto object : {change.from, change.to}) {
-      auto &combined = facts[{object.bits, term}];
-      combined = causes.combine(combined, summary);
-    }
+    const auto &origin = interaction_origin(intents, change.from, change.to);
+    for (auto object : {change.from, change.to})
+      step::enqueue_watch(queues, {{object, term}, origin});
   }
-  for (const auto &[key, summary] : facts) {
-    const Handle object{key.first};
-    const auto origin = published_origin(journal, objects_state, catalog_state, hz, summary, now,
-                                         std::span(&object, 1));
-    step::enqueue_watch(queues, {{object, key.second}, origin});
-  }
-}
-void collect_physical_causes(MechanicalCauses &causes, const space::Space &space) {
-  std::vector<space::CauseToken> tokens;
-  space::active_cause_tokens(space, tokens);
-  causes.retain(tokens);
 }
 space::StepResult advance_motion(space::Space &space, amber::ObjectState &objects_state,
                                  space::PhysicalRelations &physical_relations,
@@ -195,13 +86,11 @@ space::StepResult advance_motion(space::Space &space, amber::ObjectState &object
   auto ids = amber::identity(std::as_const(objects_state.objects));
 
   auto &intents = step_state.intents;
-  auto &intent_endings = step_state.intent_endings;
   auto &travel_access = step_state.travel_access;
   auto &plots = perm_state.plots;
   auto &players = perm_state.players;
   auto &grants = perm_state.grants;
   auto auth = amber::authority(std::as_const(objects_state.objects));
-  auto &mechanical_causes = step_state.mechanical_causes;
 
   std::vector<space::MoveRequest> moving;
   moving.reserve(intents.moving.size());
@@ -214,23 +103,24 @@ space::StepResult advance_motion(space::Space &space, amber::ObjectState &object
     moving.push_back(
         {Handle{bits}, intent.id, std::move(goal),
          travel_boundaries(travel_access, ids, auth, Handle{bits}, plots, players, grants, now),
-         intent.speed_m_s, mechanical_causes.intern(intent.origin)});
+         intent.speed_m_s});
   }
   std::erase_if(travel_access.bodies,
                 [&](const auto &row) { return !intents.moving.contains(row.first); });
   space::StepResult physics;
   space::step(space, objects_state, physical_relations, now, 1.0f / hz, moving, physics);
-  for (const auto &progress : physics.intents)
-    if (progress.state == space::IntentState::Arrived ||
-        progress.state == space::IntentState::Blocked ||
-        progress.state == space::IntentState::TargetGone) {
-      if (auto ending = step::finish_move(intents, progress.body,
-                                          progress.state == space::IntentState::Arrived
+  return physics;
+}
+void finish_motion(State &state, std::span<const space::IntentProgress> progress) {
+  for (const auto &item : progress)
+    if (item.state == space::IntentState::Arrived || item.state == space::IntentState::Blocked ||
+        item.state == space::IntentState::TargetGone) {
+      if (auto ending = step::finish_move(state.intents, item.body,
+                                          item.state == space::IntentState::Arrived
                                               ? step::IntentEnd::Arrived
                                               : step::IntentEnd::Blocked))
-        intent_endings.push_back(std::move(*ending));
+        state.intent_endings.push_back(std::move(*ending));
     }
-  return physics;
 }
 void publish_intent_endings(amber::step::State &step_state, const react::Terms &terms,
                             TermId arrived, TermId blocked, TermId cancelled,

@@ -38,7 +38,6 @@ OperationResult set_properties(Space &space, IdentityRead identity, Handle objec
   const auto total = double(root->spec.mass_kg) - own.mass_kg + properties.mass_kg;
   if (!(total > 0) || !std::isfinite(total) || total > std::numeric_limits<float>::max())
     return {Status::UnsupportedMotion, {}};
-  clear_cause(n, object);
   own.mass_kg = properties.mass_kg;
   root->spec.mass_kg = static_cast<float>(total);
   {

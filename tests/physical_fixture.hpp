@@ -12,7 +12,7 @@ struct Fixture {
   amber::space::State space_state;
   amber::perm::State perm_state;
   amber::net::State net_state{test_net::options()};
-  amber::step::State step_state{3};
+  amber::step::State step_state;
 
   test_runtime::Fixture f{1000};
   amber::ObjectState &objects_state = f.objects_state;
@@ -30,7 +30,6 @@ struct Fixture {
   net::Profiles &profiles = net_state.profiles;
   step::Intents &intents = step_state.intents;
   std::vector<step::IntentEnding> &endings = step_state.intent_endings;
-  step::MechanicalCauses &causes = step_state.mechanical_causes;
   observe::Hearing &hearing = space_state.hearing;
   std::vector<observe::Listener> &listeners = space_state.listeners;
   catalog::InstanceTexts &instance_texts = catalog_state.instance_text;
@@ -161,7 +160,7 @@ struct Fixture {
     if (run.outcome)
       return *run.outcome;
     return finish(run, step::grasp_action(f.objects_state, space_state, {20, 21, 22, 23}, reach_m,
-                                          causes, plots, run.call));
+                                          plots, run.call));
   }
   step::ActionOutcome release(Handle target, nlohmann::json args = nlohmann::json::object(),
                               amber::Origin parent = {}) {
@@ -169,20 +168,20 @@ struct Fixture {
     if (run.outcome)
       return *run.outcome;
     return finish(run, step::release_action(f.objects_state, space_state, {20, 21, 22, 23},
-                                            perm_state, causes, run.call));
+                                            perm_state, run.call));
   }
   step::ActionOutcome attach(Handle target, nlohmann::json args) {
     auto run = begin("engine.attach", target, std::move(args));
     if (run.outcome)
       return *run.outcome;
     return finish(run, step::attach_action(f.objects_state, space_state, {20, 21, 22, 23},
-                                           perm_state, reach_m, causes, run.call));
+                                           perm_state, reach_m, run.call));
   }
   step::ActionOutcome impulse(Handle target, nlohmann::json args, amber::Origin parent = {}) {
     auto run = begin("engine.impulse", target, std::move(args), parent);
     if (run.outcome)
       return *run.outcome;
-    return finish(run, step::impulse_action(space, identity(f.objects), causes, run.call));
+    return finish(run, step::impulse_action(space, identity(f.objects), run.call));
   }
   struct HandlerResult {
     react::RunOutcome outcome;

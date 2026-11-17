@@ -195,7 +195,6 @@ initialize_physics(amber::step::State &step_state, const amber::catalog::State &
   const auto values = react::value_read(objects_state, catalog_state, react_state);
   const auto &clock = step_state.clock;
   const auto &restored_motion = decoded.motion;
-  const auto &restored_causes = decoded.causes;
   const auto &physics = catalog_state.mechanical.values.at("physics");
   const PhysicsRoles roles{
       physics.at("density").get<TermId>(), physics.at("transmission").get<TermId>(),
@@ -213,8 +212,6 @@ initialize_physics(amber::step::State &step_state, const amber::catalog::State &
   auto &parts = objects_state.parts;
   auto &declared_parts = objects_state.declared_parts;
   auto &physical = space_state.physical_relations;
-
-  auto &causes = step_state.mechanical_causes;
 
   const auto identity = values.identity;
   std::unordered_set<std::uint64_t> stored;
@@ -258,7 +255,6 @@ initialize_physics(amber::step::State &step_state, const amber::catalog::State &
           throw std::runtime_error(space::status_text(result.status));
       }
     space::restore_motion(space, identity, restored_motion);
-    restore_motion_causes(causes, space, identity, restored_causes);
   }
   for (;;) {
     const auto navigation = space::install_ready_navigation(space);

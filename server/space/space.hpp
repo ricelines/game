@@ -79,11 +79,6 @@ struct Space {
   Space &operator=(const Space &) = delete;
 };
 using Edges = amber::Relation;
-using CauseToken = std::uint64_t;
-struct CausePair {
-  CauseToken first = 0, second = 0;
-};
-enum class CauseScope { Step, Motion };
 struct PhysicalRelations {
   Edges contains, supports, attached_to, in_zone;
 };
@@ -92,7 +87,6 @@ struct RelationChange {
   RelationKind kind;
   Handle from, to;
   bool added;
-  CausePair causes{};
 };
 enum class Status {
   Ok,
@@ -135,7 +129,7 @@ OperationResult register_logical_root(Space &, IdentityRead, Handle);
 bool is_logical_root(const Space &, IdentityRead, Handle);
 OperationResult assemble(Space &, IdentityRead, TransformRead, Handle,
                          std::span<const Handle> declared_descendants,
-                         std::optional<Motion> motion = {}, CauseToken cause = 0);
+                         std::optional<Motion> motion = {});
 void remove(Space &, IdentityRead, Handle, ParentWrite, SpaceFlags, PhysicalRelations &,
             std::vector<RelationChange> &);
 // Leaves no query-visible native body or attachment. A null custodian is offline storage.
@@ -161,10 +155,7 @@ struct BodyProperties {
   Surface surface;
 };
 OperationResult set_properties(Space &, IdentityRead, Handle, BodyProperties);
-OperationResult set_pose(Space &, IdentityRead, TransformWrite, Handle, Pose, CauseToken cause = 0);
-CauseToken motion_cause(const Space &, IdentityRead, Handle);
-void active_cause_tokens(const Space &, std::vector<CauseToken> &);
-OperationResult restore_motion_cause(Space &, IdentityRead, Handle, CauseToken);
+OperationResult set_pose(Space &, IdentityRead, TransformWrite, Handle, Pose);
 enum class VolumeKind { Zone, Container };
 struct VolumeSpec {
   Handle owner;
@@ -220,19 +211,17 @@ struct Release {
   Vec3 linear_velocity_m_s, angular_velocity_rad_s;
 };
 OperationResult attach(amber::ObjectState &objects_state, amber::space::State &space_state,
-                       const Attachment &, CauseToken cause = 0);
+                       const Attachment &);
 OperationResult detach(amber::ObjectState &objects_state, amber::space::State &space_state,
-                       const Release &, CauseToken cause = 0);
-OperationResult impulse(Space &, IdentityRead, Handle, Vec3 newton_seconds, Vec3 world_point,
-                        CauseToken cause = 0);
+                       const Release &);
+OperationResult impulse(Space &, IdentityRead, Handle, Vec3 newton_seconds, Vec3 world_point);
 std::optional<Hit> sweep(const Space &, IdentityRead, Handle, Vec3 translation_m, QueryFilter);
 struct SweepMove {
   Status status;
   Pose actual;
   std::optional<Hit> contact;
 };
-SweepMove translate(Space &, IdentityRead, TransformWrite, Handle, Vec3, float seconds,
-                    CauseToken cause = 0);
+SweepMove translate(Space &, IdentityRead, TransformWrite, Handle, Vec3, float seconds);
 struct PointGoal {
   Vec3 point;
   float tolerance_m;
@@ -252,7 +241,6 @@ struct MoveRequest {
   Goal goal;
   std::span<const TravelBoundary> forbidden;
   std::optional<float> speed_m_s = {};
-  CauseToken cause = 0;
 };
 enum class PathStatus { Ready, PendingTiles, NoSurface, Unreachable, AccessDenied };
 struct Path {
@@ -274,7 +262,6 @@ struct Contact {
   Handle first, second;
   Vec3 point, normal;
   bool started;
-  CausePair causes{};
 };
 struct StepResult {
   std::vector<Handle> moved;

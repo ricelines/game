@@ -282,7 +282,7 @@ Json failure(std::string);
 } // namespace amber::step::authoring
 
 namespace amber::step {
-inline constexpr char runtime_version[] = "ambergris-0.7";
+inline constexpr char runtime_version[] = "ambergris-0.8";
 
 struct NavigationRequests {
   struct Request {
@@ -425,26 +425,6 @@ void refresh_material(space::Space &, const GeometryAssets &,
                       PhysicsRoles, PhysicsDefaults, std::span<const TermId>,
                       const amber::step::Clock &clock);
 
-struct CauseSummary {
-  amber::Origin origin;
-  bool ambiguous = false;
-};
-class MechanicalCauses {
-public:
-  explicit MechanicalCauses(std::size_t authors_max = 8);
-  ~MechanicalCauses();
-  MechanicalCauses(const MechanicalCauses &) = delete;
-  MechanicalCauses &operator=(const MechanicalCauses &) = delete;
-  space::CauseToken intern(const amber::Origin &, space::CauseToken previous = 0);
-  space::CauseToken restore(CauseSummary);
-  CauseSummary lookup(space::CauseToken) const;
-  CauseSummary combine(const CauseSummary &, const CauseSummary &) const;
-  void retain(std::span<const space::CauseToken>);
-
-private:
-  struct Data;
-  std::unique_ptr<Data> data;
-};
 struct PhysicalRelationTerms {
   TermId contains, supports, attached_to, in_zone;
 };
@@ -455,40 +435,27 @@ struct PhysicalEventTerms {
   PhysicalRelationTerms relations;
 };
 void publish_physical(amber::step::State &step_state, record::Journal &, const PhysicalEventTerms &,
-                      std::size_t event_limit, const amber::ObjectState &objects_state,
-                      const amber::catalog::State &catalog_state, const space::StepResult &,
+                      std::size_t event_limit, const space::StepResult &,
                       const amber::step::Clock &clock);
-void collect_physical_causes(MechanicalCauses &, const space::Space &);
-
-struct BodyCauseRow {
-  Handle object;
-  CauseSummary summary;
-};
-void capture_motion_causes(const MechanicalCauses &, const space::Space &, IdentityRead,
-                           std::span<const Handle>, std::vector<BodyCauseRow> &);
-void restore_motion_causes(MechanicalCauses &, space::Space &, IdentityRead,
-                           std::span<const BodyCauseRow>);
-void write_motion_causes(snap::Output &, const std::vector<BodyCauseRow> &,
-                         const snap::ObjectSelection & = {});
-void read_motion_causes(snap::Input &, std::vector<BodyCauseRow> &);
+const amber::Origin &move_origin(const Intents &, Handle);
+void finish_motion(State &, std::span<const space::IntentProgress>);
 
 step::NativeCompletion grasp_action(amber::ObjectState &objects_state,
                                     amber::space::State &space_state,
                                     const PhysicalRelationTerms &relation_terms, float reach_m,
-                                    MechanicalCauses &causes, const perm::Plots &plots,
-                                    const step::NativeCall &call);
+                                    const perm::Plots &plots, const step::NativeCall &call);
 step::NativeCompletion attach_action(amber::ObjectState &objects_state,
                                      amber::space::State &space_state,
                                      const PhysicalRelationTerms &relation_terms,
                                      const amber::perm::State &perm_state, float reach_m,
-                                     MechanicalCauses &causes, const step::NativeCall &call);
+                                     const step::NativeCall &call);
 step::NativeCompletion release_action(amber::ObjectState &objects_state,
                                       amber::space::State &space_state,
                                       const PhysicalRelationTerms &relation_terms,
                                       const amber::perm::State &perm_state,
-                                      MechanicalCauses &causes, const step::NativeCall &call);
+                                      const step::NativeCall &call);
 step::NativeCompletion impulse_action(space::Space &world, IdentityRead identity,
-                                      MechanicalCauses &causes, const step::NativeCall &call);
+                                      const step::NativeCall &call);
 step::NativeCompletion transfer_action(amber::react::State &react_state,
                                        const amber::ObjectState &objects_state,
                                        const amber::perm::State &perm_state,
@@ -796,7 +763,6 @@ struct SnapshotProgress {
 struct Decoded {
   std::uint64_t next_record;
   std::vector<space::MotionRow> motion;
-  std::vector<BodyCauseRow> causes;
 };
 std::vector<Handle> neighborhood(IdentityRead, ParentRead, const lifecycle::Parts &,
                                  std::span<const Relation *const>, std::span<const Handle> seeds);
@@ -813,8 +779,7 @@ void encode_checkpoint(
     const amber::catalog::State &catalog_state, const amber::perm::State &perm_state,
     const amber::net::State &net_state, const amber::step::State &step_state,
     const amber::elaborate::State &elaborate_state, const std::vector<space::MotionRow> &motion,
-    const std::vector<BodyCauseRow> &causes, std::uint64_t next_record,
-    const CaptureSelection *selection);
+    std::uint64_t next_record, const CaptureSelection *selection);
 Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_state,
                           amber::react::State &react_state, amber::space::State &space_state,
                           amber::catalog::State &catalog_state, amber::perm::State &perm_state,
@@ -1100,7 +1065,6 @@ struct State {
   std::vector<IntentEnding> intent_endings;
   Clock clock;
   GeometryAssets geometry;
-  MechanicalCauses mechanical_causes;
   TravelAccess travel_access;
   DeliveryTargets delivery;
   AssemblyMasses masses;
@@ -1109,6 +1073,5 @@ struct State {
   std::vector<FactKey> mutated;
   std::vector<GapDraft> gaps;
   checkpoint::SnapshotProgress snapshot_progress;
-  explicit State(std::size_t authors_max) : mechanical_causes(authors_max) {}
 };
 } // namespace amber::step

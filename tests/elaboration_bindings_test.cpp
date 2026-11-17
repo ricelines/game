@@ -26,7 +26,7 @@ Json tests() {
 struct Fixture {
   amber::elaborate::State elaborate_state;
   amber::catalog::State catalog_state;
-  amber::step::State step_state{8};
+  amber::step::State step_state;
 
   test_runtime::Fixture reactive;
   elaborate::Requests &requests = elaborate_state.requests;

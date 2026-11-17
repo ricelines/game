@@ -153,13 +153,6 @@ struct Space::Native {
   std::vector<Bounds> dirty_bounds;
   std::vector<Contact> contacts;
   std::vector<RelationChange> zone_changes;
-  struct CauseStamp {
-    CauseToken token;
-    CauseScope scope;
-    std::uint64_t expires_after;
-  };
-  std::unordered_map<std::uint64_t, CauseStamp> causes;
-  std::uint64_t physics_epoch = 0;
   std::unordered_map<std::uint32_t, Handle> handles;
   struct Listener final : JPH::ContactListener {
     Native &state;
@@ -221,11 +214,6 @@ struct Space::Native {
   void dirty_navigation(Bounds);
   void wake(Bounds);
 };
-CauseToken native_cause(const Space::Native &, Handle);
-CausePair native_causes(const Space::Native &, Handle, Handle);
-void stamp_cause(Space::Native &, Handle, CauseToken, CauseScope);
-void clear_cause(Space::Native &, Handle);
-void expire_causes(Space::Native &, const std::map<std::uint64_t, const MoveRequest *> &);
 NavResult build_tile(const NavJob &, const NavSettings &);
 void start_navigation_workers(Space::Native &);
 void stop_navigation_workers(Space::Native &);

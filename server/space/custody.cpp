@@ -41,7 +41,6 @@ OperationResult release_occupants(Space &space, IdentityRead identity, Handle ro
       continue;
     }
     const auto parent = it->second.parent;
-    clear_cause(n, h);
     it = n.attachments.erase(it);
     parents.parent[h.slot()] = {};
     const auto found = n.bodies.find(h.bits);
@@ -111,9 +110,6 @@ OperationResult visible_custody(amber::ObjectState &objects_state, amber::space:
   if (checked.status != Status::Ok)
     return checked;
   auto &n = *space.native;
-  clear_cause(n, change.goods);
-  for (auto child : descendants)
-    clear_cause(n, child);
   const auto released = release_occupants(space, identity, change.goods, descendants, parents,
                                           flags, relations, changes);
   if (released.status != Status::Ok)

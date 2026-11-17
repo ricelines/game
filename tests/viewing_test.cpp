@@ -478,7 +478,7 @@ int main(int argc, char **argv) {
     observe::ActiveViews &active = (space_state.active_views = observe::ActiveViews(8));
     space_state.lights = observe::Lights(8);
 
-    step::State step_state{8};
+    step::State step_state;
 
     Step now = 0;
     const observe::Settings perception{30, 1.5f, 256, 1, .1f, .1, 40, 8, 40};

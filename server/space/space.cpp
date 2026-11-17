@@ -172,7 +172,6 @@ void query_shape(Space::Native &n, Mirror &body, bool query) {
   }
 }
 void extract_native(Space::Native &n, Handle object) {
-  clear_cause(n, object);
   // CharacterVirtual's private contact cache does not notify our listener when
   // the character itself is destroyed. Retire those derived pairs explicitly.
   std::erase_if(n.character_listener.pairs, [&](const auto &entry) {
@@ -182,7 +181,6 @@ void extract_native(Space::Native &n, Handle object) {
     if (!contact.sensor) {
       auto removed = contact;
       removed.started = false;
-      removed.causes = native_causes(n, removed.first, removed.second);
       n.contacts.push_back(removed);
     }
     return true;
@@ -560,6 +558,85 @@ bool has_sensor_contact(const Space::Native &n, const CachedContact &contact) {
   return std::any_of(n.listener.pairs.begin(), n.listener.pairs.end(), matches) ||
          std::any_of(n.character_listener.pairs.begin(), n.character_listener.pairs.end(), matches);
 }
+void Space::Native::CharacterListener::add(const JPH::CharacterVirtual *character,
+                                           const JPH::CharacterContact &hit, bool started) {
+  // Jolt calls this from actual contact resolution/support; some paths set
+  // mHadCollision immediately after the callback rather than before it.
+  const Handle first{character->GetUserData()}, second{hit.mUserData};
+  if (!first || !second || first == second)
+    return;
+  const Key key{first.bits, hit.mBodyB.GetIndexAndSequenceNumber(), hit.mCharacterIDB.GetValue(),
+                hit.mSubShapeIDB.GetValue()};
+  if (hit.mIsSensorB) {
+    auto found = pairs.find(key);
+    if (found == pairs.end()) {
+      const auto volume = std::ranges::find(state.volumes, hit.mBodyB, &Volume::body);
+      if (volume == state.volumes.end())
+        return;
+      CachedContact contact{{first, second, {}, {}, true}, volume->spec.kind};
+      pairs.emplace(key, contact);
+      sensor_contact_changed(state, contact, true);
+    } else if (found->second.sensor == VolumeKind::Container) {
+      const auto subject_body = state.bodies.find(first.bits);
+      if (subject_body != state.bodies.end())
+        subject_body->second.membership.containers_dirty = true;
+    }
+    return;
+  }
+  Contact contact{first, second, av(hit.mPosition), av(-hit.mContactNormal), started};
+  pairs[key] = {contact, {}};
+  if (started)
+    state.contacts.push_back(contact);
+}
+void Space::Native::CharacterListener::remove(const JPH::CharacterVirtual *character,
+                                              const JPH::BodyID &body,
+                                              const JPH::CharacterID &other,
+                                              const JPH::SubShapeID &subshape) {
+  const Key key{character->GetUserData(), body.GetIndexAndSequenceNumber(), other.GetValue(),
+                subshape.GetValue()};
+  const auto found = pairs.find(key);
+  if (found == pairs.end())
+    return;
+  auto contact = found->second;
+  pairs.erase(found);
+  if (contact.sensor) {
+    if (!has_sensor_contact(state, contact))
+      sensor_contact_changed(state, contact, false);
+    return;
+  }
+  contact.started = false;
+  state.contacts.push_back(contact);
+}
+void Space::Native::CharacterListener::OnContactAdded(const JPH::CharacterVirtual *c,
+                                                      const JPH::CharacterContact &hit,
+                                                      JPH::CharacterContactSettings &) {
+  add(c, hit, true);
+}
+void Space::Native::CharacterListener::OnContactPersisted(const JPH::CharacterVirtual *c,
+                                                          const JPH::CharacterContact &hit,
+                                                          JPH::CharacterContactSettings &) {
+  add(c, hit, false);
+}
+void Space::Native::CharacterListener::OnContactRemoved(const JPH::CharacterVirtual *c,
+                                                        const JPH::BodyID &body,
+                                                        const JPH::SubShapeID &subshape) {
+  remove(c, body, JPH::CharacterID{}, subshape);
+}
+void Space::Native::CharacterListener::OnCharacterContactAdded(const JPH::CharacterVirtual *c,
+                                                               const JPH::CharacterContact &hit,
+                                                               JPH::CharacterContactSettings &) {
+  add(c, hit, true);
+}
+void Space::Native::CharacterListener::OnCharacterContactPersisted(
+    const JPH::CharacterVirtual *c, const JPH::CharacterContact &hit,
+    JPH::CharacterContactSettings &) {
+  add(c, hit, false);
+}
+void Space::Native::CharacterListener::OnCharacterContactRemoved(const JPH::CharacterVirtual *c,
+                                                                 const JPH::CharacterID &other,
+                                                                 const JPH::SubShapeID &subshape) {
+  remove(c, JPH::BodyID{}, other, subshape);
+}
 void Space::Native::Listener::add(const JPH::Body &a, const JPH::Body &b,
                                   const JPH::ContactManifold &m, bool started) {
   if (!a.GetUserData() || !b.GetUserData())
@@ -580,7 +657,7 @@ void Space::Native::Listener::add(const JPH::Body &a, const JPH::Body &b,
       const auto volume = std::ranges::find(state.volumes, sensor.GetID(), &Volume::body);
       if (volume == state.volumes.end())
         return;
-      CachedContact contact{{{subject.GetUserData()}, {sensor.GetUserData()}, {}, {}, true, {}},
+      CachedContact contact{{{subject.GetUserData()}, {sensor.GetUserData()}, {}, {}, true},
                             volume->spec.kind};
       pairs.emplace(key, contact);
       sensor_contact_changed(state, contact, true);
@@ -595,8 +672,7 @@ void Space::Native::Listener::add(const JPH::Body &a, const JPH::Body &b,
                   {b.GetUserData()},
                   av(m.GetWorldSpaceContactPointOn1(0)),
                   av(m.mWorldSpaceNormal),
-                  started,
-                  native_causes(state, {a.GetUserData()}, {b.GetUserData()})};
+                  started};
   pairs[key] = {contact, {}};
   if (started)
     state.contacts.push_back(contact);
@@ -612,7 +688,6 @@ void Space::Native::Listener::OnContactRemoved(const JPH::SubShapeIDPair &ids) {
       return;
     }
     contact.started = false;
-    contact.causes = native_causes(state, contact.first, contact.second);
     state.contacts.push_back(contact);
   }
 }
@@ -910,7 +985,6 @@ OperationResult set_surface(Space &space, IdentityRead identity, Handle object, 
   auto *body = get(n, identity, object);
   if (!body)
     return {Status::StaleHandle, {}};
-  clear_cause(n, object);
   if (body->own_geometry)
     body->own_geometry->spec.surface = surface;
   else
@@ -946,7 +1020,7 @@ OperationResult set_surface(Space &space, IdentityRead identity, Handle object, 
   return {Status::Ok, {}};
 }
 OperationResult set_pose(Space &space, IdentityRead identity, TransformWrite transforms,
-                         Handle object, Pose pose, CauseToken cause) {
+                         Handle object, Pose pose) {
   auto &n = *space.native;
   if (!identity.valid(object))
     return {Status::StaleHandle, {}};
@@ -954,14 +1028,12 @@ OperationResult set_pose(Space &space, IdentityRead identity, TransformWrite tra
     return {Status::UnsupportedMotion, {}};
   auto *body = get(n, identity, object);
   if (!body) {
-    stamp_cause(n, object, cause, CauseScope::Step);
     n.dirty_objects.insert(object.bits);
     transforms.position[object.slot()] = pose.position;
     transforms.rotation[object.slot()] = pose.rotation;
     return {Status::Ok, {}};
   }
   auto old = n.world_bounds(*body);
-  stamp_cause(n, object, cause, CauseScope::Step);
   native_pose(n, *body, pose);
   if (body->kinematic_start) {
     body->kinematic_start.reset();
@@ -982,7 +1054,6 @@ OperationResult set_pose(Space &space, IdentityRead identity, TransformWrite tra
 void remove(Space &space, IdentityRead identity, Handle object, ParentWrite parents,
             SpaceFlags flags, PhysicalRelations &relations, std::vector<RelationChange> &changes) {
   auto &n = *space.native;
-  clear_cause(n, object);
   remove_compound_member(space, identity, flags, object);
   n.logical_roots.erase(object.bits);
   extract_native(n, object);
@@ -1008,7 +1079,6 @@ void remove(Space &space, IdentityRead identity, Handle object, ParentWrite pare
       Handle h{child->first};
       parents.parent[h.slot()] = {};
       auto *mirror = get(n, identity, h);
-      clear_cause(n, h);
       if (mirror) {
         auto mode = mirror->character ? Motion::Character : Motion::Dynamic;
         update_motion(n, *mirror, mode);
@@ -1081,8 +1151,6 @@ OperationResult custody(amber::ObjectState &objects_state, Handle object, Handle
   for (auto h : descendants)
     assembly.insert(h.bits);
   auto &n = *space.native;
-  for (auto bits : assembly)
-    clear_cause(n, {bits});
   ++n.volume_revision;
   std::erase_if(n.volumes, [&](const Volume &volume) {
     if (!assembly.contains(volume.spec.owner.bits))
@@ -1307,7 +1375,7 @@ double illuminance(const Space &space, IdentityRead identity, Handle receiver, V
   return result;
 }
 OperationResult attach(amber::ObjectState &objects_state, amber::space::State &space_state,
-                       const Attachment &attachment, CauseToken cause) {
+                       const Attachment &attachment) {
   auto &space = space_state.space;
 
   auto identity = amber::identity(std::as_const(objects_state.objects));
@@ -1337,11 +1405,9 @@ OperationResult attach(amber::ObjectState &objects_state, amber::space::State &s
   if (body && !body->character && !n.geometries[body->spec.geometry]->hull)
     return {Status::UnsupportedMotion, {}};
   const auto old = body ? n.world_bounds(*body) : Bounds{};
-  stamp_cause(n, attachment.subject, cause, CauseScope::Step);
   if (body && !body->character) {
     auto result = update_motion(n, *body, Motion::Kinematic);
     if (result.status != Status::Ok) {
-      clear_cause(n, attachment.subject);
       return result;
     }
     n.physics.GetBodyInterface().SetLinearAndAngularVelocity(body->body, JPH::Vec3::sZero(),
@@ -1375,7 +1441,7 @@ OperationResult attach(amber::ObjectState &objects_state, amber::space::State &s
   return {Status::Ok, {}};
 }
 OperationResult detach(amber::ObjectState &objects_state, amber::space::State &space_state,
-                       const Release &release, CauseToken cause) {
+                       const Release &release) {
   auto &space = space_state.space;
 
   auto identity = amber::identity(std::as_const(objects_state.objects));
@@ -1403,7 +1469,6 @@ OperationResult detach(amber::ObjectState &objects_state, amber::space::State &s
     if (release.motion != Motion::Static && release.motion != Motion::Kinematic)
       return {Status::UnsupportedMotion, {}};
     const auto parent = attachment->second.parent;
-    stamp_cause(n, release.subject, cause, CauseScope::Step);
     transforms.position[release.subject.slot()] = release_pose.position;
     transforms.rotation[release.subject.slot()] = release_pose.rotation;
     parents.parent[release.subject.slot()] = {};
@@ -1413,7 +1478,6 @@ OperationResult detach(amber::ObjectState &objects_state, amber::space::State &s
     n.dirty_objects.insert(release.subject.bits);
     return {Status::Ok, {}};
   }
-  clear_cause(n, release.subject);
   native_pose(n, *body, release_pose);
   transforms.position[release.subject.slot()] = release_pose.position;
   transforms.rotation[release.subject.slot()] = release_pose.rotation;
@@ -1434,10 +1498,8 @@ OperationResult detach(amber::ObjectState &objects_state, amber::space::State &s
     }
   const auto parent = attachment->second.parent;
   auto mode = body->character ? Motion::Character : release.motion;
-  stamp_cause(n, release.subject, cause, CauseScope::Motion);
   auto status = update_motion(n, *body, mode);
   if (status.status != Status::Ok) {
-    clear_cause(n, release.subject);
     return status;
   }
   n.attachments.erase(attachment);
@@ -1456,7 +1518,7 @@ OperationResult detach(amber::ObjectState &objects_state, amber::space::State &s
   return {Status::Ok, {}};
 }
 OperationResult impulse(Space &space, IdentityRead identity, Handle object, Vec3 momentum,
-                        Vec3 point, CauseToken cause) {
+                        Vec3 point) {
   auto &n = *space.native;
   auto *body = get(n, identity, object);
   if (!body)
@@ -1465,7 +1527,6 @@ OperationResult impulse(Space &space, IdentityRead identity, Handle object, Vec3
     return {Status::UnsupportedMotion, {}};
   if (momentum == Vec3{})
     return {Status::Ok, {}};
-  stamp_cause(n, object, cause, CauseScope::Motion);
   n.physics.GetBodyInterface().AddImpulse(body->body, jv(momentum), jv(point));
   return {Status::Ok, {}};
 }
@@ -1514,7 +1575,7 @@ std::optional<Hit> sweep(const Space &space, IdentityRead identity, Handle objec
              av(hit.mContactPointOn2), av(-hit.mPenetrationAxis.NormalizedOr(JPH::Vec3::sZero()))};
 }
 SweepMove translate(Space &space, IdentityRead identity, TransformWrite transforms, Handle object,
-                    Vec3 delta, float seconds, CauseToken cause) {
+                    Vec3 delta, float seconds) {
   auto &n = *space.native;
   auto *body = get(n, identity, object);
   if (!body)
@@ -1536,7 +1597,7 @@ SweepMove translate(Space &space, IdentityRead identity, TransformWrite transfor
   if (actual.position == body->pose.position)
     return {cast ? Status::Obstructed : Status::Ok, actual, cast};
   const auto start = body->kinematic_start.value_or(body->pose);
-  set_pose(space, identity, transforms, object, actual, cause);
+  set_pose(space, identity, transforms, object, actual);
   // Queries see the accepted pose immediately. Physics replays this displacement once
   // during its phase so dynamic bodies receive the kinematic contact velocity.
   auto &interface = n.physics.GetBodyInterface();
@@ -1560,7 +1621,6 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
   ZoneValue(requests.size());
   auto &n = *space.native;
   out = {};
-  ++n.physics_epoch;
   install_ready_navigation(space);
   std::set<std::uint64_t> touched = n.dirty_objects;
   touched.insert(n.character_handles.begin(), n.character_handles.end());
@@ -1585,8 +1645,6 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
       continue;
     auto input = active.find(bits);
     if (input == active.end()) {
-      if (body.character->IsSupported())
-        clear_cause(n, {bits});
       if (body.agent >= 0)
         n.crowd->resetMoveTarget(body.agent);
       body.intent = 0;
@@ -1594,7 +1652,6 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
       continue;
     }
     const auto &request = *input->second;
-    stamp_cause(n, {bits}, request.cause, CauseScope::Motion);
     Vec3 goal = std::holds_alternative<PointGoal>(request.goal)
                     ? std::get<PointGoal>(request.goal).point
                     : Vec3{};
@@ -1804,16 +1861,10 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
                                                      : parent_body->second.pose;
     const auto target = compose(parent_pose, attachment->second.local_pose);
     if (body != n.bodies.end()) {
-      if (!n.compound_parent.contains(child.bits) &&
-          (body->second.pose.position != target.position ||
-           body->second.pose.rotation != target.rotation))
-        stamp_cause(n, child, native_cause(n, parent), CauseScope::Step);
       native_pose(n, body->second, target);
     } else if (n.logical_roots.contains(child.bits)) {
       if (transforms.position[child.slot()] != target.position ||
           transforms.rotation[child.slot()] != target.rotation) {
-        if (!n.compound_parent.contains(child.bits))
-          stamp_cause(n, child, native_cause(n, parent), CauseScope::Step);
         n.dirty_objects.insert(child.bits);
       }
       transforms.position[child.slot()] = target.position;
@@ -1923,8 +1974,6 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
       }
     }
   membership(space, identity, parents, relations, out.relations, now, seconds);
-  for (auto &change : out.relations)
-    change.causes = native_causes(n, change.from, change.to);
   n.dirty_objects.clear();
   out.dirty_bounds.swap(n.dirty_bounds);
   out.contacts.swap(n.contacts);
@@ -1934,23 +1983,20 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
   for (auto &contact : out.contacts)
     if (contact.second.bits < contact.first.bits) {
       std::swap(contact.first, contact.second);
-      std::swap(contact.causes.first, contact.causes.second);
       contact.normal = contact.normal * -1;
     }
   // Preserve actual callback order, including start/end/start in one phase.
   // Virtual controllers and their inner rigid bodies can report the same state.
-  std::map<std::pair<std::uint64_t, std::uint64_t>, std::tuple<bool, CauseToken, CauseToken>>
-      last_contact;
+  std::map<std::pair<std::uint64_t, std::uint64_t>, bool> last_contact;
   std::erase_if(out.contacts, [&](const Contact &contact) {
     const auto key = std::pair{contact.first.bits, contact.second.bits};
-    const auto state = std::tuple{contact.started, contact.causes.first, contact.causes.second};
+    const auto state = contact.started;
     const auto found = last_contact.find(key);
     if (found != last_contact.end() && found->second == state)
       return true;
     last_contact[key] = state;
     return false;
   });
-  expire_causes(n, active);
 }
 namespace {
 MotionRow motion_row(const Space::Native &n, const Mirror &body) {

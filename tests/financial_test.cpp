@@ -12,7 +12,7 @@ namespace {
 struct Fixture {
   amber::perm::State perm_state;
   amber::net::State net_state{test_net::options()};
-  amber::step::State step_state{8};
+  amber::step::State step_state;
 
   test_runtime::Fixture f{1000};
   amber::ObjectState &objects_state = f.objects_state;

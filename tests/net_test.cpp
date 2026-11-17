@@ -30,7 +30,7 @@ void pending_views_track_only_their_current_contents() {
   react.terms.rows[1].id = 1;
   react.terms.rows[1].name = "test.material";
   react.terms.rows[1].kind = react::Kind::Material;
-  step::State step{8};
+  step::State step;
   step.clock.hz = 20;
   scene.space_state.active_views = observe::ActiveViews(8);
   scene.space_state.lights = observe::Lights(8);
