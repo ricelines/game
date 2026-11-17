@@ -1,4 +1,4 @@
-local BATCH = 50 -- plot reads per run; prior Release boot max 1.74/2.72 ms at 600/1200 lots, missing the 2.5 ms gate
+local BATCH = 50 -- plot reads per run
 local names = {'base','front','back','along','depth','port_falloff','street_rate','back_rate',
     'exempt_value','open_discount','notice_days','period_days','scarcity','on_offer','start_multiple','halving_days'}
 
@@ -226,9 +226,9 @@ local function sales(self, s, now)
                     state['offer:'..id],state['price:'..id],state['age:'..id] = result.offer,price,now
                     state['offered:'..class..':'..count],state['offered:'..class] = id,count
                     state.dirty = true
+                    if (state['offered:street'] or 0)>=s.on_offer and (state['offered:back'] or 0)>=s.on_offer then break end
                 end
             end
-            if (state['offered:street'] or 0)>=s.on_offer and (state['offered:back'] or 0)>=s.on_offer then break end
         end
     end
     state.offers_dirty = nil
@@ -323,9 +323,10 @@ local function boot(self)
     if self.state.boot then self:after(0.05,'base.land_boot') end
 end
 
-local function payable(self, id, s, now)
-    local deadline = self.state['due:'..id]
-    return deadline and now>=deadline-s.notice_days*s.day and now<=deadline
+local function payable(state, id, notice, now)
+    local key = 'due:'..id
+    local deadline = state[key]
+    if deadline and now>=deadline-notice and now<=deadline then return key,deadline end
 end
 
 local function pay(self, _, args, caller)
@@ -333,16 +334,19 @@ local function pay(self, _, args, caller)
     local state,now = self.state,self:now()
     local s = applied(self)
     local lots,total = {},0
+    local notice,period = s.notice_days*s.day,s.period_days*s.day
     if args.plot then
         local plot = read(self,args.plot)
         assert(plot and plot.owner==caller,'Pay only for your own lot.')
         plan(self,plot,s,now)
-        assert(payable(self,args.plot,s,now),'Pay a taxable lot during its notice window, by its deadline.')
-        lots[1],total = args.plot,bill(self,args.plot,s)
+        local key,deadline = payable(state,args.plot,notice,now)
+        assert(key,'Pay a taxable lot during its notice window, by its deadline.')
+        lots[key],total = deadline+period,bill(self,args.plot,s)
     else
         for _, id in self:plots(caller) do
-            if payable(self,id,s,now) then
-                table.insert(lots,id)
+            local key,deadline = payable(state,id,notice,now)
+            if key then
+                lots[key] = deadline+period
                 total += bill(self,id,s)
             end
         end
@@ -350,7 +354,7 @@ local function pay(self, _, args, caller)
     assert(total>0,'No taxable lots are in their payment window.')
     assert(args.amount==total,string.format('Pay the full bill: %d.',total))
     if not self:act('engine.pay',nil,{from=caller,to='p:0',amount=total}).ok then return end
-    for _, id in lots do state['due:'..id] += s.period_days*s.day end
+    for key,deadline in lots do state[key] = deadline end
 end
 
 local function quote(self, _, args, caller)

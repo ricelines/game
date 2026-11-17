@@ -972,6 +972,7 @@ void plot_changes_dispatch_before_authority_is_removed() {
   f.plots.rows[1].bounds = {990, -20, 1010, 20};
   f.plots.rows[2].bounds = {990, -25, 1010, -20};
   f.plots.rows[2].kind = perm::PlotKind::Street;
+  perm::set_plot_owner(f.plots, 2, 0);
   const auto admin = step::declare_admin(f.f.terms, f.declarations);
   const auto permissions = [&](nlohmann::json arguments) {
     return step::native_permissions(

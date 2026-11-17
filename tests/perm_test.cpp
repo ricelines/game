@@ -369,6 +369,7 @@ void plot_records_show_live_land_control() {
   Plots plots;
   plots.rows.push_back({1, 0, 1, 6, {0, -50, 72, 50}, {}, PlotKind::Street});
   plots.rows.push_back({2, 2, 0, 2, {8, 50, 24, 82}, {}, PlotKind::Lot});
+  rebuild_plot_owners(plots);
   const auto root_scope = Scope::all_land();
   const auto root =
       create_root_grant(f.grants, f.players, {0, Holder::player(4), root_scope, Rights{24} << 8},

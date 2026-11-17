@@ -182,7 +182,51 @@ void installed_script_identity_is_readonly() {
   f.ok(R"(assert(self.script==100 and self:object().owner=='p:2')
     assert(self.context==nil and from~=self.handle)
     assert(not pcall(function()self.script=1 end))
-    assert(self.script==100))");
+    assert(self.script==100 and type(self.plot)=='function')
+    assert(getmetatable(self)=='locked')
+    assert(not pcall(function() self.plot=nil end))
+    assert(not pcall(function() setmetatable(self,{}) end)))");
+}
+void plot_records_preserve_public_fields_and_readonly_rights() {
+  Fixture f;
+  f.plots.rows[1].bounds = {8, 50, 24, 82};
+  f.plots.rows[1].preset = 3;
+  f.plots.rows.push_back({2, 0, 0, 2, {0, -50, 72, 50}, {}, perm::PlotKind::Street});
+  perm::rebuild_plot_owners(f.plots);
+  const auto world = perm::Holder::script(90, {});
+  require(
+      bool(perm::create_root_grant(
+          f.grants, f.players, {0, world, perm::Scope::all_land(), perm::Rights{24} << 8, 0, 0, 21},
+          {world, 2, true}, 1)),
+      "plot record world authority fixture failed");
+  require(bool(perm::create_grant(f.grants, f.players, perm::Holder::player(2),
+                                  {2, perm::Holder::player(3), perm::Scope::plot(1), 24, 0, 0, 21},
+                                  {perm::Scope::plot(1), 2, perm::all_rights},
+                                  {perm::Holder::player(3), 3, true}, 1)),
+          "plot record ordinary authority fixture failed");
+  const auto offered = perm::offer_plot(f.perm_state, perm::Holder::player(2), 1, 42, 0, 22, 1);
+  require(bool(offered), "plot record public offer fixture failed");
+  f.ok(R"(local p=self:plot(1)
+    assert(p.kind=='lot' and p.owner=='p:2' and p.area_m2==512)
+    assert(p.open and p.build_open and p.fronts=='street' and p.port==0 and p.port_x==0)
+    assert(p.bounds[1]==8 and p.bounds[2]==50 and p.bounds[3]==24 and p.bounds[4]==82)
+    assert(#p.rights==2 and p.rights[1].holder.script=='s:90' and p.rights[1].holder.on=='world')
+    assert(p.rights[2].holder=='p:3')
+    for _,right in p.rights do
+      assert(#right.verbs==2 and right.verbs[1]=='transfer' and right.verbs[2]=='return')
+    end
+    assert(p.for_sale.offer=='offer:1' and p.for_sale.price==42 and p.for_sale.buyer==nil)
+    assert(not pcall(function() p.owner='p:3' end))
+    assert(not pcall(function() p.rights[1].holder.on='elsewhere' end))
+    assert(not pcall(function() p.rights[1].verbs[1]='build' end))
+    assert(not pcall(function() p.for_sale.price=1 end))
+    assert(self:plot(2).kind=='street' and #self:plot(2).rights==0))");
+  auto &offer = f.perm_state.offers.rows[offered.offer];
+  offer.buyer = 3;
+  f.ok("assert(self:plot(1).for_sale==nil)");
+  offer.buyer = 0;
+  offer.expires_step = 20;
+  f.ok("assert(self:plot(1).for_sale==nil)");
 }
 void single_solid_measurement_has_no_assembly_metadata() {
   Fixture f;
@@ -247,6 +291,7 @@ int main() {
     effective_metadata_and_mass();
     single_solid_measurement_has_no_assembly_metadata();
     installed_script_identity_is_readonly();
+    plot_records_preserve_public_fields_and_readonly_rights();
     retained_handles_grant_no_reads();
     plot_objects_returns_only_independent_placed_things();
     plots_filter_by_current_owner();

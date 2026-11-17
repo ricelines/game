@@ -157,6 +157,9 @@ enum class Reason {
 };
 enum class LandVerb : std::uint8_t { Build, Enter, RunScripts, Transfer, Return };
 enum class PlotKind : std::uint8_t { Street, Alley, Lot };
+inline constexpr const char *land_verb_names[]{"build", "enter", "run_scripts", "transfer",
+                                               "return"};
+inline constexpr const char *plot_kind_names[]{"street", "alley", "lot"};
 struct Plot {
   PlotId id = 0;
   PlayerId owner = 0;

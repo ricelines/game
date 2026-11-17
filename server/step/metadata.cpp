@@ -107,7 +107,7 @@ struct PlotReadBinding {
   float port_spacing_m;
   AuthorityRead authority;
 };
-void text(lua_State *L, const std::string &text) {
+void text(lua_State *L, std::string_view text) {
   lua_pushlstring(L, text.data(), text.size());
 }
 void handle_field(lua_State *L, const char *key, Handle handle) {
@@ -402,6 +402,36 @@ int meter_binding(lua_State *L) {
   lua_pushnumber(L, found == b.meters.end() ? 0 : react::metered(found->second, inv.step, inv.hz));
   return 1;
 }
+void plot_rights(lua_State *L, const std::vector<perm::PlotHolder> &holders) {
+  lua_createtable(L, static_cast<int>(holders.size()), 0);
+  int index = 0;
+  for (const auto &[holder, verbs] : holders) {
+    lua_createtable(L, 0, 2);
+    if (holder.kind == perm::HolderKind::Player)
+      text(L, "p:" + std::to_string(holder.id));
+    else {
+      lua_createtable(L, 0, 2);
+      text(L, "s:" + std::to_string(holder.id));
+      lua_setfield(L, -2, "script");
+      text(L, holder.installed_on ? to_string(holder.installed_on) : "world");
+      lua_setfield(L, -2, "on");
+      lua_setreadonly(L, -1, true);
+    }
+    lua_setfield(L, -2, "holder");
+    lua_createtable(L, 0, 0);
+    int verb_index = 0;
+    for (unsigned bit = 0; bit < std::size(perm::land_verb_names); ++bit)
+      if (verbs & (1u << bit)) {
+        text(L, perm::land_verb_names[bit]);
+        lua_rawseti(L, -2, ++verb_index);
+      }
+    lua_setreadonly(L, -1, true);
+    lua_setfield(L, -2, "verbs");
+    lua_setreadonly(L, -1, true);
+    lua_rawseti(L, -2, ++index);
+  }
+  lua_setreadonly(L, -1, true);
+}
 int plot_binding(lua_State *L) {
   const auto &b = *static_cast<PlotReadBinding *>(react::binding_data(L));
   const auto &plots = b.permissions.plots;
@@ -410,8 +440,46 @@ int plot_binding(lua_State *L) {
       lua_isnoneornil(L, 2) ? b.authority.plot[inv.self.object.slot()] : unsigned_arg(L, 2);
   if (!id || id >= plots.rows.size() || plots.rows[id].id != id)
     luaL_error(L, "unknown plot");
-  json_value(L, perm::plot_record(plots, b.permissions.grants, id, b.port_spacing_m, inv.step,
-                                  perm::plot_offer(b.permissions.offers, id, inv.step, 0)));
+  const auto &plot = plots.rows[id];
+  const auto facts = perm::plot_facts(plots, id, b.port_spacing_m);
+  lua_createtable(L, 0, 13);
+  number_field(L, "plot", id);
+  text(L, perm::plot_kind_names[static_cast<unsigned>(plot.kind)]);
+  lua_setfield(L, -2, "kind");
+  text(L, "p:" + std::to_string(facts.owner));
+  lua_setfield(L, -2, "owner");
+  lua_createtable(L, 4, 0);
+  for (unsigned index = 0; index < facts.bounds.size(); ++index) {
+    lua_pushnumber(L, facts.bounds[index]);
+    lua_rawseti(L, -2, index + 1);
+  }
+  lua_setreadonly(L, -1, true);
+  lua_setfield(L, -2, "bounds");
+  lua_pushboolean(L, facts.open);
+  lua_setfield(L, -2, "open");
+  lua_pushboolean(L, facts.build_open);
+  lua_setfield(L, -2, "build_open");
+  number_field(L, "area_m2",
+               (facts.bounds[2] - facts.bounds[0]) * (facts.bounds[3] - facts.bounds[1]));
+  text(L, facts.fronts);
+  lua_setfield(L, -2, "fronts");
+  number_field(L, "port", facts.port);
+  number_field(L, "port_x", facts.port_x);
+  plot_rights(L, perm::plot_holders(plot, b.permissions.grants, inv.step));
+  lua_setfield(L, -2, "rights");
+  if (const auto *offer = perm::plot_offer(b.permissions.offers, id, inv.step, 0)) {
+    lua_createtable(L, 0, 3);
+    text(L, "offer:" + std::to_string(offer->id));
+    lua_setfield(L, -2, "offer");
+    number_field(L, "price", offer->price);
+    if (offer->buyer) {
+      text(L, "p:" + std::to_string(offer->buyer));
+      lua_setfield(L, -2, "buyer");
+    }
+    lua_setreadonly(L, -1, true);
+    lua_setfield(L, -2, "for_sale");
+  }
+  lua_setreadonly(L, -1, true);
   return 1;
 }
 int plots_binding(lua_State *L) {

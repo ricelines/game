@@ -74,26 +74,29 @@ PlotFacts plot_facts(const Plots &plots, PlotId id, float port_spacing_m) {
   const auto &plot = plots.rows.at(id);
   const auto &b = plot.bounds;
   const char *fronts = "none";
-  for (const auto &way : plots.rows) {
-    if (!way.id || way.kind == PlotKind::Lot)
-      continue;
-    const auto &w = way.bounds;
-    const bool vertical =
-        (b[0] == w[2] || b[2] == w[0]) && std::max(b[1], w[1]) < std::min(b[3], w[3]);
-    const bool horizontal =
-        (b[1] == w[3] || b[3] == w[1]) && std::max(b[0], w[0]) < std::min(b[2], w[2]);
-    if (horizontal && way.kind == PlotKind::Street) {
-      fronts = "street";
-      break;
-    }
-    if (way.kind == PlotKind::Alley) {
-      if (horizontal) {
-        fronts = "back way";
-      } else if (vertical && std::string_view(fronts) == "none") {
-        fronts = "alley";
+  const auto root = plots.by_owner.find(0);
+  if (root != plots.by_owner.end())
+    for (auto way_id : root->second) {
+      const auto &way = plots.rows[way_id];
+      if (way.kind == PlotKind::Lot)
+        continue;
+      const auto &w = way.bounds;
+      const bool vertical =
+          (b[0] == w[2] || b[2] == w[0]) && std::max(b[1], w[1]) < std::min(b[3], w[3]);
+      const bool horizontal =
+          (b[1] == w[3] || b[3] == w[1]) && std::max(b[0], w[0]) < std::min(b[2], w[2]);
+      if (horizontal && way.kind == PlotKind::Street) {
+        fronts = "street";
+        break;
+      }
+      if (way.kind == PlotKind::Alley) {
+        if (horizontal) {
+          fronts = "back way";
+        } else if (vertical && std::string_view(fronts) == "none") {
+          fronts = "alley";
+        }
       }
     }
-  }
   const auto port = std::int64_t(std::round((b[0] + b[2]) / (2 * port_spacing_m)));
   return {plot.id,
           plot.owner,
@@ -117,15 +120,13 @@ nlohmann::json plot_record(const Plots &plots, const Grants &grants, PlotId id,
                       : Json{{"script", "s:" + std::to_string(held.id)},
                              {"on", held.installed_on ? to_string(held.installed_on) : "world"}};
     Json names = Json::array();
-    constexpr const char *land_verbs[]{"build", "enter", "run_scripts", "transfer", "return"};
     for (unsigned bit = 0; bit < 5; ++bit)
       if (verbs & (1u << bit))
-        names.push_back(land_verbs[bit]);
+        names.push_back(land_verb_names[bit]);
     rights.push_back({{"holder", std::move(holder)}, {"verbs", std::move(names)}});
   }
-  constexpr const char *kinds[]{"street", "alley", "lot"};
   Json result = {{"plot", id},
-                 {"kind", kinds[static_cast<unsigned>(plot.kind)]},
+                 {"kind", plot_kind_names[static_cast<unsigned>(plot.kind)]},
                  {"owner", "p:" + std::to_string(plot.owner)},
                  {"bounds", b},
                  {"open", facts.open},

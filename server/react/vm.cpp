@@ -58,7 +58,7 @@ struct RunContext {
   int thread_ref = 0;
   std::optional<RunOutcome::Action> action{};
   const nlohmann::json *result = nullptr;
-  const std::map<std::string, Binding> *bindings = nullptr;
+  int self_metatable_ref = 0;
   const HandlerRef *handler = nullptr;
   int module_ref = 0;
   bool missing = false;
@@ -538,7 +538,7 @@ int handler_entry(lua_State *L) {
     run.missing = true;
     return 0;
   }
-  lua_createtable(L, 0, static_cast<int>(run.bindings->size() + 2));
+  lua_createtable(L, 0, 3);
   if (inv.self.object)
     push_handle(L, inv.self.object);
   else
@@ -550,14 +550,8 @@ int handler_entry(lua_State *L) {
       lua_newuserdatataggedwithmetatable(L, sizeof(StateProxy), state_tag));
   *proxy = {inv.state};
   lua_setfield(L, -2, "state");
-  for (const auto &[name, binding] : *run.bindings) {
-    if (name == "world.near" || name == "world.raycast")
-      continue;
-    lua_pushlightuserdata(L, binding.data);
-    lua_pushcclosurek(L, binding.function, name.c_str(), 1,
-                      binding.function == act_method ? act_result : nullptr);
-    lua_setfield(L, -2, name.c_str());
-  }
+  lua_getref(L, run.self_metatable_ref);
+  lua_setmetatable(L, -2);
   lua_setreadonly(L, -1, 1);
   push_handle(L, inv.sender);
   push_payload(L, inv.payload);
@@ -658,6 +652,26 @@ void cfunction(lua_State *L, const char *name, lua_CFunction fn) {
   lua_pushcfunction(L, fn, name);
   lua_setfield(L, -2, name);
 }
+int self_metatable(lua_State *L, const std::map<std::string, Binding> &bindings) {
+  lua_createtable(L, 0, 2);
+  lua_createtable(L, 0, static_cast<int>(bindings.size()));
+  for (const auto &[name, binding] : bindings) {
+    if (name == "world.near" || name == "world.raycast")
+      continue;
+    lua_pushlightuserdata(L, binding.data);
+    lua_pushcclosurek(L, binding.function, name.c_str(), 1,
+                      binding.function == act_method ? act_result : nullptr);
+    lua_setfield(L, -2, name.c_str());
+  }
+  lua_setreadonly(L, -1, true);
+  lua_setfield(L, -2, "__index");
+  lua_pushstring(L, "locked");
+  lua_setfield(L, -2, "__metatable");
+  lua_setreadonly(L, -1, true);
+  const int ref = lua_ref(L, -1);
+  lua_pop(L, 1);
+  return ref;
+}
 void metatable(lua_State *L, int tag,
                std::initializer_list<std::pair<const char *, lua_CFunction>> methods) {
   lua_newtable(L);
@@ -680,6 +694,7 @@ struct Vm::Impl {
   lua_State *main = nullptr;
   std::unordered_map<ScriptId, Script> scripts;
   std::map<std::string, Binding> bindings;
+  int self_metatable_ref = 0;
   std::vector<std::unique_ptr<RunContext>> calls;
   RunOutcome advance(Invocation &);
   explicit Impl(VmSettings supplied) : settings(supplied) {
@@ -838,6 +853,11 @@ RunOutcome load_script(Vm &vm, const CompiledScript &compiled,
     return {RunOutcome::Status::Error, "script did not compile", 0};
   if (impl.scripts.contains(declaration.id))
     return {RunOutcome::Status::Error, "script ID already loaded", 0};
+  if (impl.scripts.empty()) {
+    if (impl.self_metatable_ref)
+      lua_unref(impl.main, impl.self_metatable_ref);
+    impl.self_metatable_ref = self_metatable(impl.main, impl.bindings);
+  }
   impl.allocator.current = declaration.id;
   auto *L = lua_newthread(impl.main);
   const auto thread_ref = lua_ref(impl.main, -1);
@@ -920,7 +940,8 @@ RunOutcome Vm::Impl::advance(Invocation &inv) {
   }
   lua_setthreaddata(L, nullptr);
   lua_resetthread(L);
-  lua_unref(main, run.thread_ref);
+  if (run.thread_ref)
+    lua_unref(main, run.thread_ref);
   calls.pop_back();
   return result;
 }
@@ -952,10 +973,14 @@ RunOutcome run_handler(Vm &vm, const HandlerRef &handler, Invocation &inv) {
   run->event_fields_max = impl.settings.event_fields_max;
   run->module_ref = script.module_ref;
   run->handler = &handler;
-  run->bindings = &impl.bindings;
-  run->thread = lua_newthread(impl.main);
-  run->thread_ref = lua_ref(impl.main, -1);
-  lua_pop(impl.main, 1);
+  run->self_metatable_ref = impl.self_metatable_ref;
+  if (!lua_getthreaddata(script.thread))
+    run->thread = script.thread;
+  else {
+    run->thread = lua_newthread(impl.main);
+    run->thread_ref = lua_ref(impl.main, -1);
+    lua_pop(impl.main, 1);
+  }
   lua_setthreaddata(run->thread, run.get());
   lua_pushcclosurek(run->thread, handler_entry, "handler", 0, handler_done);
   impl.calls.push_back(std::move(run));

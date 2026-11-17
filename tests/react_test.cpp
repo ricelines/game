@@ -458,7 +458,8 @@ void luau_state_and_limits() {
   Vm cutoff({4096, 50, 5, 64});
   d.id = 3;
   auto spin =
-      compile_script("return {on={run=function(self) self.state.before=1; while true do end end}}");
+      compile_script("return {on={run=function(self) self.state.before=1; while true do end end,"
+                     "recover=function(self) self.state.after=self.handle end}}");
   require(load_script(cutoff, spin, d).status == RunOutcome::Status::Ok, "load infinite handler");
   ScriptState cs;
   DeferredEffects ce;
@@ -469,6 +470,19 @@ void luau_state_and_limits() {
   require(run_handler(cutoff, {3, "run"}, runaway).status == RunOutcome::Status::Cutoff,
           "VM interrupt applies the configured handler CPU limit");
   require(cs.values.contains(StateKey{std::string("before")}), "write before cutoff stays");
+  ScriptState recovered;
+  DeferredEffects recovered_effects;
+  Invocation healthy;
+  const auto other = Handle::make(2, 1);
+  healthy.self = {other, 3};
+  healthy.state = &recovered;
+  healthy.effects = &recovered_effects;
+  require(run_handler(cutoff, {3, "recover"}, healthy).status == RunOutcome::Status::Ok,
+          "a script thread can run again after a cutoff");
+  require(recovered.values.size() == 1 &&
+              std::get<Handle>(recovered.values.at(std::string("after"))) == other &&
+              cs.values.size() == 1,
+          "reused script threads bind the new installation's state and handle");
   Vm nested({4096, 50, 5, 64});
   d.id = 4;
   auto invalid =
