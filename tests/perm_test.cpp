@@ -271,12 +271,14 @@ void plot_records_show_live_land_control() {
   const auto ordinary = f.grant(2, Holder::player(3), Scope::plot(2), 2, 24, 0, 0, 10);
   require(bool(root) && ordinary, "land record fixture creates real grants");
   const auto record = plot_record(plots, f.grants, 2, 1000, 5);
-  require(record["fronts"] == "street" &&
+  require(record["open"] == true && record["fronts"] == "street" &&
               record["bounds"] == nlohmann::json::array({8, 50, 24, 82}) &&
               record["rights"].size() == 2 && record["rights"][0]["holder"] == "p:4" &&
               record["rights"][1]["holder"] == "p:3" &&
               record["rights"][0]["verbs"] == nlohmann::json::array({"transfer", "return"}),
           "lot records expose ordinary and root land control as named verbs");
+  plots.rows[2].preset = 0;
+  require(plot_record(plots, f.grants, 2, 1000, 5)["open"] == false, "closed lot reported open");
   require(plot_record(plots, f.grants, 2, 1000, 10)["rights"].size() == 1 &&
               plot_record(plots, f.grants, 1, 1000, 5)["rights"].empty(),
           "expired grants and all-land authority on ways are excluded");
