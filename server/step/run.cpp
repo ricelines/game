@@ -621,6 +621,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             }
             change_custody(objects_state, space_state, relation_terms, plots, illumination_sources,
                            completed);
+            discard_script_work(queues, timers, completed.hidden_objects);
             auto &removed = completed.removed_objects;
             std::sort(removed.begin(), removed.end());
             removed.erase(std::unique(removed.begin(), removed.end()), removed.end());
@@ -682,6 +683,13 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             for (auto object : completed.created_objects)
               completed.effects.ordered.emplace_back(
                   react::EventWork{object, {}, role("events", "start"), {}, action->call.origin});
+            if (const auto *operation =
+                    std::get_if<react::ConstructionAction>(&action->resolution.native_operation);
+                operation && *operation == react::ConstructionAction::PlaceExisting &&
+                completed.changed)
+              for (auto object : completed.visible_objects)
+                completed.effects.ordered.emplace_back(
+                    react::EventWork{object, {}, role("events", "start"), {}, action->call.origin});
             const auto first_changed = mutated.size();
             reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
                               completed.effects, action->call.origin);
@@ -704,6 +712,12 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
         continue;
       }
       auto &handler = std::get<HandlerRun>(*selected);
+      std::erase_if(handler.completed.effects.ordered, [&](const react::Effect &effect) {
+        const auto *timer = std::get_if<react::Timer>(&effect);
+        return timer && ids.valid(timer->event.receiver) &&
+               (ids.flags[timer->event.receiver.slot()] & Held) &&
+               !objects.plot[timer->event.receiver.slot()];
+      });
       const auto first_changed = mutated.size();
       reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
                         handler.completed.effects, handler.completed.origin);

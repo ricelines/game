@@ -130,6 +130,28 @@ struct Fixture {
     return completed;
   }
 };
+void stored_scripts_keep_data_and_restart_without_a_saved_execution() {
+  Fixture f;
+  const auto key = react::ScriptKey{f.object, 2};
+  auto first = f.run(2, 4);
+  require(first.outcome.status == react::RunOutcome::Status::Ok, "script started");
+  const auto count = f.states.at(key).at(std::string("count"));
+  f.objects.flags[f.object.slot()] |= Held;
+  f.objects.plot[f.object.slot()] = 0;
+  require(!react::find_handler(f.triggers, f.values, key, 4, 20, 20),
+          "stored script stayed active");
+  require(f.states.at(key).at(std::string("count")) == count, "storage changed script data");
+  // A visible held item still runs; hidden inventory alone stops execution.
+  f.objects.plot[f.object.slot()] = 1;
+  require(bool(react::find_handler(f.triggers, f.values, key, 4, 20, 20)),
+          "hand-held script was stopped");
+  f.objects.flags[f.object.slot()] &= ~Held;
+  auto next = f.run(2, 4);
+  require(next.outcome.status == react::RunOutcome::Status::Ok &&
+              std::get<double>(f.states.at(key).at(std::string("count"))) ==
+                  std::get<double>(count) + 1,
+          "placed script could not continue from ordinary stored data");
+}
 void live_effects_and_causal_finalization() {
   Fixture f;
   auto &journal = f.journal;
@@ -336,6 +358,7 @@ void model_rebind_retires_only_removed_installations() {
 } // namespace
 int main() {
   try {
+    stored_scripts_keep_data_and_restart_without_a_saved_execution();
     live_effects_and_causal_finalization();
     persistence_and_activation();
     withdrawing_from_retired_subject_is_idempotent();

@@ -13,6 +13,25 @@ react::EventWork event(TermId id) {
   e.event = id;
   return e;
 }
+void storing_discards_work_without_a_suspended_execution() {
+  WorkQueues queues;
+  TimerWheel wheel;
+  const auto stored = Handle::make(1, 1), live = Handle::make(2, 1);
+  auto work = event(3);
+  work.receiver = stored;
+  enqueue_event(queues, work, 100);
+  queues.turns.push_back({work, {}});
+  queues.background.push_back({stored, 3, 1, {}, 1});
+  schedule(wheel, {10, work, {}});
+  work.receiver = live;
+  enqueue_event(queues, work, 100);
+  schedule(wheel, {10, work, {}});
+  discard_script_work(queues, wheel, std::span(&stored, 1));
+  require(queues.emitted_events == 1 && queues.causal.size() == 1 && queues.turns.empty() &&
+              queues.background.empty() && timers(wheel).size() == 1 &&
+              timers(wheel)[0].event.receiver == live,
+          "storage retained work or removed another object's work");
+}
 void publication_stamps_completed_origin() {
   record::Journal journal(8, {});
   record::Event action;
@@ -355,6 +374,7 @@ void mixed_due_replacement_preserves_events_across_rebucketing() {
 }
 } // namespace
 int main() {
+  storing_discards_work_without_a_suspended_execution();
   publication_stamps_completed_origin();
   ordering_and_overflow();
   timer_cascades();

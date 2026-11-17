@@ -161,6 +161,9 @@ std::optional<std::pair<HandlerRef, std::size_t>> find_handler(const Triggers &t
                                                                Step now, double hz) {
   if (!values.identity.valid(consumer.object))
     return {};
+  if ((values.identity.flags[consumer.object.slot()] & Held) &&
+      !values.plots[consumer.object.slot()])
+    return {};
   const auto found = triggers.find(trigger);
   if (found == triggers.end())
     return {};

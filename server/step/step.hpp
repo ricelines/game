@@ -324,6 +324,7 @@ PushResult enqueue_event(WorkQueues &, react::EventWork, std::size_t limit);
 PushResult enqueue_watch(WorkQueues &, react::WatchWork);
 void enqueue_background(WorkQueues &, react::BackgroundItem);
 void schedule(TimerWheel &, react::Timer);
+void discard_script_work(WorkQueues &, TimerWheel &, std::span<const Handle>);
 void cancel_threshold(TimerWheel &, const ThresholdKey &);
 void cancel_source_thresholds(TimerWheel &, const react::Subscriptions &, FactKey);
 void rebuild_queue_index(WorkQueues &);
