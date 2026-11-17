@@ -1321,7 +1321,7 @@ bool set_activation(Vm &vm, ScriptId script, bool approved, bool active) {
 }
 void consult_object(const Invocation &inv, Handle object) {
   auto &handles = inv.effects->consulted_handles;
-  if (object && std::find(handles.begin(), handles.end(), object) == handles.end())
+  if (object && (handles.empty() || handles.back() != object))
     handles.push_back(object);
 }
 namespace {

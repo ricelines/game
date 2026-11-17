@@ -416,7 +416,8 @@ void membership(Space &space, IdentityRead identity, ParentWrite parents,
       if (std::find(containers.begin(), containers.end(), container) == containers.end())
         edge(relations.contains, RelationKind::Contains, container, object, false, changes);
     for (auto container : containers)
-      edge(relations.contains, RelationKind::Contains, container, object, true, changes);
+      if (std::find(previous.begin(), previous.end(), container) == previous.end())
+        edge(relations.contains, RelationKind::Contains, container, object, true, changes);
     if (!n.attachments.contains(bits))
       parents.parent[object.slot()] = immediate;
     predicted = {now, 0, center, {}, n.volume_revision, false, false};

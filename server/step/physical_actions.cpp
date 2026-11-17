@@ -73,10 +73,14 @@ bool acquired(const Invocation &i, Handle h) {
   return h == i.self.object || std::ranges::find(i.parts, h) != i.parts.end() ||
          std::ranges::find(i.acquired, h) != i.acquired.end();
 }
-Handle handle(lua_State *L, int index, IdentityRead id) {
+Handle live_handle(lua_State *L, int index, IdentityRead id) {
   auto h = react::check_handle(L, index);
   if (!id.valid(h))
     luaL_error(L, "stale object handle");
+  return h;
+}
+Handle handle(lua_State *L, int index, IdentityRead id) {
+  auto h = live_handle(L, index, id);
   if (!acquired(react::invocation(L), h))
     luaL_error(L, "object handle was not acquired");
   return h;
@@ -574,7 +578,7 @@ int move_part_binding(lua_State *L) {
       lua_rawgeti(L, 2, int(row));
       luaL_checktype(L, -1, LUA_TTABLE);
       lua_getfield(L, -1, "object");
-      const auto part = handle(L, -1, b.identity);
+      const auto part = live_handle(L, -1, b.identity);
       lua_pop(L, 1);
       auto target = pose(L, -1);
       lua_getfield(L, -1, "rotation");
@@ -585,7 +589,7 @@ int move_part_binding(lua_State *L) {
       lua_pop(L, 1);
     }
   } else {
-    const auto part = handle(L, 2, b.identity);
+    const auto part = live_handle(L, 2, b.identity);
     move(part,
          {vec(L, 3), lua_isnoneornil(L, 4) ? b.transforms.rotation[part.slot()] : rotation(L, 4)});
   }

@@ -119,10 +119,14 @@ void finish_invocation(IdentityRead identity, AttributionRead attribution,
                        const catalog::Models &models, const catalog::Scripts &scripts,
                        record::Journal &journal, react::Invocation &invocation,
                        CompletedInvocation &result) {
-  acquire(result.things, invocation.self.object);
-  acquire(result.things, invocation.sender);
-  for (auto object : result.effects.consulted_handles)
-    acquire(result.things, object);
+  result.things.insert(result.things.end(), result.effects.consulted_handles.begin(),
+                       result.effects.consulted_handles.end());
+  if (invocation.self.object)
+    result.things.push_back(invocation.self.object);
+  if (invocation.sender)
+    result.things.push_back(invocation.sender);
+  std::sort(result.things.begin(), result.things.end());
+  result.things.erase(std::unique(result.things.begin(), result.things.end()), result.things.end());
   result.object_credits =
       record::credits(identity, attribution, models, scripts, result.things, 0, invocation.hz);
   result.script_credits = record::credits(identity, attribution, models, scripts, {},
