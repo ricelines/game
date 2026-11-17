@@ -318,11 +318,24 @@ using StateKey = std::variant<std::string, std::int64_t>;
 
 using StateAtom = std::variant<double, bool, std::string, Handle>;
 
-struct StateKeyHash {
-  std::size_t operator()(const StateKey &) const;
+struct StateStringKey {
+  std::string_view text;
 };
 
-using ScriptState = std::unordered_map<StateKey, StateAtom, StateKeyHash>;
+struct StateKeyHash {
+  using is_transparent = void;
+  std::size_t operator()(const StateKey &) const;
+  std::size_t operator()(StateStringKey) const;
+};
+
+struct StateKeyEqual {
+  using is_transparent = void;
+  bool operator()(const StateKey &, const StateKey &) const;
+  bool operator()(const StateKey &, StateStringKey) const;
+  bool operator()(StateStringKey, const StateKey &) const;
+};
+
+using ScriptState = std::unordered_map<StateKey, StateAtom, StateKeyHash, StateKeyEqual>;
 
 using ScriptStates = std::unordered_map<ScriptKey, ScriptState, ScriptKeyHash>;
 

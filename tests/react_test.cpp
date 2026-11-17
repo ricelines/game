@@ -499,6 +499,36 @@ void luau_state_and_limits() {
   require(iter_result.status == RunOutcome::Status::Error && iter_result.memory_bytes <= 256 * 1024,
           "retained iterator snapshots count against script budget");
 }
+void state_keys_keep_owned_bytes_between_handlers() {
+  Vm vm({256, 50, 5, 64});
+  ScriptDeclaration declaration;
+  declaration.id = 1;
+  auto compiled = compile_script(R"(return {on={run=function(self)
+    local prefix=string.rep('account',8)
+    local key=prefix..string.char(0)..'credit'
+    self.state[prefix]=23
+    self.state[key]=(self.state[key] or 0)+1
+    self.state[key..'temporary']=99
+    self.state[key..'temporary']=nil
+    assert(self.state[key..'temporary']==nil)
+    assert(self.state[prefix]==23)
+  end}})");
+  require(load_script(vm, compiled, declaration).status == RunOutcome::Status::Ok,
+          "load dynamic state keys");
+  ScriptState state;
+  for (unsigned run = 0; run < 2; ++run) {
+    DeferredEffects effects;
+    require(execute(vm, state, effects, Handle::make(1, 1), 1).status == RunOutcome::Status::Ok,
+            "read, update and delete dynamic keys across handler lifetimes");
+  }
+  std::string prefix;
+  for (unsigned i = 0; i < 8; ++i)
+    prefix += "account";
+  const auto key = prefix + std::string("\0credit", 7);
+  require(state.size() == 2 && std::get<double>(state.at(key)) == 2 &&
+              std::get<double>(state.at(prefix)) == 23,
+          "state owns long binary keys and preserves bytes after a zero byte");
+}
 void live_activation_and_dispatch_authority() {
   Vm vm({4096, 50, 5, 64});
   auto compiled = compile_script("return {on={run=function(self) self.state.ran=true end}}");
@@ -864,6 +894,7 @@ int main() {
   dispatch_order();
   action_handlers_receive_the_actual_caller();
   luau_state_and_limits();
+  state_keys_keep_owned_bytes_between_handlers();
   live_activation_and_dispatch_authority();
   luau_bound_values_and_events();
   synchronous_actions_and_nested_deadlines();

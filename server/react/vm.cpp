@@ -152,6 +152,14 @@ StateKey state_key(lua_State *L, int index) {
   }
   luaL_error(L, "state key must be a string or integer");
 }
+ScriptState::iterator find_state(lua_State *L, ScriptState &state, int index) {
+  if (lua_type(L, index) == LUA_TSTRING) {
+    std::size_t size;
+    const char *text = lua_tolstring(L, index, &size);
+    return state.find(StateStringKey{{text, size}});
+  }
+  return state.find(state_key(L, index));
+}
 StateAtom state_atom(lua_State *L, int index) {
   switch (lua_type(L, index)) {
   case LUA_TNUMBER:
@@ -196,7 +204,7 @@ void push_key(lua_State *L, const StateKey &key) {
 int state_index(lua_State *L) {
   auto *proxy = static_cast<StateProxy *>(luaL_checkudatatagged(L, 1, state_tag));
   context(L);
-  auto found = proxy->state->find(state_key(L, 2));
+  auto found = find_state(L, *proxy->state, 2);
   if (found == proxy->state->end())
     lua_pushnil(L);
   else
@@ -206,8 +214,7 @@ int state_index(lua_State *L) {
 int state_newindex(lua_State *L) {
   auto *proxy = static_cast<StateProxy *>(luaL_checkudatatagged(L, 1, state_tag));
   auto &run = context(L);
-  auto key = state_key(L, 2);
-  auto found = proxy->state->find(key);
+  auto found = find_state(L, *proxy->state, 2);
   const std::size_t previous =
       found == proxy->state->end()
           ? 0
@@ -220,15 +227,19 @@ int state_newindex(lua_State *L) {
     }
     return 0;
   }
+  std::optional<StateKey> key;
+  if (found == proxy->state->end())
+    key = state_key(L, 2);
   auto atom = state_atom(L, 3);
-  const auto next = key_size(key) + atom_size(atom) + sizeof(void *) * 2;
+  const auto next =
+      (key ? key_size(*key) : key_size(found->first)) + atom_size(atom) + sizeof(void *) * 2;
   if (run.state_bytes - previous + next + (run.heap_bytes ? *run.heap_bytes : 0) > run.state_limit)
     luaL_error(L, "script state memory limit exceeded");
   run.state_bytes = run.state_bytes - previous + next;
   if (found == proxy->state->end() || found->second != atom)
     run.invocation->effects->changed = true;
   if (found == proxy->state->end())
-    proxy->state->emplace(std::move(key), std::move(atom));
+    proxy->state->emplace(std::move(*key), std::move(atom));
   else
     found->second = std::move(atom);
   return 0;
