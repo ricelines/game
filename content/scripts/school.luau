@@ -42,7 +42,6 @@ end
 
 local function swim(self)
     self:after(0.1, 'aq.swim')
-    if self:object().held then return end
     local tank = self:related('aq.reservoir', 'out')[1]
     if not tank then return end
     local pose = self:object(tank)

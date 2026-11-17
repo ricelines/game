@@ -134,18 +134,11 @@ struct Fixture {
     require(result.status == react::RunOutcome::Status::Ok, result.error.c_str());
   }
 };
-void held_metadata_follows_custody_flag() {
-  Fixture f;
-  f.objects.flags[f.root.slot()] |= Held;
-  f.ok("assert(self:object().held)");
-  f.objects.flags[f.root.slot()] &= ~Held;
-  f.ok("assert(not self:object().held)");
-}
 void effective_metadata_and_mass() {
   Fixture f;
   f.ok(R"(
     local o=self:object()
-    assert(o.owner=='p:2' and o.model==1 and o.params==1 and o.material==4 and not o.held)
+    assert(o.owner=='p:2' and o.model==1 and o.params==1 and o.material==4)
     assert(o.script==8 and o.scripts[1]==8 and o.scripts[2]==9)
     assert(o.position.X==10 and o.rotation[4]==1)
     assert(not pcall(function()o.scripts[1]=99 end))
@@ -215,7 +208,6 @@ void retained_handles_grant_no_reads() {
 } // namespace
 int main() {
   try {
-    held_metadata_follows_custody_flag();
     effective_metadata_and_mass();
     single_solid_measurement_has_no_assembly_metadata();
     installed_script_identity_is_readonly();

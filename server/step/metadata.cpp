@@ -247,12 +247,10 @@ int object_binding(lua_State *L) {
   const auto object = object_arg(L, 2, b.identity);
   const auto s = object.slot();
   const auto script = b.models.rows[b.identity.model[s]].script;
-  lua_createtable(L, 0, 9);
+  lua_createtable(L, 0, 8);
   number_field(L, "model", b.identity.model[s]);
   number_field(L, "params", b.params[s]);
   number_field(L, "material", b.identity.material[s]);
-  lua_pushboolean(L, bool(b.identity.flags[s] & Held));
-  lua_setfield(L, -2, "held");
   text(L, "p:" + std::to_string(b.authority.owner[s]));
   lua_setfield(L, -2, "owner");
   handle_field(L, "parent", b.parents.parent[s]);
