@@ -350,6 +350,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   std::deque<elaborate::FixtureResult> fixture_results;
   std::size_t script_errors = 0, phase_cursor = 0;
   std::vector<double> phase_ms;
+  double phase_max_ms = 0;
   constexpr std::size_t phase_samples_max = 4096;
   while (!stopping && (fixture_action || clock.step < final_step)) {
     FrameMarkStart("step work");
@@ -835,6 +836,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     }
     const auto now = Monotonic::now();
     const auto duration = std::chrono::duration<double, std::milli>(now - frame.started).count();
+    phase_max_ms = std::max(phase_max_ms, duration);
     if (phase_ms.size() < phase_samples_max)
       phase_ms.push_back(duration);
     else {
@@ -894,9 +896,11 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                     {"queued", queues.causal.size() + queues.turns.size()},
                     {"gaps", gaps.size()},
                     {"script_errors", script_errors},
+                    {"phase_max_ms", phase_max_ms},
                     {"phase_p50_ms", percentile(.5)},
                     {"phase_p95_ms", percentile(.95)},
                     {"phase_sample_steps", phase_ms.size()},
+                    {"phase_sample_window", "most_recent_steps"},
                     {"snapshot_pause_max_ms", snapshot_progress.pause_max_ms}}
                    .dump()
             << '\n';
