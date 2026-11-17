@@ -7,6 +7,91 @@ bool edge(const sp::Edges &edges, Handle from, Handle to) {
   auto *list = edges.out.get(from.slot());
   return list && std::find(list->begin(), list->end(), to) != list->end();
 }
+void clear_character_spawns() {
+  Scene scene;
+  scene.box({40, 40, 1}, {0, 0, -1}, sp::Motion::Static, 0, false);
+  scene.box({4, 4, 3}, {}, sp::Motion::Static, 0, false, false);
+  ObjectInit init;
+  init.model = 1;
+  const auto zone = create(scene.objects, init);
+  const auto geometry = sp::sensor_box_geometry(scene.space, {4, 4, 4});
+  require(sp::add_volume(scene.space, identity(scene.objects), transforms(scene.objects),
+                         {zone, geometry, {{0, 0, 1}, {}}, sp::VolumeKind::Zone})
+                  .status == sp::Status::Ok,
+          "spawn sensor fixture");
+  std::vector<Vec3> positions;
+  for (int i = 0; i < 20; ++i) {
+    const auto position = sp::clear_character_position(scene.space, {}, .3f, 1.8f);
+    require(position.z == 0 && (i || position == Vec3{}),
+            "clear origin or floor tangency was rejected by spawn search");
+    for (auto earlier : positions)
+      require((position - earlier).length() >= .6f,
+              "new character spawn overlaps an existing character");
+    positions.push_back(position);
+    scene.character(position);
+  }
+
+  Scene blocked;
+  const Vec3 origin{5, -4, 0};
+  blocked.box({6, 6, 3}, origin, sp::Motion::Kinematic, 0, false);
+  const auto position = sp::clear_character_position(blocked.space, origin, .3f, 1.8f);
+  require(position.z == origin.z &&
+              std::max(std::abs(position.x - origin.x), std::abs(position.y - origin.y)) >= 3.3f,
+          "spawn search did not clear the solid obstacle around its supplied origin");
+}
+void characters_pass_through_each_other() {
+  Scene scene;
+  scene.box({20, 12, .2f}, {0, 0, -.2f});
+  const auto wall = scene.box({.2f, 8, 3}, {2, 0, 0});
+  std::vector<Handle> occupants;
+  for (int i = 0; i < 12; ++i)
+    occupants.push_back(scene.character({}));
+  const auto walker = scene.character({-3, 0, .1f});
+  const auto hit = sp::sweep(scene.space, identity(scene.objects), walker, {6, 0, 0}, {});
+  require(hit && hit->object == wall,
+          ("character sweep must pass people and stop at wall " + to_string(wall) + "; hit " +
+           (hit ? to_string(hit->object) + " at " + std::to_string(hit->fraction) : "nothing"))
+              .c_str());
+  const auto visible = sp::raycast(scene.space, identity(scene.objects), {-1, 0, 1}, {1, 0, 1}, {});
+  require(visible && std::ranges::find(occupants, visible->object) != occupants.end(),
+          "noncolliding characters lost their query-visible bodies");
+  scene.wait_navigation();
+  const sp::MoveRequest move{walker, 1, sp::PointGoal{{1, 0, 0}, .15f}, {}};
+  bool arrived = false;
+  float nearest = INFINITY;
+  for (int tick = 0; tick < 200 && !arrived; ++tick) {
+    scene.tick({&move, 1});
+    nearest = std::min(nearest, scene.objects.position[walker.slot()].length());
+    for (auto occupant : occupants) {
+      const auto p = scene.objects.position[occupant.slot()];
+      require(std::abs(p.x) < .01f && std::abs(p.y) < .01f && std::abs(p.z) < .05f,
+              "co-located characters pushed one another or lost floor support");
+    }
+    arrived = std::ranges::any_of(scene.result.intents, [](const auto &progress) {
+      return progress.state == sp::IntentState::Arrived;
+    });
+  }
+  require(arrived && nearest < .3f, "walking failed to pass through co-located characters");
+  const auto seat = scene.box({1, 1, .2f}, {0, 0, -.2f}, sp::Motion::Kinematic, 0, false);
+  require(sp::attach(scene.objects_state, scene.space_state,
+                     {occupants.front(), seat, {{0, 0, .2f}, {}}, false})
+                      .status == sp::Status::Ok &&
+              sp::detach(scene.objects_state, scene.space_state,
+                         {occupants.front(), sp::Motion::Character, {}, {}})
+                      .status == sp::Status::Ok,
+          "another character obstructed detaching at the same position");
+
+  Scene pushing;
+  pushing.box({20, 12, .2f}, {0, 0, -.2f});
+  const auto pusher = pushing.character({-2, 0, 0});
+  const auto goods = pushing.box({.4f, .4f, .4f}, {}, sp::Motion::Dynamic, 0, false);
+  pushing.wait_navigation();
+  const sp::MoveRequest push{pusher, 2, sp::PointGoal{{2, 0, 0}, .15f}, {}};
+  for (int tick = 0; tick < 120; ++tick)
+    pushing.tick({&push, 1});
+  require(pushing.objects.position[goods.slot()].x > .2f,
+          "characters stopped pushing ordinary dynamic objects");
+}
 void returns_release_seated_standing_and_static_occupants() {
   Scene scene;
   const auto seat = scene.box({4, 4, 1}, {0, 0, 1});
@@ -402,10 +487,10 @@ void crowd_doorway_and_stale_tiles() {
   scene.box({24, 10, .2f}, {0, 0, -.2f});
   scene.box({.2f, 4.1f, 3}, {0, 2.95f, 0});
   scene.box({.2f, 4.1f, 3}, {0, -2.95f, 0});
-  auto a = scene.character({-3, -.3f, 0}), b = scene.character({3, .3f, 0});
+  auto a = scene.character({-3, 0, 0}), b = scene.character({3, 0, 0});
   scene.wait_navigation();
-  std::vector<sp::MoveRequest> requests{{a, 1, sp::PointGoal{{3, -.3f, 0}, .15f}, {}},
-                                        {b, 2, sp::PointGoal{{-3, .3f, 0}, .15f}, {}}};
+  std::vector<sp::MoveRequest> requests{{a, 1, sp::PointGoal{{3, 0, 0}, .15f}, {}},
+                                        {b, 2, sp::PointGoal{{-3, 0, 0}, .15f}, {}}};
   unsigned completed = 0;
   float nearest = INFINITY;
   for (int i = 0; i < 300 && !requests.empty(); ++i) {
@@ -419,7 +504,7 @@ void crowd_doorway_and_stale_tiles() {
                       [&](const auto &request) { return request.intent == progress.intent; });
       }
   }
-  require(nearest > .55f, "crowd proxies bypassed character collision");
+  require(nearest < .3f, "opposing walkers did not pass through each other");
   require(completed == 2, "two crowd agents failed to negotiate doorway");
 
   Scene edits;
@@ -531,7 +616,7 @@ void real_stair_navigation() {
   require(unreachable.status == sp::PathStatus::Unreachable,
           "new wall did not invalidate navigation");
 }
-void crowd_deviation_respects_retained_plot_boundaries() {
+void opposing_walks_respect_retained_plot_boundaries() {
   Scene scene;
   scene.box({20, 12, .2f}, {0, 0, -.2f});
   const auto first = scene.character({-4, -.15f, 0});
@@ -544,19 +629,21 @@ void crowd_deviation_respects_retained_plot_boundaries() {
        {{{-2, .25f, 0}, {2, .25f, 0}, {2, 3, 0}, {-2, 3, 0}}, -1, 5}}};
   std::vector<sp::MoveRequest> moves{{first, 1, sp::PointGoal{{4, -.15f, 0}, .1f}},
                                      {second, 2, sp::PointGoal{{-4, .15f, 0}, .1f}}};
-  bool stopped = false;
-  for (int i = 0; i < 160 && !stopped; ++i) {
+  unsigned completed = 0;
+  for (int i = 0; i < 200 && !moves.empty(); ++i) {
     scene.tick(moves, closed);
     for (const auto &progress : scene.result.intents)
-      stopped |= progress.path_status == sp::PathStatus::AccessDenied;
+      if (progress.state == sp::IntentState::Arrived) {
+        ++completed;
+        std::erase_if(moves, [&](const auto &move) { return move.intent == progress.intent; });
+      }
     for (const auto body : {first, second}) {
       const auto p = scene.objects.position[body.slot()];
       require(p.x <= -2 || p.x >= 2 || std::abs(p.y) <= .25f,
-              "crowd avoidance cannot carry a walker into a forbidden plot");
+              "opposing walks crossed a forbidden plot boundary");
     }
   }
-  require(stopped && scene.objects.position[first.slot()].x > -3.5f,
-          "a legal walk advances and then stops when crowd motion reaches a closed lot edge");
+  require(completed == 2, "noncolliding walkers failed to cross the legal strip");
 }
 void displaced_walk_replans_with_fresh_boundaries() {
   Scene scene;
@@ -1347,6 +1434,8 @@ int main(int argc, char **argv) {
       density_benchmarks();
       return 0;
     }
+    clear_character_spawns();
+    characters_pass_through_each_other();
     returns_release_seated_standing_and_static_occupants();
     expired_native_queries_stop();
     sensor_contacts_use_body_overlap();
@@ -1355,7 +1444,7 @@ int main(int argc, char **argv) {
     terrain_sweep();
     attachments_and_sweep();
     real_stair_navigation();
-    crowd_deviation_respects_retained_plot_boundaries();
+    opposing_walks_respect_retained_plot_boundaries();
     displaced_walk_replans_with_fresh_boundaries();
     waiting_navigation_finishes_after_unrelated_tiles();
     object_goal_uses_reachable_side();

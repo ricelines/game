@@ -67,7 +67,7 @@ struct Settings {
   std::uint32_t max_bodies, max_body_pairs, max_contacts, physics_temp_bytes;
   float contact_slop_m, sweep_skin_m, crowd_correction_m, blocked_after_s;
   std::uint32_t max_characters;
-  float crowd_query_radius_multiplier, crowd_optimize_radius_multiplier, crowd_separation_weight;
+  float crowd_optimize_radius_multiplier;
   float terrain_tile_m;
 };
 struct Space {
@@ -119,6 +119,7 @@ BodyPreflight can_add(const Space &, std::span<const BodySpec>, std::size_t sens
                       std::span<const Handle> retiring = {});
 ImportResult import_geometry(Space &, const GeometrySource &);
 GeometryId sensor_box_geometry(Space &, Vec3 size);
+Vec3 clear_character_position(const Space &, Vec3 origin, float radius_m, float height_m);
 struct BodyMotion {
   Motion motion;
   bool collision_solid, independent;

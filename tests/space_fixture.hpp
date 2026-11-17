@@ -49,9 +49,7 @@ inline sp::Settings settings() {
       f(p["CROWD_CORRECTION_M"]),
       f(p["BLOCKED_AFTER_S"]),
       i(p["MAX_CHARACTERS"]),
-      f(n["CROWD_QUERY_RADIUS_MULTIPLIER"]),
       f(n["CROWD_OPTIMIZE_RADIUS_MULTIPLIER"]),
-      f(n["CROWD_SEPARATION_WEIGHT"]),
       f(config["land"]["TERRAIN_TILE_M"])};
 }
 class Output final : public JPH::StreamOut {

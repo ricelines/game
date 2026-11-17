@@ -143,9 +143,12 @@ void check_joining(const Json &plan, catalog::State &catalog, react::State &reac
                    const Settings &settings, const std::filesystem::path &asset_root) {
   const auto model = newcomer_model(plan, catalog, react);
   const step::Clock clock{.step = 7, .hz = 20};
+  step::State step;
+  step.clock = clock;
+  space::State space(settings.space, settings.light_cell_m);
   const auto expected = static_cast<PlayerId>(net.profiles.rows.size());
   auto joined = step::create_join({"  New arrival  "}, net.profiles, permissions, objects, catalog,
-                                  plan.at("newcomer"), model, clock);
+                                  plan.at("newcomer"), model, clock, space);
   require(joined.player == expected && joined.refusal.empty(),
           "join did not allocate the next player");
   const auto &profile = net.profiles.rows.at(joined.player);
@@ -178,33 +181,6 @@ void check_joining(const Json &plan, catalog::State &catalog, react::State &reac
     require(permissions.grants.rows[grant].issuer == joined.player,
             "newcomer grants were not issued by the newcomer");
 
-  const auto profiles_before = net.profiles.rows.size(),
-             players_before = permissions.players.rows.size();
-  const auto objects_before = objects.objects.model.size(),
-             grants_before = permissions.grants.rows.size();
-  for (const auto &name : {std::string(" new ARRIVAL "), std::string(""), std::string(33, 'x')}) {
-    const auto refused = step::create_join({name}, net.profiles, permissions, objects, catalog,
-                                           plan.at("newcomer"), model, clock);
-    require(!refused.player &&
-                refused.refusal == (name == " new ARRIVAL " ? "name_taken" : "bad_input"),
-            "join did not reject a duplicate or invalid name");
-  }
-  require(net.profiles.rows.size() == profiles_before &&
-              permissions.players.rows.size() == players_before &&
-              objects.objects.model.size() == objects_before &&
-              permissions.grants.rows.size() == grants_before,
-          "a refused join partially created a player, body or grants");
-  std::string unicode_name;
-  for (int i = 0; i < 32; ++i)
-    unicode_name += "界";
-  const auto second = step::create_join({unicode_name}, net.profiles, permissions, objects, catalog,
-                                        plan.at("newcomer"), model, clock);
-  require(second.player == joined.player + 1,
-          "second join did not preserve Unicode or allocate the next id");
-
-  step::State step;
-  step.clock = clock;
-  space::State space(settings.space, settings.light_cell_m);
   for (auto object : joined.objects) {
     const auto &asset = catalog.assets.rows.at(catalog.models.rows[ids.model[object.slot()]].asset);
     step::import_geometry_asset(step.geometry, space.space, asset, asset_root);
@@ -221,6 +197,38 @@ void check_joining(const Json &plan, catalog::State &catalog, react::State &reac
                                 return event && event->receiver == body && event->event == start;
                               }),
           "joining did not schedule the real body startup event");
+
+  const auto profiles_before = net.profiles.rows.size(),
+             players_before = permissions.players.rows.size();
+  const auto objects_before = objects.objects.model.size(),
+             grants_before = permissions.grants.rows.size();
+  for (const auto &name : {std::string(" new ARRIVAL "), std::string(""), std::string(33, 'x')}) {
+    const auto refused = step::create_join({name}, net.profiles, permissions, objects, catalog,
+                                           plan.at("newcomer"), model, clock, space);
+    require(!refused.player &&
+                refused.refusal == (name == " new ARRIVAL " ? "name_taken" : "bad_input"),
+            "join did not reject a duplicate or invalid name");
+  }
+  require(net.profiles.rows.size() == profiles_before &&
+              permissions.players.rows.size() == players_before &&
+              objects.objects.model.size() == objects_before &&
+              permissions.grants.rows.size() == grants_before,
+          "a refused join partially created a player, body or grants");
+  std::string unicode_name;
+  for (int i = 0; i < 32; ++i)
+    unicode_name += "界";
+  const auto second = step::create_join({unicode_name}, net.profiles, permissions, objects, catalog,
+                                        plan.at("newcomer"), model, clock, space);
+  require(second.player == joined.player + 1,
+          "second join did not preserve Unicode or allocate the next id");
+  const auto second_body = net.profiles.rows[second.player].body;
+  const auto &asset = catalog.assets.rows.at(catalog.models.rows.at(model).asset);
+  const auto size = asset.maximum - asset.minimum;
+  require((objects.objects.position[second_body.slot()] - objects.objects.position[body.slot()])
+                  .length() >= std::max(size.x, size.y),
+          "successive joins overlap their physical bodies");
+  step::activate_join(catalog, react, objects, space, net, step, settings, second.objects);
+
   net.sessions.accept(net::Connected{100});
   const auto connected =
       net.sessions.establish(100, net.profiles.rows[joined.player], net::Mode::Play, false);
@@ -253,8 +261,9 @@ void check_joining(const Json &plan, catalog::State &catalog, react::State &reac
              players_without_script = permissions.players.rows.size();
   const auto objects_without_script = objects.objects.model.size(),
              grants_without_script = permissions.grants.rows.size();
-  const auto unavailable = step::create_join({"Later arrival"}, net.profiles, permissions, objects,
-                                             catalog, plan.at("newcomer"), configured_model, clock);
+  const auto unavailable =
+      step::create_join({"Later arrival"}, net.profiles, permissions, objects, catalog,
+                        plan.at("newcomer"), configured_model, clock, space);
   require(!unavailable.player && unavailable.refusal == "refused" &&
               net.profiles.rows.size() == profiles_without_script &&
               permissions.players.rows.size() == players_without_script &&

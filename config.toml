@@ -146,10 +146,8 @@ POLYGONS_PER_TILE = 4096
 # Two tile workers keep navigation construction off the writer.
 WORKERS = 2
 
-# Detour steering defaults in body-radius units; tune algorithm reach independently of authored speed.
-CROWD_QUERY_RADIUS_MULTIPLIER = 12.0
+# Detour path optimization range in body-radius units.
 CROWD_OPTIMIZE_RADIUS_MULTIPLIER = 30.0
-CROWD_SEPARATION_WEIGHT = 2.0
 
 [land]
 STREET_WIDTH_M = 100

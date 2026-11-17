@@ -128,7 +128,7 @@ public:
   bool ShouldCollide(JPH::ObjectLayer a, JPH::ObjectLayer b) const override {
     if (a == 4 || b == 4)
       return a == 2 || b == 2;
-    return !(a == 0 && b == 0) && !(a == 2 && b == 2);
+    return !(a == 0 && b == 0) && !(a == 2 && b == 2) && !(a == 3 && b == 3);
   }
 };
 struct CachedContact : Contact {
@@ -142,7 +142,6 @@ struct Space::Native {
   JPH::PhysicsSystem physics;
   JPH::TempAllocatorImpl temp;
   JPH::JobSystemSingleThreaded jobs;
-  JPH::CharacterVsCharacterCollisionSimple characters;
   std::vector<std::shared_ptr<Geometry>> geometries{nullptr};
   std::shared_ptr<Geometry> terrain_geometry;
   std::map<std::uint64_t, Mirror> bodies;
@@ -170,24 +169,16 @@ struct Space::Native {
   } listener;
   struct CharacterListener final : JPH::CharacterContactListener {
     Native &state;
-    using Key = std::tuple<std::uint64_t, std::uint32_t, std::uint32_t, std::uint32_t>;
+    using Key = std::tuple<std::uint64_t, std::uint32_t, std::uint32_t>;
     std::map<Key, CachedContact> pairs;
     explicit CharacterListener(Native &n) : state(n) {}
     void add(const JPH::CharacterVirtual *, const JPH::CharacterContact &, bool);
-    void remove(const JPH::CharacterVirtual *, const JPH::BodyID &, const JPH::CharacterID &,
-                const JPH::SubShapeID &);
     void OnContactAdded(const JPH::CharacterVirtual *, const JPH::CharacterContact &,
                         JPH::CharacterContactSettings &) override;
     void OnContactPersisted(const JPH::CharacterVirtual *, const JPH::CharacterContact &,
                             JPH::CharacterContactSettings &) override;
     void OnContactRemoved(const JPH::CharacterVirtual *, const JPH::BodyID &,
                           const JPH::SubShapeID &) override;
-    void OnCharacterContactAdded(const JPH::CharacterVirtual *, const JPH::CharacterContact &,
-                                 JPH::CharacterContactSettings &) override;
-    void OnCharacterContactPersisted(const JPH::CharacterVirtual *, const JPH::CharacterContact &,
-                                     JPH::CharacterContactSettings &) override;
-    void OnCharacterContactRemoved(const JPH::CharacterVirtual *, const JPH::CharacterID &,
-                                   const JPH::SubShapeID &) override;
   } character_listener;
   dtNavMesh *mesh = nullptr;
   dtNavMeshQuery *query = nullptr;

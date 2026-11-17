@@ -97,9 +97,7 @@ Settings read_settings(const std::filesystem::path &path, std::string_view profi
   s.default_friction = f("space", "DEFAULT_FRICTION");
   s.default_restitution = f("space", "DEFAULT_RESTITUTION");
   s.goal_tolerance_m = f("space", "GOAL_TOLERANCE_M");
-  s.space.crowd_query_radius_multiplier = f("navigation", "CROWD_QUERY_RADIUS_MULTIPLIER");
   s.space.crowd_optimize_radius_multiplier = f("navigation", "CROWD_OPTIMIZE_RADIUS_MULTIPLIER");
-  s.space.crowd_separation_weight = f("navigation", "CROWD_SEPARATION_WEIGHT");
   s.space.navigation = {f("navigation", "CELL_M"),
                         f("navigation", "CELL_HEIGHT_M"),
                         size("navigation", "TILE_CELLS"),

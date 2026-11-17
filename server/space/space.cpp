@@ -202,7 +202,6 @@ void extract_native(Space::Native &n, Handle object) {
       n.crowd->removeAgent(it->second.agent);
     if (it->second.character) {
       n.handles.erase(it->second.body.GetIndexAndSequenceNumber());
-      n.characters.Remove(it->second.character.get());
       it->second.character.reset();
     } else
       destroy_rigid(n, it->second.body);
@@ -322,9 +321,20 @@ void flags_for(SpaceFlags flags, Handle h, Motion motion, bool held) {
   flags.set(h.slot(), bits | (held ? Held : 0u));
 }
 namespace {
+JPH::ShapeRefC character_shape(float radius_m, float height_m) {
+  auto capsule = JPH::Ref<JPH::Shape>(new JPH::CapsuleShape(height_m * .5f - radius_m, radius_m));
+  return new JPH::RotatedTranslatedShape(
+      {0, 0, height_m * .5f},
+      JPH::Quat::sRotation(JPH::Vec3::sAxisX(), std::numbers::pi_v<float> * .5f), capsule);
+}
 class SolidObjects final : public JPH::ObjectLayerFilter {
+  bool characters;
+
 public:
-  bool ShouldCollide(JPH::ObjectLayer l) const override { return l != 2 && l != 4; }
+  explicit SolidObjects(bool include_characters = true) : characters(include_characters) {}
+  bool ShouldCollide(JPH::ObjectLayer l) const override {
+    return l != 2 && l != 4 && (characters || l != 3);
+  }
 };
 std::vector<Handle> overlapping_zones(Space::Native &n, IdentityRead identity, const Mirror &body) {
   class Sensors final : public JPH::ObjectLayerFilter {
@@ -478,7 +488,6 @@ Space::Native::~Native() {
   for (auto &[key, body] : bodies) {
     (void)key;
     if (body.character) {
-      characters.Remove(body.character.get());
       body.character.reset();
     } else
       destroy_rigid(*this, body.body);
@@ -565,8 +574,7 @@ void Space::Native::CharacterListener::add(const JPH::CharacterVirtual *characte
   const Handle first{character->GetUserData()}, second{hit.mUserData};
   if (!first || !second || first == second)
     return;
-  const Key key{first.bits, hit.mBodyB.GetIndexAndSequenceNumber(), hit.mCharacterIDB.GetValue(),
-                hit.mSubShapeIDB.GetValue()};
+  const Key key{first.bits, hit.mBodyB.GetIndexAndSequenceNumber(), hit.mSubShapeIDB.GetValue()};
   if (hit.mIsSensorB) {
     auto found = pairs.find(key);
     if (found == pairs.end()) {
@@ -588,12 +596,10 @@ void Space::Native::CharacterListener::add(const JPH::CharacterVirtual *characte
   if (started)
     state.contacts.push_back(contact);
 }
-void Space::Native::CharacterListener::remove(const JPH::CharacterVirtual *character,
-                                              const JPH::BodyID &body,
-                                              const JPH::CharacterID &other,
-                                              const JPH::SubShapeID &subshape) {
-  const Key key{character->GetUserData(), body.GetIndexAndSequenceNumber(), other.GetValue(),
-                subshape.GetValue()};
+void Space::Native::CharacterListener::OnContactRemoved(const JPH::CharacterVirtual *character,
+                                                        const JPH::BodyID &body,
+                                                        const JPH::SubShapeID &subshape) {
+  const Key key{character->GetUserData(), body.GetIndexAndSequenceNumber(), subshape.GetValue()};
   const auto found = pairs.find(key);
   if (found == pairs.end())
     return;
@@ -616,26 +622,6 @@ void Space::Native::CharacterListener::OnContactPersisted(const JPH::CharacterVi
                                                           const JPH::CharacterContact &hit,
                                                           JPH::CharacterContactSettings &) {
   add(c, hit, false);
-}
-void Space::Native::CharacterListener::OnContactRemoved(const JPH::CharacterVirtual *c,
-                                                        const JPH::BodyID &body,
-                                                        const JPH::SubShapeID &subshape) {
-  remove(c, body, JPH::CharacterID{}, subshape);
-}
-void Space::Native::CharacterListener::OnCharacterContactAdded(const JPH::CharacterVirtual *c,
-                                                               const JPH::CharacterContact &hit,
-                                                               JPH::CharacterContactSettings &) {
-  add(c, hit, true);
-}
-void Space::Native::CharacterListener::OnCharacterContactPersisted(
-    const JPH::CharacterVirtual *c, const JPH::CharacterContact &hit,
-    JPH::CharacterContactSettings &) {
-  add(c, hit, false);
-}
-void Space::Native::CharacterListener::OnCharacterContactRemoved(const JPH::CharacterVirtual *c,
-                                                                 const JPH::CharacterID &other,
-                                                                 const JPH::SubShapeID &subshape) {
-  remove(c, JPH::BodyID{}, other, subshape);
 }
 void Space::Native::Listener::add(const JPH::Body &a, const JPH::Body &b,
                                   const JPH::ContactManifold &m, bool started) {
@@ -813,6 +799,43 @@ GeometryId sensor_box_geometry(Space &space, Vec3 size) {
   n.geometries.push_back(std::move(geometry));
   return id;
 }
+Vec3 clear_character_position(const Space &space, Vec3 origin, float radius_m, float height_m) {
+  class Obstruction final : public JPH::CollideShapeCollector {
+    float slop;
+
+  public:
+    explicit Obstruction(float value) : slop(value) {}
+    void AddHit(const JPH::CollideShapeResult &hit) override {
+      if (hit.mPenetrationDepth > slop)
+        ForceEarlyOut();
+    }
+  };
+  const auto &n = *space.native;
+  const auto shape = character_shape(radius_m, height_m);
+  SolidObjects solids;
+  auto clear = [&](Vec3 position) {
+    Obstruction obstruction(n.settings.contact_slop_m);
+    const auto matrix =
+        JPH::RMat44::sTranslation(jv(position)).PreTranslated(shape->GetCenterOfMass());
+    n.physics.GetNarrowPhaseQuery().CollideShape(shape, JPH::Vec3::sReplicate(1), matrix,
+                                                 JPH::CollideShapeSettings{}, JPH::RVec3::sZero(),
+                                                 obstruction, {}, solids);
+    return !obstruction.ShouldEarlyOut();
+  };
+  if (clear(origin))
+    return origin;
+  const auto spacing = 2 * (radius_m + n.settings.sweep_skin_m);
+  for (int ring = 1;; ++ring) {
+    Vec3 offset{-float(ring), -float(ring), 0};
+    for (const Vec3 direction : {Vec3{1, 0, 0}, Vec3{0, 1, 0}, Vec3{-1, 0, 0}, Vec3{0, -1, 0}})
+      for (int step = 0; step < 2 * ring; ++step) {
+        const auto position = origin + offset * spacing;
+        if (clear(position))
+          return position;
+        offset = offset + direction;
+      }
+  }
+}
 std::optional<BodyMotion> body_motion(const Space &space, IdentityRead identity, Handle object) {
   const auto &n = *space.native;
   if (!identity.valid(object))
@@ -913,20 +936,14 @@ OperationResult add(Space &space, IdentityRead identity, TransformRead transform
     settings.mMaxSlopeAngle = c.max_slope_radians;
     settings.mMass = c.mass_kg;
     settings.mMaxStrength = c.max_push_force_n;
-    auto capsule =
-        JPH::Ref<JPH::Shape>(new JPH::CapsuleShape(c.height_m * .5f - c.radius_m, c.radius_m));
-    settings.mShape = new JPH::RotatedTranslatedShape(
-        {0, 0, c.height_m * .5f},
-        JPH::Quat::sRotation(JPH::Vec3::sAxisX(), std::numbers::pi_v<float> * .5f), capsule);
+    settings.mShape = character_shape(c.radius_m, c.height_m);
     settings.mInnerBodyShape = settings.mShape;
     settings.mInnerBodyLayer = 3;
     settings.mEnhancedInternalEdgeRemoval = true;
     settings.mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisZ(), -c.radius_m);
     body.character = std::make_unique<JPH::CharacterVirtual>(
         &settings, jv(body.pose.position), jq(body.pose.rotation), spec.object.bits, &n.physics);
-    body.character->SetCharacterVsCharacterCollision(&n.characters);
     body.character->SetListener(&n.character_listener);
-    n.characters.Add(body.character.get());
     body.body = body.character->GetInnerBodyID();
   } else {
     body.body = create_rigid(n, body, spec.motion);
@@ -1488,7 +1505,7 @@ OperationResult detach(amber::ObjectState &objects_state, amber::space::State &s
   const auto shape = body->character ? body->character->GetShape()
                                      : n.geometries[body->spec.geometry]->hull.GetPtr();
   JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
-  SolidObjects objects;
+  SolidObjects objects(!body->character);
   BodyFilter bodies(n, {release.subject, attachment->second.parent, false});
   auto matrix = JPH::RMat44::sRotationTranslation(jq(body->pose.rotation), jv(body->pose.position))
                     .PreTranslated(shape->GetCenterOfMass());
@@ -1561,7 +1578,7 @@ std::optional<Hit> sweep(const Space &space, IdentityRead identity, Handle objec
     }
   } collector(delta);
   filter.ignore_a = object;
-  SolidObjects objects;
+  SolidObjects objects(!body.character);
   BodyFilter bodies(n, filter);
   auto cast = JPH::RShapeCast::sFromWorldTransform(
       shape, JPH::Vec3::sReplicate(1),
@@ -1713,16 +1730,15 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
         vertical <= 0)
       vertical = body.character->GetGroundVelocity().GetZ();
     auto velocity = desired + Vec3{0, 0, vertical} + n.settings.gravity_m_s2 * seconds;
-    body.character->SetLinearVelocity(
-        body.character->CancelVelocityTowardsSteepSlopes(jv(velocity)));
+    body.character->SetLinearVelocity(jv(velocity));
     JPH::CharacterVirtual::ExtendedUpdateSettings settings;
     const auto &c = *body.spec.character;
     settings.mWalkStairsStepUp = {0, 0, c.max_step_m};
     settings.mStickToFloorStepDown = {0, 0, -c.floor_snap_m};
     BodyFilter filter(n, {{bits}, {}, false});
     body.character->ExtendedUpdate(seconds, jv(n.settings.gravity_m_s2), settings,
-                                   n.physics.GetDefaultBroadPhaseLayerFilter(1),
-                                   n.physics.GetDefaultLayerFilter(1), filter, {}, n.temp);
+                                   n.physics.GetDefaultBroadPhaseLayerFilter(3),
+                                   n.physics.GetDefaultLayerFilter(3), filter, {}, n.temp);
     body.pose = {av(body.character->GetPosition()), aq(body.character->GetRotation())};
     if (body.character->GetGroundState() != JPH::CharacterBase::EGroundState::OnGround &&
         body.agent >= 0) {

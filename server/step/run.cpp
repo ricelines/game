@@ -396,7 +396,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       if (admission) {
         if (const auto *request = std::get_if<net::JoinRequest>(&admission->request)) {
           auto joined = create_join(*request, profiles, perm_state, objects_state, catalog_state,
-                                    plan.at("newcomer"), newcomer_model, clock);
+                                    plan.at("newcomer"), newcomer_model, clock, space_state);
           record::Event event;
           event.step = clock.step;
           event.kind = record::Kind::System;

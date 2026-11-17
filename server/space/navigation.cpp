@@ -400,8 +400,7 @@ void request_corner(Space::Native &n, Mirror &body) {
   if (body.agent < 0)
     return;
   if (body.waypoint + 1 < body.route.size()) {
-    // Intermediate corners are through points. Target mode slows down as if
-    // each were the destination, allowing crowd separation to stall the walk.
+    // Intermediate corners are through points; only the final goal slows the walk.
     auto velocity = nav(body.route[body.waypoint] - body.pose.position);
     velocity.y = 0;
     const float distance = velocity.length();
@@ -466,11 +465,9 @@ void plan_move(Space &space, IdentityRead identity, const MoveRequest &request,
     params.height = c.height_m;
     params.maxAcceleration = c.acceleration_m_s2;
     params.maxSpeed = c.max_speed_m_s;
-    params.collisionQueryRange = c.radius_m * n.settings.crowd_query_radius_multiplier;
+    params.collisionQueryRange = 0;
     params.pathOptimizationRange = c.radius_m * n.settings.crowd_optimize_radius_multiplier;
-    params.updateFlags = DT_CROWD_ANTICIPATE_TURNS | DT_CROWD_OBSTACLE_AVOIDANCE |
-                         DT_CROWD_SEPARATION | DT_CROWD_OPTIMIZE_VIS | DT_CROWD_OPTIMIZE_TOPO;
-    params.separationWeight = n.settings.crowd_separation_weight;
+    params.updateFlags = DT_CROWD_ANTICIPATE_TURNS | DT_CROWD_OPTIMIZE_VIS | DT_CROWD_OPTIMIZE_TOPO;
     body.agent = n.crowd->addAgent(&position.x, &params);
   }
   while (body.waypoint + 1 < body.route.size() &&

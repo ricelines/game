@@ -99,7 +99,7 @@ void admit_operator(const net::Admission &, net::State &, perm::State &, const n
                     const amber::Settings &, record::Journal &, const Clock &);
 JoinResult create_join(const net::JoinRequest &, net::Profiles &, perm::State &, ObjectState &,
                        const catalog::State &, const nlohmann::json &newcomer, ModelId,
-                       const Clock &);
+                       const Clock &, const space::State &);
 react::DeferredEffects activate_join(const catalog::State &, react::State &, ObjectState &,
                                      space::State &, net::State &, State &, const amber::Settings &,
                                      std::span<const Handle>);
