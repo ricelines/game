@@ -189,7 +189,7 @@ void retire_publication(net::ReplicationIndex &replication, catalog::InstanceTex
   }
 }
 
-void refresh_object_plots(const space::Space &space, const ObjectState &objects_state,
+void refresh_object_plots(const space::State &space_state, const ObjectState &objects_state,
                           react::State &react_state, const catalog::State &catalog_state,
                           const Clock &clock, const amber::Origin &origin, NativeCompletion &out) {
   const auto values = react::value_read(objects_state, catalog_state, react_state);
@@ -205,9 +205,9 @@ void refresh_object_plots(const space::Space &space, const ObjectState &objects_
   out.hidden_objects.clear();
   for (auto object : out.changed_objects) {
     const bool visible =
-        space::body_motion(space, identity, object).has_value() ||
-        (space::is_logical_root(space, identity, object) &&
-         (!(identity.flags[object.slot()] & Held) || space::bounds(space, identity, object)));
+        space::body_motion(space_state.space, identity, object).has_value() ||
+        (space::is_logical_root(space_state.space, identity, object) &&
+         (!(identity.flags[object.slot()] & Held) || space::bounds(space_state, identity, object)));
     (visible ? out.visible_objects : out.hidden_objects).push_back(object);
   }
   unique(out.crossed_plots);

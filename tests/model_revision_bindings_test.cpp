@@ -131,8 +131,8 @@ void two_owners_and_hidden_goods() {
               37 &&
           x.f.instance_settings.columns[12].get(first[1].slot())->numeric() == 91,
       "definition editing preserves owners, state and instance settings");
-  require(space::bounds(x.world, ids, first[0])->max.x > 1.9f &&
-              !space::bounds(x.world, ids, second[0]),
+  require(space::bounds(x.space_state, ids, first[0])->max.x > 1.9f &&
+              !space::bounds(x.space_state, ids, second[0]),
           "real visible collision changes while hidden inventory stays hidden");
   const auto retained = x.f.objects.model[first[1].slot()];
   const auto children = lifecycle::collect(x.parts, ids, first[0]);
@@ -200,8 +200,8 @@ void default_and_explicit_parameters_update_in_place() {
               x.f.objects.params[a[0].slot()] == 0 && x.f.objects.params[b[0].slot()] == 1 &&
               catalog::resolve_asset(x.f.models, x.parameters, 1, 1).hash == variant.hash,
           "default and explicit instances keep their parameter identities on the new definition");
-  require(space::bounds(x.world, identity(x.f.objects), a[0])->max.x > 1.9f &&
-              space::bounds(x.world, identity(x.f.objects), b[0])->max.x > 6.9f,
+  require(space::bounds(x.space_state, identity(x.f.objects), a[0])->max.x > 1.9f &&
+              space::bounds(x.space_state, identity(x.f.objects), b[0])->max.x > 6.9f,
           "actual native shapes follow each independently baked new parameter set");
   require(x.f.assets.parameter_rows.at(1).volume == 4,
           "existing parameter block's measured facts follow its new geometry");

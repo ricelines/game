@@ -28,8 +28,8 @@ void entry_authority_is_sampled_for_each_plan() {
   auto tick = [&] {
     ++state.clock.step;
     space::install_ready_navigation(scene.space);
-    auto result = step::advance_motion(scene.space, scene.objects_state, scene.relations, state,
-                                       permissions, state.clock, .15f, 1.5f);
+    auto result = step::advance_motion(scene.space_state, scene.objects_state, state, permissions,
+                                       state.clock, .15f, 1.5f);
     step::finish_motion(state, result.intents);
     return result;
   };

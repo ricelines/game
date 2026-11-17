@@ -218,9 +218,12 @@ Scan scan(const amber::ObjectState &objects_state, const Observer &observer, Han
   };
   std::vector<Candidate> candidates;
   candidates.reserve(nearby.size());
+  std::unordered_set<std::uint64_t> visited;
   for (const auto &row : nearby) {
     const auto object = logical_root(world, identity, parts, row.object);
-    const auto bounds = space::bounds(world, identity, object).value_or(row.world_bounds);
+    if (object == observer.body || !visited.insert(object.bits).second)
+      continue;
+    const auto bounds = space::bounds(space_state, identity, object).value_or(row.world_bounds);
     const auto size = bounds.max - bounds.min;
     const auto dist = distance(observer.eye, bounds);
     candidates.push_back(
@@ -239,14 +242,11 @@ Scan scan(const amber::ObjectState &objects_state, const Observer &observer, Han
   std::unordered_map<std::uint64_t, float> speeds;
   for (auto row : motion)
     speeds[row.object.bits] = row.velocity.length();
-  std::unordered_set<std::uint64_t> visited;
   std::vector<space::LightSample> samples;
   std::vector<Handle> ignore, zones;
   auto limit = requested ? requested : settings.things_max;
   for (const auto &candidate : candidates) {
     auto object = candidate.object;
-    if (object == observer.body || !visited.insert(object.bits).second)
-      continue;
     auto b = candidate.bounds;
     auto center = (b.min + b.max) * .5f;
     float dist = candidate.distance_m;

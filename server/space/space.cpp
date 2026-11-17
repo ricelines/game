@@ -1280,19 +1280,23 @@ void volumes_at(const Space &space, IdentityRead identity, Vec3 point, VolumeKin
   out.erase(std::unique(out.begin(), out.end()), out.end());
 }
 
-std::optional<Bounds> bounds(const Space &space, IdentityRead identity, Handle object) {
+std::optional<Bounds> bounds(const State &state, IdentityRead identity, Handle object) {
   if (!identity.valid(object))
     return {};
-  const auto &n = *space.native;
+  const auto &n = *state.space.native;
   auto collect = [&](auto &&self, Handle subject) -> std::optional<Bounds> {
     std::optional<Bounds> result;
     auto body = n.bodies.find(subject.bits);
     if (body != n.bodies.end())
       result = n.world_bounds(body->second);
-    for (const auto &[bits, attachment] : n.attachments) {
-      if (attachment.parent != subject || !identity.valid({bits}))
+    const auto *children = state.physical_relations.attached_to.in.get(subject.slot());
+    if (!children)
+      return result;
+    for (auto attached : *children) {
+      // Stored assemblies retain their relation edges without native attachments.
+      if (!identity.valid(attached) || !n.attachments.contains(attached.bits))
         continue;
-      auto child = self(self, Handle{bits});
+      auto child = self(self, attached);
       if (!child)
         continue;
       if (!result)

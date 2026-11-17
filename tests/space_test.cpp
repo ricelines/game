@@ -320,7 +320,7 @@ void gravity_visibility_zones_and_snapshot() {
   require(std::abs(scene.objects.position[falling.slot()].z) < .04f,
           "gravity did not land on baked mesh");
   if (!edge(scene.relations.supports, floor, falling)) {
-    auto b = *sp::bounds(scene.space, identity(scene.objects), falling);
+    auto b = *sp::bounds(scene.space_state, identity(scene.objects), falling);
     std::cerr << "support probe base=" << scene.objects.position[falling.slot()].z
               << " bounds=" << b.min.z << "," << b.max.z << "\n";
     auto probe = sp::raycast(scene.space, identity(scene.objects), {0, 0, b.min.z + .015f},
@@ -479,8 +479,16 @@ void snapshot_continuation_and_fixed_parts() {
           "nested attachments depended on slot order");
   auto ray = sp::raycast(restored.space, identity(restored.objects), {3, 0, 1}, {5, 0, 1}, {});
   require(ray && ray->object == part, "fixed part became noncollidable when attached");
-  auto assembly = sp::bounds(restored.space, identity(restored.objects), root);
+  auto assembly = sp::bounds(restored.space_state, identity(restored.objects), root);
   require(assembly && assembly->max.z > 2.1f, "empty root did not include child bounds");
+  require(sp::detach(restored.objects_state, restored.space_state,
+                     {grandchild, sp::Motion::Dynamic, {}, {}})
+                  .status == sp::Status::Ok,
+          "nested part can detach from the assembly");
+  require(sp::bounds(restored.space_state, identity(restored.objects), root)->max.z < 2.01f &&
+              sp::bounds(restored.space_state, identity(restored.objects), grandchild)->max.z >
+                  2.1f,
+          "detached geometry keeps its own bounds and stops extending its former root");
 }
 void crowd_doorway_and_stale_tiles() {
   Scene scene;
@@ -520,8 +528,8 @@ void crowd_doorway_and_stale_tiles() {
   sp::set_pose(edits.space, identity(edits.objects), transforms(edits.objects), wall,
                {{10, 0, 0}, {}});
   edits.wait_navigation();
-  auto route =
-      sp::path(edits.space, identity(edits.objects), walker, sp::PointGoal{{5, 0, 0}, .1f}, {});
+  auto route = sp::path(edits.space_state, identity(edits.objects), walker,
+                        sp::PointGoal{{5, 0, 0}, .1f}, {});
   require(route.status == sp::PathStatus::Ready, "stale worker result restored an obsolete wall");
   sp::MoveRequest gone{walker, 9, sp::ObjectGoal{wall, 1.5f}, {}};
   std::vector<sp::RelationChange> changes;
@@ -585,8 +593,8 @@ void real_stair_navigation() {
   scene.box({5, 5, .2f}, {7.825f, 0, 1.6f});
   auto walker = scene.character({-2, 0, 0});
   scene.wait_navigation();
-  auto route =
-      sp::path(scene.space, identity(scene.objects), walker, sp::PointGoal{{8, 0, 1.8f}, .15f}, {});
+  auto route = sp::path(scene.space_state, identity(scene.objects), walker,
+                        sp::PointGoal{{8, 0, 1.8f}, .15f}, {});
   require(route.status == sp::PathStatus::Ready && route.corners.size() > 1,
           "real staircase has no path");
   sp::MoveRequest move{walker, 1, sp::PointGoal{{8, 0, 1.8f}, .15f}, {}};
@@ -603,7 +611,7 @@ void real_stair_navigation() {
   std::cout << "stair endpoint " << position.x << "," << position.y << "," << position.z << "\n";
   require(arrived && position.z > 1.7f, "CharacterVirtual failed to climb Detour staircase");
   sp::TravelBoundary closed{{{4, -5, 0}, {5, -5, 0}, {5, 5, 0}, {4, 5, 0}}, -1, 5};
-  auto denied = sp::path(scene.space, identity(scene.objects), walker,
+  auto denied = sp::path(scene.space_state, identity(scene.objects), walker,
                          sp::PointGoal{{-2, 0, 0}, .1f}, {&closed, 1});
   require(denied.status == sp::PathStatus::AccessDenied, "forbidden entry path accepted");
   auto wall = scene.box({.2f, 20, 4}, {6, 0, 0});
@@ -611,8 +619,8 @@ void real_stair_navigation() {
   auto revision = sp::navigation_revision(scene.space);
   scene.wait_navigation();
   require(sp::navigation_revision(scene.space) > revision, "construction did not replace tiles");
-  auto unreachable =
-      sp::path(scene.space, identity(scene.objects), walker, sp::PointGoal{{-2, 0, 0}, .1f}, {});
+  auto unreachable = sp::path(scene.space_state, identity(scene.objects), walker,
+                              sp::PointGoal{{-2, 0, 0}, .1f}, {});
   require(unreachable.status == sp::PathStatus::Unreachable,
           "new wall did not invalidate navigation");
 }
@@ -676,11 +684,11 @@ void waiting_navigation_finishes_after_unrelated_tiles() {
     scene.tick();
   scene.box({1, 1, .2f}, {50, 50, 0});
   const sp::MoveRequest move{walker, 1, sp::PointGoal{{5, 0, 0}, .1f}};
-  sp::plan_move(scene.space, identity(scene.objects), move, {});
-  require(!sp::needs_plan(scene.space, identity(scene.objects), move),
+  sp::plan_move(scene.space_state, identity(scene.objects), move, {});
+  require(!sp::needs_plan(scene.space_state, identity(scene.objects), move),
           "an unchanged pending route does not repeat its path query");
   scene.wait_navigation();
-  require(sp::needs_plan(scene.space, identity(scene.objects), move),
+  require(sp::needs_plan(scene.space_state, identity(scene.objects), move),
           "finishing the unrelated pending tiles releases the waiting attempt");
   scene.tick({&move, 1});
   require(scene.result.intents[0].state == sp::IntentState::Blocked,
@@ -695,7 +703,7 @@ void object_goal_uses_reachable_side() {
   for (int i = 0; i < 4; ++i)
     scene.tick();
   const sp::MoveRequest move{walker, 1, sp::ObjectGoal{target, 1.5f}};
-  const auto route = sp::path(scene.space, identity(scene.objects), walker, move.goal, {});
+  const auto route = sp::path(scene.space_state, identity(scene.objects), walker, move.goal, {});
   require(route.status == sp::PathStatus::Ready && route.corners.back().x < 1,
           "an object with its far side off the floor retains the reachable near-side route");
   bool arrived = false;
@@ -717,7 +725,7 @@ void one_plan_follows_multiple_corners() {
   for (int i = 0; i < 4; ++i)
     scene.tick();
   const sp::MoveRequest move{walker, 1, sp::PointGoal{{8, 0, 0}, .15f}};
-  const auto route = sp::path(scene.space, identity(scene.objects), walker, move.goal, {});
+  const auto route = sp::path(scene.space_state, identity(scene.objects), walker, move.goal, {});
   require(route.status == sp::PathStatus::Ready && route.corners.size() >= 4,
           "alternating walls require a route with at least three corners");
   bool arrived = false;
@@ -852,12 +860,12 @@ void custody_and_empty_root_updates() {
       sp::custody(scene.objects_state, parent, custodian, scene.space_state, {&child, 1}).status ==
           sp::Status::Ok,
       "assembly custody failed");
-  require(!sp::bounds(scene.space, identity(scene.objects), child) &&
+  require(!sp::bounds(scene.space_state, identity(scene.objects), child) &&
               scene.objects.parent[child.slot()] == parent &&
               scene.objects.position[child.slot()] == child_position &&
               edge(scene.relations.attached_to, child, parent),
           "assembly extraction left geometry or destroyed ordinary part topology");
-  require(sp::bounds(scene.space, identity(scene.objects), occupant).has_value() &&
+  require(sp::bounds(scene.space_state, identity(scene.objects), occupant).has_value() &&
               !scene.objects.parent[occupant.slot()],
           "assembly collection hid an unrelated occupant");
   require(!sp::raycast(scene.space, identity(scene.objects), {5, -2, .5f}, {5, 2, .5f}, {}),
@@ -867,7 +875,7 @@ void custody_and_empty_root_updates() {
               sp::Status::Ok,
           "custody transition failed");
   require(scene.objects.parent[item.slot()] == parent &&
-              !sp::bounds(scene.space, identity(scene.objects), item),
+              !sp::bounds(scene.space_state, identity(scene.objects), item),
           "custody item remained query-visible or lost its custodian");
   require(!sp::raycast(scene.space, identity(scene.objects), {8, -2, .5f}, {8, 2, .5f}, {}),
           "custody retained native collision geometry");
@@ -952,8 +960,8 @@ void visible_custody_preserves_scene_and_preflights_capacity() {
               !limited.objects.parent[occupant.slot()] &&
               sp::body_motion(limited.space, identity(limited.objects), occupant)->motion ==
                   sp::Motion::Dynamic &&
-              sp::bounds(limited.space, identity(limited.objects), occupant) &&
-              !sp::bounds(limited.space, identity(limited.objects), placed),
+              sp::bounds(limited.space_state, identity(limited.objects), occupant) &&
+              !sp::bounds(limited.space_state, identity(limited.objects), placed),
           "hidden collection uses retiring slot to restore unrelated occupant in exact-full pool");
 }
 
@@ -1147,7 +1155,7 @@ void movable_physical_assembly() {
   sp::remove(scene.space, identity(scene.objects), first, parents(scene.objects),
              space_flags(scene.objects), scene.relations, changes);
   destroy(scene.objects, first);
-  require(sp::bounds(scene.space, identity(scene.objects), root).has_value() &&
+  require(sp::bounds(scene.space_state, identity(scene.objects), root).has_value() &&
               sp::assembly_root(scene.space, identity(scene.objects), second) == root &&
               sp::body_motion(scene.space, identity(scene.objects), root)->motion ==
                   sp::Motion::Dynamic,
@@ -1321,8 +1329,8 @@ void assembly_geometry_rebuild() {
                                    volumes, internal)
                       .status == sp::Status::Ok &&
               sp::capacity(scene.space).native_available == available &&
-              !sp::bounds(scene.space, identity(scene.objects), root) &&
-              !sp::bounds(scene.space, identity(scene.objects), seat) &&
+              !sp::bounds(scene.space_state, identity(scene.objects), root) &&
+              !sp::bounds(scene.space_state, identity(scene.objects), seat) &&
               (scene.objects.flags[added.slot()] & Held),
           "custody replacement creates no colliders or sensors and preserves hidden child graph");
 }

@@ -78,7 +78,7 @@ void terrain_supports_bodies_and_navigation() {
                              step::outdoor_lux(lighting), {}) == 120,
           "outdoor objects receive the world setting's 120 lux");
   scene.wait_navigation();
-  const auto route = space::path(scene.space, identity(scene.objects), body,
+  const auto route = space::path(scene.space_state, identity(scene.objects), body,
                                  space::PointGoal{{20, 20, 0}, .1f}, {});
   require(route.status == space::PathStatus::Ready, "navigation crosses terrain");
   require(scene.result.contacts.empty(), "terrain has no object contact events");

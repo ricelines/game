@@ -44,8 +44,8 @@ struct Fixture : test_physical::Fixture {
   void tick(std::span<const sp::MoveRequest> requests = {}) {
     sp::install_ready_navigation(space);
     for (const auto &request : requests)
-      if (sp::needs_plan(space, identity(f.objects), request))
-        sp::plan_move(space, identity(f.objects), request, {});
+      if (sp::needs_plan(space_state, identity(f.objects), request))
+        sp::plan_move(space_state, identity(f.objects), request, {});
     sp::step(space, f.objects_state, physical, ++clock.step, .05f, requests, last);
     bi::publish_physical(step_state, journal, {14, {20, 21, 22, 23}}, 10000, last,
                          amber::step::Clock{.step = clock.step, .hz = 20});

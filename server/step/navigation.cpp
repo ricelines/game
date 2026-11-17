@@ -1,15 +1,15 @@
 #include "step/step.hpp"
 
 namespace amber::step {
-void queue_navigation(NavigationRequests &pending, const space::Space &world, IdentityRead identity,
-                      TransformRead transforms, std::span<const Handle> objects, PlayerId author,
-                      Handle body) {
+void queue_navigation(NavigationRequests &pending, const space::State &space_state,
+                      IdentityRead identity, TransformRead transforms,
+                      std::span<const Handle> objects, PlayerId author, Handle body) {
   if (!identity.valid(body))
     return;
   for (auto object : objects) {
     if (!identity.valid(object))
       continue;
-    const auto region = space::bounds(world, identity, object);
+    const auto region = space::bounds(space_state, identity, object);
     if (!region)
       continue;
     auto &request = pending.rows[author];
@@ -19,8 +19,8 @@ void queue_navigation(NavigationRequests &pending, const space::Space &world, Id
   }
 }
 std::vector<NavigationNotice> publish_navigation(NavigationRequests &pending,
-                                                 const space::Space &world, IdentityRead identity,
-                                                 TransformRead transforms,
+                                                 const space::State &space_state,
+                                                 IdentityRead identity, TransformRead transforms,
                                                  const space::NavigationInstall &installed) {
   std::vector<NavigationNotice> notices;
   for (auto request = pending.rows.begin(); request != pending.rows.end();) {
@@ -28,7 +28,7 @@ std::vector<NavigationNotice> publish_navigation(NavigationRequests &pending,
     row.errors.insert(row.errors.end(), installed.errors.begin(), installed.errors.end());
     for (auto region = row.regions.begin(); region != row.regions.end();) {
       const auto current = identity.valid(region->first)
-                               ? space::bounds(world, identity, region->first)
+                               ? space::bounds(space_state, identity, region->first)
                                : std::nullopt;
       if (!current)
         region = row.regions.erase(region);
@@ -53,7 +53,7 @@ std::vector<NavigationNotice> publish_navigation(NavigationRequests &pending,
       regions.push_back(region);
       objects.push_back(to_string(object));
     }
-    const auto report = space::diagnose_navigation(world, regions, row.reference);
+    const auto report = space::diagnose_navigation(space_state.space, regions, row.reference);
     if (!report.complete) {
       ++request;
       continue;

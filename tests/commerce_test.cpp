@@ -192,7 +192,8 @@ struct Fixture {
                               {{actor, action, target, {}}, std::move(args), {}, 20, 20, {}}, 29);
     const auto custody = std::move(out.custody);
     step::apply_custody(f.objects_state, space_state, {0, 0, 3, 0}, plots, custody, out);
-    step::refresh_object_plots(world, objects_state, react_state, catalog_state, {20, 20}, {}, out);
+    step::refresh_object_plots(space_state, objects_state, react_state, catalog_state, {20, 20}, {},
+                               out);
     return out;
   }
   step::NativeCompletion place(Caller actor, nlohmann::json args, Handle target) {
@@ -200,16 +201,18 @@ struct Fixture {
         f.objects_state, space_state, {0, 0, 3, 0}, perm_state, geometry, f.catalog_state, {10, 11},
         {.6f, 0}, f.react_state,
         {{actor, ids.place_existing, target, {}}, std::move(args), {}, 20, 20, {}});
-    step::refresh_object_plots(world, objects_state, react_state, catalog_state, {20, 20}, {}, out);
+    step::refresh_object_plots(space_state, objects_state, react_state, catalog_state, {20, 20}, {},
+                               out);
     return out;
   }
 
-  bool visible(Handle h) { return space::bounds(world, identity(f.objects), h).has_value(); }
+  bool visible(Handle h) { return space::bounds(space_state, identity(f.objects), h).has_value(); }
   void store(Handle h, PlayerId owner) {
     step::NativeCompletion out;
     const std::array custody{perm::CustodyChange{h, bodies[owner - 1], false}};
     step::apply_custody(objects_state, space_state, {0, 0, 3, 0}, plots, custody, out);
-    step::refresh_object_plots(world, objects_state, react_state, catalog_state, {20, 20}, {}, out);
+    step::refresh_object_plots(space_state, objects_state, react_state, catalog_state, {20, 20}, {},
+                               out);
     players.rows[owner].inventory.push_back(h);
   }
 };

@@ -270,13 +270,7 @@ void flush_connections(amber::net::State &net_state, net::Server &server,
 
 void refresh_connections(amber::net::State &net_state, amber::space::State &space_state,
                          amber::step::State &step_state, const amber::catalog::State &catalog_state,
-                         const amber::react::State &react_state,
-                         const amber::ObjectState &objects_state, const amber::step::Clock &clock) {
-  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
-
-  const auto now = clock.step;
-  const auto hz = clock.hz;
-
+                         const amber::ObjectState &objects_state) {
   auto &sessions = net_state.sessions;
   auto &views = net_state.session_views;
   auto &listeners = space_state.listeners;
@@ -289,13 +283,14 @@ void refresh_connections(amber::net::State &net_state, amber::space::State &spac
 
   listeners.clear();
   delivery.present_bodies.clear();
-  const auto identity = values.identity;
+  const auto identity = amber::identity(objects_state.objects);
   for (auto &[session, row] : views.rows)
     if (identity.valid(row.body)) {
-      const auto effective = catalog::resolve_asset(
-          models, parameters, identity.model[row.body.slot()], values.params[row.body.slot()]);
-      if (const auto binding = net::observer_binding(assets.rows.at(effective.hash), values.terms))
-        row.eye = net::observer(*binding, row.body, poses, values, now, hz).eye;
+      const auto effective =
+          catalog::resolve_asset(models, parameters, identity.model[row.body.slot()],
+                                 objects_state.objects.params[row.body.slot()]);
+      if (const auto eye = net::observer_eye(assets.rows.at(effective.hash), row.body, poses))
+        row.eye = *eye;
       listeners.push_back({session, row.body, row.eye});
       if (const auto principal = sessions.principal(session);
           principal && principal->mode == net::Mode::Play)

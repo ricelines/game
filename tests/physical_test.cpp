@@ -38,7 +38,7 @@ void character_collision_uses_measured_body_bounds() {
           "body and character controller use solid volume times material density");
   step::install_physics(physical.space, identity(f.objects), transforms(f.objects),
                         space_flags(f.objects), f.a, definition);
-  const auto bounds = space::bounds(physical.space, identity(f.objects), f.a);
+  const auto bounds = space::bounds(physical, identity(f.objects), f.a);
   require(bounds && std::abs(bounds->min.x + .4f) < 1e-5f &&
               std::abs(bounds->max.x - .4f) < 1e-5f && std::abs(bounds->min.y + .4f) < 1e-5f &&
               std::abs(bounds->max.y - .4f) < 1e-5f && std::abs(bounds->min.z) < 1e-5f &&

@@ -6,12 +6,12 @@ using namespace testspace;
 namespace {
 void queue(Scene &scene, st::NavigationRequests &pending, std::span<const Handle> objects,
            Handle body, PlayerId author = 7) {
-  st::queue_navigation(pending, scene.space, identity(scene.objects), transforms(scene.objects),
-                       objects, author, body);
+  st::queue_navigation(pending, scene.space_state, identity(scene.objects),
+                       transforms(scene.objects), objects, author, body);
 }
 std::vector<st::NavigationNotice> publish(Scene &scene, st::NavigationRequests &pending,
                                           const sp::NavigationInstall &installed) {
-  return st::publish_navigation(pending, scene.space, identity(scene.objects),
+  return st::publish_navigation(pending, scene.space_state, identity(scene.objects),
                                 transforms(scene.objects), installed);
 }
 std::vector<st::NavigationNotice> await_notice(Scene &scene, st::NavigationRequests &pending) {
@@ -111,10 +111,10 @@ void small_shapes_missing_references_and_stale_handles() {
 void benchmark_diagnostics() {
   Scene scene;
   const auto floor = scene.box({80, 80, .2f}, {0, 0, -.2f});
-  std::vector<sp::Bounds> regions{*sp::bounds(scene.space, identity(scene.objects), floor)};
+  std::vector<sp::Bounds> regions{*sp::bounds(scene.space_state, identity(scene.objects), floor)};
   for (int i = 0; i < 32; ++i) {
     const auto island = scene.box({2, 2, .2f}, {float(i % 8 * 6 - 21), float(i / 8 * 6 - 9), 4});
-    regions.push_back(*sp::bounds(scene.space, identity(scene.objects), island));
+    regions.push_back(*sp::bounds(scene.space_state, identity(scene.objects), island));
   }
   scene.wait_navigation();
   const auto started = std::chrono::steady_clock::now();

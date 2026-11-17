@@ -1,6 +1,7 @@
 #include "catalog/catalog.hpp"
 #include "net.hpp"
 #include "react/react.hpp"
+#include "view_private.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -61,7 +62,7 @@ double binding_value(const ScalarBinding &s, Handle h, const react::ValueRead &v
 ObjectDescription describe_object(Handle h, IdentityRead identity,
                                   const amber::catalog::State &catalog_state,
                                   const react::ValueRead &values, std::span<const TermId> inspected,
-                                  std::span<const std::string> actions, Step now, double hz) {
+                                  Step now, double hz) {
   auto &models = catalog_state.models;
   auto &parameters = catalog_state.parameters;
   auto &assets = catalog_state.assets;
@@ -92,7 +93,7 @@ ObjectDescription describe_object(Handle h, IdentityRead identity,
           "m:" + std::to_string(model),
           std::move(measured),
           object_text(catalog_state, h, model),
-          {actions.begin(), actions.end()}};
+          {}};
 }
 Json object_metadata(IdentityRead identity, AuthorityRead authority, ParentRead parents,
                      const catalog::State &catalog, std::span<const Handle> handles) {
@@ -191,11 +192,36 @@ std::optional<ObserverBinding> observer_binding(const catalog::Asset &asset,
   return ObserverBinding{vector(j.at("eye")), vector(j.at("forward")),
                          binding_scalar(j.at("dim_lux"), terms)};
 }
+std::optional<Vec3> observer_eye(const catalog::Asset &asset, Handle body,
+                                 TransformRead transforms) {
+  const auto &bindings = asset.manifest.at("bindings");
+  if (!bindings.contains("observer"))
+    return {};
+  return space::transform_point(
+      {transforms.position[body.slot()], transforms.rotation[body.slot()]},
+      vector(bindings.at("observer").at("eye")));
+}
 observe::Observer observer(const ObserverBinding &binding, Handle body, TransformRead transforms,
                            const react::ValueRead &values, Step now, double hz) {
-  space::Pose pose{transforms.position[body.slot()], transforms.rotation[body.slot()]};
-  auto eye = space::transform_point(pose, binding.eye),
-       forward = space::transform_point({{}, pose.rotation}, binding.forward);
+  const auto eye = space::transform_point(
+      {transforms.position[body.slot()], transforms.rotation[body.slot()]}, binding.eye);
+  const auto forward =
+      space::transform_point({{}, transforms.rotation[body.slot()]}, binding.forward);
   return {body, eye, forward, binding_value(binding.dim_lux, body, values, now, hz)};
 }
 } // namespace amber::net
+
+namespace amber::net::view_detail {
+ObjectDescription describe(const catalog::State &catalog_state, const react::ValueRead &values,
+                           Handle h, Step now, double hz, std::span<const TermId> inspected) {
+  auto result = describe_object(h, values.identity, catalog_state, values, inspected, now, hz);
+  for (const auto &entry : catalog_state.authored_text.rows)
+    if (entry.id && entry.target == h && entry.kind == catalog::AuthoredTextKind::Detail)
+      result.elaborated.push_back({{"id", entry.id},
+                                   {"elaborated", true},
+                                   {"text", entry.text},
+                                   {"author", "p:" + std::to_string(entry.author)},
+                                   {"created_s", entry.created_s}});
+  return result;
+}
+} // namespace amber::net::view_detail

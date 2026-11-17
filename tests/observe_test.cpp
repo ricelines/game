@@ -75,6 +75,36 @@ void far_salience_prefers_the_dome_over_nearer_chairs() {
               scan.far.front().object == dome && scan.far.size() == settings.far_max,
           "far salience keeps the larger dome despite twenty nearer chairs");
 }
+void logical_assembly_occupies_one_observation_slot() {
+  Scene scene;
+  const auto body = scene.character({0, 0, 0});
+  ObjectInit init;
+  init.model = 1;
+  const auto root = create(scene.objects, init);
+  require(sp::register_logical_root(scene.space, identity(scene.objects), root).status ==
+              sp::Status::Ok,
+          "observation assembly has a root without its own collider");
+  const auto near_part = scene.box({1, 1, 2}, {0, 5, 0}, sp::Motion::Kinematic, 0, false);
+  const auto far_part = scene.box({1, 1, 2}, {0, 50, 0}, sp::Motion::Kinematic, 0, false);
+  auto &parts = scene.objects_state.declared_parts;
+  parts.out.set(root.slot(), std::vector<Handle>{near_part, far_part});
+  for (const auto part : {near_part, far_part}) {
+    parts.in.set(part.slot(), std::vector<Handle>{root});
+    require(sp::attach(scene.objects_state, scene.space_state,
+                       {part, root, {scene.objects.position[part.slot()], {}}, false})
+                    .status == sp::Status::Ok,
+            "observation assembly parts attach to their logical root");
+  }
+  const auto separate = scene.box({1, 1, 2}, {5, 8, 0}, sp::Motion::Static, 0, false);
+  const ob::Settings settings{30, 1.5f, 256, 1, .1f, .1, 2, 8, 40};
+  const auto scan = ob::scan(scene.objects_state, {body, {0, 0, 1}, {0, 1, 0}, 10}, {}, settings,
+                             scene.space_state, 100, 0);
+  require(scan.things.size() == 2 && scan.things[0].object == root &&
+              scan.things[1].object == separate && scan.far.empty(),
+          "near and far parts appear once as their logical root without consuming another slot");
+  require(std::abs(scan.things[0].distance_m - 4.5f) < .001f,
+          "logical assembly distance uses its closest attached geometry");
+}
 void zones_subscriptions_hearing_and_observation() {
   Scene scene;
   auto receiver = scene.box({.2f, .2f, .2f}, {0, 0, 1}, sp::Motion::Static, 0, false);
@@ -172,6 +202,7 @@ int main(int argc, char **argv) {
     }
     observation_geometry_and_live_light();
     far_salience_prefers_the_dome_over_nearer_chairs();
+    logical_assembly_occupies_one_observation_slot();
     zones_subscriptions_hearing_and_observation();
     std::cout << "observation tests passed\n";
     return 0;

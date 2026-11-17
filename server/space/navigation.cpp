@@ -15,10 +15,10 @@
 namespace amber::space {
 namespace {
 template <class T, void (*Free)(T *)> using Rc = std::unique_ptr<T, decltype(Free)>;
-Vec3 goal_position(const Space &space, IdentityRead identity, const Goal &goal) {
+Vec3 goal_position(const State &state, IdentityRead identity, const Goal &goal) {
   if (const auto *point = std::get_if<PointGoal>(&goal))
     return point->point;
-  const auto target = bounds(space, identity, std::get<ObjectGoal>(goal).target);
+  const auto target = bounds(state, identity, std::get<ObjectGoal>(goal).target);
   return target ? (target->min + target->max) * .5f : Vec3{};
 }
 void include(Bounds &bounds, Vec3 point) {
@@ -374,8 +374,8 @@ std::uint64_t navigation_revision(const Space &space) {
   return space.native->revision;
 }
 
-bool needs_plan(const Space &space, IdentityRead identity, const MoveRequest &request) {
-  const auto &n = *space.native;
+bool needs_plan(const State &state, IdentityRead identity, const MoveRequest &request) {
+  const auto &n = *state.space.native;
   const auto found = n.bodies.find(request.body.bits);
   if (!identity.valid(request.body) || found == n.bodies.end() || !found->second.character ||
       n.attachments.contains(request.body.bits))
@@ -390,7 +390,7 @@ bool needs_plan(const Space &space, IdentityRead identity, const MoveRequest &re
     return false;
   const auto position = body.pose.position;
   return body.route_dirty ||
-         (body.last_goal - goal_position(space, identity, request.goal)).length() >
+         (body.last_goal - goal_position(state, identity, request.goal)).length() >
              n.settings.crowd_correction_m ||
          position.x < body.route_bounds.min.x || position.x > body.route_bounds.max.x ||
          position.y < body.route_bounds.min.y || position.y > body.route_bounds.max.y ||
@@ -418,19 +418,19 @@ void request_corner(Space::Native &n, Mirror &body) {
   if (ref)
     n.crowd->requestMoveTarget(body.agent, ref, nearest);
 }
-void plan_move(Space &space, IdentityRead identity, const MoveRequest &request,
+void plan_move(State &state, IdentityRead identity, const MoveRequest &request,
                std::span<const TravelBoundary> forbidden) {
-  auto &n = *space.native;
+  auto &n = *state.space.native;
   auto &body = n.bodies.at(request.body.bits);
   if (body.intent != request.intent)
     body.stuck_s = 0;
-  auto result = path(space, identity, request.body, request.goal, forbidden);
+  auto result = path(state, identity, request.body, request.goal, forbidden);
   body.route = std::move(result.corners);
   body.waypoint = 0;
   body.path_status = result.status;
   body.intent = request.intent;
   body.route_dirty = false;
-  body.last_goal = goal_position(space, identity, request.goal);
+  body.last_goal = goal_position(state, identity, request.goal);
   body.membership.due = 0;
 
   body.route_bounds = {body.pose.position, body.pose.position};
@@ -508,9 +508,9 @@ bool travel_blocked(Vec3 a, Vec3 b, std::span<const TravelBoundary> regions) {
   }
   return false;
 }
-Path path(const Space &space, IdentityRead identity, Handle body, const Goal &goal,
+Path path(const State &state, IdentityRead identity, Handle body, const Goal &goal,
           std::span<const TravelBoundary> forbidden) {
-  const auto &n = *space.native;
+  const auto &n = *state.space.native;
   Path result{PathStatus::NoSurface, {}, 0};
   auto found = n.bodies.find(body.bits);
   if (!identity.valid(body) || found == n.bodies.end())
@@ -522,7 +522,7 @@ Path path(const Space &space, IdentityRead identity, Handle body, const Goal &go
   if (const auto *point = std::get_if<PointGoal>(&goal))
     candidates.push_back(point->point);
   else {
-    target = bounds(space, identity, object->target);
+    target = bounds(state, identity, object->target);
     if (!target)
       return result;
     const auto b = *target;

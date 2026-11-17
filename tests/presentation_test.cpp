@@ -110,9 +110,8 @@ void descriptions_and_roles() {
   f.properties[2].set(h.slot(), Value(99.));
   f.instance_texts.rows[h.bits] = {"", "instance fiction", ""};
   const std::array<TermId, 2> inspected{1, 2};
-  const std::array<std::string, 1> actions{"invented.poke"};
-  auto description = bi::describe_object(h, identity(f.objects), f.catalog_state, f.values(),
-                                         inspected, actions, 0, 20);
+  auto description =
+      bi::describe_object(h, identity(f.objects), f.catalog_state, f.values(), inspected, 0, 20);
   require(description.measured["size_m"][2] == 5 && description.measured["params"]["height"] == 5,
           "effective parameter asset supplies actual geometry measurements");
   require(description.measured["mass_kg"] == 3925 && description.measured["capacity_l"] == 200 &&
@@ -120,8 +119,7 @@ void descriptions_and_roles() {
               !description.measured.contains("capacity_m3"),
           "S5 mass, capacity units and material name come from the actual variant");
   f.materials.rows[3][6] = Value(1000.);
-  require(bi::describe_object(h, identity(f.objects), f.catalog_state, f.values(), inspected,
-                              actions, 0, 20)
+  require(bi::describe_object(h, identity(f.objects), f.catalog_state, f.values(), inspected, 0, 20)
                   .measured["mass_kg"] == 500,
           "material edits must change measured mass without rebaking");
   require(description.measured["values"]["invented.q1"] == 7 && description.says.name.empty() &&
@@ -162,8 +160,12 @@ void descriptions_and_roles() {
           "observer uses actual transformed eye, forward and live threshold");
   f.objects.rotation[h.slot()] = {std::sqrt(.5f), 0, 0, std::sqrt(.5f)};
   view = bi::observer(*observer, h, transforms(f.objects), f.values(), 0, 20);
-  require(std::isfinite(view.forward.x) && std::isfinite(view.forward.y),
-          "vertical observer forward remains finite");
+  const auto eye = bi::observer_eye(asset, h, transforms(f.objects));
+  require(eye && (*eye - Vec3{4, 4, 6}).length() < .001 && (view.eye - *eye).length() < .001 &&
+              std::isfinite(view.forward.x) && std::isfinite(view.forward.y),
+          "listener and observer eyes preserve authored offsets under body rotation");
+  require(!bi::observer_eye(f.assets.rows.at(f.first), h, transforms(f.objects)),
+          "an asset without an observer has no authored listener eye");
   testspace::Scene scene;
   auto sensor = space::sensor_box_geometry(scene.space, zone->box->size);
   ObjectInit init;
@@ -316,7 +318,7 @@ void coherent_catalog_publication() {
       require(send->session != 103, "publication reached an unauthenticated transport");
   const std::array inspected{added};
   const auto description = net::describe_object(object, identity(f.objects), f.catalog_state,
-                                                f.values(), inspected, {}, 0, 20);
+                                                f.values(), inspected, 0, 20);
   require(description.measured["values"]["p9.live_fact"] == 123,
           "live inspection did not consume the newly appended quantity");
 

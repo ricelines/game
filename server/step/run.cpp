@@ -437,7 +437,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                               play->principal.body, clock.step);
           change_custody(objects_state, space_state, relation_terms, plots, illumination_sources,
                          delivered);
-          refresh_object_plots(space, objects_state, react_state, catalog_state, clock, {},
+          refresh_object_plots(space_state, objects_state, react_state, catalog_state, clock, {},
                                delivered);
           project_visibility(illumination_sources, space_state, replication, poses, catalog_state,
                              values, delivered, settings.light_source_radius_m, clock);
@@ -674,7 +674,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             refresh_rule_reactions(objects_state, catalog_state, react_state, space_state,
                                    step_state, completed.changed_scripts);
             invalidate_execution(execution, ids, states);
-            refresh_object_plots(space, objects_state, react_state, catalog_state, clock,
+            refresh_object_plots(space_state, objects_state, react_state, catalog_state, clock,
                                  action->call.origin, completed);
             sync_illuminance_reads(light_subscriptions, react_state, values, scripts, poses,
                                    role("measurements", "illuminance"), completed.changed_objects,
@@ -695,7 +695,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
               if (const auto *initiator = std::get_if<ActionRun>(&*ancestor))
                 if (const auto *player = std::get_if<PlayerId>(&initiator->call.request.caller)) {
                   // A notice uses the real initiating player, never installation-owner authority.
-                  queue_navigation(navigation_requests, space, ids, poses,
+                  queue_navigation(navigation_requests, space_state, ids, poses,
                                    completed.changed_objects, *player, initiator->call.body);
                   break;
                 }
@@ -763,12 +763,13 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                            elaborate_state);
     const auto physics_start = Monotonic::now();
     const auto installed_tiles = space::install_ready_navigation(space);
-    for (auto &notice : publish_navigation(navigation_requests, space, ids, poses, installed_tiles))
+    for (auto &notice :
+         publish_navigation(navigation_requests, space_state, ids, poses, installed_tiles))
       sessions.event_for_player(notice.author, std::move(notice.event));
     for (const auto &error : installed_tiles.errors)
       std::cerr << "navigation: " << error << '\n';
-    auto physics = advance_motion(space, objects_state, physical_relations, step_state, perm_state,
-                                  clock, settings.goal_tolerance_m, settings.perception.reach_m);
+    auto physics = advance_motion(space_state, objects_state, step_state, perm_state, clock,
+                                  settings.goal_tolerance_m, settings.perception.reach_m);
     const auto crossed_plots = perm::update_plots(objects, plots, physics.moved, true);
     for (const auto object : crossed_plots) {
       const auto origin = move_origin(intents, object);
@@ -803,8 +804,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                     settings.event_queue_max);
     publish_value_changes(replication, processes, mutated);
     mutated.clear();
-    refresh_connections(net_state, space_state, step_state, catalog_state, react_state,
-                        objects_state, clock);
+    refresh_connections(net_state, space_state, step_state, catalog_state, objects_state);
     if (launch.network && clock.step % settings.repl_every == 0)
       server.publish(net::publication(replication, ids, poses, values, clock.step, hz));
     flush_connections(net_state, server, step_state, objects_state, catalog_state);

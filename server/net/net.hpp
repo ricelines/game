@@ -188,8 +188,7 @@ struct LightRole {
 double binding_value(const ScalarBinding &, Handle, const react::ValueRead &, Step, double hz);
 ObjectDescription describe_object(Handle, IdentityRead, const amber::catalog::State &catalog_state,
                                   const react::ValueRead &,
-                                  std::span<const TermId> inspection_terms,
-                                  std::span<const std::string> declared_actions, Step, double hz);
+                                  std::span<const TermId> inspection_terms, Step, double hz);
 const catalog::Text &object_text(const catalog::State &, Handle, ModelId);
 nlohmann::json object_metadata(IdentityRead, AuthorityRead, ParentRead, const catalog::State &,
                                std::span<const Handle>);
@@ -217,6 +216,7 @@ std::optional<LightRole> light_binding(const catalog::Asset &, const react::Term
                                        float default_source_radius_m);
 std::optional<ZoneBinding> zone_binding(const catalog::Asset &, const react::Terms &);
 std::optional<ObserverBinding> observer_binding(const catalog::Asset &, const react::Terms &);
+std::optional<Vec3> observer_eye(const catalog::Asset &, Handle, TransformRead);
 observe::Observer observer(const ObserverBinding &, Handle, TransformRead, const react::ValueRead &,
                            Step, double hz);
 using Json = nlohmann::json;

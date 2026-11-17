@@ -604,6 +604,8 @@ int main(int argc, char **argv) {
             "object observation lists bare names instead of input signatures");
     require(seen && seen->contains("measured") && (*seen)["says"]["name"] == "Claimed giant",
             "structured full row and separate maker claim");
+    require(!seen->contains("actions"),
+            "unreachable visible objects must omit action signatures from observations");
     const auto &observed_values = (*seen)["measured"]["values"];
     require(
         !observed_values.contains("novel.observed5") &&
@@ -623,7 +625,9 @@ int main(int argc, char **argv) {
             "public detail lost its provenance, merged maker claims or exposed a refusal");
     require(find(first["things"], held) && (*find(first["things"], held))["held"].get<bool>(),
             "held object included by real custody relationship");
-    require(find(first["far"], far), "salient distant geometry included");
+    const auto *far_row = find(first["far"], far);
+    require(far_row && !far_row->contains("actions"),
+            "salient distant geometry is included without unreachable action signatures");
     const auto second = look(call).fields;
     require(find(second["things"], visible)->contains("measured"),
             "native observations must remain full for gateway compaction");
@@ -759,6 +763,8 @@ int main(int argc, char **argv) {
             "live authoring inspection lost exact source/default or included historical variants");
     call.request.fields = {{"target", to_string(visible)}};
     const auto current = inspect(call).fields;
+    require(current["actions"] == Json::array({signature}),
+            "full inspection retains declared actions beyond reach");
     require(current["values"]["test.t1"] == 73,
             "inspect reads current VM-mutated state after an earlier observation");
     require(current["values"]["novel.observed5"] == 99 &&

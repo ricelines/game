@@ -152,8 +152,11 @@ Json object_record(const amber::catalog::State &catalog_state,
   auto &states = react_state.states;
   auto &triggers = react_state.triggers;
 
-  auto result = view_detail::description(
-      view_detail::describe(catalog_state, react_state, values, object, now, hz, inspection_terms));
+  auto description =
+      view_detail::describe(catalog_state, values, object, now, hz, inspection_terms);
+  description.actions =
+      object_actions(models, scripts, instances, react_state.native_declarations, values, object);
+  auto result = view_detail::description(description);
   const auto identity = values.identity;
   result["owner"] = "p:" + std::to_string(authority.owner[object.slot()]);
   result["maker"] = "p:" + std::to_string(attribution.maker[object.slot()]);

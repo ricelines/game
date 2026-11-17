@@ -288,8 +288,8 @@ std::vector<net::SessionId> Sessions::sessions_for(PlayerId player) const {
   return selected;
 }
 void Sessions::event_for_player(PlayerId player, const Json &record) {
-  for (auto id : sessions_for(player))
-    event(id, record);
+  if (const auto controlling = controlling_.find(player); controlling != controlling_.end())
+    event(controlling->second, record);
 }
 void Sessions::broadcast(Json message, Modes recipients) {
   for (const auto &[id, session] : sessions_)

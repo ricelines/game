@@ -192,7 +192,7 @@ std::optional<Hit> raycast(const Space &, IdentityRead, Vec3, Vec3, QueryFilter)
 Visibility visibility(const Space &, IdentityRead, Vec3, Vec3, QueryFilter,
                       float minimum_transmission);
 void near(const Space &, IdentityRead, Vec3, float radius_m, QueryFilter, std::vector<Nearby> &);
-std::optional<Bounds> bounds(const Space &, IdentityRead, Handle);
+std::optional<Bounds> bounds(const State &, IdentityRead, Handle);
 struct LightSample {
   Handle source;
   Vec3 position;
@@ -244,15 +244,15 @@ struct MoveRequest {
 };
 // Install ready navigation before preparing requested moves. Permission boundaries
 // are supplied only for a new plan; ordinary steps use the retained route data.
-bool needs_plan(const Space &, IdentityRead, const MoveRequest &);
-void plan_move(Space &, IdentityRead, const MoveRequest &, std::span<const TravelBoundary>);
+bool needs_plan(const State &, IdentityRead, const MoveRequest &);
+void plan_move(State &, IdentityRead, const MoveRequest &, std::span<const TravelBoundary>);
 enum class PathStatus { Ready, PendingTiles, NoSurface, Unreachable, AccessDenied };
 struct Path {
   PathStatus status;
   std::vector<Vec3> corners;
   float length_m;
 };
-Path path(const Space &, IdentityRead, Handle, const Goal &, std::span<const TravelBoundary>);
+Path path(const State &, IdentityRead, Handle, const Goal &, std::span<const TravelBoundary>);
 enum class IntentState { Moving, WaitingNavigation, Arrived, Blocked, TargetGone };
 struct IntentProgress {
   Handle body;

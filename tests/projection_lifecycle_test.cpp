@@ -140,14 +140,14 @@ void light_replication_lifetimes() {
   require(std::ranges::any_of(dirty, [&](const auto &point) { return point.subject == f.c; }) &&
               !space::volume_bounds(space, root, space::VolumeKind::Zone),
           "custody must dirty old zone observers before removing the real Jolt sensor");
-  step::refresh_object_plots(space, f.objects_state, f.react_state, f.catalog_state,
+  step::refresh_object_plots(space_state, f.objects_state, f.react_state, f.catalog_state,
                              {.step = 1, .hz = 20}, {}, hidden);
   step::project_visibility(illumination, space_state, replicas, transforms(f.objects),
                            f.catalog_state, *f.projection, hidden, .05f,
                            amber::step::Clock{.step = 1, .hz = 20});
   require(hidden.visible_objects.empty() && hidden.hidden_objects.size() == 2 &&
               lights.rows.empty() && zones.rows.value.empty() && replicas.rows.empty() &&
-              !space::bounds(space, identity(f.objects), root) &&
+              !space::bounds(space_state, identity(f.objects), root) &&
               std::get<double>(f.states.at({root, 77}).values.at(std::string("kept"))) == 42,
           "hidden assembly kept ghost projections or lost private state");
 

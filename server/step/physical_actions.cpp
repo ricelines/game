@@ -171,9 +171,9 @@ int operation(lua_State *L, space::OperationResult result) {
   }
   return 1;
 }
-bool within_reach(space::Space &world, IdentityRead identity, TransformRead transforms,
+bool within_reach(const space::State &space_state, IdentityRead identity, TransformRead transforms,
                   float reach_m, Handle body, Handle target) {
-  auto bounds = space::bounds(world, identity, target);
+  auto bounds = space::bounds(space_state, identity, target);
   if (!bounds)
     return false;
   auto p = transforms.position[body.slot()];
@@ -290,7 +290,8 @@ step::NativeCompletion grasp_action(amber::ObjectState &objects_state,
 
   const auto target = call.request.target, body = actor_body(call);
   const auto local = input_pose(call.arguments.value("local_pose", Json::object()));
-  if (!identity.valid(body) || !within_reach(world, identity, transforms, reach_m, body, target) ||
+  if (!identity.valid(body) ||
+      !within_reach(space_state, identity, transforms, reach_m, body, target) ||
       local.position.length() > reach_m)
     return native_denied("reach", target, Reason::InvalidScope);
   if (relations.attached_to.out.get(target.slot()))
@@ -322,8 +323,6 @@ step::NativeCompletion attach_action(amber::ObjectState &objects_state,
                                      const PhysicalRelationTerms &relation_terms,
                                      const amber::perm::State &perm_state, float reach_m,
                                      const step::NativeCall &call) {
-  auto &world = space_state.space;
-
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(objects_state.objects);
 
@@ -342,7 +341,8 @@ step::NativeCompletion attach_action(amber::ObjectState &objects_state,
   if (!permit)
     return native_denied("use", parent, permit.reason, authority.owner[parent.slot()]);
   const auto body = actor_body(call);
-  if (!identity.valid(body) || !within_reach(world, identity, transforms, reach_m, body, parent))
+  if (!identity.valid(body) ||
+      !within_reach(space_state, identity, transforms, reach_m, body, parent))
     return native_denied("reach", parent, Reason::InvalidScope);
   const auto changes_begin = space_state.relation_changes.size();
   auto result = space::attach(

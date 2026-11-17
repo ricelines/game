@@ -63,27 +63,7 @@ inline Json description(const ObjectDescription &d) {
   return {{"h", to_string(d.object)}, {"model", d.model},           {"measured", d.measured},
           {"says", text(d.says)},     {"elaborated", d.elaborated}, {"actions", d.actions}};
 }
-inline ObjectDescription describe(const amber::catalog::State &catalog_state,
-                                  const amber::react::State &react_state,
-                                  const react::ValueRead &values, Handle h, Step now, double hz,
-                                  std::span<const TermId> inspected) {
-  auto &models = catalog_state.models;
-  auto &scripts = catalog_state.scripts;
-  auto &instances = react_state.installations;
-  auto &native = react_state.native_declarations;
-  auto &authored_texts = catalog_state.authored_text;
-
-  const auto actions = object_actions(models, scripts, instances, native, values, h);
-  auto result =
-      describe_object(h, values.identity, catalog_state, values, inspected, actions, now, hz);
-  for (const auto &entry : authored_texts.rows)
-    if (entry.id && entry.target == h && entry.kind == catalog::AuthoredTextKind::Detail)
-      result.elaborated.push_back({{"id", entry.id},
-                                   {"elaborated", true},
-                                   {"text", entry.text},
-                                   {"author", "p:" + std::to_string(entry.author)},
-                                   {"created_s", entry.created_s}});
-  return result;
-}
+ObjectDescription describe(const catalog::State &, const react::ValueRead &, Handle, Step,
+                           double hz, std::span<const TermId> inspected);
 
 } // namespace amber::net::view_detail

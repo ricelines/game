@@ -18,8 +18,8 @@ void creation_checks_build_and_native_capacity_before_allocation() {
   const auto made = x.create({{"model", "m:1"}, {"position", {1, 0, 0}}});
   const auto &objects = made.created_objects;
   require(objects.size() == 2 && x.f.objects.owner[objects[0].slot()] == 1 &&
-              space::bounds(x.world, identity(x.f.objects), objects[0]).has_value() &&
-              space::bounds(x.world, identity(x.f.objects), objects[1]).has_value() &&
+              space::bounds(x.space_state, identity(x.f.objects), objects[0]).has_value() &&
+              space::bounds(x.space_state, identity(x.f.objects), objects[1]).has_value() &&
               x.f.objects.parent[objects[1].slot()] == objects[0],
           "create installs actual root/child native geometry and declared attachment");
   Fixture full(1);
@@ -52,7 +52,7 @@ void native_reconfiguration_retains_identity_and_real_geometry() {
               read_state(x.f.properties, x.f.processes, root, 1, 0, 20).value.numeric() == 37 &&
               lifecycle::collect(x.parts, identity(x.f.objects), root).size() == 3,
           "ordinary Edit changes geometry/topology while retaining matching handles and state");
-  require(space::bounds(x.world, identity(x.f.objects), root)->max.x > 1.9f,
+  require(space::bounds(x.space_state, identity(x.f.objects), root)->max.x > 1.9f,
           "reconfiguration updates actual native shape instead of metadata alone");
   const auto holder = perm::Holder::script(x.script, x.f.a);
   require(!perm::check(holder, perm::Verb::Destroy,
@@ -85,10 +85,10 @@ void hidden_reconfiguration_stays_hidden_and_destroy_needs_no_reach() {
       "fixture stores assembly in hidden inventory");
   x.f.objects.preset[root.slot()] |= perm::bit(perm::Verb::Edit);
   auto edited = x.replace(root, {{"model", "m:1"}, {"params", 1}});
-  require(edited.changed && !space::bounds(x.world, identity(x.f.objects), root),
+  require(edited.changed && !space::bounds(x.space_state, identity(x.f.objects), root),
           "rebuilding hidden inventory does not make its root or children query visible");
   for (auto h : lifecycle::collect(x.parts, identity(x.f.objects), root))
-    require(!space::bounds(x.world, identity(x.f.objects), h),
+    require(!space::bounds(x.space_state, identity(x.f.objects), h),
             "hidden child remains absent from scene");
   x.grant(root, perm::bit(perm::Verb::Destroy));
   const auto removed = step::remove_instance(x.parts, *x.f.projection, authority(x.f.objects),

@@ -162,8 +162,8 @@ struct Scene {
             std::span<const sp::TravelBoundary> forbidden = {}) {
     sp::install_ready_navigation(space);
     for (const auto &move : moves)
-      if (sp::needs_plan(space, identity(objects), move)) {
-        sp::plan_move(space, identity(objects), move, forbidden);
+      if (sp::needs_plan(space_state, identity(objects), move)) {
+        sp::plan_move(space_state, identity(objects), move, forbidden);
         ++planned_moves;
       }
     sp::step(space, objects_state, relations, ++clock, dt, moves, result);

@@ -74,8 +74,7 @@ void publish_physical(amber::step::State &step_state, record::Journal &journal,
       step::enqueue_watch(queues, {{object, term}, origin});
   }
 }
-space::StepResult advance_motion(space::Space &space, amber::ObjectState &objects_state,
-                                 space::PhysicalRelations &physical_relations,
+space::StepResult advance_motion(space::State &space_state, amber::ObjectState &objects_state,
                                  amber::step::State &step_state,
                                  const amber::perm::State &perm_state,
                                  const amber::step::Clock &clock, float goal_tolerance_m,
@@ -100,7 +99,7 @@ space::StepResult advance_motion(space::Space &space, amber::ObjectState &object
     else
       goal = space::ObjectGoal{std::get<Handle>(intent.goal), reach_m};
     const space::MoveRequest request{Handle{bits}, intent.id, std::move(goal), intent.speed_m_s};
-    if (space::needs_plan(space, ids, request)) {
+    if (space::needs_plan(space_state, ids, request)) {
       std::vector<space::TravelBoundary> forbidden;
       const auto player = perm::Holder::player(auth.owner[request.body.slot()]);
       for (const auto &plot : plots.rows)
@@ -111,12 +110,13 @@ space::StepResult advance_motion(space::Space &space, amber::ObjectState &object
                                std::numeric_limits<float>::lowest(),
                                std::numeric_limits<float>::max()});
         }
-      space::plan_move(space, ids, request, forbidden);
+      space::plan_move(space_state, ids, request, forbidden);
     }
     moving.push_back(request);
   }
   space::StepResult physics;
-  space::step(space, objects_state, physical_relations, now, 1.0f / hz, moving, physics);
+  space::step(space_state.space, objects_state, space_state.physical_relations, now, 1.0f / hz,
+              moving, physics);
   return physics;
 }
 void finish_motion(State &state, std::span<const space::IntentProgress> progress) {

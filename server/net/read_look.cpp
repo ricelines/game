@@ -52,7 +52,7 @@ ObjectDescription seen_description(const amber::catalog::State &catalog_state,
         selected.contains(id))
       inspected.push_back(id);
   }
-  return view_detail::describe(catalog_state, react_state, values, object, now, hz, inspected);
+  return view_detail::describe(catalog_state, values, object, now, hz, inspected);
 }
 } // namespace
 std::vector<TermId> object_action_ids(const catalog::Models &models,
@@ -170,9 +170,15 @@ std::vector<PreparedThing> describe_things(const catalog::State &catalog_state,
                                            const step::Clock &clock) {
   std::vector<PreparedThing> result;
   result.reserve(seen.size());
-  for (const auto &thing : seen)
-    result.push_back({thing, seen_description(catalog_state, react_state, values, thing.object,
-                                              clock.step, clock.hz)});
+  for (const auto &thing : seen) {
+    auto description =
+        seen_description(catalog_state, react_state, values, thing.object, clock.step, clock.hz);
+    if (thing.reachable)
+      description.actions =
+          object_actions(catalog_state.models, catalog_state.scripts, react_state.installations,
+                         react_state.native_declarations, values, thing.object);
+    result.push_back({thing, std::move(description)});
+  }
   return result;
 }
 } // namespace

@@ -27,8 +27,7 @@ void write_report(const std::filesystem::path &, const react::ValueRead &, const
 } // namespace amber::step::fixture
 
 namespace amber::step {
-space::StepResult advance_motion(space::Space &space, amber::ObjectState &objects_state,
-                                 space::PhysicalRelations &physical_relations,
+space::StepResult advance_motion(space::State &space_state, amber::ObjectState &objects_state,
                                  amber::step::State &step_state,
                                  const amber::perm::State &perm_state,
                                  const amber::step::Clock &clock, float goal_tolerance_m,
@@ -88,8 +87,7 @@ void flush_connections(amber::net::State &net_state, net::Server &server,
 
 void refresh_connections(amber::net::State &net_state, amber::space::State &space_state,
                          amber::step::State &step_state, const amber::catalog::State &catalog_state,
-                         const amber::react::State &react_state,
-                         const amber::ObjectState &objects_state, const amber::step::Clock &clock);
+                         const amber::ObjectState &objects_state);
 } // namespace amber::step
 
 namespace amber::step {

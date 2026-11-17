@@ -61,8 +61,6 @@ ActionRun begin_action(const amber::catalog::State &catalog_state,
 
   const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
-  auto &space = space_state.space;
-
   auto &models = catalog_state.models;
   auto &scripts = catalog_state.scripts;
   auto &triggers = react_state.triggers;
@@ -178,7 +176,7 @@ ActionRun begin_action(const amber::catalog::State &catalog_state,
                            ? run.call.body
                            : std::get<ScriptHolder>(request.caller).object;
     const auto target = request.target ? request.target : resolution.receiver;
-    const auto bounds = space::bounds(space, values.identity, target);
+    const auto bounds = space::bounds(space_state, values.identity, target);
     if (!values.identity.valid(actor) || !bounds ||
         !in_reach(poses.position[actor.slot()], {bounds->min, bounds->max}, reach_m)) {
       deny({{"ok", false},

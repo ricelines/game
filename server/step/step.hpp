@@ -276,10 +276,10 @@ struct NavigationNotice {
   PlayerId author;
   nlohmann::json event;
 };
-void queue_navigation(NavigationRequests &, const space::Space &, IdentityRead, TransformRead,
+void queue_navigation(NavigationRequests &, const space::State &, IdentityRead, TransformRead,
                       std::span<const Handle>, PlayerId author, Handle body);
 // Unfinished tile rebuilds retain their requests.
-std::vector<NavigationNotice> publish_navigation(NavigationRequests &, const space::Space &,
+std::vector<NavigationNotice> publish_navigation(NavigationRequests &, const space::State &,
                                                  IdentityRead, TransformRead,
                                                  const space::NavigationInstall &);
 void append_inputs(WorkQueues &, std::vector<Work>);
@@ -794,7 +794,7 @@ void retire_physics(space::Space &, amber::ObjectState &objects_state, space::Ph
                     NativeCompletion &);
 void retire_publication(net::ReplicationIndex &, catalog::InstanceTexts &,
                         std::span<const Handle> removed);
-void refresh_object_plots(const space::Space &, const ObjectState &, react::State &,
+void refresh_object_plots(const space::State &, const ObjectState &, react::State &,
                           const catalog::State &, const Clock &, const amber::Origin &,
                           NativeCompletion &);
 

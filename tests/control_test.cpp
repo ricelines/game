@@ -238,7 +238,15 @@ void authentication_and_presentation() {
   connect(sessions, 5, "invalid-fixture-key");
   wire.drain(sessions);
   require(wire.closed.back().second == "bad_key", "unknown credential rejected");
+  connect(sessions, 6, "fixture-watch", "watch");
+  wire.drain(sessions);
   const auto count = wire.sent.size();
+  sessions.accept(Disconnected{1, 1000, {}});
+  sessions.event_for_player(999, {{"id", 18}, {"kind", "action"}});
+  sessions.event_for_player(2, {{"id", 19}, {"kind", "action"}});
+  wire.drain(sessions);
+  require(wire.sent.size() == count,
+          "player events must ignore missing players and watch-only connections");
   sessions.event_for_player(1, {{"id", 20}, {"kind", "action"}});
   wire.drain(sessions);
   require(wire.sent.size() == count + 1 && wire.last().at("t") == "event" &&
@@ -246,6 +254,19 @@ void authentication_and_presentation() {
           "player events reach the live play session and exclude its watch session");
   const auto rendered = Json(wire.last()).dump();
   require(rendered.find("fixture-player") == rendered.npos, "no credentials in public event");
+  sessions.accept(Disconnected{3, 1000, {}});
+  sessions.event_for_player(1, {{"id", 21}, {"kind", "action"}});
+  wire.drain(sessions);
+  require(wire.sent.size() == count + 1,
+          "disconnecting the play session must not redirect player events to its watcher");
+  connect(sessions, 7);
+  wire.drain(sessions);
+  const auto reconnected_count = wire.sent.size();
+  sessions.event_for_player(1, {{"id", 22}, {"kind", "action"}});
+  wire.drain(sessions);
+  require(wire.sent.size() == reconnected_count + 1 && wire.sent.back().first == 7 &&
+              wire.last().at("t") == "event" && wire.last().at("id") == 22,
+          "player events resume exactly once on the reconnected play session");
 }
 void lanes_and_orphans() {
   auto p = profiles();
