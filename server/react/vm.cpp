@@ -227,7 +227,10 @@ int state_newindex(lua_State *L) {
   run.state_bytes = run.state_bytes - previous + next;
   if (found == proxy->state->end() || found->second != atom)
     run.invocation->effects->changed = true;
-  (*proxy->state)[std::move(key)] = std::move(atom);
+  if (found == proxy->state->end())
+    proxy->state->emplace(std::move(key), std::move(atom));
+  else
+    found->second = std::move(atom);
   return 0;
 }
 void destroy_iterator(lua_State *, void *pointer) {
