@@ -184,6 +184,30 @@ void expired_native_queries_stop() {
           object,
       "an unlimited query sees the same geometry");
 }
+void rays_and_visibility_preserve_ordered_intersections() {
+  Scene scene;
+  const auto glass = scene.box({.2f, 2, 2}, {1, 0, 0}, sp::Motion::Static, .5f, false);
+  const auto tinted = scene.box({.2f, 2, 2}, {2, 0, 0}, sp::Motion::Static, .25f, false);
+  const auto wall = scene.box({.2f, 2, 2}, {3, 0, 0}, sp::Motion::Static, 0, false);
+  scene.box({.2f, 2, 2}, {4, 0, 0}, sp::Motion::Static, .8f, false);
+  const Vec3 from{0, 0, 1}, to{5, 0, 1};
+  const auto ids = identity(scene.objects);
+  const auto hit = sp::raycast(scene.space, ids, from, to, {});
+  require(hit && hit->object == glass && std::abs(hit->fraction - .18f) < .001f &&
+              (hit->position - Vec3{.9f, 0, 1}).length() < .001f,
+          "raycast returns the nearest real intersection and its position and fraction");
+  const auto ignored = sp::raycast(scene.space, ids, from, to, {glass, {}, false});
+  require(ignored && ignored->object == tinted && std::abs(ignored->fraction - .38f) < .001f,
+          "raycast ignores the excluded object before selecting its nearest hit");
+  const auto through = sp::visibility(scene.space, ids, from, {2.5f, 0, 1}, {}, .01f);
+  require(through.clear && std::abs(through.transmission - .125f) < .001f &&
+              through.through == std::vector<Handle>{glass, tinted},
+          "visibility attenuates once per object and reports transparent intersections in order");
+  const auto blocked = sp::visibility(scene.space, ids, from, to, {}, .01f);
+  require(!blocked.clear && blocked.transmission == 0 &&
+              blocked.through == std::vector<Handle>{glass, tinted, wall},
+          "visibility includes its first opaque blocker without reporting objects behind it");
+}
 void sensor_contacts_use_body_overlap() {
   Scene scene;
   const auto moving = scene.box({.6f, .6f, .6f}, {2, 0, 0}, sp::Motion::Kinematic, 0, false, false);
@@ -1446,6 +1470,7 @@ int main(int argc, char **argv) {
     characters_pass_through_each_other();
     returns_release_seated_standing_and_static_occupants();
     expired_native_queries_stop();
+    rays_and_visibility_preserve_ordered_intersections();
     sensor_contacts_use_body_overlap();
     plot_membership_follows_real_motion_and_hidden_custody();
     gravity_visibility_zones_and_snapshot();

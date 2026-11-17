@@ -5,7 +5,6 @@
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/StreamIn.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
-#include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseQuery.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollidePointResult.h>
@@ -262,8 +261,8 @@ public:
       hits.push_back(hit);
   }
 };
-std::vector<Hit> hits(const Space &space, IdentityRead identity, Vec3 from, Vec3 to,
-                      QueryFilter filter) {
+std::vector<JPH::RayCastResult> ray_hits(const Space &space, Vec3 from, Vec3 to,
+                                         QueryFilter filter) {
   auto &n = *space.native;
   Rays collector(filter.deadline);
   ObjectFilter objects(filter.include_sensors);
@@ -272,21 +271,7 @@ std::vector<Hit> hits(const Space &space, IdentityRead identity, Vec3 from, Vec3
                                           collector, {}, objects, bodies);
   std::sort(collector.hits.begin(), collector.hits.end(),
             [](auto a, auto b) { return a.mFraction < b.mFraction; });
-  std::vector<Hit> out;
-  for (const auto &hit : collector.hits) {
-    if (filter.deadline.passed())
-      break;
-    auto owner = n.handles.find(hit.mBodyID.GetIndexAndSequenceNumber());
-    if (owner == n.handles.end() || !identity.valid(owner->second))
-      continue;
-    auto position = from + (to - from) * hit.mFraction;
-    Vec3 normal;
-    JPH::BodyLockRead lock(n.physics.GetBodyLockInterface(), hit.mBodyID);
-    if (lock.Succeeded())
-      normal = av(lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, jv(position)));
-    out.push_back({owner->second, hit.mFraction, position, normal});
-  }
-  return out;
+  return std::move(collector.hits);
 }
 void erase_value(SparseColumn<std::vector<Handle>> &column, Handle key, Handle value) {
   auto *values = column.get(key.slot());
@@ -1314,28 +1299,41 @@ std::optional<Bounds> bounds(const State &state, IdentityRead identity, Handle o
 }
 std::optional<Hit> raycast(const Space &space, IdentityRead identity, Vec3 from, Vec3 to,
                            QueryFilter filter) {
-  auto all = hits(space, identity, from, to, filter);
-  return all.empty() ? std::nullopt : std::optional<Hit>(all.front());
+  const auto &n = *space.native;
+  for (const auto &hit : ray_hits(space, from, to, filter)) {
+    if (filter.deadline.passed())
+      break;
+    const auto owner = n.handles.find(hit.mBodyID.GetIndexAndSequenceNumber());
+    if (owner != n.handles.end() && identity.valid(owner->second))
+      return Hit{owner->second, hit.mFraction, from + (to - from) * hit.mFraction};
+  }
+  return {};
 }
 Visibility visibility(const Space &space, IdentityRead identity, Vec3 from, Vec3 to,
                       QueryFilter filter, float minimum) {
-  auto all = hits(space, identity, from, to, filter);
+  const auto &n = *space.native;
   Visibility result{true, 1, {}};
   std::set<std::uint64_t> seen;
-  for (const auto &hit : all)
-    if (seen.insert(hit.object.bits).second) {
-      auto it = space.native->bodies.find(hit.object.bits);
-      if (it == space.native->bodies.end())
+  for (const auto &hit : ray_hits(space, from, to, filter)) {
+    if (filter.deadline.passed())
+      break;
+    const auto owner = n.handles.find(hit.mBodyID.GetIndexAndSequenceNumber());
+    if (owner == n.handles.end() || !identity.valid(owner->second))
+      continue;
+    if (seen.insert(owner->second.bits).second) {
+      auto it = n.bodies.find(owner->second.bits);
+      if (it == n.bodies.end())
         continue;
       result.transmission *= it->second.own_geometry
                                  ? it->second.own_geometry->spec.surface.transmission
                                  : it->second.spec.surface.transmission;
-      result.through.push_back(hit.object);
+      result.through.push_back(owner->second);
       if (result.transmission < minimum) {
         result.clear = false;
         break;
       }
     }
+  }
   return result;
 }
 void near(const Space &space, IdentityRead identity, Vec3 point, float radius, QueryFilter filter,
@@ -1597,7 +1595,7 @@ std::optional<Hit> sweep(const Space &space, IdentityRead identity, Handle objec
   auto hit = *collector.closest;
   auto owner = n.handles.find(hit.mBodyID2.GetIndexAndSequenceNumber());
   return Hit{owner == n.handles.end() ? Handle{} : owner->second, hit.mFraction,
-             av(hit.mContactPointOn2), av(-hit.mPenetrationAxis.NormalizedOr(JPH::Vec3::sZero()))};
+             av(hit.mContactPointOn2)};
 }
 SweepMove translate(Space &space, IdentityRead identity, TransformWrite transforms, Handle object,
                     Vec3 delta, float seconds) {
@@ -1924,7 +1922,7 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
       for (auto h : old)
         if (h != support)
           edge(relations.supports, RelationKind::Supports, h, {bits}, false, out.relations);
-      if (support)
+      if (support && std::find(old.begin(), old.end(), support) == old.end())
         edge(relations.supports, RelationKind::Supports, support, {bits}, true, out.relations);
     }
   }

@@ -176,7 +176,7 @@ struct QueryFilter {
 struct Hit {
   Handle object;
   float fraction;
-  Vec3 position, normal;
+  Vec3 position;
 };
 struct Visibility {
   bool clear;
