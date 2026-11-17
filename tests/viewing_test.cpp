@@ -63,20 +63,19 @@ void land_browse_and_actions() {
   settings.perception.events_per_response = 40;
   settings.actions_page = 50;
   settings.land.port_spacing_m = 1000;
-  net::SessionViews sessions;
   observe::Hearing hearing;
   net::Invocation call;
   call.session = 1;
   call.principal.player = 2;
   const step::Clock clock{.step = 10, .hz = 20};
   const auto inspect = [&] {
-    return net::read_inspect(catalog_state, react_state, sessions, hearing, objects, permissions,
-                             clock, settings, call)
+    return net::read_inspect(catalog_state, react_state, hearing, objects, permissions, clock,
+                             settings, call)
         .fields;
   };
   const auto actions = [&] {
-    return net::read_actions(catalog_state, react_state, objects, sessions, hearing, settings,
-                             permissions, clock.step, call)
+    return net::read_actions(catalog_state, react_state, objects, hearing, settings, permissions,
+                             clock.step, call)
         .fields;
   };
   call.request.fields = {{"target", "land"}, {"owner", "self"}};
@@ -490,18 +489,18 @@ int main(int argc, char **argv) {
     vi::Profiles profiles;
     profiles.rows.resize(3);
     profiles.rows[2].id = 2;
-    observe::ActiveViews &active = (space_state.active_views = observe::ActiveViews(8));
     space_state.lights = observe::Lights(8);
 
     step::State step_state;
 
     Step now = 0;
+    double ambient_lux = 120;
     const observe::Settings perception{30, 1.5f, 256, 1, .1f, .1, 40, 8, 40};
     const auto look = [&](const net::Invocation &request) {
       step_state.clock.step = now;
       step_state.clock.hz = 20;
       return vi::read_look(catalog_state, react_state, views, space_state, scene.objects_state,
-                           step_state, perception, 120, request);
+                           step_state, perception, ambient_lux, request);
     };
     net::Invocation call;
     call.session = 11;
@@ -522,7 +521,7 @@ int main(int argc, char **argv) {
 
     const auto offered = [&](const net::Invocation &request) {
       return vi::read_actions(
-          catalog_state, react_state, scene.objects_state, views, hearing,
+          catalog_state, react_state, scene.objects_state, hearing,
           [&] {
             amber::Settings s{};
             s.actions_page = 10;
@@ -635,8 +634,6 @@ int main(int argc, char **argv) {
                 second["body_actions"] == first["body_actions"] &&
                 second["player_actions"] == first["player_actions"],
             "native projection lost action lists needed by a fresh gateway session");
-    const auto *prepared_rows = views.rows.at(11).pending.things.data();
-    const auto acquired = views.rows.at(11).acquired;
     const auto positions = scene.objects.position;
     const auto flags = scene.objects.flags;
     const auto model_ids = scene.objects.model;
@@ -646,18 +643,13 @@ int main(int argc, char **argv) {
                 full_again["player_actions"] == first["player_actions"] &&
                 full_again["far"] == first["far"],
             "successive native looks must supply full descriptions and actions");
-    require(views.rows.at(11).pending.ready &&
-                views.rows.at(11).pending.things.data() == prepared_rows &&
-                views.rows.at(11).acquired == acquired && !active.dirty.contains(11) &&
-                scene.objects.position == positions && scene.objects.flags == flags &&
+    require(scene.objects.position == positions && scene.objects.flags == flags &&
                 scene.objects.model == model_ids,
-            "unchanged look rescanned perception or mutated world state");
+            "look mutated world state");
     call.request.fields["limit"] = 1;
     const auto limited = look(call).fields;
-    require(limited["things"].size() == 1 && limited["far"] == first["far"] &&
-                views.rows.at(11).pending.things.data() == prepared_rows &&
-                views.rows.at(11).pending.things.size() > 1,
-            "smaller same-step limit ignored the requested near-row cap or rescanned perception");
+    require(limited["things"].size() == 1 && limited["far"] == first["far"],
+            "smaller same-step limit ignored the requested near-row cap");
     const auto &reported = views.rows.at(11).last_observation;
     require(reported.size() == 1 + limited["things"].size() + limited["far"].size() &&
                 std::ranges::all_of(reported,
@@ -667,8 +659,27 @@ int main(int argc, char **argv) {
                                     }),
             "limited observation capture includes handles not returned to the player");
     call.request.fields.erase("limit");
+    const auto started = step::start_move(step_state.intents, body, Vec3{0, 10, 0}, {});
+    require(look(call).fields["self"]["intent"]["id"] == started.id,
+            "same-step look did not report the new movement intent");
+    require(step::cancel_move(step_state.intents, body).has_value(), "cancel actual intent");
+    require(look(call).fields["self"]["intent"].is_null(),
+            "same-step look retained a cancelled movement intent");
+    models.rows[body_model].script = 0;
+    require(look(call).fields["body_actions"].empty(),
+            "same-step model edit left removed body actions visible");
+    models.rows[body_model].script = 1;
+    require(look(call).fields["body_actions"] == first["body_actions"],
+            "same-step model edit failed to restore declared body actions");
+    ambient_lux = 1;
+    const auto dark = look(call).fields;
+    require(!find(dark["things"], visible)->at("lit").get<bool>(),
+            "next look did not recompute lighting after ambient changed in the same step");
+    ambient_lux = 120;
+    const auto lit = look(call).fields;
+    require(find(lit["things"], visible)->at("lit").get<bool>(),
+            "next look did not restore current lighting");
     model_settings.rows[1][7] = Value(17.0);
-    vi::invalidate(views, std::span(&visible, 1));
     const auto setting_changed = look(call).fields;
     require(find(setting_changed["things"], visible)
                     ->at("measured")
@@ -676,7 +687,6 @@ int main(int argc, char **argv) {
                     .at("novel.observed7") == 17,
             "compact look did not replace a short row after arbitrary authored setting change");
     authored_texts.rows[detail_id].text = "A polished brass edge";
-    vi::invalidate(views, std::span(&visible, 1));
     const auto rewritten = look(call).fields;
     const auto *rewritten_row = find(rewritten["things"], visible);
     require(rewritten_row && (*rewritten_row)["elaborated"][0]["text"] == "A polished brass edge" &&
@@ -700,7 +710,7 @@ int main(int argc, char **argv) {
 
     const auto inspect = [&](const net::Invocation &request) {
       return vi::read_inspect(
-          catalog_state, react_state, views, hearing, scene.objects_state, perm_state,
+          catalog_state, react_state, hearing, scene.objects_state, perm_state,
           amber::step::Clock{.step = now, .hz = 20},
           [&] {
             amber::Settings loaded{};
@@ -710,6 +720,14 @@ int main(int argc, char **argv) {
           }(),
           request);
     };
+    auto owner_call = call;
+    owner_call.request.fields = {{"target", to_string(visible)}};
+    require(inspect(owner_call).fields["owner"] == "p:3", "inspect reports current owner");
+    scene.objects.owner[visible.slot()] = 2;
+    const auto transferred = inspect(owner_call).fields;
+    require(transferred["owner"] == "p:2" && transferred["rights"]["take"]["allowed"] == true,
+            "same-step ownership change left inspection or authority stale");
+    scene.objects.owner[visible.slot()] = 3;
     auto grant_call = call;
     grant_call.request.fields = {{"target", "grants"}};
     const auto grant_inspection = inspect(grant_call).fields;
@@ -820,11 +838,10 @@ int main(int argc, char **argv) {
     require(!inspect(call).fields["ok"].get<bool>(), "plot lookup accepted reserved ID zero");
     call.request.fields = {{"target", "plot:999"}};
     require(!inspect(call).fields["ok"].get<bool>(), "plot lookup accepted nonexistent ID");
-    vi::invalidate(views, std::span(&visible, 1));
     call.request.fields = Json::object();
     const auto refreshed = look(call).fields;
     require(find(refreshed["things"], visible)->at("measured").at("values").at("test.t1") == 73,
-            "same-step invalidation refreshes a changed visible value");
+            "next look reads a changed visible value in the same step");
     require(!current["rights"]["take"]["allowed"].get<bool>(),
             "inspect exposes actual denial without requiring Use to inspect");
     observe::emit_sound(
@@ -853,8 +870,48 @@ int main(int argc, char **argv) {
     call.principal.mode = net::Mode::Debug;
     require(vi::read_events(feed, views, profiles, 30, 40, call).fields["events"].size() == 2,
             "explicit debug feed can show retained global records");
-    vi::remove_session(views, active, hearing, 11);
-    require(!views.rows.contains(11) && !active.rows.contains(11) && !hearing.queues.contains(11),
+    call.request.fields = Json::object();
+    const auto previous_position = scene.objects.position[visible.slot()];
+    const auto previous_rotation = scene.objects.rotation[visible.slot()];
+    require(space::set_pose(scene.space, identity(scene.objects), transforms(scene.objects),
+                            visible, {{10000, 0, 0}, previous_rotation})
+                    .status == space::Status::Ok,
+            "move observed object beyond sight");
+    require(!find(look(call).fields["things"], visible),
+            "next look retained an object moved out of sight in the same step");
+    require(space::set_pose(scene.space, identity(scene.objects), transforms(scene.objects),
+                            visible, {previous_position, previous_rotation})
+                    .status == space::Status::Ok,
+            "return observed object to sight");
+    require(find(look(call).fields["things"], visible),
+            "next look omitted an object returned to sight in the same step");
+    ObjectInit zone_init;
+    zone_init.model = 4;
+    zone_init.material = 2;
+    const auto zone = create(scene.objects, zone_init);
+    const auto volume = space::sensor_box_geometry(scene.space, {10, 10, 6});
+    require(space::add_volume(scene.space, identity(scene.objects), transforms(scene.objects),
+                              {zone, volume, {{0, 0, 2}, {}}, space::VolumeKind::Zone})
+                    .status == space::Status::Ok,
+            "zone-name observation uses an actual containing volume");
+    observe::set_zone(space_state.zones, {zone, 120, 1});
+    model_text.rows[4] = {"Workshop", "", ""};
+    require(look(call).fields["self"]["zone"] == "Workshop",
+            "zone display did not inherit its model name");
+    catalog_state.instance_text.rows[zone.bits] = {"Copper room", "", ""};
+    require(look(call).fields["self"]["zone"] == "Copper room",
+            "zone display did not use its current instance name");
+    catalog_state.instance_text.rows[zone.bits].name.clear();
+    require(look(call).fields["self"]["zone"] == "",
+            "intentional empty instance name fell back to the model name");
+    catalog_state.instance_text.rows.erase(zone.bits);
+    require(look(call).fields["self"]["zone"] == "Workshop",
+            "removing instance text did not restore the model name");
+    model_text.rows.erase(4);
+    require(look(call).fields["self"]["zone"] == "",
+            "zone without authored text did not use an empty name");
+    vi::remove_session(views, hearing, 11);
+    require(!views.rows.contains(11) && !hearing.queues.contains(11),
             "close erases transient session read state");
     std::cout << "Viewing actual Space/VM boundary checks passed\n";
   } catch (const std::exception &error) {

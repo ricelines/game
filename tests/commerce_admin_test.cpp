@@ -529,8 +529,6 @@ int main() {
     destroy(f.objects, f.a);
     require(!run(1, ids.preset, stale, {{"everyone", {"use"}}}).reply["ok"],
             "preset edit accepted a stale generation");
-    require(created_group.permissions_changed && settings.permissions_changed,
-            "successful permission edits omitted their actual invalidation delta");
     const auto begin = std::chrono::steady_clock::now();
     std::size_t total_rows = 0;
     for (unsigned iteration = 0; iteration < 1000; ++iteration)

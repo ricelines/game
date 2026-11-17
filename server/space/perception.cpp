@@ -158,7 +158,7 @@ void dirty_points(LightSubscriptions &s, std::span<const space::Bounds> bounds) 
   }
 }
 void dirty_geometry(LightSubscriptions &s, const Lights &lights,
-                    std::span<const space::Bounds> bounds, ActiveViews *views) {
+                    std::span<const space::Bounds> bounds) {
   dirty_points(s, bounds);
   std::unordered_set<std::uint64_t> affected;
   for (auto b : bounds) {
@@ -176,12 +176,6 @@ void dirty_geometry(LightSubscriptions &s, const Lights &lights,
   for (auto bits : affected) {
     const auto &light = lights.rows.at(bits);
     dirty_light(s, light.position, light.binding.radius_m);
-    if (views) {
-      const auto r = light.binding.radius_m;
-      const Vec3 extent{r, r, r};
-      const space::Bounds influence{light.position - extent, light.position + extent};
-      dirty_views(*views, std::span(&influence, 1));
-    }
   }
 }
 void dirty_light(LightSubscriptions &s, Vec3 p, float radius) {
@@ -198,51 +192,6 @@ std::vector<LightPoint> take_dirty(LightSubscriptions &s) {
   for (auto key : s.dirty)
     out.push_back(s.rows.at(key));
   s.dirty.clear();
-  return out;
-}
-ActiveViews::ActiveViews(float side) : cell_m(side) {
-  if (!(side > 0))
-    throw std::invalid_argument("view cell size must be positive");
-}
-void remove_view(ActiveViews &views, std::uint64_t session) {
-  auto it = views.rows.find(session);
-  if (it == views.rows.end())
-    return;
-  for (auto key : it->second.cells) {
-    auto c = views.cells.find(key);
-    c->second.erase(session);
-    if (c->second.empty())
-      views.cells.erase(c);
-  }
-  views.rows.erase(it);
-  views.dirty.erase(session);
-}
-void track_view(ActiveViews &views, std::uint64_t session, Vec3 eye, float radius) {
-  remove_view(views, session);
-  ActiveViews::View row{eye, radius, {}};
-  cells(eye, radius, views.cell_m, [&](Cell c) {
-    row.cells.push_back(c);
-    views.cells[c].insert(session);
-  });
-  views.rows.emplace(session, std::move(row));
-  views.dirty.insert(session);
-}
-void dirty_views(ActiveViews &views, std::span<const space::Bounds> edited) {
-  for (auto bounds : edited) {
-    auto lo = cell(bounds.min, views.cell_m), hi = cell(bounds.max, views.cell_m);
-    for (auto x = lo[0]; x <= hi[0]; ++x)
-      for (auto y = lo[1]; y <= hi[1]; ++y)
-        if (auto it = views.cells.find({x, y}); it != views.cells.end())
-          for (auto session : it->second) {
-            const auto &view = views.rows.at(session);
-            if (distance(view.eye, bounds) <= view.radius_m)
-              views.dirty.insert(session);
-          }
-  }
-}
-std::vector<std::uint64_t> take_dirty_views(ActiveViews &views) {
-  std::vector<std::uint64_t> out(views.dirty.begin(), views.dirty.end());
-  views.dirty.clear();
   return out;
 }
 Scan scan(const amber::ObjectState &objects_state, const Observer &observer, Handle held,

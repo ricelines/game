@@ -111,17 +111,6 @@ void zones_subscriptions_hearing_and_observation() {
   ob::unsubscribe(subscriptions, receiver, 5);
   ob::unsubscribe(subscriptions, distant, 5);
   require(subscriptions.cells.empty(), "unsubscribe prunes cells");
-  ob::ActiveViews views(32);
-  ob::track_view(views, 1, {0, 0, 1}, 30);
-  ob::track_view(views, 2, {100, 100, 1}, 30);
-  require(ob::take_dirty_views(views).size() == 2, "new views dirty");
-  sp::Bounds change{{-1, -1, 0}, {1, 1, 2}};
-  ob::dirty_views(views, std::span(&change, 1));
-  require(ob::take_dirty_views(views) == std::vector<std::uint64_t>{1},
-          "spatial observer invalidation excludes unrelated sessions");
-  ob::remove_view(views, 1);
-  ob::remove_view(views, 2);
-  require(views.cells.empty(), "roaming observer cells are pruned");
   ob::Hearing hearing;
   std::vector<ob::Listener> listeners{{1, receiver, {0, 0, 1}}, {2, receiver, {10, 0, 1}}};
   for (int i = 0; i < 45; ++i)

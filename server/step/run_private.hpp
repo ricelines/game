@@ -49,7 +49,7 @@ void sample_motion(std::vector<observe::MotionSample> &motion,
 nlohmann::json state_report(const ObjectState &, const catalog::State &, const react::State &,
                             const amber::step::Clock &clock, std::size_t script_errors,
                             const TimerWheel &pending_timers);
-void publish_value_changes(net::ReplicationIndex &, net::SessionViews &, const react::Processes &,
+void publish_value_changes(net::ReplicationIndex &, const react::Processes &,
                            std::span<const FactKey>);
 void record_frame(record::Journal &journal, record::Writer &writer, net::RecordFeed &feed,
                   IdentityRead ids, TransformRead poses, std::size_t &script_errors);
@@ -59,9 +59,8 @@ void advance_permission_deadlines(amber::perm::State &perm_state, net::Sessions 
                                   double reminder_seconds, std::size_t limit,
                                   std::size_t mailbox_max);
 void expire_sale_offers(perm::State &perm_state, IdentityRead ids, PermissionFlags flags,
-                        net::SessionViews &session_views, net::Sessions &sessions,
-                        record::Journal &journal, Step now, std::size_t limit,
-                        std::size_t mailbox_max);
+                        net::Sessions &sessions, record::Journal &journal, Step now,
+                        std::size_t limit, std::size_t mailbox_max);
 
 std::optional<net::Authenticated>
 connection_notice(const net::SessionNotice &notice, amber::net::State &net_state,
@@ -90,8 +89,7 @@ void flush_connections(amber::net::State &net_state, net::Server &server,
 void refresh_connections(amber::net::State &net_state, amber::space::State &space_state,
                          amber::step::State &step_state, const amber::catalog::State &catalog_state,
                          const amber::react::State &react_state,
-                         const amber::ObjectState &objects_state, observe::Settings settings,
-                         const amber::step::Clock &clock);
+                         const amber::ObjectState &objects_state, const amber::step::Clock &clock);
 } // namespace amber::step
 
 namespace amber::step {

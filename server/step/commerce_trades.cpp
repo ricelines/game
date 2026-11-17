@@ -135,7 +135,6 @@ step::NativeCompletion trade_confirm(amber::perm::State &perm_state,
         commerce_detail::cleared_notice(out, grants, confirmed.revoked, target.owner, target.object,
                                         objects);
       }
-  out.permissions_changed = !confirmed.revoked.empty();
   return out;
 }
 step::NativeCompletion trade_cancel(perm::Trades &trades, perm::Offers &offers,

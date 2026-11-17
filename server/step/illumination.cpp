@@ -16,30 +16,20 @@ void invalidate_world_illumination(space::State &state) {
     (void)point;
     state.light_subscriptions.dirty.insert(key);
   }
-  for (const auto &[session, view] : state.active_views.rows) {
-    (void)view;
-    state.active_views.dirty.insert(session);
-  }
 }
 
 namespace {
-void dirty_light(observe::LightSubscriptions &points, observe::ActiveViews &views,
-                 const observe::Lights &lights, Handle source) {
+void dirty_light(observe::LightSubscriptions &points, const observe::Lights &lights,
+                 Handle source) {
   const auto found = lights.rows.find(source.bits);
   if (found == lights.rows.end())
     return;
   const auto &light = found->second;
   observe::dirty_light(points, light.position, light.binding.radius_m);
-  const Vec3 radius{light.binding.radius_m, light.binding.radius_m, light.binding.radius_m};
-  const space::Bounds bounds{light.position - radius, light.position + radius};
-  observe::dirty_views(views, std::span{&bounds, 1});
 }
-void dirty_zone(observe::LightSubscriptions &points, observe::ActiveViews &views,
-                const space::Space &world, Handle zone) {
-  if (const auto bounds = space::volume_bounds(world, zone, space::VolumeKind::Zone)) {
+void dirty_zone(observe::LightSubscriptions &points, const space::Space &world, Handle zone) {
+  if (const auto bounds = space::volume_bounds(world, zone, space::VolumeKind::Zone))
     observe::dirty_points(points, std::span{&*bounds, 1});
-    observe::dirty_views(views, std::span{&*bounds, 1});
-  }
 }
 const react::Process *process(const react::Processes &processes, Handle object, TermId term) {
   return term < processes.size() ? processes[term].get(object.slot()) : nullptr;
@@ -59,7 +49,6 @@ void light_changed(IlluminationSources &sources, amber::space::State &space_stat
                    double hz) {
   auto &lights = space_state.lights;
   auto &points = space_state.light_subscriptions;
-  auto &views = space_state.active_views;
 
   auto found = lights.rows.find(object.bits);
   if (found == lights.rows.end()) {
@@ -69,7 +58,7 @@ void light_changed(IlluminationSources &sources, amber::space::State &space_stat
   const auto value = sampled(values, object, term, now, hz);
   if (found->second.binding.intensity_cd != value) {
     found->second.binding.intensity_cd = value;
-    dirty_light(points, views, lights, object);
+    dirty_light(points, lights, object);
   }
   if (advances(process(values.processes, object, term), now, hz))
     sources.running_lights.insert(object.bits);
@@ -82,7 +71,6 @@ void zone_changed(IlluminationSources &sources, amber::space::State &space_state
 
   auto &zones = space_state.zones;
   auto &points = space_state.light_subscriptions;
-  auto &views = space_state.active_views;
 
   auto *zone = zones.rows.get(object.slot());
   if (!zone || zone->zone != object) {
@@ -92,7 +80,7 @@ void zone_changed(IlluminationSources &sources, amber::space::State &space_state
   const auto value = sampled(values, object, term, now, hz);
   if (zone->ambient_lux != value) {
     zone->ambient_lux = value;
-    dirty_zone(points, views, world, object);
+    dirty_zone(points, world, object);
   }
   if (advances(process(values.processes, object, term), now, hz))
     sources.running_zones.insert(object.bits);
@@ -111,7 +99,6 @@ void register_illumination(IlluminationSources &sources, amber::space::State &sp
   auto &lights = space_state.lights;
   auto &zones = space_state.zones;
   auto &points = space_state.light_subscriptions;
-  auto &views = space_state.active_views;
   auto &models = catalog_state.models;
   auto &parameters = catalog_state.parameters;
   auto &assets = catalog_state.assets;
@@ -121,7 +108,7 @@ void register_illumination(IlluminationSources &sources, amber::space::State &sp
                                                               values.identity.model[object.slot()],
                                                               values.params[object.slot()])
                                            .hash);
-    dirty_light(points, views, lights, object);
+    dirty_light(points, lights, object);
     sources.lights.erase(object.bits);
     sources.running_lights.erase(object.bits);
     if (const auto role = net::light_binding(asset, values.terms, object, source_radius)) {
@@ -136,8 +123,8 @@ void register_illumination(IlluminationSources &sources, amber::space::State &sp
       }
     } else
       observe::remove_light(lights, object);
-    dirty_light(points, views, lights, object);
-    dirty_zone(points, views, world, object);
+    dirty_light(points, lights, object);
+    dirty_zone(points, world, object);
     sources.zones.erase(object.bits);
     sources.running_zones.erase(object.bits);
     if (const auto role = net::zone_binding(asset, values.terms)) {
@@ -153,21 +140,19 @@ void register_illumination(IlluminationSources &sources, amber::space::State &sp
   }
 }
 void move_illumination(observe::Lights &lights, observe::LightSubscriptions &points,
-                       observe::ActiveViews &views, TransformRead transforms,
-                       std::span<const Handle> objects) {
+                       TransformRead transforms, std::span<const Handle> objects) {
   for (auto object : objects) {
-    dirty_light(points, views, lights, object);
+    dirty_light(points, lights, object);
     observe::move_light(lights, object, transforms);
-    dirty_light(points, views, lights, object);
+    dirty_light(points, lights, object);
   }
 }
 void retire_illumination(IlluminationSources &sources, observe::Lights &lights,
                          observe::ZoneAmbients &zones, observe::LightSubscriptions &points,
-                         observe::ActiveViews &views, const space::Space &world,
-                         std::span<const Handle> objects) {
+                         const space::Space &world, std::span<const Handle> objects) {
   for (auto object : objects) {
-    dirty_light(points, views, lights, object);
-    dirty_zone(points, views, world, object);
+    dirty_light(points, lights, object);
+    dirty_zone(points, world, object);
     observe::remove_light(lights, object);
     observe::remove_zone(zones, object);
     sources.lights.erase(object.bits);
@@ -196,7 +181,6 @@ void advance_illumination(IlluminationSources &sources, amber::space::State &spa
   auto &lights = space_state.lights;
   auto &zones = space_state.zones;
   auto &points = space_state.light_subscriptions;
-  auto &views = space_state.active_views;
 
   // Update only sources with a running process; dormant geometry costs no work.
   std::erase_if(sources.running_lights, [&](std::uint64_t bits) {
@@ -207,7 +191,7 @@ void advance_illumination(IlluminationSources &sources, amber::space::State &spa
     const auto value = sampled(values, Handle{bits}, term->second, now, hz);
     if (row->second.binding.intensity_cd != value) {
       row->second.binding.intensity_cd = value;
-      dirty_light(points, views, lights, Handle{bits});
+      dirty_light(points, lights, Handle{bits});
     }
     return !advances(process(values.processes, Handle{bits}, term->second), now, hz);
   });
@@ -219,7 +203,7 @@ void advance_illumination(IlluminationSources &sources, amber::space::State &spa
     const auto value = sampled(values, Handle{bits}, term->second, now, hz);
     if (row->ambient_lux != value) {
       row->ambient_lux = value;
-      dirty_zone(points, views, world, Handle{bits});
+      dirty_zone(points, world, Handle{bits});
     }
     return !advances(process(values.processes, Handle{bits}, term->second), now, hz);
   });
@@ -310,13 +294,11 @@ update_frame_illumination(State &step_state, space::State &space_state, Transfor
   auto &lights = space_state.lights;
   auto &zones = space_state.zones;
   auto &points = space_state.light_subscriptions;
-  auto &views = space_state.active_views;
   auto &measurements = react_state.runtime_measurements;
 
-  move_illumination(lights, points, views, transforms, moved);
+  move_illumination(lights, points, transforms, moved);
   move_illuminance_reads(points, transforms, illuminance, moved);
-  observe::dirty_views(views, dirty_bounds);
-  observe::dirty_geometry(points, lights, dirty_bounds, &views);
+  observe::dirty_geometry(points, lights, dirty_bounds);
   std::vector<Handle> changed_sources;
   changed_sources.reserve(changed.size());
   for (const auto fact : changed)

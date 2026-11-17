@@ -35,8 +35,6 @@ void transport_view(net::Server &server, net::ReplicationIndex &replication,
   auto ids = amber::identity(std::as_const(objects_state.objects));
   auto auth = amber::authority(std::as_const(objects_state.objects));
   auto parent = amber::parents(std::as_const(objects_state.objects));
-  auto &model_text = catalog_state.model_text;
-  auto &instance_text = catalog_state.instance_text;
 
   const auto found = replication.interests.find(session);
   const auto previous =
@@ -55,10 +53,10 @@ void transport_view(net::Server &server, net::ReplicationIndex &replication,
   if (previous.empty() && !replication.interests.at(session).contains(net::global_cell))
     collect(net::global_cell);
   if (!visible.empty())
-    server.send(session, Json{{"t", "metadata"},
-                              {"objects", net::object_metadata(ids, auth, parent, model_text,
-                                                               instance_text, visible)}}
-                             .dump());
+    server.send(session,
+                Json{{"t", "metadata"},
+                     {"objects", net::object_metadata(ids, auth, parent, catalog_state, visible)}}
+                    .dump());
 }
 } // namespace
 
@@ -77,7 +75,6 @@ connection_notice(const net::SessionNotice &notice, amber::net::State &net_state
 
   auto &sessions = net_state.sessions;
   auto &views = net_state.session_views;
-  auto &active = space_state.active_views;
   auto &hearing = space_state.hearing;
   auto &replication = net_state.replication;
   auto &listeners = space_state.listeners;
@@ -126,7 +123,7 @@ connection_notice(const net::SessionNotice &notice, amber::net::State &net_state
           std::erase_if(listeners,
                         [&](const auto &listener) { return listener.session == value.session; });
           net::remove_view_interest(replication, value.session);
-          net::remove_session(views, active, hearing, value.session);
+          net::remove_session(views, hearing, value.session);
         }
         return {};
       },
@@ -207,12 +204,12 @@ void answer_query(amber::net::State &net_state, amber::space::State &space_state
     break;
   }
   case net::ControlKind::Inspect:
-    reply = net::read_inspect(catalog_state, react_state, views, hearing, objects_state, perm_state,
-                              clock, loaded_settings, request);
+    reply = net::read_inspect(catalog_state, react_state, hearing, objects_state, perm_state, clock,
+                              loaded_settings, request);
     break;
   case net::ControlKind::Actions:
-    reply = net::read_actions(catalog_state, react_state, objects_state, views, hearing,
-                              loaded_settings, perm_state, now, request);
+    reply = net::read_actions(catalog_state, react_state, objects_state, hearing, loaded_settings,
+                              perm_state, now, request);
     break;
   case net::ControlKind::Events:
     reply = net::read_events(feed, views, net_state.profiles, settings.sight_m,
@@ -245,7 +242,7 @@ void send_connection_outputs(std::span<net::SessionOutput> outputs, net::Server 
           else if constexpr (std::is_same_v<T, net::Close>)
             server.close(value.session, value.code, std::move(value.reason));
           else {
-            net::view_changed(views, value.session, value.position);
+            views.rows[value.session].eye = value.position;
             transport_view(server, replication, objects_state, catalog_state, value.session,
                            value.position);
           }
@@ -274,8 +271,7 @@ void flush_connections(amber::net::State &net_state, net::Server &server,
 void refresh_connections(amber::net::State &net_state, amber::space::State &space_state,
                          amber::step::State &step_state, const amber::catalog::State &catalog_state,
                          const amber::react::State &react_state,
-                         const amber::ObjectState &objects_state, observe::Settings settings,
-                         const amber::step::Clock &clock) {
+                         const amber::ObjectState &objects_state, const amber::step::Clock &clock) {
   const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
   const auto now = clock.step;
@@ -283,7 +279,6 @@ void refresh_connections(amber::net::State &net_state, amber::space::State &spac
 
   auto &sessions = net_state.sessions;
   auto &views = net_state.session_views;
-  auto &active = space_state.active_views;
   auto &listeners = space_state.listeners;
   auto &delivery = step_state.delivery;
   auto &models = catalog_state.models;
@@ -306,10 +301,5 @@ void refresh_connections(amber::net::State &net_state, amber::space::State &spac
           principal && principal->mode == net::Mode::Play)
         delivery.present_bodies[row.player] = row.body;
     }
-  for (auto session : observe::take_dirty_views(active))
-    if (const auto principal = sessions.principal(session))
-      net::refresh_view(catalog_state, react_state, views, space_state, objects_state, step_state,
-                        settings, outdoor_lux(react_state), net::Authenticated{session, *principal},
-                        settings.things_max);
 }
 } // namespace amber::step

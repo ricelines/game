@@ -469,10 +469,10 @@ void model_rebind_retires_only_removed_installations() {
     completed.rebound_objects = plan.retained;
     step::editing::rebind_scripts(f.catalog_state, f.react_state, f.values(), perm_state, 6,
                                   amber::step::Clock{.step = 12, .hz = 20}, {}, completed);
-    return std::pair{completed.permissions_changed, std::move(completed.effects)};
+    return std::move(completed.effects);
   };
-  const auto [changed, effects] = replace(f.a);
-  require(changed && !f.states.contains({f.a, old}) &&
+  const auto effects = replace(f.a);
+  require(!f.states.contains({f.a, old}) &&
               std::get<std::string>(f.states.at({f.a, keep}).values.at(std::string("saved"))) ==
                   "surviving state",
           "changing the same root model retires removed state but retains explicit script state");
@@ -509,9 +509,9 @@ void model_rebind_retires_only_removed_installations() {
   f.states[{f.c, old}].insert(std::string("saved"), true);
   const auto explicit_grant = grant(old, f.c);
   react::set_contribution(f.shared, f.gives_to, f.terms.rows[4], f.c, f.b, 3, f.effects);
-  const auto explicit_result = replace(f.c);
+  replace(f.c);
   require(
-      !explicit_result.first && grants.rows[explicit_grant].live &&
+      grants.rows[explicit_grant].live &&
           std::get<bool>(f.states.at({f.c, old}).values.at(std::string("saved"))) &&
           f.shared[4].get(f.b.slot())->total == 3,
       "an old default surviving as an explicit installation keeps state, grants and contribution");
@@ -523,9 +523,9 @@ void model_rebind_retires_only_removed_installations() {
   f.states[{same_default, old}].insert(std::string("saved"), true);
   const auto model_grant = grant(old, same_default);
   react::set_contribution(f.shared, f.gives_to, f.terms.rows[4], same_default, f.b, 5, f.effects);
-  const auto model_result = replace(same_default, 3);
+  replace(same_default, 3);
   require(
-      !model_result.first && grants.rows[model_grant].live &&
+      grants.rows[model_grant].live &&
           std::get<bool>(f.states.at({same_default, old}).values.at(std::string("saved"))) &&
           f.shared[4].get(f.b.slot())->total == 8,
       "changing models retains an unchanged default script and its state, grant and contribution");
@@ -539,9 +539,9 @@ void model_rebind_retires_only_removed_installations() {
   f.states[{with_rule, old}].insert(std::string("retired"), true);
   const auto removed_grant = grant(old, with_rule);
   react::set_contribution(f.shared, f.gives_to, f.terms.rows[4], with_rule, f.b, 5, f.effects);
-  const auto rule_result = replace(with_rule, 2, 9);
-  require(rule_result.first && !grants.rows[removed_grant].live &&
-              !f.states.contains({with_rule, old}) && f.shared[4].get(f.b.slot())->total == 13,
+  replace(with_rule, 2, 9);
+  require(!grants.rows[removed_grant].live && !f.states.contains({with_rule, old}) &&
+              f.shared[4].get(f.b.slot())->total == 13,
           "an applicable material rule preserves a supported contribution while removed model "
           "authority retires");
 }

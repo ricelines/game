@@ -47,7 +47,6 @@ step::NativeCompletion give(amber::perm::State &perm_state, amber::ObjectState &
   out.custody = given.custody;
   out.changed_objects = item.closure;
   commerce_detail::record(out, call, "give", item.closure, out.reply);
-  out.permissions_changed = !out.reply.value("revoked", Json::array()).empty();
   return out;
 }
 step::NativeCompletion offer(amber::perm::State &perm_state, amber::ObjectState &objects_state,
@@ -234,7 +233,6 @@ step::NativeCompletion accept(amber::perm::State &perm_state, amber::ObjectState
           {"owner", perm::plot_facts(perm_state.plots, surveyed.id, settings.land.port_spacing_m),
            0, (b[2] - b[0]) * (b[3] - b[1])});
     }
-    out.permissions_changed = true;
     return out;
   }
   const auto item = commerce_detail::goods(identity, parts, declared_parts, authority, limits,
@@ -268,7 +266,6 @@ step::NativeCompletion accept(amber::perm::State &perm_state, amber::ObjectState
                            {"cleared", commerce_detail::grants(bought.revoked)}});
   commerce_detail::cleared_notice(out, grants, bought.revoked, item.root.owner, item.root.object,
                                   item.closure);
-  out.permissions_changed = !bought.revoked.empty();
   return out;
 }
 step::NativeCompletion cancel_offer(amber::perm::State &perm_state,
@@ -310,11 +307,9 @@ step::NativeCompletion cancel_offer(amber::perm::State &perm_state,
   return out;
 }
 void expire_sale_offers(perm::State &perm_state, IdentityRead ids, PermissionFlags flags,
-                        net::SessionViews &session_views, net::Sessions &sessions,
-                        record::Journal &journal, Step now, std::size_t limit,
-                        std::size_t mailbox_max) {
+                        net::Sessions &sessions, record::Journal &journal, Step now,
+                        std::size_t limit, std::size_t mailbox_max) {
   for (const auto &expired : advance_offer_expiry(perm_state.offers, ids, flags, now, limit)) {
-    net::invalidate(session_views, expired.cleared);
     Json notice{{"kind", "offer_expired"},
                 {"offer", "offer:" + std::to_string(expired.offer)},
                 {"goods", to_string(expired.goods)},

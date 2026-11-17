@@ -76,7 +76,6 @@ void change_custody(amber::ObjectState &objects_state, amber::space::State &spac
   auto &lights = space_state.lights;
   auto &zones = space_state.zones;
   auto &points = space_state.light_subscriptions;
-  auto &views = space_state.active_views;
 
   const auto custody = std::move(out.custody);
   out.custody.clear();
@@ -87,8 +86,8 @@ void change_custody(amber::ObjectState &objects_state, amber::space::State &spac
       hiding.insert(hiding.end(), closure.begin(), closure.end());
     }
   unique(hiding);
-  // Zone bounds must dirty their old observers before custody removes the sensor.
-  retire_illumination(sources, lights, zones, points, views, space, hiding);
+  // Zone bounds must dirty their old light subscribers before custody removes the sensor.
+  retire_illumination(sources, lights, zones, points, space, hiding);
   apply_custody(objects_state, space_state, terms, plots, custody, out);
 }
 
@@ -102,12 +101,11 @@ void project_visibility(IlluminationSources &sources, amber::space::State &space
   auto &lights = space_state.lights;
   auto &zones = space_state.zones;
   auto &points = space_state.light_subscriptions;
-  auto &views = space_state.active_views;
   auto &models = catalog_state.models;
   auto &parameters = catalog_state.parameters;
   auto &assets = catalog_state.assets;
 
-  retire_illumination(sources, lights, zones, points, views, space, out.hidden_objects);
+  retire_illumination(sources, lights, zones, points, space, out.hidden_objects);
   for (auto object : out.hidden_objects)
     net::retire_replication(replication, object);
   register_illumination(sources, space_state, transforms, catalog_state, values,
@@ -149,8 +147,7 @@ void retire_commerce(amber::perm::State &perm_state, amber::ObjectState &objects
                     {"agent", false}};
     out.records.push_back(std::move(event));
   }
-  if (!perm::revoke_objects(grants, players, removed).empty())
-    out.permissions_changed = true;
+  perm::revoke_objects(grants, players, removed);
   for (auto object : removed) {
     const auto owner = authority.owner[object.slot()];
     if (owner < players.rows.size()) {
@@ -184,13 +181,12 @@ void retire_physics(space::Space &space, amber::ObjectState &objects_state,
   }
 }
 
-void retire_publication(net::ReplicationIndex &replication, net::SessionViews &views,
-                        catalog::InstanceTexts &texts, std::span<const Handle> removed) {
+void retire_publication(net::ReplicationIndex &replication, catalog::InstanceTexts &texts,
+                        std::span<const Handle> removed) {
   for (auto object : removed) {
     net::retire_replication(replication, object);
     texts.rows.erase(object.bits);
   }
-  net::invalidate(views, removed);
 }
 
 void refresh_object_plots(const space::Space &space, const ObjectState &objects_state,
@@ -247,13 +243,12 @@ void refresh_rule_reactions(const ObjectState &objects_state, const catalog::Sta
                               discover);
 }
 
-void publish_catalog_changes(net::Sessions &sessions, net::SessionViews &views,
-                             const catalog::Models &models, const catalog::ModelTexts &texts,
-                             const react::Terms &terms, const react::Materials &materials,
+void publish_catalog_changes(net::Sessions &sessions, const catalog::Models &models,
+                             const catalog::ModelTexts &texts, const react::Terms &terms,
+                             const react::Materials &materials,
                              net::MaterialAppearanceRoles appearance, double world_ambient_lux,
                              NativeCompletion &out) {
   unique(out.changed_models);
-  unique(out.changed_scripts);
   unique(out.changed_terms);
   unique(out.changed_materials);
   if (out.world_ambient_changed)
@@ -271,28 +266,19 @@ void publish_catalog_changes(net::Sessions &sessions, net::SessionViews &views,
                         {"world", {{"ambient_lux", world_ambient_lux}}},
                         {"materials", net::material_metadata(terms, materials, appearance,
                                                              out.changed_materials)}});
-  if (out.permissions_changed || out.world_ambient_changed || !out.changed_models.empty() ||
-      !out.changed_scripts.empty() || !out.changed_terms.empty() || !out.changed_materials.empty())
-    for (auto &[session, view] : views.rows) {
-      (void)session;
-      view.pending.ready = false;
-    }
 }
 
-void publish_object_changes(net::Sessions &sessions, net::SessionViews &views,
-                            IdentityRead identity, AuthorityRead authority, ParentRead parents,
-                            const catalog::ModelTexts &model_text,
-                            const catalog::InstanceTexts &instance_text,
+void publish_object_changes(net::Sessions &sessions, IdentityRead identity, AuthorityRead authority,
+                            ParentRead parents, const catalog::State &catalog,
                             std::span<const Handle> changed) {
   std::vector<Handle> objects(changed.begin(), changed.end());
   unique(objects);
   std::erase_if(objects, [&](Handle object) { return !identity.valid(object); });
   if (objects.empty())
     return;
-  net::invalidate(views, objects);
-  sessions.broadcast({{"t", "metadata"},
-                      {"objects", net::object_metadata(identity, authority, parents, model_text,
-                                                       instance_text, objects)}});
+  sessions.broadcast(
+      {{"t", "metadata"},
+       {"objects", net::object_metadata(identity, authority, parents, catalog, objects)}});
 }
 
 } // namespace amber::step

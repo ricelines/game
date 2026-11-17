@@ -14,15 +14,6 @@ Json vec(Vec3 p) {
 Json text(const catalog::Text &t) {
   return {{"name", t.name}, {"description", t.description}, {"writing", t.writing}};
 }
-const catalog::Text &claims(Handle h, ModelId model, const catalog::ModelTexts &models,
-                            const catalog::InstanceTexts &instances) {
-  if (auto it = instances.rows.find(h.bits); it != instances.rows.end())
-    return it->second;
-  if (auto it = models.rows.find(model); it != models.rows.end())
-    return it->second;
-  static const catalog::Text empty;
-  return empty;
-}
 Json scalar_value(Value value) {
   switch (value.kind) {
   case Value::Kind::None:
@@ -51,6 +42,15 @@ ScalarBinding binding_scalar(const Json &j, const react::Terms &terms) {
   return TermRef{terms.by_name.at(j.get<std::string>())};
 }
 } // namespace
+const catalog::Text &object_text(const catalog::State &catalog, Handle object, ModelId model) {
+  if (auto it = catalog.instance_text.rows.find(object.bits);
+      it != catalog.instance_text.rows.end())
+    return it->second;
+  if (auto it = catalog.model_text.rows.find(model); it != catalog.model_text.rows.end())
+    return it->second;
+  static const catalog::Text empty;
+  return empty;
+}
 double binding_value(const ScalarBinding &s, Handle h, const react::ValueRead &values, Step now,
                      double hz) {
   if (const auto *constant = std::get_if<double>(&s))
@@ -65,8 +65,6 @@ ObjectDescription describe_object(Handle h, IdentityRead identity,
   auto &models = catalog_state.models;
   auto &parameters = catalog_state.parameters;
   auto &assets = catalog_state.assets;
-  auto &texts = catalog_state.model_text;
-  auto &instances = catalog_state.instance_text;
 
   auto model = identity.model[h.slot()], material = identity.material[h.slot()];
   auto effective = catalog::resolve_asset(models, parameters, model, values.params[h.slot()]);
@@ -93,12 +91,11 @@ ObjectDescription describe_object(Handle h, IdentityRead identity,
   return {h,
           "m:" + std::to_string(model),
           std::move(measured),
-          claims(h, model, texts, instances),
+          object_text(catalog_state, h, model),
           {actions.begin(), actions.end()}};
 }
 Json object_metadata(IdentityRead identity, AuthorityRead authority, ParentRead parents,
-                     const catalog::ModelTexts &models, const catalog::InstanceTexts &instances,
-                     std::span<const Handle> handles) {
+                     const catalog::State &catalog, std::span<const Handle> handles) {
   Json rows = Json::array();
   for (auto h : handles)
     if (identity.valid(h)) {
@@ -109,7 +106,7 @@ Json object_metadata(IdentityRead identity, AuthorityRead authority, ParentRead 
                       {"material", identity.material[h.slot()]},
                       {"owner", "p:" + std::to_string(authority.owner[h.slot()])},
                       {"parent", parent ? Json(to_string(parent)) : Json(nullptr)},
-                      {"text", text(claims(h, model, models, instances))}});
+                      {"text", text(object_text(catalog, h, model))}});
     }
   return rows;
 }

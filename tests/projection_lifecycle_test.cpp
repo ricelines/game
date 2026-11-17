@@ -86,7 +86,6 @@ void light_replication_lifetimes() {
   observe::LightSubscriptions &points =
       (space_state.light_subscriptions = observe::LightSubscriptions{8});
   observe::ZoneAmbients &zones = space_state.zones;
-  observe::ActiveViews &views = (space_state.active_views = observe::ActiveViews{8});
   net::ReplicationIndex replicas{{32, 2, 3, 65536, 1048576}};
   const auto capacity = space::capacity(space).native_available;
   step::NativeCompletion born;
@@ -110,7 +109,7 @@ void light_replication_lifetimes() {
           "real root movement failed");
   space::StepResult physics;
   space::step(space, f.objects_state, physical, 1, .05f, {}, physics);
-  step::move_illumination(lights, points, views, transforms(f.objects), physics.moved);
+  step::move_illumination(lights, points, transforms(f.objects), physics.moved);
   require(observe::take_dirty(points).size() == 2 &&
               lights.rows.at(root.bits).position == Vec3{20, 0, 1},
           "moving light failed to invalidate old and new point ranges");
@@ -154,9 +153,8 @@ void light_replication_lifetimes() {
 
   step::retire_physics(space, f.objects_state, physical, step_state, assembly.objects, {}, {},
                        hidden);
-  net::SessionViews sessions;
   catalog::InstanceTexts text;
-  step::retire_publication(replicas, sessions, text, assembly.objects);
+  step::retire_publication(replicas, text, assembly.objects);
   lifecycle::release_rows(f.objects, parts, declared, assembly.objects);
   require(!identity(f.objects).valid(root) && !identity(f.objects).valid(child) &&
               space::capacity(space).native_available == capacity + 3,

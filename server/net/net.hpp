@@ -190,8 +190,9 @@ ObjectDescription describe_object(Handle, IdentityRead, const amber::catalog::St
                                   const react::ValueRead &,
                                   std::span<const TermId> inspection_terms,
                                   std::span<const std::string> declared_actions, Step, double hz);
-nlohmann::json object_metadata(IdentityRead, AuthorityRead, ParentRead, const catalog::ModelTexts &,
-                               const catalog::InstanceTexts &, std::span<const Handle>);
+const catalog::Text &object_text(const catalog::State &, Handle, ModelId);
+nlohmann::json object_metadata(IdentityRead, AuthorityRead, ParentRead, const catalog::State &,
+                               std::span<const Handle>);
 nlohmann::json model_metadata(const catalog::Models &, const catalog::ModelTexts &,
                               std::span<const ModelId>);
 nlohmann::json term_metadata(const react::Terms &, std::span<const TermId>);
@@ -384,24 +385,13 @@ private:
 };
 void write_profiles(snap::Output &, const Profiles &, const snap::ObjectSelection * = nullptr);
 void read_profiles(snap::Input &, Profiles &);
-struct PendingView {
-  Step step = 0;
-  bool ready = false;
-  std::size_t limit = 0;
-  SelfDescription self;
-  std::vector<PreparedThing> things, far;
-  std::vector<std::string> body_actions, player_actions;
-};
 struct SessionView {
   PlayerId player = 0;
   Handle body;
   Vec3 eye;
-  PendingView pending;
-  std::unordered_set<std::uint64_t> acquired;
   std::vector<Handle> last_observation;
 };
 struct SessionViews {
-  std::unordered_map<std::uint64_t, std::vector<SessionId>> shown_in;
   std::unordered_map<SessionId, SessionView> rows;
 };
 struct RecordFeed {
@@ -425,30 +415,21 @@ std::vector<std::string> object_actions(const catalog::Models &models,
                                         const react::ValueRead &values, Handle object);
 std::vector<std::string> player_actions(const react::NativeActions &native,
                                         const react::ValueRead &values);
-void view_changed(SessionViews &views, SessionId session, Vec3 eye);
-void invalidate(SessionViews &views, std::span<const Handle> changed);
-void remove_session(SessionViews &views, observe::ActiveViews &active, observe::Hearing &hearing,
-                    SessionId session);
+void remove_session(SessionViews &views, observe::Hearing &hearing, SessionId session);
 void append_heard(Json &result, observe::Hearing &hearing, SessionId session, std::size_t limit);
-void refresh_view(const amber::catalog::State &catalog_state,
-                  const amber::react::State &react_state, SessionViews &sessions,
-                  amber::space::State &space_state, const amber::ObjectState &objects_state,
-                  const amber::step::State &step_state, observe::Settings settings,
-                  double world_ambient_lux, const Authenticated &recipient, std::size_t limit);
 Reply read_look(const amber::catalog::State &catalog_state, const amber::react::State &react_state,
                 SessionViews &sessions, amber::space::State &space_state,
                 const amber::ObjectState &objects_state, const amber::step::State &step_state,
                 observe::Settings settings, double world_ambient_lux, const Invocation &call);
 Reply read_actions(const amber::catalog::State &catalog_state,
                    const amber::react::State &react_state, const amber::ObjectState &objects_state,
-                   SessionViews &sessions, observe::Hearing &hearing,
-                   const amber::Settings &settings, const amber::perm::State &perm_state, Step now,
-                   const Invocation &call);
+                   observe::Hearing &hearing, const amber::Settings &settings,
+                   const amber::perm::State &perm_state, Step now, const Invocation &call);
 Reply read_inspect(const amber::catalog::State &catalog_state,
-                   const amber::react::State &react_state, SessionViews &sessions,
-                   observe::Hearing &hearing, const amber::ObjectState &objects_state,
-                   const amber::perm::State &perm_state, const amber::step::Clock &clock,
-                   const amber::Settings &settings, const Invocation &call);
+                   const amber::react::State &react_state, observe::Hearing &hearing,
+                   const amber::ObjectState &objects_state, const amber::perm::State &perm_state,
+                   const amber::step::Clock &clock, const amber::Settings &settings,
+                   const Invocation &call);
 void append_records(RecordFeed &feed, std::span<const Json> records, IdentityRead identity,
                     TransformRead transforms);
 Reply read_events(const RecordFeed &feed, const SessionViews &sessions, const Profiles &,

@@ -4,29 +4,6 @@
 
 namespace amber::net {
 namespace {
-std::vector<Handle> shown(const PendingView &view) {
-  std::vector<Handle> result;
-  auto add = [&](Handle h) {
-    if (h && std::find(result.begin(), result.end(), h) == result.end())
-      result.push_back(h);
-  };
-  add(view.self.body);
-  add(view.self.holding);
-  for (const auto &[zone, name] : view.self.zones)
-    add(zone);
-  for (const auto *rows : {&view.things, &view.far})
-    for (const auto &thing : *rows)
-      add(thing.seen.object);
-  return result;
-}
-void unshow(SessionViews &views, SessionId session, const PendingView &view) {
-  for (auto object : shown(view)) {
-    const auto found = views.shown_in.find(object.bits);
-    std::erase(found->second, session);
-    if (found->second.empty())
-      views.shown_in.erase(found);
-  }
-}
 void referenced_settings(const Json &value, const react::Terms &terms,
                          std::unordered_set<TermId> &selected) {
   if (value.is_string()) {
@@ -125,22 +102,8 @@ std::vector<std::string> player_actions(const react::NativeActions &native,
     result.push_back(react::action_signature(values.terms, native, id));
   return result;
 }
-void view_changed(SessionViews &views, net::SessionId session, Vec3 eye) {
-  views.rows[session].eye = eye;
-}
-void invalidate(SessionViews &views, std::span<const Handle> changed) {
-  for (auto object : changed)
-    if (const auto found = views.shown_in.find(object.bits); found != views.shown_in.end())
-      for (auto session : found->second)
-        views.rows.at(session).pending.ready = false;
-}
-void remove_session(SessionViews &views, observe::ActiveViews &active, observe::Hearing &hearing,
-                    net::SessionId session) {
-  if (const auto found = views.rows.find(session); found != views.rows.end()) {
-    unshow(views, session, found->second.pending);
-    views.rows.erase(found);
-  }
-  observe::remove_view(active, session);
+void remove_session(SessionViews &views, observe::Hearing &hearing, net::SessionId session) {
+  views.rows.erase(session);
   observe::remove_listener(hearing, session);
 }
 void append_heard(Json &result, observe::Hearing &hearing, net::SessionId session,
@@ -170,154 +133,114 @@ void append_heard(Json &result, observe::Hearing &hearing, net::SessionId sessio
   }
   result["events_omitted"] = result.value("events_omitted", std::size_t{}) + omitted;
 }
-void refresh_view(const amber::catalog::State &catalog_state,
-                  const amber::react::State &react_state, SessionViews &sessions,
-                  amber::space::State &space_state, const amber::ObjectState &objects_state,
-                  const amber::step::State &step_state, observe::Settings settings,
-                  double world_ambient_lux, const Authenticated &recipient, std::size_t limit) {
-  const auto &intents = step_state.intents;
-  const auto &clock = step_state.clock;
-  const auto session = recipient.session;
-  const auto &principal = recipient.principal;
-
-  const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
-
-  const auto now = clock.step;
-  const auto hz = clock.hz;
-
-  auto &models = catalog_state.models;
-  auto &parameters = catalog_state.parameters;
-  auto &assets = catalog_state.assets;
-  auto &scripts = catalog_state.scripts;
-
-  auto &instances = react_state.installations;
-  auto &native = react_state.native_declarations;
-  auto &inspection_terms = react_state.inspection_terms;
-
-  auto &active = space_state.active_views;
-  auto transforms = amber::transforms(std::as_const(objects_state.objects));
-
-  auto &attached_to = space_state.physical_relations.attached_to;
-
-  auto &zones = space_state.zones;
-
-  const auto identity = values.identity;
-  if (!identity.valid(principal.body))
-    throw std::invalid_argument("Player has no live body");
-  const auto &asset = view_detail::asset(models, parameters, assets, values, principal.body);
-  const auto authored = observer_binding(asset, values.terms);
-  if (!authored)
-    throw std::invalid_argument("Body has no authored observer binding");
-  const auto observer = net::observer(*authored, principal.body, transforms, values, now, hz);
-  Handle held;
-  if (const auto *incoming = attached_to.in.get(principal.body.slot()))
-    for (const auto object : *incoming)
-      if (identity.valid(object) && (identity.flags[object.slot()] & Held)) {
-        held = object;
-        break;
-      }
-  const auto scan =
-      observe::scan(objects_state, observer, held, settings, space_state, world_ambient_lux, limit);
-  auto &row = sessions.rows[session];
-  row.player = principal.player;
-  row.body = principal.body;
-  row.eye = observer.eye;
-  PendingView next;
-  next.ready = true;
-  next.step = now;
-  next.limit = limit;
-  next.self.body = principal.body;
-  next.self.holding = held;
-  next.self.position = transforms.position[principal.body.slot()];
-  next.self.facing_degrees =
-      std::atan2(observer.forward.x, observer.forward.y) * 180.0 / std::numbers::pi;
-  next.self.intent = nullptr;
-  if (const auto intent = intents.moving.find(principal.body.bits);
-      intent != intents.moving.end()) {
-    Json goal;
-    if (const auto *point = std::get_if<Vec3>(&intent->second.goal))
-      goal = view_detail::vector(*point);
-    else
-      goal = to_string(std::get<Handle>(intent->second.goal));
-    next.self.intent = {{"id", intent->second.id}, {"kind", "move_to"}, {"goal", goal}};
-  }
-  auto ordered_zones = scan.zones;
-  std::sort(ordered_zones.begin(), ordered_zones.end(), [&](Handle left, Handle right) {
+namespace {
+Json describe_intent(const step::Intents &intents, Handle body) {
+  const auto found = intents.moving.find(body.bits);
+  if (found == intents.moving.end())
+    return nullptr;
+  const auto &intent = found->second;
+  Json goal;
+  if (const auto *point = std::get_if<Vec3>(&intent.goal))
+    goal = view_detail::vector(*point);
+  else
+    goal = to_string(std::get<Handle>(intent.goal));
+  return {{"id", intent.id}, {"kind", "move_to"}, {"goal", std::move(goal)}};
+}
+std::vector<std::pair<Handle, std::string>> describe_zones(const catalog::State &catalog,
+                                                           IdentityRead identity,
+                                                           const observe::ZoneAmbients &zones,
+                                                           std::vector<Handle> selected) {
+  std::sort(selected.begin(), selected.end(), [&](Handle left, Handle right) {
     const auto *a = zones.rows.get(left.slot());
     const auto *b = zones.rows.get(right.slot());
     const auto pa = a && a->zone == left ? a->priority : 0;
     const auto pb = b && b->zone == right ? b->priority : 0;
     return pa != pb ? pa > pb : left < right;
   });
-  for (const auto zone : ordered_zones) {
-    auto description =
-        view_detail::describe(catalog_state, react_state, values, zone, now, hz, inspection_terms);
-    next.self.zones.emplace_back(zone, description.says.name);
-  }
-  auto prepare = [&](const auto &seen, auto &output) {
-    for (const auto &thing : seen)
-      output.push_back(
-          {thing, seen_description(catalog_state, react_state, values, thing.object, now, hz)});
-  };
-  prepare(scan.things, next.things);
-  prepare(scan.far, next.far);
-  next.body_actions = object_actions(models, scripts, instances, native, values, principal.body);
-  next.player_actions = player_actions(native, values);
-  unshow(sessions, session, row.pending);
-  for (auto object : shown(next))
-    sessions.shown_in[object.bits].push_back(session);
-  row.pending = std::move(next);
-  const auto tracked = active.rows.find(session);
-  if (tracked == active.rows.end() || !(tracked->second.eye == observer.eye))
-    observe::track_view(active, session, observer.eye, settings.sight_m);
-  active.dirty.erase(session);
+  std::vector<std::pair<Handle, std::string>> result;
+  result.reserve(selected.size());
+  for (const auto zone : selected)
+    result.emplace_back(zone, object_text(catalog, zone, identity.model[zone.slot()]).name);
+  return result;
 }
+std::vector<PreparedThing> describe_things(const catalog::State &catalog_state,
+                                           const react::State &react_state,
+                                           const react::ValueRead &values,
+                                           std::span<const observe::Seen> seen,
+                                           const step::Clock &clock) {
+  std::vector<PreparedThing> result;
+  result.reserve(seen.size());
+  for (const auto &thing : seen)
+    result.push_back({thing, seen_description(catalog_state, react_state, values, thing.object,
+                                              clock.step, clock.hz)});
+  return result;
+}
+} // namespace
 net::Reply read_look(const amber::catalog::State &catalog_state,
                      const amber::react::State &react_state, SessionViews &sessions,
                      amber::space::State &space_state, const amber::ObjectState &objects_state,
                      const amber::step::State &step_state, observe::Settings settings,
                      double world_ambient_lux, const net::Invocation &call) {
-
   const auto &clock = step_state.clock;
-
-  const auto now = clock.step;
-  const auto hz = clock.hz;
-
-  auto &active = space_state.active_views;
-  auto &hearing = space_state.hearing;
-
+  const auto values = react::value_read(objects_state, catalog_state, react_state);
+  const auto transforms = amber::transforms(std::as_const(objects_state.objects));
+  const auto body = call.principal.body;
   try {
+    if (!values.identity.valid(body))
+      throw std::invalid_argument("Player has no live body");
+    const auto &asset = view_detail::asset(catalog_state.models, catalog_state.parameters,
+                                           catalog_state.assets, values, body);
+    const auto authored = observer_binding(asset, values.terms);
+    if (!authored)
+      throw std::invalid_argument("Body has no authored observer binding");
+    const auto observer = net::observer(*authored, body, transforms, values, clock.step, clock.hz);
+    Handle held;
+    if (const auto *incoming = space_state.physical_relations.attached_to.in.get(body.slot()))
+      for (const auto object : *incoming)
+        if (values.identity.valid(object) && (values.identity.flags[object.slot()] & Held)) {
+          held = object;
+          break;
+        }
     const auto limit = call.request.fields.value("limit", settings.things_max);
-    auto &row = sessions.rows[call.session];
-    if (!row.pending.ready || row.pending.step != now || row.pending.limit < limit ||
-        active.dirty.contains(call.session))
-      refresh_view(catalog_state, react_state, sessions, space_state, objects_state, step_state,
-                   settings, world_ambient_lux, net::Authenticated{call.session, call.principal},
-                   limit);
-    auto &pending = row.pending;
-    const auto things = std::span<const net::PreparedThing>(pending.things)
-                            .first(std::min(limit, pending.things.size()));
-    const auto event_limit =
-        call.request.fields.value("events_limit", settings.events_per_response);
-    auto result = net::observation(pending.step, hz, pending.self, things, pending.far,
-                                   pending.body_actions, pending.player_actions);
+    auto scan = observe::scan(objects_state, observer, held, settings, space_state,
+                              world_ambient_lux, limit);
+    const SelfDescription self{
+        body,
+        held,
+        transforms.position[body.slot()],
+        static_cast<float>(std::atan2(observer.forward.x, observer.forward.y) * 180.0 /
+                           std::numbers::pi),
+        describe_intent(step_state.intents, body),
+        describe_zones(catalog_state, values.identity, space_state.zones, std::move(scan.zones))};
+    const auto things = describe_things(
+        catalog_state, react_state, values,
+        std::span<const observe::Seen>(scan.things).first(std::min(limit, scan.things.size())),
+        clock);
+    const auto far = describe_things(catalog_state, react_state, values, scan.far, clock);
+    const auto body_actions =
+        object_actions(catalog_state.models, catalog_state.scripts, react_state.installations,
+                       react_state.native_declarations, values, body);
+    const auto player_actions = net::player_actions(react_state.native_declarations, values);
+    auto result =
+        net::observation(clock.step, clock.hz, self, things, far, body_actions, player_actions);
     result["action_spaces"] = view_detail::action_spaces(react_state);
+    auto &row = sessions.rows[call.session];
+    row.player = call.principal.player;
+    row.body = body;
+    row.eye = observer.eye;
     row.last_observation.clear();
-    row.last_observation.push_back(call.principal.body);
-    row.acquired.insert(call.principal.body.bits);
-    for (const auto rows : {things, std::span<const net::PreparedThing>(pending.far)})
-      for (const auto &thing : rows) {
+    row.last_observation.push_back(body);
+    for (const auto *rows : {&things, &far})
+      for (const auto &thing : *rows)
         row.last_observation.push_back(thing.seen.object);
-        row.acquired.insert(thing.seen.object.bits);
-      }
-    for (const auto &[zone, name] : pending.self.zones) {
+    for (const auto &[zone, name] : self.zones) {
       (void)name;
       if (std::find(row.last_observation.begin(), row.last_observation.end(), zone) ==
           row.last_observation.end())
         row.last_observation.push_back(zone);
-      row.acquired.insert(zone.bits);
     }
-    append_heard(result, hearing, call.session, event_limit);
+    append_heard(result, space_state.hearing, call.session,
+                 call.request.fields.value("events_limit", settings.events_per_response));
     return net::Reply::result(std::move(result));
   } catch (const std::exception &error) {
     return view_detail::error(error.what());

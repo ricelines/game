@@ -18,15 +18,10 @@ std::string_view status(react::RunOutcome::Status value) {
   std::terminate();
 }
 } // namespace
-void publish_value_changes(net::ReplicationIndex &replication, net::SessionViews &views,
-                           const react::Processes &processes, std::span<const FactKey> facts) {
-  std::vector<Handle> changed;
-  changed.reserve(facts.size());
-  for (const auto fact : facts) {
+void publish_value_changes(net::ReplicationIndex &replication, const react::Processes &processes,
+                           std::span<const FactKey> facts) {
+  for (const auto fact : facts)
     net::value_changed(replication, fact.subject, fact.term, processes);
-    changed.push_back(fact.subject);
-  }
-  net::invalidate(views, changed);
 }
 void record_send_overflow(record::Journal &journal, const net::SendOverflow &notice, Step now) {
   record::Event event;

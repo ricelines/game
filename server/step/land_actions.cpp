@@ -63,7 +63,6 @@ NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
   commerce_detail::plot_changed(
       out, holders, plot_changed, call,
       {"owner", perm::plot_facts(state.plots, id, settings.port_spacing_m), owner, area});
-  out.permissions_changed = true;
   return out;
 }
 NativeCompletion split_plot(perm::State &state, ObjectState &objects, const LandSettings &settings,
@@ -99,7 +98,6 @@ NativeCompletion split_plot(perm::State &state, ObjectState &objects, const Land
       {"split", perm::plot_facts(state.plots, id, settings.port_spacing_m), owner,
        (lower[2] - lower[0]) * (lower[3] - lower[1]), (upper[2] - upper[0]) * (upper[3] - upper[1]),
        perm::plot_facts(state.plots, next, settings.port_spacing_m)});
-  out.permissions_changed = true;
   return out;
 }
 NativeCompletion join_plots(perm::State &state, ObjectState &objects, const LandSettings &settings,
@@ -145,7 +143,6 @@ NativeCompletion join_plots(perm::State &state, ObjectState &objects, const Land
   commerce_detail::plot_changed(out, holders, plot_changed, call,
                                 {"join", perm::plot_facts(state.plots, a, settings.port_spacing_m),
                                  owner, area, other_area, other, old});
-  out.permissions_changed = true;
   return out;
 }
 } // namespace amber::step

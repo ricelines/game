@@ -216,8 +216,7 @@ int main() {
                          {"rights", {"edit"}},
                          {"expires_s", 30}};
     const auto installed = install(call(1, f.a, {{"script", sid}, {"choices", {choice}}}));
-    require(installed.changed && installed.permissions_changed,
-            "explicit installation did not report its granted authority");
+    require(installed.changed, "explicit installation did not apply");
     const auto grant = step::identifier(installed.reply.at("grants")[0].at("grant"), "g:");
     require(grants.rows[grant].holder == perm::Holder::script(script, f.a) &&
                 grants.rows[grant].expires_step == 610,

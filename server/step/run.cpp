@@ -137,7 +137,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &timers = step_state.timers;
   auto &intents = step_state.intents;
   auto &inputs = step_state.inputs;
-  auto &requests = elaborate_state.requests;
 
   auto &captures = elaborate_state.captures;
   auto &fixtures = elaborate_state.fixtures;
@@ -153,9 +152,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &lights = space_state.lights;
   auto &light_subscriptions = space_state.light_subscriptions;
   auto &zones = space_state.zones;
-  auto &active_views = space_state.active_views;
   auto &replication = net_state.replication;
-  auto &session_views = net_state.session_views;
   auto &illumination_sources = step_state.illumination_sources;
   auto &navigation_requests = step_state.navigation_requests;
   auto &vm = react_state.vm;
@@ -369,8 +366,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     advance_permission_deadlines(perm_state, sessions, journal, clock.step, hz,
                                  settings.grant_reminder_seconds, settings.deadlines_per_step,
                                  settings.mailbox_max);
-    expire_sale_offers(perm_state, ids, permission_flags(objects), session_views, sessions, journal,
-                       clock.step, settings.deadlines_per_step, settings.mailbox_max);
+    expire_sale_offers(perm_state, ids, permission_flags(objects), sessions, journal, clock.step,
+                       settings.deadlines_per_step, settings.mailbox_max);
 
     for (auto &result : fixture_worker.take())
       fixture_results.push_back(std::move(result));
@@ -444,8 +441,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                delivered);
           project_visibility(illumination_sources, space_state, replication, poses, catalog_state,
                              values, delivered, settings.light_source_radius_m, clock);
-          publish_object_changes(sessions, session_views, ids, auth, parent, model_text,
-                                 instance_text, delivered.changed_objects);
+          publish_object_changes(sessions, ids, auth, parent, catalog_state,
+                                 delivered.changed_objects);
           amber::Origin delivery_origin;
           for (auto &record : delivered.records)
             delivery_origin = journal.append(std::move(record));
@@ -529,10 +526,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             registry = catalog::read_registry(
                 registry_directory,
                 catalog::save_registry(registry_directory, terms, materials, rules, mechanical));
-            for (auto &[session, row] : session_views.rows) {
-              (void)session;
-              row.pending.ready = false;
-            }
           }
           reconcile_effects(values, react_state, step_state, clock, completed.effects);
           publish_effects(std::move(completed.effects), completed.origin, clock.step, queues,
@@ -543,8 +536,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                    {{"kind", closed.kind},
                     {"request", "request:" + std::to_string(closed.request)},
                     {"text", closed.text}});
-            const auto target = requests.rows.at(closed.request).target;
-            net::invalidate(session_views, std::span{&target, 1});
           }
           if (completed.input && completed.input->session)
             sessions.complete(completed.input->session, completed.input->sequence,
@@ -563,8 +554,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
               launch.data / "scripts");
           for (auto model : installed.changed_models)
             react::project_model(triggers, models, scripts, terms, model);
-          publish_catalog_changes(sessions, session_views, models, model_text, terms, materials,
-                                  appearance, outdoor_lux(react_state), installed);
+          publish_catalog_changes(sessions, models, model_text, terms, materials, appearance,
+                                  outdoor_lux(react_state), installed);
           deliver_input(inputs, sessions, hearing, settings.perception.events_per_response,
                         input.id, {std::move(installed.reply), origin});
           continue;
@@ -668,11 +659,11 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                       action->call.origin, completed.effects);
               retire_illuminance_reads(light_subscriptions, runtime_measurements,
                                        role("measurements", "illuminance"), removed);
-              retire_illumination(illumination_sources, lights, zones, light_subscriptions,
-                                  active_views, space, removed);
+              retire_illumination(illumination_sources, lights, zones, light_subscriptions, space,
+                                  removed);
               retire_physics(space, objects_state, physical_relations, step_state, removed,
                              relation_terms, action->call.origin, completed);
-              retire_publication(replication, session_views, instance_text, removed);
+              retire_publication(replication, instance_text, removed);
               std::erase_if(runtime_measurements.values, [&](const auto &row) {
                 return std::binary_search(removed.begin(), removed.end(), row.first.subject);
               });
@@ -694,10 +685,10 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                values, completed, settings.light_source_radius_m, clock);
             if (completed.world_ambient_changed)
               invalidate_world_illumination(space_state);
-            publish_catalog_changes(sessions, session_views, models, model_text, terms, materials,
-                                    appearance, outdoor_lux(react_state), completed);
-            publish_object_changes(sessions, session_views, ids, auth, parent, model_text,
-                                   instance_text, completed.changed_objects);
+            publish_catalog_changes(sessions, models, model_text, terms, materials, appearance,
+                                    outdoor_lux(react_state), completed);
+            publish_object_changes(sessions, ids, auth, parent, catalog_state,
+                                   completed.changed_objects);
             for (const auto &[recipient, notice] : completed.notices)
               notify(players, sessions, settings.mailbox_max, recipient, notice);
             for (auto ancestor = execution.rbegin(); ancestor != execution.rend(); ++ancestor)
@@ -724,7 +715,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                     react::EventWork{object, {}, role("events", "start"), {}, action->call.origin});
             const auto first_changed = mutated.size();
             reconcile_effects(values, react_state, step_state, clock, completed.effects);
-            publish_value_changes(replication, session_views, processes,
+            publish_value_changes(replication, processes,
                                   std::span(mutated).subspan(first_changed));
             action->changed = completed.changed || completed.effects.changed;
             action->created = completed.created_objects;
@@ -751,8 +742,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       });
       const auto first_changed = mutated.size();
       reconcile_effects(values, react_state, step_state, clock, handler.completed.effects);
-      publish_value_changes(replication, session_views, processes,
-                            std::span(mutated).subspan(first_changed));
+      publish_value_changes(replication, processes, std::span(mutated).subspan(first_changed));
       if (auto call = finish_handler_segment(execution, journal, queues, timers, clock.step, hz,
                                              settings.event_queue_max)) {
         const auto &waiting = std::get<HandlerRun>(execution.back());
@@ -811,10 +801,10 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     reconcile_effects(values, react_state, step_state, clock, light_effects);
     publish_effects(std::move(light_effects), {}, clock.step, queues, timers, journal,
                     settings.event_queue_max);
-    publish_value_changes(replication, session_views, processes, mutated);
+    publish_value_changes(replication, processes, mutated);
     mutated.clear();
     refresh_connections(net_state, space_state, step_state, catalog_state, react_state,
-                        objects_state, settings.perception, clock);
+                        objects_state, clock);
     if (launch.network && clock.step % settings.repl_every == 0)
       server.publish(net::publication(replication, ids, poses, values, clock.step, hz));
     flush_connections(net_state, server, step_state, objects_state, catalog_state);

@@ -1,6 +1,4 @@
 #include "net/net.hpp"
-#include "space_fixture.hpp"
-#include "step/step.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -21,71 +19,6 @@ namespace {
 void require(bool value, const char *text) {
   if (!value)
     throw std::runtime_error(text);
-}
-void pending_views_track_only_their_current_contents() {
-  testspace::Scene scene;
-  catalog::State catalog;
-  react::State react({4096, 50, 5, 64});
-  react.terms.rows.resize(2);
-  react.terms.rows[1].id = 1;
-  react.terms.rows[1].name = "test.material";
-  react.terms.rows[1].kind = react::Kind::Material;
-  step::State step;
-  step.clock.hz = 20;
-  scene.space_state.active_views = observe::ActiveViews(8);
-  scene.space_state.lights = observe::Lights(8);
-  const auto first = scene.character({0, 0, 0});
-  const auto second = scene.character({1000, 0, 0});
-  const auto thing = scene.box({1, 1, 1}, {0, 4, 0});
-  catalog.models.rows.resize(3);
-  for (ModelId id : {1u, 2u}) {
-    const auto hash = catalog::sha256(std::to_string(id));
-    auto &asset = catalog.assets.rows[hash];
-    asset.hash = hash;
-    asset.minimum = {-.5f, -.5f, 0};
-    asset.maximum = {.5f, .5f, 2};
-    asset.canonical_params = "{}";
-    asset.manifest = {{"params", nt::Json::object()}, {"bindings", nt::Json::object()}};
-    if (id == 2)
-      asset.manifest["bindings"]["observer"] = {
-          {"eye", {0, 0, 1.55}}, {"forward", {0, 1, 0}}, {"dim_lux", 10}};
-    catalog.models.rows[id].id = id;
-    catalog.models.rows[id].asset = hash;
-  }
-  nt::SessionViews views;
-  const observe::Settings settings{30, 1.5f, 256, 1, .1f, .1, 40, 8, 40};
-  auto refresh = [&](net::SessionId session, Handle body) {
-    nt::Authenticated recipient{session,
-                                {PlayerId(session), body, "Observer", net::Mode::Play, false}};
-    nt::refresh_view(catalog, react, views, scene.space_state, scene.objects_state, step, settings,
-                     120, recipient, 40);
-  };
-  refresh(1, first);
-  refresh(2, second);
-  require(views.shown_in.at(thing.bits) == std::vector<net::SessionId>{1},
-          "thing not in first view alone");
-  views.rows[1].acquired.insert(thing.bits);
-  nt::invalidate(views, std::span(&thing, 1));
-  require(!views.rows[1].pending.ready && views.rows[2].pending.ready,
-          "unrelated view invalidated");
-  // Move the thing beyond sight while keeping the session's authority to name it.
-  require(space::set_pose(scene.space, identity(scene.objects), transforms(scene.objects), thing,
-                          {{10000, 0, 0}, {}})
-                  .status == space::Status::Ok,
-          "move thing out of sight");
-  refresh(1, first);
-  require(!views.shown_in.contains(thing.bits) && views.rows[1].acquired.contains(thing.bits),
-          "refresh kept a departed thing or removed acquired authority");
-  nt::invalidate(views, std::span(&thing, 1));
-  require(views.rows[1].pending.ready && views.rows[2].pending.ready,
-          "historical sight invalidated a view");
-  nt::invalidate(views, std::span(&second, 1));
-  require(views.rows[1].pending.ready && !views.rows[2].pending.ready,
-          "body invalidated wrong view");
-  nt::remove_session(views, scene.space_state.active_views, scene.space_state.hearing, 2);
-  for (const auto &[handle, sessions] : views.shown_in)
-    require(!sessions.empty() && std::find(sessions.begin(), sessions.end(), 2) == sessions.end(),
-            "removed session survived in shown_in");
 }
 void canonical_observation() {
   const auto receiver = Handle::make(1, 1);
@@ -470,7 +403,6 @@ void empty_world_roaming_does_not_retain_streams() {
 } // namespace
 int main() {
   try {
-    pending_views_track_only_their_current_contents();
     canonical_observation();
     golden_and_stream_consistency();
     skipped_drop_is_retried_after_partial_batch();

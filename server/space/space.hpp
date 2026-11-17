@@ -412,27 +412,9 @@ struct LightSubscriptions {
 void subscribe(LightSubscriptions &, LightPoint);
 void unsubscribe(LightSubscriptions &, Handle, TermId);
 void dirty_points(LightSubscriptions &, std::span<const space::Bounds>);
-struct ActiveViews;
-void dirty_geometry(LightSubscriptions &, const Lights &, std::span<const space::Bounds>,
-                    ActiveViews *views = nullptr);
+void dirty_geometry(LightSubscriptions &, const Lights &, std::span<const space::Bounds>);
 void dirty_light(LightSubscriptions &, Vec3, float radius_m);
 std::vector<LightPoint> take_dirty(LightSubscriptions &);
-struct ActiveViews {
-  struct View {
-    Vec3 eye;
-    float radius_m;
-    std::vector<Cell> cells;
-  };
-  float cell_m;
-  std::unordered_map<std::uint64_t, View> rows;
-  std::map<Cell, std::set<std::uint64_t>> cells;
-  std::set<std::uint64_t> dirty;
-  explicit ActiveViews(float cell_m);
-};
-void track_view(ActiveViews &, std::uint64_t session, Vec3 eye, float radius_m);
-void remove_view(ActiveViews &, std::uint64_t session);
-void dirty_views(ActiveViews &, std::span<const space::Bounds>);
-std::vector<std::uint64_t> take_dirty_views(ActiveViews &);
 struct MotionSample {
   Handle object;
   Vec3 velocity;
@@ -489,12 +471,10 @@ struct State {
   observe::Lights lights;
   observe::LightSubscriptions light_subscriptions;
   observe::ZoneAmbients zones;
-  observe::ActiveViews active_views;
   std::vector<observe::MotionSample> motion;
   SparseColumn<std::pair<Handle, Vec3>> previous_positions;
   State(const Settings &settings, float light_cell_m)
-      : space(settings), lights(light_cell_m), light_subscriptions(light_cell_m),
-        active_views(light_cell_m) {}
+      : space(settings), lights(light_cell_m), light_subscriptions(light_cell_m) {}
 };
 } // namespace amber::space
 

@@ -157,7 +157,6 @@ struct NativeCompletion {
   std::vector<ModelId> changed_models;
   std::vector<ScriptId> changed_scripts;
   std::vector<TermId> changed_terms, changed_materials;
-  bool permissions_changed = false;
   bool world_ambient_changed = false;
   std::vector<perm::CustodyChange> custody;
   std::vector<Handle> created_objects, removed_objects, visible_objects, hidden_objects;
@@ -729,11 +728,11 @@ void register_illumination(IlluminationSources &, amber::space::State &space_sta
                            const amber::catalog::State &catalog_state, const react::ValueRead &,
                            std::span<const Handle>, float default_source_radius_m,
                            const amber::step::Clock &clock);
-void move_illumination(observe::Lights &, observe::LightSubscriptions &, observe::ActiveViews &,
-                       TransformRead, std::span<const Handle>);
+void move_illumination(observe::Lights &, observe::LightSubscriptions &, TransformRead,
+                       std::span<const Handle>);
 void retire_illumination(IlluminationSources &, observe::Lights &, observe::ZoneAmbients &,
-                         observe::LightSubscriptions &, observe::ActiveViews &,
-                         const space::Space &, std::span<const Handle>);
+                         observe::LightSubscriptions &, const space::Space &,
+                         std::span<const Handle>);
 void illumination_values_changed(IlluminationSources &, amber::space::State &space_state,
                                  const react::ValueRead &, std::span<const FactKey>, Step,
                                  double hz);
@@ -793,20 +792,19 @@ void retire_physics(space::Space &, amber::ObjectState &objects_state, space::Ph
                     amber::step::State &step_state, std::span<const Handle> removed,
                     std::array<TermId, 4> relation_terms, const amber::Origin &,
                     NativeCompletion &);
-void retire_publication(net::ReplicationIndex &, net::SessionViews &, catalog::InstanceTexts &,
+void retire_publication(net::ReplicationIndex &, catalog::InstanceTexts &,
                         std::span<const Handle> removed);
 void refresh_object_plots(const space::Space &, const ObjectState &, react::State &,
                           const catalog::State &, const Clock &, const amber::Origin &,
                           NativeCompletion &);
 
 double outdoor_lux(const react::State &);
-void publish_catalog_changes(net::Sessions &, net::SessionViews &, const catalog::Models &,
-                             const catalog::ModelTexts &, const react::Terms &,
-                             const react::Materials &, net::MaterialAppearanceRoles,
-                             double world_ambient_lux, NativeCompletion &);
-void publish_object_changes(net::Sessions &, net::SessionViews &, IdentityRead, AuthorityRead,
-                            ParentRead, const catalog::ModelTexts &, const catalog::InstanceTexts &,
-                            std::span<const Handle> changed);
+void publish_catalog_changes(net::Sessions &, const catalog::Models &, const catalog::ModelTexts &,
+                             const react::Terms &, const react::Materials &,
+                             net::MaterialAppearanceRoles, double world_ambient_lux,
+                             NativeCompletion &);
+void publish_object_changes(net::Sessions &, IdentityRead, AuthorityRead, ParentRead,
+                            const catalog::State &, std::span<const Handle> changed);
 
 void reconcile_effects(const react::ValueRead &, react::State &, step::State &, const Clock &,
                        react::DeferredEffects &);

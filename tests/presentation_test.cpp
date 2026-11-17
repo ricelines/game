@@ -128,7 +128,7 @@ void descriptions_and_roles() {
               description.says.description == "instance fiction",
           "measured truth and intentional empty claims remain separate");
   auto objects = bi::object_metadata(identity(f.objects), authority(f.objects), parents(f.objects),
-                                     f.texts, f.instance_texts, std::span(&h, 1));
+                                     f.catalog_state, std::span(&h, 1));
   require(objects[0]["owner"] == "p:9" && objects[0]["material"] == 3 &&
               objects[0]["parent"].is_null(),
           "metadata preserves material and owner independently of asset hash");
@@ -262,9 +262,6 @@ void coherent_catalog_publication() {
   std::vector<net::SessionOutput> outputs;
   sessions.drain(requests, notices, outputs);
   outputs.clear();
-  net::SessionViews views;
-  views.rows[101].body = object;
-  views.rows[101].pending.ready = true;
   auto model = f.models.rows[1];
   model.id = static_cast<ModelId>(f.models.rows.size());
   model.asset = f.variant;
@@ -286,13 +283,11 @@ void coherent_catalog_publication() {
   changed.changed_models = {model.id, model.id};
   changed.changed_terms = {added, added};
   changed.changed_materials = {3, 3};
-  step::publish_catalog_changes(sessions, views, f.models, f.texts, f.terms, f.materials,
+  step::publish_catalog_changes(sessions, f.models, f.texts, f.terms, f.materials,
                                 {4, 0, 0, 0, 0, 0}, 120, changed);
   const std::array object_changes{object, object};
-  step::publish_object_changes(sessions, views, identity(f.objects), authority(f.objects),
-                               parents(f.objects), f.texts, f.instance_texts, object_changes);
-  require(!views.rows[101].pending.ready,
-          "definition/authority changes left the actual pending observation valid");
+  step::publish_object_changes(sessions, identity(f.objects), authority(f.objects),
+                               parents(f.objects), f.catalog_state, object_changes);
   sessions.drain(requests, notices, outputs);
   require(outputs.size() == 8, "four direct deltas did not reach each authenticated observer");
   const auto rows = [&](net::SessionId id, std::string_view field) -> const Json & {
@@ -326,15 +321,12 @@ void coherent_catalog_publication() {
           "live inspection did not consume the newly appended quantity");
 
   outputs.clear();
-  views.rows[101].pending.ready = true;
   step::NativeCompletion ambient;
   ambient.world_ambient_changed = true;
-  step::publish_catalog_changes(sessions, views, f.models, f.texts, f.terms, f.materials,
+  step::publish_catalog_changes(sessions, f.models, f.texts, f.terms, f.materials,
                                 {4, 0, 0, 0, 0, 0}, 7, ambient);
   sessions.drain(requests, notices, outputs);
-  require(
-      !views.rows[101].pending.ready && outputs.size() == 2,
-      "world ambient edit must refresh pending observations and notify authenticated renderers");
+  require(outputs.size() == 2, "world ambient edit must notify authenticated renderers");
   for (const auto id : {101u, 102u})
     require(rows(id, "world")["ambient_lux"] == 7,
             "renderer did not receive the new world ambient without a model edit");

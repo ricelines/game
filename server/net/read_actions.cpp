@@ -184,10 +184,9 @@ std::vector<TermId> space_action_ids(const catalog::State &catalog, const react:
 } // namespace view_detail
 net::Reply read_actions(const amber::catalog::State &catalog_state,
                         const amber::react::State &react_state,
-                        const amber::ObjectState &objects_state, SessionViews &sessions,
-                        observe::Hearing &hearing, const amber::Settings &settings,
-                        const amber::perm::State &perm_state, Step now,
-                        const net::Invocation &call) {
+                        const amber::ObjectState &objects_state, observe::Hearing &hearing,
+                        const amber::Settings &settings, const amber::perm::State &perm_state,
+                        Step now, const net::Invocation &call) {
   const auto values = react::value_read(objects_state, catalog_state, react_state);
 
   const auto page_size = settings.actions_page;
@@ -264,8 +263,6 @@ net::Reply read_actions(const amber::catalog::State &catalog_state,
       for (auto index = begin; index < end; ++index)
         result["actions"].push_back(record(names[index]));
     }
-    if (target)
-      sessions.rows[call.session].acquired.insert(target.bits);
     result["ok"] = true;
     append_heard(result, hearing, call.session,
                  call.request.fields.value("events_limit", events_per_response));

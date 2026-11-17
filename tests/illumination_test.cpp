@@ -36,11 +36,8 @@ void world_ambient_edits_refresh_lighting() {
   re::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
   f.baseline(f.b);
   auto &points = space_state.light_subscriptions;
-  auto &views = space_state.active_views;
   bi::sync_illuminance_reads(points, f.react_state, f.values(), f.scripts, transforms(f.objects), 2,
                              std::span(&f.b, 1), {.step = 10, .hz = 20});
-  ob::track_view(views, 1, {0, 0, 1}, 30);
-  ob::track_view(views, 2, {100, 0, 1}, 30);
   const auto sample = [&] {
     f.effects = {};
     bi::sample_illuminance(points, space_state.space, identity(f.objects), space_state.lights,
@@ -56,7 +53,6 @@ void world_ambient_edits_refresh_lighting() {
     return found->lit;
   };
   require(sample() == 1 && !visible(), "initial ambient reaches runtime sampling and observation");
-  ob::take_dirty_views(views);
   const auto edit = [&](double lux) {
     const std::array<std::string, 1> roles{"architect"};
     const perm::Players players;
@@ -71,8 +67,6 @@ void world_ambient_edits_refresh_lighting() {
   require(changed.reply.at("ok") && changed.world_ambient_changed,
           "actual architect edit did not identify the changed ambient");
   bi::invalidate_world_illumination(space_state);
-  require(ob::take_dirty_views(views) == std::vector<std::uint64_t>{1, 2},
-          "global ambient changes affect observers in every cell");
   require(sample() == 120 && !f.effects.ordered.empty() && visible(),
           "stationary runtime samples and light-dependent observation retained the old ambient");
   require(!edit(120).world_ambient_changed, "unchanged ambient requested another global refresh");
@@ -112,10 +106,6 @@ void actual_lighting_watch_sampling() {
   re::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
   f.baseline(f.a);
   auto &points = space_state.light_subscriptions;
-  auto &views = space_state.active_views;
-  ob::track_view(views, 1, {30, 0, 1}, 1);
-  ob::track_view(views, 2, {100, 0, 1}, 1);
-  ob::take_dirty_views(views);
   auto &lights = space_state.lights;
   auto &zones = space_state.zones;
   auto values = f.values();
@@ -160,7 +150,7 @@ void actual_lighting_watch_sampling() {
     space::StepResult physics;
     space::PhysicalRelations relations;
     space::step(world, f.objects_state, relations, 1, .05f, {}, physics);
-    ob::dirty_geometry(points, lights, physics.dirty_bounds, &views);
+    ob::dirty_geometry(points, lights, physics.dirty_bounds);
   };
   move_wall({8, 0, 0});
   require(near(sample(1), 2),
@@ -179,8 +169,6 @@ void actual_lighting_watch_sampling() {
   require(sources.running_lights.contains(f.c.bits),
           "restored active light process is indexed without needing a new state mutation");
   changed(f.c, 1, 0);
-  require(ob::take_dirty_views(views) == std::vector<std::uint64_t>{1},
-          "light changes invalidate actual influenced observers only");
   advance(20);
   require(sources.running_lights.empty() && near(sample(20), 2),
           "terminal process sample publishes darkness before stopping periodic work");
@@ -206,7 +194,7 @@ void actual_lighting_watch_sampling() {
   space::PhysicalRelations relations;
   space::remove(world, identity(f.objects), zone, parents(f.objects), space_flags(f.objects),
                 relations, changes);
-  bi::retire_illumination(sources, lights, zones, points, views, world, std::span(&zone, 1));
+  bi::retire_illumination(sources, lights, zones, points, world, std::span(&zone, 1));
   space::StepResult physics;
   space::step(world, f.objects_state, relations, 61, .05f, {}, physics);
   ob::dirty_geometry(points, lights, physics.dirty_bounds);

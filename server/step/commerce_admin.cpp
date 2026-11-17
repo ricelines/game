@@ -72,7 +72,6 @@ perm::HolderControl installed_holder(perm::Holder selected, const perm::Players 
 step::NativeCompletion result(bool changed, Json fields = Json::object()) {
   step::NativeCompletion out;
   out.changed = changed;
-  out.permissions_changed = changed;
   out.result = changed ? record::Result::Applied : record::Result::NoEffect;
   out.reply = {{"ok", true}, {"effect", changed ? "applied" : "none"}};
   out.reply.update(fields);
