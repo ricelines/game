@@ -111,7 +111,7 @@ NativeCompletion native_construction(amber::ObjectState &objects_state,
 NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm::State &perm_state,
                                  space::State &space_state, const DeliveryTargets &delivery,
                                  const amber::Settings &settings, react::ExchangeAction operation,
-                                 const NativeCall &call) {
+                                 const NativeCall &call, TermId plot_changed) {
   const auto &space = space_state.space;
   const auto mailbox_max = settings.mailbox_max;
   auto &parts = objects_state.parts;
@@ -133,19 +133,19 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
   case react::ExchangeAction::AbandonPlot: {
     if (const auto error = validate_abandon_plot(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = abandon_plot(perm_state, objects_state, delivery, space, call);
+    out = abandon_plot(perm_state, objects_state, delivery, space, call, plot_changed);
     break;
   }
   case react::ExchangeAction::SplitPlot: {
     if (const auto error = validate_split_plot(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = split_plot(perm_state, objects_state, settings.land, call);
+    out = split_plot(perm_state, objects_state, settings.land, call, plot_changed);
     break;
   }
   case react::ExchangeAction::JoinPlots: {
     if (const auto error = validate_join_plots(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = join_plots(perm_state, objects_state, call);
+    out = join_plots(perm_state, objects_state, call, plot_changed);
     break;
   }
   case react::ExchangeAction::ReturnGoods: {
@@ -211,7 +211,8 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
   case react::ExchangeAction::Accept: {
     if (const auto error = validate_accept(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = step::accept(perm_state, objects_state, space_state, delivery, settings, call);
+    out = step::accept(perm_state, objects_state, space_state, delivery, settings, call,
+                       plot_changed);
     break;
   }
   case react::ExchangeAction::CancelOffer: {

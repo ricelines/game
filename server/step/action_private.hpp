@@ -61,7 +61,7 @@ NativeCompletion native_construction(amber::ObjectState &objects_state,
 NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm::State &perm_state,
                                  space::State &space_state, const DeliveryTargets &delivery,
                                  const amber::Settings &settings, react::ExchangeAction operation,
-                                 const NativeCall &call);
+                                 const NativeCall &call, TermId plot_changed);
 NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
                                     const amber::react::State &react_state,
                                     amber::perm::State &perm_state,

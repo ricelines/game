@@ -2,6 +2,14 @@
 #include "step.hpp"
 
 namespace amber::step::commerce_detail {
+struct PlotChange {
+  std::string_view op;
+  PlotId plot, other;
+  PlayerId owner, old_owner;
+  float area, other_area;
+};
+void plot_changed(NativeCompletion &, std::span<const perm::PlotHolder>, TermId, const NativeCall &,
+                  const PlotChange &);
 perm::Holder actor(const step::NativeCall &call);
 PlayerId player(const step::NativeCall &call);
 PlayerId player_id(const Json &input, const perm::Players &players);

@@ -2290,5 +2290,10 @@
     "kind": "action",
     "description": "Sign as the named tenant after giving the lease a capped wallet Spend grant.",
     "inputs": []
+  },
+  {
+    "name": "base.plot_changed",
+    "kind": "event",
+    "description": "A plot split, join, owner change or newly surveyed pool lot."
   }
 ]

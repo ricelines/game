@@ -69,6 +69,10 @@ struct Fixture {
     f.objects.owner[f.a.slot()] = 1;
     f.objects.owner[f.b.slot()] = 1;
     f.terms.rows.resize(32);
+    f.terms.rows[29].id = 29;
+    f.terms.rows[29].name = "base.plot_changed";
+    f.terms.rows[29].kind = react::Kind::Event;
+    f.terms.by_name.emplace("base.plot_changed", 29);
     for (auto [id, role] : {std::pair{30u, react::MeasurementRole::Mass},
                             std::pair{31u, react::MeasurementRole::Runtime}}) {
       f.terms.rows[id].id = id;
@@ -181,7 +185,7 @@ struct Fixture {
         float(toml::parse_file(AMBER_CONFIG_PATH)["land"]["LOT_MIN_M"].value<double>().value());
     auto out =
         step::native_exchange(objects_state, perm_state, space_state, delivery, settings, operation,
-                              {{actor, action, target, {}}, std::move(args), {}, 20, 20, {}});
+                              {{actor, action, target, {}}, std::move(args), {}, 20, 20, {}}, 29);
     const auto custody = std::move(out.custody);
     step::apply_custody(f.objects_state, space_state, {0, 0, 3, 0}, plots, custody, out);
     return out;
@@ -959,6 +963,86 @@ void land_refusals_have_fixes_and_denial_records() {
   denied(f.call(f.ids.abandon_plot, PlayerId{1}, {{"plot", 1}}),
          "this lot already belongs to the pool");
 }
+void plot_changes_dispatch_before_authority_is_removed() {
+  Fixture f;
+  const auto observer = R"(return {kind='instance',on={['base.plot_changed']=function(self,_,event)
+    self.state.count=(self.state.count or 0)+1
+    self.state.op=event.op;self.state.plot=event.plot;self.state.other=event.other
+    self.state.owner=event.owner;self.state.old_owner=event.old_owner
+    self.state.area=event.area;self.state.other_area=event.other_area
+  end}})";
+  const auto land = f.f.add(observer), lease = f.f.add(observer), builder = f.f.add(observer);
+  for (const auto &[script, object, rights] :
+       {std::tuple{land, f.f.a, perm::Rights{8} << 8}, {builder, f.f.c, perm::Rights{1} << 8}}) {
+    require(bool(perm::create_root_grant(f.grants, f.players,
+                                         {0, perm::Holder::script(script, object),
+                                          perm::Scope::all_land(), rights, 0, 0, 1000},
+                                         {perm::Holder::script(script, object), 1, true}, 1)),
+            "observer root grant");
+  }
+  for (const auto &[script, object] : {std::pair{land, f.f.a}, {lease, f.f.b}, {builder, f.f.c}}) {
+    const std::array installed{script};
+    react::set_instances(f.f.installed, object, installed, f.f.scripts);
+    react::project_instance(f.f.triggers, f.f.installed, f.f.scripts, f.f.terms, object);
+  }
+  const auto grant_lease = [&](PlayerId owner) {
+    const auto holder = perm::Holder::script(lease, f.f.b);
+    const auto made = perm::create_grant(f.grants, f.players, perm::Holder::player(owner),
+                                         {owner, holder, perm::Scope::plot(1), 16, 0, 0, 1000},
+                                         {perm::Scope::plot(1), owner, 31}, {holder, 1, true}, 1);
+    require(bool(made), "lease observer grant");
+    return made.grant;
+  };
+  const auto initial_grant = grant_lease(1);
+  unsigned count = 0;
+  const auto deliver = [&](step::NativeCompletion out, std::string op, PlotId other,
+                           std::string owner, std::string old_owner, double area,
+                           double other_area) {
+    require(out.changed, "plot mutation failed");
+    step::WorkQueues queues;
+    step::TimerWheel timers;
+    record::Journal journal{100, {}};
+    step::publish_effects(std::move(out.effects), {}, 20, queues, timers, journal, 100);
+    unsigned received = 0;
+    while (auto item = step::pop_foreground(queues)) {
+      const auto &event = std::get<react::EventWork>(item->work);
+      for (const auto &handler :
+           react::dispatch(f.f.triggers, f.f.values(), event.receiver, event.event, 20, 20))
+        if (handler.script == event.recipient_script) {
+          const std::array plans{react::InvocationPlan{
+              handler, event.receiver, event.sender, event.event, event.payload, {}}};
+          f.f.run(plans, 20);
+          ++received;
+        }
+    }
+    require(received == 2, "plot event did not reach exactly land and lease");
+    ++count;
+    for (const auto &[script, object] : {std::pair{land, f.f.a}, {lease, f.f.b}}) {
+      const auto &state = f.f.states.at({object, script});
+      const auto number = [&](const char *key) {
+        return std::get<double>(state.at(std::string(key)));
+      };
+      require(number("count") == count && number("plot") == 1 && number("other") == other &&
+                  number("area") == area && number("other_area") == other_area &&
+                  std::get<std::string>(state.at(std::string("op"))) == op &&
+                  std::get<std::string>(state.at(std::string("owner"))) == owner &&
+                  std::get<std::string>(state.at(std::string("old_owner"))) == old_owner,
+              "dispatched plot change has the wrong fields or was duplicated");
+    }
+    require(!f.f.states.contains({f.f.c, builder}), "build-only observer received a plot event");
+  };
+  deliver(f.call(f.ids.split_plot, PlayerId{1}, {{"plot", 1}, {"x", -15}}), "split", 3, "p:1",
+          "p:1", 200, 600);
+  deliver(f.call(f.ids.join_plots, PlayerId{1}, {{"plots", {1, 3}}}), "join", 3, "p:1", "p:1", 200,
+          600);
+  const auto offer = f.call(f.ids.offer_plot, PlayerId{1}, {{"plot", 1}, {"price", 0}});
+  deliver(f.call(f.ids.accept, PlayerId{2}, {{"offer", offer.reply.at("offer")}, {"max_price", 0}}),
+          "owner", 0, "p:2", "p:1", 800, 0);
+  require(!f.grants.rows[initial_grant].live, "sale retained the previous lease grant");
+  grant_lease(2);
+  deliver(f.call(f.ids.abandon_plot, PlayerId{2}, {{"plot", 1}}), "owner", 0, "p:0", "p:2", 800, 0);
+}
+
 void land_editing_preserves_grants_and_refreshes_objects() {
   Fixture f;
   auto item = f.item(1, {-4, 0, 0});
@@ -993,6 +1077,7 @@ int main() {
     script_notices_need_a_live_recipient_grant_and_keep_unicode();
     returns_use_inventory_with_static_occupants_and_ignore_full_mailboxes();
     land_refusals_have_fixes_and_denial_records();
+    plot_changes_dispatch_before_authority_is_removed();
     land_editing_preserves_grants_and_refreshes_objects();
     offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox();
     wallet_native_authority_is_explicit();

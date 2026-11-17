@@ -29,7 +29,7 @@ void refresh(ObjectState &objects, const perm::Plots &plots, PlotId first, PlotI
 } // namespace
 NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
                               const DeliveryTargets &delivery, const space::Space &space,
-                              const NativeCall &call) {
+                              const NativeCall &call, TermId plot_changed) {
   const auto id = call.arguments.at("plot").get<PlotId>();
   if (auto refusal = lot(state, id, call))
     return *refusal;
@@ -38,6 +38,9 @@ NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
     return commerce_detail::denied("transfer", "plot:" + std::to_string(id),
                                    "lot is already in the pool",
                                    "this lot already belongs to the pool");
+  const auto holders = perm::plot_holders(state.plots.rows[id], state.grants, call.step);
+  const auto bounds = state.plots.rows[id].bounds;
+  const auto area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]);
   auto out = commerce_detail::result(true, {{"plot", id}, {"owner", "p:0"}});
   const auto ids = identity(std::as_const(objects.objects));
   for (auto object : plot_things(ids, objects.objects.plot, objects.declared_parts, id)) {
@@ -57,11 +60,13 @@ NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
                           {{"plot", id}, {"old_owner", owner}, {"owner", 0}});
   out.records.back().kind = record::Kind::System;
   commerce_detail::record(out, call, "abandon_plot", {}, out.reply);
+  commerce_detail::plot_changed(out, holders, plot_changed, call,
+                                {"owner", id, 0, 0, owner, area, 0});
   out.permissions_changed = true;
   return out;
 }
 NativeCompletion split_plot(perm::State &state, ObjectState &objects, const LandSettings &settings,
-                            const NativeCall &call) {
+                            const NativeCall &call, TermId plot_changed) {
   const auto id = call.arguments.at("plot").get<PlotId>();
   if (auto refusal = lot(state, id, call))
     return *refusal;
@@ -77,14 +82,23 @@ NativeCompletion split_plot(perm::State &state, ObjectState &objects, const Land
       plot.bounds[axis + 2] - cut < settings.lot_min_m)
     return commerce_detail::denied("transfer", "plot:" + std::to_string(id), "piece is too narrow",
                                    "cut at least LOT_MIN_M m from each edge");
+  const auto holders = perm::plot_holders(plot, state.grants, call.step);
+  const auto owner = plot.owner;
   const auto next = perm::split_plot(state, id, axis, cut, call.step);
   auto out = commerce_detail::result(true, {{"plots", {id, next}}});
   refresh(objects, state.plots, id, next, out);
   commerce_detail::record(out, call, "split_plot", out.changed_objects, out.reply);
+  const auto &lower = state.plots.rows[id].bounds;
+  const auto &upper = state.plots.rows[next].bounds;
+  commerce_detail::plot_changed(out, holders, plot_changed, call,
+                                {"split", id, next, owner, owner,
+                                 (lower[2] - lower[0]) * (lower[3] - lower[1]),
+                                 (upper[2] - upper[0]) * (upper[3] - upper[1])});
   out.permissions_changed = true;
   return out;
 }
-NativeCompletion join_plots(perm::State &state, ObjectState &objects, const NativeCall &call) {
+NativeCompletion join_plots(perm::State &state, ObjectState &objects, const NativeCall &call,
+                            TermId plot_changed) {
   auto a = call.arguments.at("plots").at(0).get<PlotId>();
   auto b = call.arguments.at("plots").at(1).get<PlotId>();
   if (a > b)
@@ -103,6 +117,12 @@ NativeCompletion join_plots(perm::State &state, ObjectState &objects, const Nati
     return commerce_detail::denied(
         "transfer", "plot:" + std::to_string(a), "invalid join",
         "choose two lots of one owner that share a whole edge and form a rectangle");
+  auto holders = perm::plot_holders(left, state.grants, call.step);
+  const auto other_holders = perm::plot_holders(right, state.grants, call.step);
+  holders.insert(holders.end(), other_holders.begin(), other_holders.end());
+  const auto owner = left.owner;
+  const auto area = (l[2] - l[0]) * (l[3] - l[1]);
+  const auto other_area = (r[2] - r[0]) * (r[3] - r[1]);
   const auto removed = perm::join_plots(state, a, b);
   auto out = commerce_detail::result(true, {{"plot", a}});
   std::map<PlayerId, std::vector<GrantId>> notices;
@@ -115,6 +135,8 @@ NativeCompletion join_plots(perm::State &state, ObjectState &objects, const Nati
   refresh(objects, state.plots, a, b, out);
   commerce_detail::record(out, call, "join_plots", out.changed_objects,
                           {{"plots", {a, b}}, {"plot", a}});
+  commerce_detail::plot_changed(out, holders, plot_changed, call,
+                                {"join", a, b, owner, owner, area, other_area});
   out.permissions_changed = true;
   return out;
 }

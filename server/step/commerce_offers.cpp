@@ -153,7 +153,8 @@ step::NativeCompletion offers(const perm::Offers &offers, const perm::Players &p
 }
 step::NativeCompletion accept(amber::perm::State &perm_state, amber::ObjectState &objects_state,
                               space::State &space_state, const DeliveryTargets &delivery,
-                              const amber::Settings &settings, const step::NativeCall &call) {
+                              const amber::Settings &settings, const step::NativeCall &call,
+                              TermId plot_changed) {
   const auto &space = space_state.space;
   const auto mailbox_max = settings.mailbox_max;
   auto &offers = perm_state.offers;
@@ -184,12 +185,16 @@ step::NativeCompletion accept(amber::perm::State &perm_state, amber::ObjectState
   if (row.plot) {
     const auto seller = row.seller;
     const auto plot = row.plot;
+    const auto holders = perm::plot_holders(perm_state.plots.rows[plot], grants, call.step);
+    const auto bounds = perm_state.plots.rows[plot].bounds;
+    const auto area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]);
     const auto bought =
         perm::accept_plot(perm_state, {commerce_detail::actor(call), beneficiary, payer, {}, false},
                           id, max_price, call.step);
     if (!bought)
       return commerce_detail::denied(bought.reason, "accept", "offer:" + std::to_string(id),
                                      seller);
+    const auto before_survey = perm_state.plots.rows.size();
     if (!seller)
       fill_pool(perm_state, space_state, settings.land);
     auto out = commerce_detail::result(
@@ -205,6 +210,18 @@ step::NativeCompletion accept(amber::perm::State &perm_state, amber::ObjectState
                              {"price", row.price},
                              {"offer", id}});
     out.records.back().kind = record::Kind::System;
+    commerce_detail::plot_changed(out, holders, plot_changed, call,
+                                  {"owner", plot, 0, beneficiary, seller, area, 0});
+    for (std::size_t index = before_survey; index < perm_state.plots.rows.size(); ++index) {
+      const auto &surveyed = perm_state.plots.rows[index];
+      if (surveyed.kind != perm::PlotKind::Lot)
+        continue;
+      const auto recipients = perm::plot_holders(surveyed, grants, call.step);
+      const auto &b = surveyed.bounds;
+      commerce_detail::plot_changed(
+          out, recipients, plot_changed, call,
+          {"owner", surveyed.id, 0, 0, 0, (b[2] - b[0]) * (b[3] - b[1]), 0});
+    }
     out.permissions_changed = true;
     return out;
   }

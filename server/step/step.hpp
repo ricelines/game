@@ -565,7 +565,8 @@ step::NativeCompletion offers(const perm::Offers &offers, const perm::Players &p
                               const step::NativeCall &call);
 step::NativeCompletion accept(amber::perm::State &perm_state, amber::ObjectState &objects_state,
                               space::State &space_state, const DeliveryTargets &delivery,
-                              const amber::Settings &settings, const step::NativeCall &call);
+                              const amber::Settings &settings, const step::NativeCall &call,
+                              TermId plot_changed);
 step::NativeCompletion cancel_offer(amber::perm::State &perm_state,
                                     amber::ObjectState &objects_state,
                                     const step::NativeCall &call);
@@ -1079,9 +1080,10 @@ std::string validate_abandon_plot(const Json &);
 std::string validate_split_plot(const Json &);
 std::string validate_join_plots(const Json &);
 NativeCompletion abandon_plot(perm::State &, ObjectState &, const DeliveryTargets &,
-                              const space::Space &, const NativeCall &);
-NativeCompletion split_plot(perm::State &, ObjectState &, const LandSettings &, const NativeCall &);
-NativeCompletion join_plots(perm::State &, ObjectState &, const NativeCall &);
+                              const space::Space &, const NativeCall &, TermId plot_changed);
+NativeCompletion split_plot(perm::State &, ObjectState &, const LandSettings &, const NativeCall &,
+                            TermId plot_changed);
+NativeCompletion join_plots(perm::State &, ObjectState &, const NativeCall &, TermId plot_changed);
 step::NativeCompletion return_goods(perm::State &, ObjectState &, const DeliveryTargets &,
                                     const space::Space &, const NativeCall &, bool forced = false);
 

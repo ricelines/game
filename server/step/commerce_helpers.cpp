@@ -4,6 +4,22 @@
 #include <cmath>
 
 namespace amber::step::commerce_detail {
+void plot_changed(NativeCompletion &out, std::span<const perm::PlotHolder> holders, TermId event,
+                  const NativeCall &call, const PlotChange &change) {
+  const std::vector<EventField> value{{"op", std::string(change.op)},
+                                      {"plot", Value(std::int64_t(change.plot))},
+                                      {"other", Value(std::int64_t(change.other))},
+                                      {"owner", "p:" + std::to_string(change.owner)},
+                                      {"old_owner", "p:" + std::to_string(change.old_owner)},
+                                      {"area", Value(double(change.area))},
+                                      {"other_area", Value(double(change.other_area))}};
+  std::set<std::pair<ScriptId, std::uint64_t>> sent;
+  for (const auto &[holder, verbs] : holders)
+    if (holder.kind == perm::HolderKind::Script &&
+        sent.emplace(holder.id, holder.installed_on.bits).second)
+      out.effects.ordered.emplace_back(react::EventWork{holder.installed_on, call.request.target,
+                                                        event, value, call.origin, holder.id});
+}
 perm::Holder actor(const step::NativeCall &call) {
   if (const auto *player = std::get_if<PlayerId>(&call.request.caller))
     return perm::Holder::player(*player);
