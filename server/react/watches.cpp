@@ -97,19 +97,14 @@ RelationAnswer read_relation(const Relation &relation, Handle object) {
   return answer;
 }
 std::vector<WatchDelivery> check_watch(Subscriptions &subscriptions, FactKey source,
-                                       const CurrentAnswers &answers, ScriptId recipient) {
+                                       const WatchAnswer &answer, ScriptId recipient) {
   std::vector<WatchDelivery> out;
   auto found = subscriptions.rows.find(source);
   if (found == subscriptions.rows.end())
     return out;
-  auto current = answers.values.find(source);
-  const WatchAnswer common =
-      current == answers.values.end() ? WatchAnswer{Answer{}} : current->second;
   for (auto &binding : found->second) {
     if (recipient && binding.consumer.script != recipient)
       continue;
-    const auto own = answers.by_consumer.find(binding.consumer);
-    const WatchAnswer &answer = own == answers.by_consumer.end() ? common : own->second;
     bool changed = binding.last != answer;
     auto scalar = [](const WatchAnswer &value) -> const Answer * {
       if (const auto *shared = std::get_if<SharedWatchAnswer>(&value))
@@ -149,7 +144,7 @@ std::vector<WatchDelivery> check_watch(Subscriptions &subscriptions, FactKey sou
         difference(old ? old->in : empty, relation->in, true);
       }
     if (changed)
-      out.push_back({binding.consumer, binding.index, answer, std::move(deltas)});
+      out.push_back({binding.consumer, binding.index, answer, std::move(deltas), source.subject});
   }
   return out;
 }
@@ -266,8 +261,8 @@ std::vector<ScriptKey> watch_consumers(const Subscriptions &subscriptions, Handl
   }
   return result;
 }
-void bind_watch(Subscriptions &subscriptions, FactKey source, WatchBinding binding) {
-  auto &rows = subscriptions.rows[source];
+void bind_watch(Subscriptions &subscriptions, WatchBinding binding) {
+  auto &rows = subscriptions.rows[{binding.consumer.object, binding.declaration.term}];
   auto found = std::find_if(rows.begin(), rows.end(), [&](const auto &row) {
     return row.consumer == binding.consumer && row.index == binding.index;
   });

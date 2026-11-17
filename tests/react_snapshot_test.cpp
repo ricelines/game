@@ -24,8 +24,8 @@ void reaction_roundtrip_and_capture() {
   states[{a, 4}].insert(std::string("1"), std::string("different"));
   states[{outside, 4}].insert(std::string("x"), 99.0);
   Subscriptions subscriptions;
-  bind_watch(subscriptions, {a, 1},
-             {{b, 4}, 0, Answer{true, Value(3.0)}, {1, {{Threshold::Predicate::Below, 2}}}, {}});
+  bind_watch(subscriptions,
+             {{b, 4}, 0, Answer{true, Value(3.0)}, {1, {{Threshold::Predicate::Below, 2}}}});
   RandomStates random{{a.bits, 345}, {outside.bits, 567}};
   AuthoredRelations relations;
   DeferredEffects effects;
@@ -85,9 +85,9 @@ void reaction_roundtrip_and_capture() {
           "restore rebuilds the persistent charge from the saved entries");
   require(loaded_random.size() == 1 && loaded_random.at(a.bits) == 345,
           "RNG selected full handle restored");
-  require(loaded_subscriptions.rows.at({a, 1})[0].last == subscriptions.rows.at({a, 1})[0].last,
+  require(loaded_subscriptions.rows.at({b, 1})[0].last == subscriptions.rows.at({b, 1})[0].last,
           "saved watch answer survives snapshot");
-  require(watch_sources(loaded_subscriptions, ScriptKey{b, 4}) == std::vector<FactKey>{{a, 1}},
+  require(watch_sources(loaded_subscriptions, ScriptKey{b, 4}) == std::vector<FactKey>{{b, 1}},
           "consumer lookup finds the restored primary row");
   require(loaded_relations.at(2).in.get(b.slot())->front() == a, "bidirectional relation restored");
   require(loaded_gives.get(b.slot())->front().subject == a, "contribution reverse restored");

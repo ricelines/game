@@ -100,18 +100,8 @@ struct Fixture {
                        mode);
   }
   std::vector<InvocationPlan> changed(FactKey fact, Step now = 0) {
-    auto changes = refresh_dependencies(subscriptions, values(), fact, now, 20, {});
     auto result = check_changed(subscriptions, values(), allocations, fact, now, 20, {});
     auto plans = plan_deliveries(result, triggers, scripts, values(), now, 20);
-    for (const auto &dirty : changes.dirty) {
-      if (dirty.source == fact)
-        continue;
-      auto followed =
-          check_changed(subscriptions, values(), allocations, dirty.source, now, 20, {});
-      auto more = plan_deliveries(followed, triggers, scripts, values(), now, 20);
-      plans.insert(plans.end(), std::make_move_iterator(more.begin()),
-                   std::make_move_iterator(more.end()));
-    }
     return plans;
   }
   void run(std::span<const InvocationPlan> plans, Step now = 0) {

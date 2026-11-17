@@ -113,19 +113,6 @@ void retire_reactions(const catalog::Models &models, const ValueRead &values,
         effects.ordered.emplace_back(react::WatchWork{{h, term}, origin});
       }
   }
-  // Rebind surviving consumers while their old answers still exist. In
-  // particular, an along edge disappearing must deliver absence once.
-  std::vector<FactKey> changed;
-  for (const auto &effect : effects.ordered)
-    if (const auto *work = std::get_if<react::WatchWork>(&effect))
-      changed.push_back(work->source);
-  for (auto fact : changed) {
-    auto rebound = react::refresh_dependencies(subscriptions, values, fact, now, hz, origin);
-    for (auto &dirty : rebound.dirty)
-      effects.ordered.emplace_back(std::move(dirty));
-    for (auto &timer : rebound.timers)
-      effects.ordered.emplace_back(std::move(timer));
-  }
   reconcile_allocations(values, react_state, effects, now, hz);
   for (auto h : objects) {
     auto installed = react::installed_scripts(models, instances, values.identity, h);

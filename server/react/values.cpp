@@ -116,17 +116,22 @@ Answer read_setting(const InstanceSettings &instance, const ModelSettings &model
       return value;
   return lookup(world.values, term);
 }
-Answer read_shared(const SharedColumns &shared, const RelationsRead &relations, Handle h,
+Handle shared_subject(const SharedColumns &shared, const RelationsRead &relations, Handle object,
+                      const Term &term) {
+  if (column(shared, term.id, object))
+    return object;
+  if (term.along)
+    if (const auto relation = relations.columns.find(term.along);
+        relation != relations.columns.end())
+      if (const auto *edges = relation->second->out.get(object.slot()); edges && !edges->empty())
+        return edges->front();
+  return object;
+}
+Answer read_shared(const SharedColumns &shared, const RelationsRead &relations, Handle object,
                    const Term &term) {
-  if (const auto *v = column(shared, term.id, h))
-    return {true, Value(v->total)};
-  if (term.along) {
-    auto relation = relations.columns.find(term.along);
-    if (relation != relations.columns.end())
-      if (auto *edges = relation->second->out.get(h.slot()); edges && !edges->empty())
-        if (const auto *v = column(shared, term.id, edges->front()))
-          return {true, Value(v->total)};
-  }
+  const auto subject = shared_subject(shared, relations, object, term);
+  if (const auto *value = column(shared, term.id, subject))
+    return {true, Value(value->total)};
   return {};
 }
 Answer read_runtime_measurement(const RuntimeMeasurements &measurements, FactKey key) {

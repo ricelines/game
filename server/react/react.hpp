@@ -262,16 +262,10 @@ struct WatchBinding {
   std::uint32_t index = 0;
   WatchAnswer last = Answer{};
   WatchDeclaration declaration;
-  std::vector<FactKey> dependencies;
 };
 
 struct Subscriptions {
   std::unordered_map<FactKey, std::vector<WatchBinding>, FactKeyHash> rows;
-};
-
-struct CurrentAnswers {
-  std::unordered_map<FactKey, WatchAnswer, FactKeyHash> values;
-  std::unordered_map<ScriptKey, WatchAnswer, ScriptKeyHash> by_consumer;
 };
 
 struct WatchDelivery {
@@ -279,6 +273,7 @@ struct WatchDelivery {
   std::uint32_t index;
   WatchAnswer value;
   std::vector<RelationDelta> relations;
+  Handle source;
 };
 
 struct Meter {
@@ -510,7 +505,6 @@ struct WatchChanges {
 };
 
 struct WatchResult {
-  FactKey source;
   std::vector<WatchDelivery> deliveries;
   std::vector<react::Timer> timers;
 };
@@ -605,6 +599,7 @@ double process_value(const Process &, Step now, double hz);
 Answer read_state(const Properties &, const Processes &, Handle, TermId, Step, double hz);
 Answer read_setting(const InstanceSettings &, const ModelSettings &, const PlotSettings &,
                     const WorldSettings &, Handle, ModelId, PlotId, TermId);
+Handle shared_subject(const SharedColumns &, const RelationsRead &, Handle, const Term &);
 Answer read_shared(const SharedColumns &, const RelationsRead &, Handle, const Term &);
 Answer read_runtime_measurement(const RuntimeMeasurements &, FactKey);
 Answer read(const ValueRead &, Handle, TermId, Step, double hz);
@@ -620,12 +615,12 @@ void acknowledge_watch(Subscriptions &, ScriptKey, const WatchRun &);
 
 RelationAnswer read_relation(const Relation &, Handle);
 
-std::vector<WatchDelivery> check_watch(Subscriptions &, FactKey, const CurrentAnswers &,
+std::vector<WatchDelivery> check_watch(Subscriptions &, FactKey, const WatchAnswer &,
                                        ScriptId recipient = 0);
 std::optional<Step> next_crossing(const Process &, const Threshold &, Step now, double hz);
 bool valid_threshold(const react::ThresholdToken &, IdentityRead, const Processes &,
                      const Subscriptions &, Step now, double hz);
-void bind_watch(Subscriptions &, FactKey, WatchBinding);
+void bind_watch(Subscriptions &, WatchBinding);
 void unbind_watch(Subscriptions &, ScriptKey, std::uint32_t index);
 void retire_subscriptions(Subscriptions &, Handle);
 std::vector<FactKey> watch_sources(const Subscriptions &, ScriptKey);
@@ -742,8 +737,6 @@ WatchChanges sync_watches(amber::react::State &react_state, const ValueRead &, S
                           const ScriptDeclaration &, Step now, double hz, const amber::Origin &,
                           SyncMode, std::optional<std::span<const TermId>> allowed_terms = {});
 void remove_watches(Subscriptions &, ScriptKey);
-WatchChanges refresh_dependencies(Subscriptions &, const ValueRead &, FactKey changed, Step,
-                                  double hz, const amber::Origin &);
 WatchChanges sync_rule_watches(amber::react::State &react_state, const ValueRead &,
                                const catalog::Scripts &, std::span<const Effect>, Step, double hz,
                                const amber::Origin &);

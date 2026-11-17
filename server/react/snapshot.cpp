@@ -61,7 +61,6 @@ template <class S> void serialize(S &s, WatchBinding &v) {
   snap::field(s, v.last);
   snap::field(s, v.declaration.term);
   snap::field(s, v.declaration.thresholds);
-  snap::field(s, v.dependencies);
 }
 
 namespace {

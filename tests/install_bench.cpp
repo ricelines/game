@@ -49,7 +49,7 @@ void watches(unsigned count) {
       delivered += unsigned(std::get<double>(state->second.values.at(std::string("count"))));
   test_runtime::require(delivered == iterations,
                         "actual Luau deliveries must preserve exact count");
-  report("own_state_dirty_primary_dependencies_delivery_luau", count, samples);
+  report("own_state_dirty_direct_watch_delivery_luau", count, samples);
 }
 void school_parts() {
   test_runtime::Fixture f{1000};
@@ -88,7 +88,7 @@ void school_parts() {
 }
 } // namespace
 int main() {
-  std::cout << "Scope: actual value mutation, primary dependency scans, watch comparison and Luau; "
+  std::cout << "Scope: actual value mutation, direct watch lookup, comparison and Luau; "
                "no physics, transport, snapshots, journal or pacing. The 300-part workload "
                "measures the school's shared-environment process update, not swimming geometry.\n";
   watches(100);

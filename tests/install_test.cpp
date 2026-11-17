@@ -81,8 +81,8 @@ void term_fallback_tracks_own_row_existence() {
   f.models.rows[1].script = id;
   project_model(f.triggers, f.models, f.scripts, f.terms, 1);
   f.bind(id, f.a);
-  require(watch_sources(f.subscriptions, ScriptKey{f.a, id}) == std::vector<FactKey>{{f.b, 4}},
-          "Term.along fallback bound to first outgoing subject");
+  require(watch_sources(f.subscriptions, ScriptKey{f.a, id}) == std::vector<FactKey>{{f.a, 4}},
+          "Term.along watch stays keyed to its consumer");
   f.shared[4].set(f.a.slot(), Shared{0, {}});
   auto plans = f.changed({f.a, 4});
   require(plans.size() == 1 && std::get<Value>(plans[0].payload).numeric() == 0,
@@ -91,7 +91,73 @@ void term_fallback_tracks_own_row_existence() {
   f.shared[4].erase(f.a.slot());
   plans = f.changed({f.a, 4});
   require(plans.size() == 1 && std::get<Value>(plans[0].payload).numeric() == 10,
-          "own row removal rebinds and preserves previous answer");
+          "own row removal reveals fallback and preserves the previous answer");
+}
+void along_changes_use_first_source_local_override_and_one_hop() {
+  Fixture f;
+  ObjectInit init;
+  init.model = 1;
+  const auto second = create(f.objects, init);
+  f.shared.resize(5);
+  f.shared[4].set(f.a.slot(), Shared{10, {}});
+  f.shared[4].set(second.slot(), Shared{20, {}});
+  set_relation(f.relations.at(3), 3, f.b, f.a, true, f.effects);
+  set_relation(f.relations.at(3), 3, f.b, second, true, f.effects);
+  set_relation(f.relations.at(3), 3, f.c, f.b, true, f.effects);
+  const auto script = f.add(R"(return {kind='instance',watches={'novel.signal'},on={
+    ['novel.signal']=function(self,source,value)
+      assert(self:get('novel.signal')==value)
+      self.state.source=source
+      self.state.value=value
+    end}})");
+  for (auto consumer : {f.b, f.c}) {
+    set_instances(f.installed, consumer, std::span(&script, 1), f.scripts);
+    project_instance(f.triggers, f.installed, f.scripts, f.terms, consumer);
+    f.bind(script, consumer);
+  }
+  f.shared[4].set(f.a.slot(), Shared{11, {}});
+  auto plans = f.changed({f.a, 4});
+  require(plans.size() == 1 && plans[0].receiver == f.b && plans[0].sender == f.a,
+          "source change wakes its direct consumer, not the next relation hop");
+  f.run(plans);
+  f.shared[4].set(second.slot(), Shared{22, {}});
+  require(f.changed({second, 4}).empty(), "a non-first source cannot replace the effective value");
+  require(
+      !has_applicable_watch(f.subscriptions, f.triggers, f.scripts, f.values(), {second, 4}, 0, 20),
+      "a watcher of another first source does not suppress this source's missing-rule gap");
+  set_relation(f.relations.at(3), 3, f.b, f.a, false, f.effects);
+  plans = f.changed({f.b, 3});
+  require(plans.size() == 1 && plans[0].sender == second &&
+              std::get<Value>(plans[0].payload).numeric() == 22,
+          "removing the first link reveals the next source and supplies its handle");
+  f.run(plans);
+  f.shared[4].set(f.b.slot(), Shared{0, {}});
+  plans = f.changed({f.b, 4});
+  require(plans.size() == 2, "an explicit zero overrides fallback and reaches direct consumers");
+  f.run(plans);
+  f.shared[4].set(second.slot(), Shared{23, {}});
+  require(f.changed({second, 4}).empty(), "local override suppresses an upstream value change");
+  require(
+      !has_applicable_watch(f.subscriptions, f.triggers, f.scripts, f.values(), {second, 4}, 0, 20),
+      "a local override does not count as modeling its unused upstream source");
+  f.shared[4].erase(f.b.slot());
+  plans = f.changed({f.b, 4});
+  require(plans.size() == 2, "local removal changes the owner and its immediate consumer");
+  for (const auto &plan : plans)
+    if (plan.receiver == f.b)
+      require(plan.sender == second && std::get<Value>(plan.payload).numeric() == 23,
+              "local removal restores the current first source");
+    else
+      require(plan.receiver == f.c && plan.sender == f.b &&
+                  !std::get<Value>(plan.payload).present(),
+              "shared fallback never follows a second hop");
+  f.run(plans);
+  set_relation(f.relations.at(3), 3, f.b, second, false, f.effects);
+  plans = f.changed({f.b, 3});
+  require(plans.size() == 1 && plans[0].receiver == f.b &&
+              !std::get<Value>(plans[0].payload).present(),
+          "removing the final edge delivers absence to its consumer");
+  f.run(plans);
 }
 void threshold_restore_and_selected_instance_codec() {
   Fixture f;
@@ -253,6 +319,7 @@ void selector_changes_publish_after_subscription_rebinding() {
 int main() {
   real_watch_drives_authored_state();
   term_fallback_tracks_own_row_existence();
+  along_changes_use_first_source_local_override_and_one_hop();
   threshold_restore_and_selected_instance_codec();
   rule_versions_partial_replacement_and_catchup();
   unwatched_quantity_never_creates_catchup();

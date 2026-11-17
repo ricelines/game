@@ -12,41 +12,32 @@ struct WatchKey {
   std::uint32_t index;
   bool operator==(const WatchKey &) const = default;
 };
-struct ResolvedWatch {
-  FactKey source;
-  std::vector<FactKey> dependencies;
-};
 template <class T> void unique(std::vector<T> &values, const T &value) {
   if (std::find(values.begin(), values.end(), value) == values.end())
     values.push_back(value);
 }
-Handle first_out(const react::ValueRead &values, Handle object, TermId relation) {
-  if (!values.identity.valid(object))
-    return {};
-  auto column = values.relations.columns.find(relation);
-  if (column == values.relations.columns.end())
-    return {};
-  const auto *edges = column->second->out.get(object.slot());
-  if (!edges || edges->empty() || !values.identity.valid(edges->front()))
-    return {};
-  return edges->front();
+std::vector<FactKey> wake_targets(const ValueRead &values, FactKey source) {
+  std::vector<FactKey> targets{source};
+  const auto &changed = values.terms.rows.at(source.term);
+  if (changed.kind == Kind::Relation) {
+    for (const auto &term : values.terms.rows)
+      if (term.combine != Combine::None && term.along == source.term)
+        targets.push_back({source.subject, term.id});
+  } else if (changed.combine != Combine::None && changed.along) {
+    if (const auto relation = values.relations.columns.find(changed.along);
+        relation != values.relations.columns.end())
+      if (const auto *incoming = relation->second->in.get(source.subject.slot()))
+        for (auto consumer : *incoming)
+          if (consumer != source.subject && values.identity.valid(consumer))
+            targets.push_back({consumer, source.term});
+  }
+  return targets;
 }
-ResolvedWatch resolve(const react::ValueRead &values, ScriptKey consumer,
-                      const react::WatchDeclaration &declaration) {
-  ResolvedWatch link;
-  Handle subject = consumer.object;
-  link.source = {subject, declaration.term};
-  const auto &term = values.terms.rows.at(declaration.term);
-  if (!subject.bits || term.combine == react::Combine::None || !term.along)
-    return link;
-  unique(link.dependencies, FactKey{subject, declaration.term});
-  if (term.id < values.shared.size() && values.shared[term.id].get(subject.slot()))
-    return link;
-  unique(link.dependencies, FactKey{subject, term.along});
-  const auto fallback = first_out(values, subject, term.along);
-  if (fallback.bits)
-    link.source.subject = fallback;
-  return link;
+Handle effective_subject(const ValueRead &values, FactKey consumer) {
+  const auto &term = values.terms.rows.at(consumer.term);
+  return term.combine != Combine::None
+             ? shared_subject(values.shared, values.relations, consumer.subject, term)
+             : consumer.subject;
 }
 react::WatchAnswer answer(const react::ValueRead &values, const react::AllocationRows &allocations,
                           FactKey source, Handle consumer, Step now, double hz) {
@@ -71,13 +62,13 @@ react::WatchAnswer answer(const react::ValueRead &values, const react::Allocatio
     return react::Answer{};
   return react::read(values, source.subject, source.term, now, hz);
 }
-std::optional<std::pair<FactKey, react::WatchBinding>>
-existing(const react::Subscriptions &subscriptions, WatchKey key) {
-  for (const auto &[source, bindings] : subscriptions.rows)
-    for (const auto &binding : bindings)
+react::WatchBinding *existing(react::Subscriptions &subscriptions, FactKey source, WatchKey key) {
+  const auto found = subscriptions.rows.find(source);
+  if (found != subscriptions.rows.end())
+    for (auto &binding : found->second)
       if (binding.consumer == key.consumer && binding.index == key.index)
-        return std::pair{source, binding};
-  return {};
+        return &binding;
+  return nullptr;
 }
 void arm(WatchChanges &result, const react::Subscriptions &subscriptions,
          const react::ValueRead &values, FactKey source, Step now, double hz,
@@ -135,31 +126,21 @@ WatchChanges sync_watches(amber::react::State &react_state, const react::ValueRe
     if (!allowed(index))
       continue;
     const WatchKey key{consumer, index};
-    auto next = resolve(values, consumer, declaration.watches[index]);
-    auto old = existing(subscriptions, key);
-    const auto source = next.source;
-    if (old && mode != SyncMode::Initial && old->first == source) {
-      auto &bindings = subscriptions.rows.at(source);
-      auto &binding = *std::find_if(bindings.begin(), bindings.end(), [&](const auto &row) {
-        return row.consumer == consumer && row.index == index;
-      });
-      binding.declaration = declaration.watches[index];
-      binding.dependencies = std::move(next.dependencies);
+    const FactKey source{consumer.object, declaration.watches[index].term};
+    auto *old = existing(subscriptions, source, key);
+    if (old && mode != SyncMode::Initial) {
+      old->declaration = declaration.watches[index];
       continue;
     }
+    const FactKey value_source{effective_subject(values, source), source.term};
     react::WatchBinding binding{consumer, index,
-                                answer(values, allocations, source, consumer.object, now, hz),
-                                declaration.watches[index], std::move(next.dependencies)};
+                                answer(values, allocations, value_source, consumer.object, now, hz),
+                                declaration.watches[index]};
     if (!old && mode == SyncMode::Change)
       binding.last = values.terms.rows[source.term].kind == react::Kind::Relation
                          ? react::WatchAnswer{react::RelationAnswer{}}
                          : react::WatchAnswer{react::Answer{}};
-    if (old) {
-      if (mode != SyncMode::Initial)
-        binding.last = old->second.last;
-      react::unbind_watch(subscriptions, consumer, index);
-    }
-    react::bind_watch(subscriptions, source, std::move(binding));
+    react::bind_watch(subscriptions, std::move(binding));
     if (mode == SyncMode::Change)
       changes.dirty.push_back({source, origin});
     unique(armed, source);
@@ -170,31 +151,11 @@ WatchChanges sync_watches(amber::react::State &react_state, const react::ValueRe
 }
 std::vector<Handle> source_consumers(const react::ValueRead &values, FactKey source,
                                      const react::WatchDeclaration &watch) {
-  auto incoming = [&](Handle subject, TermId relation) {
-    std::vector<Handle> result;
-    if (values.identity.valid(subject))
-      if (auto found = values.relations.columns.find(relation);
-          found != values.relations.columns.end())
-        if (const auto *edges = found->second->in.get(subject.slot()))
-          for (auto h : *edges)
-            if (values.identity.valid(h) && first_out(values, h, relation) == subject)
-              result.push_back(h);
-    return result;
-  };
-  std::vector<Handle> subjects{source.subject};
-  const auto &term = values.terms.rows.at(watch.term);
-  if (term.combine != react::Combine::None && term.along) {
-    const auto fallback = incoming(source.subject, term.along);
-    for (auto h : fallback)
-      if (term.id >= values.shared.size() || !values.shared[term.id].get(h.slot()))
-        unique(subjects, h);
-  }
   std::vector<Handle> consumers;
-  for (auto h : subjects)
-    if (values.identity.valid(h))
-      consumers.push_back(h);
-  std::erase_if(consumers,
-                [&](Handle h) { return resolve(values, {h, 0}, watch).source != source; });
+  for (const auto target : wake_targets(values, source))
+    if (target.term == watch.term && values.identity.valid(target.subject) &&
+        effective_subject(values, target) == source.subject)
+      consumers.push_back(target.subject);
   return consumers;
 }
 WatchChanges sync_rule_watches(amber::react::State &react_state, const react::ValueRead &values,
@@ -251,56 +212,28 @@ WatchChanges sync_rule_watches(amber::react::State &react_state, const react::Va
   }
   return result;
 }
-WatchChanges refresh_dependencies(react::Subscriptions &subscriptions,
-                                  const react::ValueRead &values, FactKey changed, Step now,
-                                  double hz, const amber::Origin &origin) {
-  WatchChanges result;
-  std::vector<WatchKey> keys;
-  for (const auto &[source, bindings] : subscriptions.rows) {
-    (void)source;
-    for (const auto &binding : bindings)
-      if (std::find(binding.dependencies.begin(), binding.dependencies.end(), changed) !=
-          binding.dependencies.end())
-        keys.push_back({binding.consumer, binding.index});
-  }
-  std::vector<FactKey> armed;
-  for (auto key : keys) {
-    auto old = existing(subscriptions, key);
-    auto next = resolve(values, key.consumer, old->second.declaration);
-    if (next.source == old->first && next.dependencies == old->second.dependencies)
-      continue;
-    const auto source = next.source;
-    old->second.dependencies = std::move(next.dependencies);
-    react::unbind_watch(subscriptions, key.consumer, key.index);
-    react::bind_watch(subscriptions, source, std::move(old->second));
-    if (source != old->first) {
-      result.dirty.push_back({source, origin});
-      unique(armed, source);
-    }
-  }
-  for (auto source : armed)
-    arm(result, subscriptions, values, source, now, hz, origin);
-  return result;
-}
 WatchResult check_changed(react::Subscriptions &subscriptions, const react::ValueRead &values,
                           const react::AllocationRows &allocations, FactKey source, Step now,
                           double hz, const amber::Origin &origin, ScriptId recipient) {
-  react::CurrentAnswers current;
-  current.values.emplace(source, answer(values, allocations, source, {}, now, hz));
-  const auto combine = values.terms.rows.at(source.term).combine;
-  if (combine == react::Combine::ShareEqual || combine == react::Combine::SharePriority)
-    if (const auto found = subscriptions.rows.find(source); found != subscriptions.rows.end())
-      for (const auto &binding : found->second)
-        current.by_consumer.emplace(binding.consumer, answer(values, allocations, source,
-                                                             binding.consumer.object, now, hz));
-  WatchResult result{source, react::check_watch(subscriptions, source, current, recipient), {}};
-  if (values.identity.valid(source.subject))
-    result.timers =
-        react::threshold_timers(subscriptions, values.processes, source, now, hz, origin);
-  if (recipient)
-    std::erase_if(result.timers, [&](const auto &timer) {
-      return !timer.threshold || timer.threshold->script != recipient;
-    });
+  WatchResult result;
+  for (const auto target : wake_targets(values, source)) {
+    if (!subscriptions.rows.contains(target))
+      continue;
+    const FactKey value_source{effective_subject(values, target), target.term};
+    const auto current = answer(values, allocations, value_source, target.subject, now, hz);
+    auto deliveries = react::check_watch(subscriptions, target, current, recipient);
+    for (auto &delivery : deliveries) {
+      delivery.source = value_source.subject;
+      result.deliveries.push_back(std::move(delivery));
+    }
+    if (values.identity.valid(target.subject)) {
+      auto timers =
+          react::threshold_timers(subscriptions, values.processes, target, now, hz, origin);
+      for (auto &timer : timers)
+        if (!recipient || timer.threshold->script == recipient)
+          result.timers.push_back(std::move(timer));
+    }
+  }
   return result;
 }
 std::vector<InvocationPlan> plan_deliveries(const WatchResult &result,
@@ -323,11 +256,11 @@ std::vector<InvocationPlan> plan_deliveries(const WatchResult &result,
       continue;
     const auto &[handler, rank] = *found;
     auto add = [&](EventPayload payload, Handle other = {}) {
-      InvocationPlan plan{handler, delivery.consumer.object, result.source.subject,
+      InvocationPlan plan{handler, delivery.consumer.object, delivery.source,
                           trigger, std::move(payload),       {}};
-      plan.watch = WatchRun{result.source, delivery.index, delivery.value};
-      if (result.source.subject.bits)
-        unique(plan.acquired, result.source.subject);
+      plan.watch = WatchRun{{delivery.consumer.object, trigger}, delivery.index, delivery.value};
+      if (delivery.source)
+        unique(plan.acquired, delivery.source);
       if (other.bits)
         unique(plan.acquired, other);
       ranked.push_back({rank, delivery.index, std::move(plan)});
@@ -356,14 +289,19 @@ std::vector<InvocationPlan> plan_deliveries(const WatchResult &result,
 bool has_applicable_watch(const react::Subscriptions &subscriptions,
                           const react::Triggers &triggers, const catalog::Scripts &scripts,
                           const react::ValueRead &values, FactKey source, Step now, double hz) {
-  const auto row = subscriptions.rows.find(source);
-  if (row == subscriptions.rows.end())
-    return false;
-  for (const auto &binding : row->second) {
-    const auto &declaration = scripts.rows.at(binding.consumer.script).declaration;
-    if (find_handler(triggers, values, binding.consumer, declaration.watches.at(binding.index).term,
-                     now, hz))
-      return true;
+  for (const auto target : wake_targets(values, source)) {
+    const auto row = subscriptions.rows.find(target);
+    if (row == subscriptions.rows.end())
+      continue;
+    if (values.terms.rows.at(source.term).combine != Combine::None &&
+        effective_subject(values, target) != source.subject)
+      continue;
+    for (const auto &binding : row->second) {
+      const auto &declaration = scripts.rows.at(binding.consumer.script).declaration;
+      if (find_handler(triggers, values, binding.consumer,
+                       declaration.watches.at(binding.index).term, now, hz))
+        return true;
+    }
   }
   return false;
 }

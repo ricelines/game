@@ -91,9 +91,6 @@ WatchPlan plan_watch(react::Subscriptions &subscriptions, const react::ValueRead
                      const catalog::Scripts &scripts, const react::WatchWork &work, Step now,
                      double hz) {
   WatchPlan plan;
-  plan.changes =
-      react::refresh_dependencies(subscriptions, values, work.source, now, hz, work.origin);
-  std::erase_if(plan.changes.dirty, [&](const auto &dirty) { return dirty.source == work.source; });
   plan.modeled =
       react::has_applicable_watch(subscriptions, triggers, scripts, values, work.source, now, hz);
   auto result =

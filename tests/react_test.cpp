@@ -194,50 +194,44 @@ void process_thresholds_and_transfer() {
   near(read_state(f.properties, f.processes, f.a, 1, 50, 20).value.numeric(), 2.5,
        "failed transfer retains value");
   Subscriptions subs;
-  bind_watch(subs, {f.a, 1},
-             {{f.b, 1}, 0, Answer{true, Value(3.0)}, {1, {{Threshold::Predicate::Below, 2}}}, {}});
-  const react::ThresholdToken token{{f.a, 1}, f.b, 1, 0};
+  bind_watch(subs,
+             {{f.a, 1}, 0, Answer{true, Value(3.0)}, {1, {{Threshold::Predicate::Below, 2}}}});
+  const react::ThresholdToken token{{f.a, 1}, f.a, 1, 0};
   require(valid_threshold(token, identity(f.objects), f.processes, subs, 60, 20),
           "current process actually crosses the subscribed predicate");
   require(!valid_threshold(token, identity(f.objects), f.processes, subs, 50, 20),
           "a timer cannot wake a predicate that has not crossed");
-  CurrentAnswers answers;
-  answers.values[{f.a, 1}] = Answer{true, Value(3.0)};
-  require(check_watch(subs, {f.a, 1}, answers).empty(), "change back is silent");
-  answers.values[{f.a, 1}] = Answer{true, Value(1.0)};
-  require(check_watch(subs, {f.a, 1}, answers).size() == 1, "threshold delivery");
+  require(check_watch(subs, {f.a, 1}, Answer{true, Value(3.0)}).empty(), "change back is silent");
+  require(check_watch(subs, {f.a, 1}, Answer{true, Value(1.0)}).size() == 1, "threshold delivery");
 }
-void subscription_rebind_and_relations() {
+void subscription_removal_and_relations() {
   Fixture f;
   Subscriptions subscriptions;
   const ScriptKey consumer{f.b, 7};
-  const FactKey source{f.a, 1};
-  bind_watch(subscriptions, source, {consumer, 0, Answer{}, {1, {}}, {}});
+  const FactKey source{f.b, 1};
+  bind_watch(subscriptions, {consumer, 0, Answer{}, {1, {}}});
   unbind_watch(subscriptions, consumer, 0);
-  bind_watch(subscriptions, source, {consumer, 0, Answer{}, {1, {}}, {}});
-  bind_watch(subscriptions, {f.c, 1}, {consumer, 1, Answer{}, {1, {}}, {}});
+  bind_watch(subscriptions, {consumer, 0, Answer{}, {1, {}}});
+  bind_watch(subscriptions, {consumer, 1, Answer{}, {2, {}}});
   require(watch_sources(subscriptions, consumer).size() == 2,
-          "consumer lookup reads the primary source rows");
+          "consumer lookup reads its watched terms");
   unbind_watch(subscriptions, consumer, 0);
-  require(!subscriptions.rows.contains(source) && subscriptions.rows.contains({f.c, 1}),
+  require(!subscriptions.rows.contains(source) && subscriptions.rows.contains({f.b, 2}),
           "unbind touches selected watch only");
   retire_subscriptions(subscriptions, f.b);
   require(subscriptions.rows.empty(), "consumer retirement removes its primary watch rows");
   Relation relation;
   DeferredEffects effects;
-  bind_watch(subscriptions, {f.a, 2}, {{f.a, 8}, 0, RelationAnswer{}, {2, {}}, {}});
+  bind_watch(subscriptions, {{f.a, 8}, 0, RelationAnswer{}, {2, {}}});
   set_relation(relation, 2, f.b, f.a, true, effects);
-  CurrentAnswers answers;
-  answers.values[{f.a, 2}] = read_relation(relation, f.a);
-  auto deliveries = check_watch(subscriptions, {f.a, 2}, answers);
+  auto deliveries = check_watch(subscriptions, {f.a, 2}, read_relation(relation, f.a));
   require(deliveries.size() == 1 && deliveries[0].relations.size() == 1 &&
               deliveries[0].relations[0].other == f.b && deliveries[0].relations[0].added &&
               deliveries[0].relations[0].incoming,
           "relation watch carries other endpoint and direction");
   acknowledge_watch(subscriptions, {f.a, 8}, {{f.a, 2}, 0, deliveries[0].value});
   set_relation(relation, 2, f.b, f.a, false, effects);
-  answers.values[{f.a, 2}] = read_relation(relation, f.a);
-  deliveries = check_watch(subscriptions, {f.a, 2}, answers);
+  deliveries = check_watch(subscriptions, {f.a, 2}, read_relation(relation, f.a));
   require(deliveries.size() == 1 && !deliveries[0].relations[0].added,
           "empty relation is delivered after removal");
   retire_subscriptions(subscriptions, f.a);
@@ -953,7 +947,7 @@ int main() {
   source_resolution();
   owner_value_view_reads_bound_relations();
   process_thresholds_and_transfer();
-  subscription_rebind_and_relations();
+  subscription_removal_and_relations();
   allocation_rows_track_current_nonzero_shares_only();
   contribution_and_metering();
   dispatch_order();

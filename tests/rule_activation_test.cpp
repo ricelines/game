@@ -62,8 +62,8 @@ void first_contribution_and_late_relation() {
   require(r.runs(f.b, id) == 1 && r.runs(f.a, id) == 0 &&
               read(f.values(), f.b, 2, 0, 20).value.numeric() == 6,
           "the term's authored fallback discovers a newly related material consumer");
-  require(watch_sources(f.subscriptions, ScriptKey{f.b, id}) == std::vector<FactKey>{{f.a, 4}},
-          "the primary row retains actual source, receiver and script");
+  require(watch_sources(f.subscriptions, ScriptKey{f.b, id}) == std::vector<FactKey>{{f.b, 4}},
+          "the primary row retains the consumer and its watched term");
   effects = {};
   set_contribution(f.shared, f.gives_to, f.terms.rows[4], f.c, f.a, 3, effects);
   r.changed(effects);
