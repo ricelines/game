@@ -36,6 +36,7 @@ void survey_block(perm::State &perm, space::State &space, const LandSettings &s,
     perm::Plot plot{id, 0, way ? s.way_group : 0, way ? perm::Rights(6 | (1 << 8)) : 2, bounds, {}};
     plot.kind = kind;
     perm.plots.rows.push_back(std::move(plot));
+    perm::set_plot_owner(perm.plots, id, 0);
     space::ensure_terrain(space, bounds);
   };
   const bool has_street = std::ranges::any_of(perm.plots.rows, [&](const auto &p) {

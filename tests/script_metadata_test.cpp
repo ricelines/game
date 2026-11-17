@@ -107,6 +107,7 @@ struct Fixture {
     meters[{root, part, 2, false}] = {2, 0, 3};
     players.rows.resize(4);
     plots.rows.push_back({1, 2, 0, 7, {-5, -4, 30, 40}, {}});
+    perm::rebuild_plot_owners(plots);
     catalog_state.mechanical.values["measurements"] = {{"density", 1}, {"capacity", 6}};
     step::bind_metadata(objects_state, catalog_state, react_state, perm_state, 1000);
   }
@@ -164,6 +165,8 @@ void effective_metadata_and_mass() {
     assert(not pcall(function()live.volume_m3=99 end))
     assert(self:meter(self.handle,'custom.2',from)==5)
     assert(#self:plots()==1 and self:plots()[1]==1)
+    assert(#self:plots('p:2')==1 and self:plots('p:2')[1]==1)
+    assert(#self:plots('p:0')==0 and #self:plots('p:3')==0)
     local p=self:plot()
     assert(p.plot==1 and p.owner=='p:2' and p.bounds[1]==-5 and p.bounds[4]==40)
     assert(not pcall(function()p.bounds[1]=0 end))
@@ -230,6 +233,14 @@ void plot_objects_returns_only_independent_placed_things() {
   f.ok(R"(local things=self:plot_objects(1)
     assert(#things==1 and things[1]==self.handle))");
 }
+void plots_filter_by_current_owner() {
+  Fixture f;
+  perm::change_plot_owner(f.perm_state, 1, 0);
+  f.ok(R"(assert(#self:plots('p:2')==0)
+    assert(#self:plots('p:0')==1 and self:plots('p:0')[1]==1)
+    assert(#self:plots()==1)
+    assert(not pcall(function() self:plots('p:bad') end)))");
+}
 } // namespace
 int main() {
   try {
@@ -238,6 +249,7 @@ int main() {
     installed_script_identity_is_readonly();
     retained_handles_grant_no_reads();
     plot_objects_returns_only_independent_placed_things();
+    plots_filter_by_current_owner();
     std::cout << "Actual readonly Luau metadata and variant mass checks passed.\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

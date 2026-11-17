@@ -168,7 +168,10 @@ struct Plot {
 };
 struct Plots {
   std::vector<Plot> rows{Plot{}};
+  std::unordered_map<PlayerId, std::vector<PlotId>> by_owner;
 };
+void set_plot_owner(Plots &, PlotId, PlayerId);
+void rebuild_plot_owners(Plots &);
 const Plot *plot_at(const Plots &, Vec3);
 struct Decision {
   Reason reason = Reason::MissingRight;

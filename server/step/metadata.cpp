@@ -416,13 +416,40 @@ int plot_binding(lua_State *L) {
 }
 int plots_binding(lua_State *L) {
   const auto &b = *static_cast<PlotReadBinding *>(react::binding_data(L));
+  auto &inv = react::invocation(L);
+  const bool all = lua_isnoneornil(L, 2);
   lua_newtable(L);
   int index = 0;
-  for (const auto &plot : b.permissions.plots.rows)
-    if (plot.id) {
-      lua_pushnumber(L, plot.id);
-      lua_rawseti(L, -2, ++index);
+  const auto append = [&](PlotId id) {
+    lua_pushnumber(L, id);
+    lua_rawseti(L, -2, ++index);
+  };
+  if (all) {
+    for (const auto &plot : b.permissions.plots.rows) {
+      if (inv.deadline.passed())
+        luaL_error(L, "handler deadline exceeded");
+      if (plot.id)
+        append(plot.id);
     }
+  } else {
+    std::size_t size = 0;
+    const auto *text = luaL_checklstring(L, 2, &size);
+    PlayerId owner = 0;
+    if (size < 3 || text[0] != 'p' || text[1] != ':')
+      luaL_error(L, "plot owner must be p:N");
+    const auto parsed = std::from_chars(text + 2, text + size, owner);
+    if (parsed.ec != std::errc{} || parsed.ptr != text + size)
+      luaL_error(L, "plot owner must be p:N");
+    const auto found = b.permissions.plots.by_owner.find(owner);
+    if (found != b.permissions.plots.by_owner.end())
+      for (auto id : found->second) {
+        if (inv.deadline.passed())
+          luaL_error(L, "handler deadline exceeded");
+        append(id);
+      }
+  }
+  if (inv.deadline.passed())
+    luaL_error(L, "handler deadline exceeded");
   lua_setreadonly(L, -1, true);
   return 1;
 }

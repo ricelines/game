@@ -66,6 +66,7 @@ struct Fixture {
     plots.rows.resize(3);
     plots.rows[1] = {1, 1, 0, 0, {-20, -20, 0, 20}, {}};
     plots.rows[2] = {2, 2, 0, 0, {0, -20, 20, 20}, {}};
+    perm::rebuild_plot_owners(plots);
     f.objects.owner[f.a.slot()] = 1;
     f.objects.owner[f.b.slot()] = 1;
     f.terms.rows.resize(32);
@@ -686,7 +687,7 @@ void offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox() {
   // The market's plot transfer is Phase 5. Exercise its mailbox contract with
   // the plain owner write and actual grant revocation, without adding a market here.
   const auto former_owner = f.plots.rows[2].owner;
-  f.plots.rows[2].owner = 1;
+  perm::set_plot_owner(f.plots, 2, 1);
   const auto removed = perm::revoke(f.grants, f.players, grant.grant);
   require(removed == std::vector<GrantId>{grant.grant}, "plot transition removes the actual grant");
   cm::notify(f.players, sessions, 2, former_owner,
@@ -930,7 +931,7 @@ void land_refusals_have_fixes_and_denial_records() {
   denied(f.call(f.ids.split_plot, PlayerId{1}, {{"plot", 1}, {"x", -19}}),
          "cut at least LOT_MIN_M m from each edge");
   f.plots.rows[2].kind = perm::PlotKind::Lot;
-  f.plots.rows[2].owner = 1;
+  perm::set_plot_owner(f.plots, 2, 1);
   f.plots.rows[2].bounds[0] = 1;
   denied(f.call(f.ids.join_plots, PlayerId{1}, {{"plots", {1, 2}}}),
          "choose two lots of one owner that share a whole edge and form a rectangle");
@@ -954,7 +955,7 @@ void land_refusals_have_fixes_and_denial_records() {
          "ask the offer's maker or seller");
   denied(f.call(f.ids.accept, PlayerId{2}, {{"offer", name}, {"max_price", 9}}),
          "inspect the offer and accept again with a max_price of at least its price");
-  f.plots.rows[1].owner = 0;
+  perm::set_plot_owner(f.plots, 1, 0);
   require(bool(perm::create_root_grant(f.grants, f.players,
                                        {0, perm::Holder::player(1), perm::Scope::all_land(),
                                         perm::Rights{8} << 8, 0, 0, 100},

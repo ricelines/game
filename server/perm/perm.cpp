@@ -6,6 +6,32 @@
 #include <unordered_set>
 
 namespace amber::perm {
+void set_plot_owner(Plots &plots, PlotId id, PlayerId owner) {
+  auto &plot = plots.rows[id];
+  if (const auto previous = plots.by_owner.find(plot.owner); previous != plots.by_owner.end()) {
+    auto &ids = previous->second;
+    const auto found = std::ranges::lower_bound(ids, id);
+    if (found != ids.end() && *found == id) {
+      if (plot.id && plot.owner == owner)
+        return;
+      ids.erase(found);
+      if (ids.empty())
+        plots.by_owner.erase(previous);
+    }
+  }
+  plot.owner = owner;
+  if (plot.id) {
+    auto &ids = plots.by_owner[owner];
+    ids.insert(std::ranges::lower_bound(ids, id), id);
+  }
+}
+void rebuild_plot_owners(Plots &plots) {
+  plots.by_owner.clear();
+  for (const auto &plot : plots.rows)
+    if (plot.id)
+      plots.by_owner[plot.owner].push_back(plot.id);
+}
+
 std::vector<PlotHolder> plot_holders(const Plot &plot, const Grants &grants, Step now) {
   std::vector<PlotHolder> result;
   const auto append = [&](GrantId id) {
@@ -891,7 +917,7 @@ std::vector<GrantId> change_plot_owner(State &state, PlotId id, PlayerId owner) 
           ids.push_back(grant_id);
   auto removed = remove_grants(state.grants, state.players, ids);
   close_plot_offers(state.offers, id);
-  plot.owner = owner;
+  set_plot_owner(state.plots, id, owner);
   return removed;
 }
 
@@ -903,6 +929,7 @@ PlotId split_plot(State &state, PlotId id, int axis, float cut, Step now) {
   plot.bounds[axis + 2] = cut;
   upper.bounds[axis] = cut;
   state.plots.rows.push_back(std::move(upper));
+  set_plot_owner(state.plots, next, state.plots.rows[next].owner);
   std::vector<GrantId> originals;
   if (const auto found = state.grants.by_plot.find(id); found != state.grants.by_plot.end())
     originals = found->second;
@@ -932,6 +959,7 @@ std::vector<GrantId> join_plots(State &state, PlotId a, PlotId b) {
   left.bounds = {std::min(l[0], r[0]), std::min(l[1], r[1]), std::max(l[2], r[2]),
                  std::max(l[3], r[3])};
   right.id = 0;
+  set_plot_owner(state.plots, b, 0);
   const auto found = state.grants.by_plot.find(b);
   const auto removed = found == state.grants.by_plot.end()
                            ? std::vector<GrantId>{}

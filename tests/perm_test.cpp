@@ -49,6 +49,42 @@ struct Fixture {
   }
 };
 
+void plots_follow_owner_changes_and_boundaries() {
+  Fixture f;
+  auto &state = f.perm_state;
+  auto &plots = state.plots;
+  plots.rows.push_back({1, 0, 0, 2, {0, 0, 16, 32}, {}});
+  plots.rows.push_back({2, 0, 0, 2, {16, 0, 32, 32}, {}});
+  rebuild_plot_owners(plots);
+  require(plots.by_owner.at(0) == std::vector<PlotId>{1, 2}, "pool omitted a lot");
+  const auto script = Holder::script(1, Handle::make(1, 1));
+  const auto grant = create_root_grant(state.grants, state.players,
+                                       {0, script, Scope::all_land(), Rights{1} << 11, 0, 0, 100},
+                                       {script, 1, true}, 1);
+  require(bool(grant), "pool sale grant failed");
+  const auto offered = offer_plot(state, script, 1, 0, 0, 50, 1);
+  const Buyer buyer{Holder::player(2), 2, AccountTarget::player(2), {}, false};
+  require(offered && accept_plot(state, buyer, offered.offer, 0, 2), "pool sale failed");
+  require(plots.by_owner.at(0) == std::vector<PlotId>{2} &&
+              plots.by_owner.at(2) == std::vector<PlotId>{1},
+          "sale did not move the lot from pool to buyer");
+  const auto piece = split_plot(state, 1, 0, 8, 3);
+  require(plots.by_owner.at(2) == std::vector<PlotId>{1, piece},
+          "split did not give the new piece to the owner");
+  join_plots(state, 1, piece);
+  require(plots.by_owner.at(2) == std::vector<PlotId>{1} &&
+              plots.by_owner.at(0) == std::vector<PlotId>{2},
+          "joined piece remained in owner or pool lists");
+  change_plot_owner(state, 1, 0);
+  require(!plots.by_owner.contains(2) && plots.by_owner.at(0) == std::vector<PlotId>{1, 2},
+          "abandonment did not restore the pool in plot order");
+  set_plot_owner(plots, 1, 0);
+  require(plots.by_owner.at(0) == std::vector<PlotId>{1, 2},
+          "setting the same owner duplicated the plot");
+  const auto owners = plots.by_owner;
+  rebuild_plot_owners(plots);
+  require(plots.by_owner == owners, "restored owner lists differ from live plots");
+}
 
 void grant_indexes_follow_every_lifetime_change() {
   Fixture f;
@@ -1381,6 +1417,7 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
 
 int main() {
   try {
+    plots_follow_owner_changes_and_boundaries();
     grant_indexes_follow_every_lifetime_change();
     split_copies_grant_parent_and_deadlines();
     changing_plot_owner_clears_only_old_owner_authority();

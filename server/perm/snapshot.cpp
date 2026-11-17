@@ -261,6 +261,7 @@ void read_players(snap::Input &in, Players &players, Ledger &ledger, Plots &plot
       throw std::invalid_argument("invalid or duplicate account balance");
   }
   snap::field(in, plots.rows);
+  rebuild_plot_owners(plots);
   snap::field(in, groups.rows);
 }
 void write_grants(snap::Output &out, const Grants &grants, const Offers &offers,

@@ -20,6 +20,7 @@ nlohmann::json measure(std::size_t unrelated) {
   perm::State permissions;
   permissions.plots.rows.push_back({1, 1, 0, 0, {0, 0, 16, 32}, {}});
   permissions.plots.rows.push_back({2, 1, 0, 0, {16, 0, 32, 32}, {}});
+  perm::rebuild_plot_owners(permissions.plots);
   ObjectInit init;
   init.model = 1;
   init.owner = 1;

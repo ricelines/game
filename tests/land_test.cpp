@@ -14,6 +14,9 @@ void layout_and_pool() {
   step::fill_pool(permissions, world, land);
   const auto &plots = permissions.plots.rows;
   require(plots.size() == 12, "one forage block creates three ways and eight lots");
+  require(permissions.plots.by_owner.at(0) ==
+              std::vector<PlotId>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+          "surveyed plots are owned by root");
   require(plots[1].kind == perm::PlotKind::Street &&
               plots[1].bounds == std::array<float, 4>{0, -50, 72, 50},
           "Street piece bounds");
@@ -38,7 +41,7 @@ void layout_and_pool() {
                               0)["fronts"] == (id <= 7 ? "street" : "back way"),
             "every surveyed lot fronts its row's street or back way, including alley corners");
   for (PlotId id = 4; id <= 7; ++id)
-    permissions.plots.rows[id].owner = 2;
+    perm::set_plot_owner(permissions.plots, id, 2);
   step::fill_pool(permissions, world, land);
   require(plots.size() == 23 && plots[12].bounds == std::array<float, 4>{-72, -50, 0, 50} &&
               plots[15].bounds == std::array<float, 4>{-64, 50, -48, 82},
@@ -51,6 +54,8 @@ void layout_and_pool() {
   perm::State restored;
   snap::Input in{bytes.data(), bytes.size()};
   perm::read_players(in, restored.players, restored.ledger, restored.plots, restored.groups);
+  require(restored.plots.by_owner == permissions.plots.by_owner,
+          "restore reconstructs each owner's plots");
   snap::check_complete(in);
   space::State rebuilt(settings.space, settings.light_cell_m);
   for (const auto &plot : restored.plots.rows)
