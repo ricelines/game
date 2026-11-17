@@ -6,9 +6,6 @@ REPLICATED = ["base.charge", "base.seated"]
 BINDINGS = {
     "observer": {"eye": [0, 0.08, 1.55], "forward": [0, 1, 0], "dim_lux": "base.dim_lux"},
     "character": {
-        "radius": 0.30,
-        "height": 1.75,
-        "mass": "base.mass",
         "max_push_force": 200,
         "max_speed": "base.walk_speed",
         "acceleration": 8,

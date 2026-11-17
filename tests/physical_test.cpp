@@ -6,6 +6,83 @@
 using namespace amber;
 using test_runtime::require;
 namespace {
+void character_collision_uses_measured_body_bounds() {
+  test_runtime::Fixture f;
+  space::State physical(testspace::settings(), 8);
+  f.terms.rows[1].source = react::Source::Intrinsic;
+  f.terms.rows[2].source = react::Source::Intrinsic;
+  f.materials.rows[8] = {{1, Value(1000.)}, {2, Value(0.)}};
+  testspace::Box shape({.6f, .8f, 2});
+  const auto imported = space::import_geometry(physical.space, shape.source());
+  require(imported.geometry != 0, "measured body geometry imports");
+  catalog::Asset asset;
+  asset.hash = "measured-body";
+  asset.minimum = shape.bounds.min;
+  asset.maximum = shape.bounds.max;
+  asset.volume = .96;
+  asset.manifest = {{"replicated", nlohmann::json::array()},
+                    {"bindings",
+                     {{"character",
+                       {{"max_push_force", 200},
+                        {"max_speed", 2},
+                        {"acceleration", 8},
+                        {"max_step", .24},
+                        {"max_slope", .78},
+                        {"floor_snap", .08}}}}}};
+  catalog::resolve_manifest_terms(asset, f.terms);
+  step::GeometryAssets geometry;
+  geometry.rows[asset.hash].collision = imported.geometry;
+  const auto definition = step::describe_physics(geometry, asset, f.values(), {1, 0, 8, 0, f.a},
+                                                 Body, {1, 2}, {.6f, 0}, {0, 20});
+  require(definition.body.mass_kg == 960 && definition.body.character->mass_kg == 960,
+          "body and character controller use solid volume times material density");
+  step::install_physics(physical.space, identity(f.objects), transforms(f.objects),
+                        space_flags(f.objects), f.a, definition);
+  const auto bounds = space::bounds(physical.space, identity(f.objects), f.a);
+  require(bounds && std::abs(bounds->min.x + .4f) < 1e-5f &&
+              std::abs(bounds->max.x - .4f) < 1e-5f && std::abs(bounds->min.y + .4f) < 1e-5f &&
+              std::abs(bounds->max.y - .4f) < 1e-5f && std::abs(bounds->min.z) < 1e-5f &&
+              std::abs(bounds->max.z - 2.f) < 1e-5f,
+          "the installed character capsule encloses the wider measured axis and measured height");
+}
+void container_queries_use_measured_cavity() {
+  test_runtime::Fixture f;
+  space::State physical(testspace::settings(), 8);
+  f.terms.rows[1].source = react::Source::Intrinsic;
+  f.terms.rows[2].source = react::Source::Intrinsic;
+  f.materials.rows[8] = {{1, Value(1000.)}, {2, Value(0.)}};
+  f.objects.position[f.a.slot()] = {5, 0, 0};
+  catalog::Asset asset;
+  asset.hash = "measured-cavity";
+  asset.manifest = {
+      {"replicated", nlohmann::json::array()},
+      {"collision", {{"static", nullptr}}},
+      {"cavity", {{"min", {-1, -.5, .2}}, {"max", {1, .5, 1.5}}}},
+      {"bindings",
+       {{"container", nlohmann::json::object()},
+        {"zone",
+         {{"ambient", 1},
+          {"priority", 1},
+          {"shape", {{"kind", "box"}, {"size", {6, 4, 4}}, {"offset", {0, 0, 2}}}}}}}}};
+  catalog::resolve_manifest_terms(asset, f.terms);
+  step::GeometryAssets geometry;
+  step::import_geometry_asset(geometry, physical.space, asset, {});
+  const auto definition = step::describe_physics(geometry, asset, f.values(), {1, 0, 8, 0, f.a},
+                                                 Static, {1, 2}, {.6f, 0}, {0, 20});
+  step::install_physics(physical.space, identity(f.objects), transforms(f.objects),
+                        space_flags(f.objects), f.a, definition);
+  std::vector<Handle> found;
+  space::volumes_at(physical.space, identity(f.objects), {5, 0, .8f}, space::VolumeKind::Container,
+                    found);
+  require(found == std::vector{f.a}, "an interior point belongs to the measured container");
+  for (const Vec3 point : {Vec3{5, 0, .1f}, Vec3{6.2f, 0, .8f}, Vec3{5, 0, 1.7f}}) {
+    space::volumes_at(physical.space, identity(f.objects), point, space::VolumeKind::Container,
+                      found);
+    require(found.empty(), "points below the floor, beyond the wall or above the rim are outside");
+    space::volumes_at(physical.space, identity(f.objects), point, space::VolumeKind::Zone, found);
+    require(found == std::vector{f.a}, "zone extent remains an independently authored intent");
+  }
+}
 void physical_primitives_are_script_only() {
   test_physical::Fixture f;
   for (const auto *name :
@@ -410,6 +487,8 @@ int main(int argc, char **argv) {
       declared_part_batch_and_foreign_rejection(true);
       return 0;
     }
+    character_collision_uses_measured_body_bounds();
+    container_queries_use_measured_cavity();
     physical_primitives_are_script_only();
     registry_actions_record_the_actual_player();
     ordinary_transfer_and_live_processes();

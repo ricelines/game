@@ -145,8 +145,8 @@ static bool triangle_box(const std::array<VoxelPoint, 3> &triangle, const VoxelP
   return !separated(cross(subtract(v[1], v[0]), subtract(v[2], v[0])));
 }
 
-static double capacity(const std::vector<Point> &vertices, const std::vector<unsigned> &indices,
-                       unsigned grid) {
+static Json capacity(const std::vector<Point> &vertices, const std::vector<unsigned> &indices,
+                     unsigned grid) {
   VoxelPoint low = voxel_point(vertices[0]), high = low;
   for (const auto &v : vertices)
     for (int axis = 0; axis < 3; ++axis) {
@@ -193,14 +193,21 @@ static double capacity(const std::vector<Point> &vertices, const std::vector<uns
           }
         }
   size_t retained = 0;
+  std::array<int, 3> first_retained{nx, ny, nz}, last_retained{};
   constexpr int offsets[6][3] = {{-1, 0, 0}, {1, 0, 0},  {0, -1, 0},
                                  {0, 1, 0},  {0, 0, -1}, {0, 0, 1}};
   while (!heap.empty()) {
     auto [level, at] = heap.top();
     heap.pop();
     const int x = int(at % nx), y = int((at / nx) % ny), z = int(at / (size_t(nx) * ny));
-    if (level > height(z) + h * 0.01)
+    if (level > height(z) + h * 0.01) {
       ++retained;
+      const std::array cell{x, y, z};
+      for (int axis = 0; axis < 3; ++axis) {
+        first_retained[axis] = std::min(first_retained[axis], cell[axis]);
+        last_retained[axis] = std::max(last_retained[axis], cell[axis]);
+      }
+    }
     for (const auto &offset : offsets) {
       const int a = x + offset[0], b = y + offset[1], c = z + offset[2];
       if (a < 0 || a >= nx || b < 0 || b >= ny || c < 0 || c >= nz)
@@ -212,7 +219,16 @@ static double capacity(const std::vector<Point> &vertices, const std::vector<uns
       }
     }
   }
-  return double(retained) * h * h * h;
+  Json cavity = nullptr;
+  if (retained) {
+    VoxelPoint minimum, maximum;
+    for (int axis = 0; axis < 3; ++axis) {
+      minimum[axis] = low[axis] + (first_retained[axis] - 1) * h;
+      maximum[axis] = low[axis] + last_retained[axis] * h;
+    }
+    cavity = {{"min", minimum}, {"max", maximum}};
+  }
+  return {{"capacity", double(retained) * h * h * h}, {"cavity", std::move(cavity)}};
 }
 
 static void compile_mesh(const Json &request, const std::filesystem::path &out,
@@ -232,7 +248,8 @@ static void compile_mesh(const Json &request, const std::filesystem::path &out,
   const unsigned grid = request.value("capacity_grid", 0u);
   if (grid > 512)
     throw std::runtime_error("Capacity grid too large");
-  const double measured_capacity = grid ? capacity(vertices, indices, grid) : 0.0;
+  const auto liquid =
+      grid ? capacity(vertices, indices, grid) : Json{{"capacity", 0.0}, {"cavity", nullptr}};
 
   std::filesystem::create_directories(out);
   const auto ratios = request.at("lod_ratios").get<std::array<float, 3>>();
@@ -315,7 +332,7 @@ static void compile_mesh(const Json &request, const std::filesystem::path &out,
             std::streamsize(vertices.size() * sizeof(Point)));
   nav.write(reinterpret_cast<const char *>(lod1.data()),
             std::streamsize(lod1.size() * sizeof(unsigned)));
-  std::ofstream(out / "native-measured.json") << Json{{"capacity", measured_capacity}};
+  std::ofstream(out / "native-measured.json") << liquid;
 }
 
 #ifdef AMB_BAKE_LIBRARY

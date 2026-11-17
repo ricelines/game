@@ -45,17 +45,21 @@ void import_geometry_asset(GeometryAssets &geometries, space::Space &space,
     prepared.collision = imported.geometry;
   }
   const auto &bindings = asset.manifest.at("bindings");
-  for (const auto &[name, kind] :
-       {std::pair{"zone", space::VolumeKind::Zone}, {"container", space::VolumeKind::Container}}) {
-    if (!bindings.contains(name) || !bindings.at(name).contains("shape"))
-      continue;
-    const auto &shape = bindings.at(name).at("shape");
+  if (bindings.contains("zone")) {
+    const auto &shape = bindings.at("zone").at("shape");
     if (shape.at("kind") != "box")
       throw std::invalid_argument("unknown authored volume shape");
     const auto size = vector(shape.at("size"));
     const auto offset = vector(shape.at("offset"));
     const auto geometry = space::sensor_box_geometry(space, size);
-    prepared.volumes.push_back({geometry, {offset, {}}, kind});
+    prepared.volumes.push_back({geometry, {offset, {}}, space::VolumeKind::Zone});
+  }
+  if (bindings.contains("container")) {
+    const auto &cavity = asset.manifest.at("cavity");
+    const auto minimum = vector(cavity.at("min")), maximum = vector(cavity.at("max"));
+    const auto geometry = space::sensor_box_geometry(space, maximum - minimum);
+    prepared.volumes.push_back(
+        {geometry, {(minimum + maximum) * .5f, {}}, space::VolumeKind::Container});
   }
   geometries.rows.emplace(asset.hash, std::move(prepared));
 }
@@ -162,11 +166,16 @@ PhysicalDefinition describe_physics(const GeometryAssets &geometries, const cata
   }
   if (motion == space::Motion::Character) {
     const auto &c = bindings.at("character");
-    body.character = space::CharacterSpec{
-        scalar(c.at("radius")),         scalar(c.at("height")),    scalar(c.at("mass")),
-        scalar(c.at("max_push_force")), scalar(c.at("max_speed")), scalar(c.at("acceleration")),
-        scalar(c.at("max_step")),       scalar(c.at("max_slope")), scalar(c.at("floor_snap"))};
-    body.mass_kg = body.character->mass_kg;
+    const auto size = asset.maximum - asset.minimum;
+    body.character = space::CharacterSpec{.5f * std::max(size.x, size.y),
+                                          size.z,
+                                          body.mass_kg,
+                                          scalar(c.at("max_push_force")),
+                                          scalar(c.at("max_speed")),
+                                          scalar(c.at("acceleration")),
+                                          scalar(c.at("max_step")),
+                                          scalar(c.at("max_slope")),
+                                          scalar(c.at("floor_snap"))};
   }
   return {body, mode_flags, &geometry.volumes};
 }

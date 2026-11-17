@@ -56,26 +56,33 @@ def build(source, directory, config, native):
 
 
 @pytest.mark.parametrize(
-    ("expression", "volume", "capacity"),
+    ("expression", "volume", "capacity", "cavity"),
     [
-        ("box(1,2,3)", 6, 0),
-        ("slab(1,2,0.1)", 0.2, 0),
-        ("cylinder(0.5,2)", math.pi * 0.5, 0),
-        ("sphere(0.5)", math.pi / 6, 0),
-        ("hollow_box(1,1,1,0.05,0.05)", 1 - 0.9 * 0.9 * 0.95, 0.9 * 0.9 * 0.95),
+        ("box(1,2,3)", 6, 0, None),
+        ("slab(1,2,0.1)", 0.2, 0, None),
+        ("cylinder(0.5,2)", math.pi * 0.5, 0, None),
+        ("sphere(0.5)", math.pi / 6, 0, None),
+        (
+            "hollow_box(1,1,1,0.05,0.05)",
+            1 - 0.9 * 0.9 * 0.95,
+            0.9 * 0.9 * 0.95,
+            {"min": [-0.45, -0.45, 0.05], "max": [0.45, 0.45, 1]},
+        ),
         (
             "hollow_cylinder(0.5,1,0.05,0.05)",
             math.pi * (0.25 - 0.45**2 * 0.95),
             math.pi * 0.45**2 * 0.95,
+            {"min": [-0.45, -0.45, 0.05], "max": [0.45, 0.45, 1]},
         ),
     ],
 )
-def test_standard_actual_geometry(expression, volume, capacity, tmp_path, config, native):
+def test_standard_actual_geometry(expression, volume, capacity, cavity, tmp_path, config, native):
     source = f"from amb.shapes import *\nPARAMS={{}}\ndef build(p): return {expression}\n"
     manifest = build(source, tmp_path, config, native)
     assert manifest["volume"] == pytest.approx(volume)
     assert manifest["capacity"] == pytest.approx(capacity)
     assert manifest["capacity_method"] == "standard_exact"
+    assert manifest["cavity"] == cavity
     for lod in manifest["lods"]:
         result = subprocess.run(
             [ROOT / ".build/bake/amb_bake_native", "--validate-glb", tmp_path / lod["file"]],
@@ -114,6 +121,35 @@ def test_arbitrary_solid_has_no_capacity(tmp_path, config, native):
     source = "import build123d as bd\ndef build(p): return bd.Box(1,1,1)\n"
     manifest = build(source, tmp_path, config, native)
     assert manifest["capacity"] == 0
+    assert manifest["cavity"] is None
+
+
+@pytest.mark.parametrize("parts", [{}, {"piece": {"solid": 0, "origin": [0, 0, 0]}}])
+def test_container_without_liquid_cavity_fails_bake(tmp_path, config, native, parts):
+    source = (
+        "from amb.shapes import box\nBINDINGS={'container':{}}\n"
+        f"PARTS={parts!r}\ndef build(p): return box(1,1,1)\n"
+    )
+    with pytest.raises(BakeError, match="Container binding requires a measured liquid cavity"):
+        build(source, tmp_path, config, native)
+
+
+@pytest.mark.parametrize(
+    ("bindings", "message"),
+    [
+        ({"character": {"radius": 0.3}}, "Character size and mass are measured"),
+        ({"character": {"height": 1.75}}, "Character size and mass are measured"),
+        ({"character": {"mass": 1}}, "Character size and mass are measured"),
+        ({"container": {"shape": {"kind": "box"}}}, "Container shape is measured"),
+    ],
+)
+def test_bindings_cannot_declare_own_geometry(tmp_path, config, native, bindings, message):
+    source = (
+        "from amb.shapes import hollow_box\n"
+        f"BINDINGS={bindings!r}\ndef build(p): return hollow_box(1,1,1,.05,.05)\n"
+    )
+    with pytest.raises(BakeError, match=message):
+        build(source, tmp_path, config, native)
 
 
 @pytest.mark.parametrize("grid", [64, 256])
@@ -157,6 +193,11 @@ def build(p):
     manifest = build(source, tmp_path, config, native)
     exact = 0.136 * 0.116 * 0.157
     assert exact * (0.8 if grid == 64 else 0.95) < manifest["capacity"] <= exact
+    for side, expected in (("min", [-0.068, -0.058, 0.003]), ("max", [0.068, 0.058, 0.16])):
+        assert manifest["cavity"][side] == pytest.approx(
+            [value + shift for value, shift in zip(expected, offset, strict=True)],
+            abs=0.16 / grid * 1.1,
+        )
 
 
 def test_z_up_measurement_y_up_glb_and_nav(tmp_path, config, native):
@@ -191,7 +232,9 @@ def build(p): return bd.Compound([box(1,1,1), box(.2,.5,1).translate((1,0,0))])
     child = json.loads((tmp_path / "parts/leaf/manifest.json").read_text())
     assert manifest["volume"] == pytest.approx(1)
     assert child["volume"] == pytest.approx(0.1)
-    assert manifest["assembly"]["volume"] == pytest.approx(manifest["volume"] + child["volume"])
+    assert manifest["volume"] + child["volume"] == pytest.approx(1.1)
+    assert manifest["assembly"]["bounds"]["min"] == pytest.approx([-0.5, -0.5, 0])
+    assert manifest["assembly"]["bounds"]["max"] == pytest.approx([1.1, 0.5, 1])
     assert child["bounds"]["min"][0] == pytest.approx(-0.1)
     assert manifest["parts"]["leaf"]["asset"] == child["hash"]
     assert child["default_script"] is None
@@ -207,7 +250,8 @@ def build(p):return box(1,1,1)
 """
     manifest = build(source, tmp_path, config, native)
     assert manifest["volume"] == 0
-    assert manifest["assembly"]["volume"] == pytest.approx(1)
+    child = json.loads((tmp_path / "parts/whole/manifest.json").read_text())
+    assert manifest["volume"] + child["volume"] == pytest.approx(1)
     assert manifest["collision"]["static"] is None
     assert all(lod["triangles"] == 0 for lod in manifest["lods"])
     subprocess.run(

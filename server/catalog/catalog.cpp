@@ -49,6 +49,17 @@ void resolve_manifest_terms(Asset &asset, const react::Terms &terms) {
   const auto &bindings = asset.manifest.at("bindings");
   if (!bindings.is_object())
     throw std::runtime_error("bindings must be an object");
+  if (bindings.contains("character")) {
+    const auto &character = bindings.at("character");
+    if (character.contains("radius") || character.contains("height") || character.contains("mass"))
+      throw std::runtime_error("character size and mass are measured from geometry and material");
+  }
+  if (bindings.contains("container")) {
+    if (bindings.at("container").contains("shape"))
+      throw std::runtime_error("container shape is measured from its liquid cavity");
+    if (!asset.manifest.contains("cavity") || asset.manifest.at("cavity").is_null())
+      throw std::runtime_error("container binding requires a measured liquid cavity");
+  }
   auto scalar = [&](const nlohmann::json &reference,
                     std::optional<std::array<std::int8_t, 8>> dimensions = {}) {
     if (reference.is_number()) {

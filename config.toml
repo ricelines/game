@@ -53,7 +53,7 @@ LIGHT_SOURCE_RADIUS_M = 0.05 # finite near-source photometric denominator; asset
 SWING_SPEED = 6.0
 
 [bake]
-BAKE_VERSION = "ambergris-bake-4"
+BAKE_VERSION = "ambergris-bake-5"
 BAKE_S = 20
 BAKE_MB = 2048
 MODEL_MAX_M = 256.0

@@ -214,7 +214,9 @@ def test_actual_plan_artifacts_and_measured_water(baked_plan):
     tank = json.loads((ROOT / "assets" / models["tank"]["asset"] / "manifest.json").read_text())
     assert tank["capacity"] == pytest.approx(3.96 * 1.96 * 1.97)
     assert objects["cafe.tank"]["state"]["base.liquid"] == pytest.approx(tank["capacity"] * 0.85)
-    assert tank["bindings"]["container"]["shape"]["size"] == [3.96, 1.96, 1.97]
+    assert tank["cavity"]["min"] == pytest.approx([-1.98, -0.98, 0.03])
+    assert tank["cavity"]["max"] == pytest.approx([1.98, 0.98, 2.0])
+    assert tank["bindings"]["container"] == {}
 
 
 def test_actual_stair_deck_and_moving_part_ownership(baked_plan):
@@ -232,8 +234,13 @@ def test_actual_stair_deck_and_moving_part_ownership(baked_plan):
     )
     assert child["bindings"]["motion"]["mode"] == "kinematic"
     assert door["parts"]["leaf"]["position"] == [0, -0.25, 0]
-    assert door["volume"] + child["volume"] == pytest.approx(door["assembly"]["volume"])
-    assert manifest("body")["bindings"]["character"]["mass"] == "base.mass"
+    frame_volume = (2 * 0.12 * 2.6 + 2.48 * 0.12) * 0.22
+    assert door["volume"] + child["volume"] == pytest.approx(frame_volume + 2.4 * 0.08 * 2.4)
+    body = manifest("body")
+    assert "mass" not in body["bindings"]["character"]
+    assert body["size"] == pytest.approx([0.70, 0.35, 1.75])
+    assert "radius" not in body["bindings"]["character"]
+    assert "height" not in body["bindings"]["character"]
     school = manifest("school")
     assert len(school["parts"]) == 300
     assert set(school["parts"]) == {f"fish_{index:03}" for index in range(300)}

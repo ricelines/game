@@ -53,7 +53,9 @@ def test_repeated_part_compile_matches_uncached_bytes_and_keeps_fresh_facts(tmp_
         tmp_path / "reused/mesh.bin"
     ).read_bytes()
     # The native request changes when trusted exact capacity replaces its grid.
-    exact = _geometry(shape, tmp_path / "exact", {}, config, native, compiled, 0)
+    exact = _geometry(
+        shape, tmp_path / "exact", {}, config, native, compiled, {"capacity": 0, "cavity": None}
+    )
     assert len(compiled) == 3 and exact["capacity_method"] == "standard_exact"
 
 

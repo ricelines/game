@@ -114,6 +114,11 @@ Asset read_asset(const std::filesystem::path &root, Hash expected, std::string c
   if (!std::isfinite(asset.volume) || !std::isfinite(asset.capacity) || asset.volume < 0 ||
       asset.capacity < 0)
     throw std::runtime_error("asset measurements must be finite and nonnegative");
+  if (const auto cavity = m.find("cavity"); cavity != m.end() && !cavity->is_null()) {
+    const auto minimum = vector3(cavity->at("min")), maximum = vector3(cavity->at("max"));
+    if (minimum.x >= maximum.x || minimum.y >= maximum.y || minimum.z >= maximum.z)
+      throw std::runtime_error("measured cavity must have positive extents");
+  }
   std::set<std::string> lods;
   for (const auto &lod : m.at("lods")) {
     const auto file = lod.at("file").get<std::string>();
