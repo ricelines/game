@@ -208,6 +208,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     start::install_money(plan, symbols, ids, auth, players, groups, ledger);
   }
 
+  const auto newcomer_model =
+      launch.network ? start::newcomer_model(plan, catalog_state, react_state) : ModelId{};
   react::RuleChange fixture_rule_change;
   if (fixture_case)
     fixture_rule_change = fixture::install_candidate(
@@ -380,12 +382,45 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     while (!incoming.empty() &&
            ((!admitted_network && !frame.foreground) || admits(frame, Monotonic::now()))) {
       ++admitted_network;
-      sessions.accept(incoming.front());
+      auto admission = sessions.accept(incoming.front());
       incoming.pop_front();
       std::vector<net::Invocation> ready;
       std::vector<net::SessionNotice> notices;
       std::vector<net::SessionOutput> outputs;
       sessions.drain(ready, notices, outputs);
+      if (admission) {
+        if (const auto *request = std::get_if<net::JoinRequest>(&admission->request)) {
+          auto joined = create_join(*request, profiles, perm_state, objects_state, catalog_state,
+                                    plan.at("newcomer"), newcomer_model, clock);
+          record::Event event;
+          event.step = clock.step;
+          event.kind = record::Kind::System;
+          event.name = joined.player ? "join" : "join_refused";
+          event.result = joined.player ? record::Result::Applied : record::Result::NoEffect;
+          event.changed = joined.player != 0;
+          event.things = joined.objects;
+          if (joined.player)
+            event.detail = {{"player", "p:" + std::to_string(joined.player)},
+                            {"name", profiles.rows[joined.player].name}};
+          else
+            event.detail = {{"name", request->name}, {"reason", joined.refusal}};
+          const auto origin = journal.append(std::move(event));
+          if (!joined.player)
+            sessions.reject(admission->session, std::move(joined.refusal));
+          else {
+            auto effects = activate_join(catalog_state, react_state, objects_state, space_state,
+                                         net_state, step_state, settings, joined.objects);
+            reconcile_effects(values, react_state, step_state, clock, effects);
+            publish_effects(std::move(effects), origin, clock.step, queues, timers, journal,
+                            settings.event_queue_max);
+            sessions.send(admission->session, {{"t", "joined"},
+                                               {"player", "p:" + std::to_string(joined.player)},
+                                               {"key", std::move(joined.key)}});
+            notices.emplace_back(sessions.establish(
+                admission->session, profiles.rows[joined.player], net::Mode::Play, false));
+          }
+        }
+      }
       for (const auto &notice : notices)
         if (const auto play =
                 connection_notice(notice, net_state, space_state, delivery, catalog_state,

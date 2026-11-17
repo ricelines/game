@@ -2,21 +2,20 @@
 #include "start_private.hpp"
 
 namespace amber::step::start {
+lifecycle::Created install_object(const catalog::State &catalog, ObjectState &objects,
+                                  ModelId model, ObjectInit init) {
+  const auto assembly =
+      lifecycle::expand(catalog.models, catalog.parameters, catalog.assets, model);
+  return lifecycle::instantiate(objects.objects, objects.parts, objects.declared_parts, assembly,
+                                init);
+}
 std::vector<Handle> install_objects(const Json &plan, Symbols &symbols,
                                     const amber::catalog::State &catalog_state,
                                     const react::Terms &terms, amber::ObjectState &objects_state,
                                     Step now) {
-  auto &models = catalog_state.models;
-  auto &parameters = catalog_state.parameters;
-  auto &assets = catalog_state.assets;
-  auto &objects = objects_state.objects;
-  auto &parts = objects_state.parts;
-  auto &declared_parts = objects_state.declared_parts;
-
   std::vector<Handle> created;
   for (const auto &row : plan.at("objects")) {
     const auto model = symbols.models.at(row.at("model").get<std::string>());
-    const auto assembly = lifecycle::expand(models, parameters, assets, model);
     ObjectInit init;
     init.position = detail::vector(row.at("at"));
     init.rotation = detail::quaternion(row.at("rotation"));
@@ -44,7 +43,7 @@ std::vector<Handle> install_objects(const Json &plan, Symbols &symbols,
     }
     if (row.contains("material"))
       init.material = detail::term(terms, row.at("material"));
-    const auto result = lifecycle::instantiate(objects, parts, declared_parts, assembly, init);
+    const auto result = install_object(catalog_state, objects_state, model, init);
     if (!symbols.objects.emplace(row.at("key").get<std::string>(), result.root).second)
       throw std::invalid_argument("duplicate initial object symbol");
     created.insert(created.end(), result.objects.begin(), result.objects.end());

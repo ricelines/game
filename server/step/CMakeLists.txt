@@ -11,6 +11,7 @@ add_library(amber_step STATIC
   controls.cpp
   run.cpp
   connections.cpp
+  joining.cpp
   fixture_cases.cpp
   lifecycle.cpp
   snapshot.cpp

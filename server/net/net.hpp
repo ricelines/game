@@ -249,6 +249,7 @@ KeyHash hash_key(std::string_view);
 void put_profile(Profiles &, Profile);
 void rebuild_key_index(Profiles &);
 const Profile *authenticate(const Profiles &, std::string_view key);
+std::string generate_key();
 // Exclusive creation: returns a hash, never the random credential itself.
 KeyHash create_key_file(const std::filesystem::path &);
 KeyHash hash_key_file(const std::filesystem::path &);
@@ -258,6 +259,14 @@ struct Hello {
   Mode mode = Mode::Watch;
   bool binary = true;
 };
+struct JoinRequest {
+  std::string name;
+};
+bool join_allowed(const JoinRequest &);
+struct Admission {
+  SessionId session;
+  std::variant<JoinRequest> request;
+};
 std::string_view operation_name(ControlKind);
 struct Request {
   std::uint64_t id = 0;
@@ -265,7 +274,7 @@ struct Request {
   Json fields = Json::object();
 };
 struct Parsed {
-  std::variant<std::monostate, Hello, Request> message;
+  std::variant<std::monostate, Hello, JoinRequest, Request> message;
   std::uint64_t id = 0;
   std::string error;
 };
@@ -330,7 +339,9 @@ public:
   explicit Sessions(const Profiles &);
   void welcome(SessionId, Json fields);
   void drain(std::vector<Invocation> &, std::vector<SessionNotice> &, std::vector<SessionOutput> &);
-  void accept(const Input &);
+  std::optional<Admission> accept(const Input &);
+  Authenticated establish(SessionId, const Profile &, Mode, bool binary);
+  void reject(SessionId, std::string);
   void complete(SessionId, std::uint64_t sequence, Json result);
   void send(SessionId, Json);
   void event(SessionId, Json);
@@ -364,7 +375,6 @@ private:
   void start(SessionId, Pending);
   void advance(SessionId);
   void forget(SessionId);
-  void reject(SessionId, std::string);
   void error(SessionId, std::uint64_t, std::string);
 };
 void write_profiles(snap::Output &, const Profiles &, const snap::ObjectSelection * = nullptr);

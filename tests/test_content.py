@@ -28,6 +28,7 @@ def test_every_start_has_closed_references_and_private_connection_modes(authored
         for stakes in (True, False):
             plan = select(authored, mode, stakes)
             validate_symbols(plan)
+            assert plan["newcomer"]["body_model"] == "body"
             assert len(plan["profiles"]) == 8
             assert next(p for p in plan["profiles"] if p["id"] == 8)["modes"] == [
                 "watch",
@@ -104,9 +105,19 @@ def test_root_owned_and_starting_body_grants_have_real_scopes(authored):
             assert not any(
                 "caller" in row or "owned_on_plot" in row["scope"] for row in plan["grants"]
             )
+            newcomer = plan["newcomer"]["body_installs"]
             for profile in plan["profiles"]:
                 if "body" not in profile:
                     continue
+                normalized = json.loads(json.dumps(profile["body_installs"]))
+                for group in normalized:
+                    for choice in group:
+                        scope = choice["scope"]
+                        if "avatar" in scope:
+                            scope["avatar"] = "$body"
+                        if "owned" in scope:
+                            scope["owned"] = "$player"
+                assert normalized == newcomer
                 choices = [choice for group in profile["body_installs"] for choice in group]
                 owner_scope = {"owned": f"p:{profile['id']}"}
                 assert {row["slot"] for row in choices if row["scope"] == owner_scope} == {

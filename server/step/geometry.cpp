@@ -195,44 +195,26 @@ void install_physics(space::Space &space, IdentityRead identity, TransformRead t
       throw std::invalid_argument(space::status_text(added.status));
   }
 }
-std::vector<Handle>
-initialize_physics(amber::step::State &step_state, const amber::catalog::State &catalog_state,
-                   const amber::react::State &react_state, amber::ObjectState &objects_state,
-                   const perm::Players &players, amber::space::State &space_state,
-                   std::span<const Handle> initial, const checkpoint::Decoded &decoded,
-                   PhysicsDefaults defaults, bool restored) {
+void install_object_physics(State &step_state, const catalog::State &catalog_state,
+                            const react::State &react_state, ObjectState &objects_state,
+                            space::State &space_state, std::span<const Handle> initial,
+                            PhysicsDefaults defaults) {
   const auto values = react::value_read(objects_state, catalog_state, react_state);
+  const auto identity = values.identity;
   const auto &clock = step_state.clock;
-  const auto &restored_motion = decoded.motion;
   const auto &physics = catalog_state.mechanical.values.at("physics");
   const PhysicsRoles roles{
       physics.at("density").get<TermId>(), physics.at("transmission").get<TermId>(),
       physics.value("friction", TermId{}), physics.value("restitution", TermId{})};
-
   auto &space = space_state.space;
-
-  auto &geometry = step_state.geometry;
-  auto &models = catalog_state.models;
-  auto &parameters = catalog_state.parameters;
-  auto &assets = catalog_state.assets;
-  auto transforms = amber::transforms(objects_state.objects);
-  auto parents = amber::parents(objects_state.objects);
-  auto flags = amber::space_flags(objects_state.objects);
-  auto &parts = objects_state.parts;
-  auto &declared_parts = objects_state.declared_parts;
-  auto &physical = space_state.physical_relations;
-
-  const auto identity = values.identity;
-  std::unordered_set<std::uint64_t> stored;
-  for (const auto &player : players.rows)
-    for (const auto *goods : {&player.inventory, &player.mailbox})
-      for (auto root : *goods)
-        for (auto object : lifecycle::collect(parts, identity, root))
-          stored.insert(object.bits);
-  std::vector<Handle> visible;
+  const auto &geometry = step_state.geometry;
+  const auto &models = catalog_state.models;
+  const auto &parameters = catalog_state.parameters;
+  const auto &assets = catalog_state.assets;
+  const auto &declared_parts = objects_state.declared_parts;
+  const auto transforms = amber::transforms(objects_state.objects);
+  const auto flags = amber::space_flags(objects_state.objects);
   for (auto object : initial) {
-    if (stored.contains(object.bits))
-      continue;
     const auto slot = object.slot();
     const auto asset_hash =
         catalog::resolve_asset(models, parameters, identity.model[slot], values.params[slot]).hash;
@@ -246,8 +228,38 @@ initialize_physics(amber::step::State &step_state, const amber::catalog::State &
       definition.mode_flags = ScriptedMotion;
     }
     install_physics(space, identity, transforms, flags, object, definition);
-    visible.push_back(object);
   }
+}
+std::vector<Handle>
+initialize_physics(amber::step::State &step_state, const amber::catalog::State &catalog_state,
+                   const amber::react::State &react_state, amber::ObjectState &objects_state,
+                   const perm::Players &players, amber::space::State &space_state,
+                   std::span<const Handle> initial, const checkpoint::Decoded &decoded,
+                   PhysicsDefaults defaults, bool restored) {
+  const auto values = react::value_read(objects_state, catalog_state, react_state);
+  const auto &restored_motion = decoded.motion;
+
+  auto &space = space_state.space;
+
+  auto transforms = amber::transforms(objects_state.objects);
+  auto parents = amber::parents(objects_state.objects);
+  auto &parts = objects_state.parts;
+  auto &declared_parts = objects_state.declared_parts;
+  auto &physical = space_state.physical_relations;
+
+  const auto identity = values.identity;
+  std::unordered_set<std::uint64_t> stored;
+  for (const auto &player : players.rows)
+    for (const auto *goods : {&player.inventory, &player.mailbox})
+      for (auto root : *goods)
+        for (auto object : lifecycle::collect(parts, identity, root))
+          stored.insert(object.bits);
+  std::vector<Handle> visible;
+  for (auto object : initial)
+    if (!stored.contains(object.bits))
+      visible.push_back(object);
+  install_object_physics(step_state, catalog_state, react_state, objects_state, space_state,
+                         visible, defaults);
   if (!restored)
     install_declared_attachments(objects_state, space_state, initial);
   if (restored) {

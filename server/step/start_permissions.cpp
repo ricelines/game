@@ -175,18 +175,47 @@ void install_grants(const Json &plan, const Symbols &symbols,
                                   std::string(perm::reason_text(created.reason)));
   }
 }
-void provision_body_grants(const Json &plan, const Symbols &symbols,
-                           const amber::catalog::State &catalog_state,
-                           const amber::ObjectState &objects_state, amber::perm::State &perm_state,
+void provision_body_grants(const Json &installs, const Symbols &symbols,
+                           const catalog::State &catalog, const ObjectState &objects,
+                           perm::State &permissions, const NativeCall &call) {
+  const auto identity = amber::identity(objects.objects);
+  const auto authority = amber::authority(objects.objects);
+  const auto script = catalog.models.rows.at(identity.model[call.body.slot()]).script;
+  const auto &source = catalog.scripts.rows.at(script);
+  std::set<std::string> filled;
+  for (auto choices : installs) {
+    for (auto &choice : choices) {
+      auto &scope = choice.at("scope");
+      for (const char *field : {"object", "avatar"})
+        if (scope.contains(field)) {
+          const auto &name = scope.at(field).get_ref<const std::string &>();
+          scope[field] = to_string(name == "$body" ? call.body : symbols.objects.at(name));
+        }
+      if (scope.contains("owned") && scope.at("owned") == "$player")
+        scope["owned"] = "p:" + std::to_string(std::get<PlayerId>(call.request.caller));
+      if (scope.contains("owned_on_plot") && scope["owned_on_plot"]["owner"].is_number_integer())
+        scope["owned_on_plot"]["owner"] =
+            "p:" + std::to_string(scope["owned_on_plot"]["owner"].get<PlayerId>());
+    }
+    const auto requested =
+        editing::detail::slot_choices(choices, source, objects, permissions, call);
+    const auto granted = editing::detail::fill_slots(source, requested, authority,
+                                                     permissions.players, permissions.grants, call);
+    if (granted.reply.at("grants").size() != choices.size())
+      throw std::invalid_argument("starting body slot grant denied: " +
+                                  granted.reply.at("unfilled_slots").dump());
+    for (const auto &choice : choices)
+      filled.insert(choice.at("slot").get<std::string>());
+  }
+  for (const auto &slot : source.declaration.slots)
+    if (!filled.contains(slot))
+      throw std::invalid_argument("starting body has no authored choice for slot: " + slot);
+}
+void provision_body_grants(const Json &plan, const Symbols &symbols, const catalog::State &catalog,
+                           const ObjectState &objects, perm::State &permissions,
                            const net::Profiles &profiles, Step now, double hz) {
-  auto &models = catalog_state.models;
-  auto &scripts = catalog_state.scripts;
-  auto identity = amber::identity(std::as_const(objects_state.objects));
-  auto authority = amber::authority(std::as_const(objects_state.objects));
-
-  auto &players = perm_state.players;
-  auto &grants = perm_state.grants;
-
+  const auto identity = amber::identity(objects.objects);
+  const auto authority = amber::authority(objects.objects);
   for (const auto &row : plan.at("profiles")) {
     if (!row.contains("body") ||
         std::find(row.at("modes").begin(), row.at("modes").end(), "play") == row.at("modes").end())
@@ -196,11 +225,8 @@ void provision_body_grants(const Json &plan, const Symbols &symbols,
     if (!identity.valid(body) || !(identity.flags[body.slot()] & Body) ||
         authority.owner[body.slot()] != player || profiles.rows.at(player).body != body)
       throw std::invalid_argument("starting body must be the configured player's own Body");
-    const auto script = models.rows.at(identity.model[body.slot()]).script;
-    if (!script)
-      continue;
-    const auto &source = scripts.rows.at(script);
-    if (source.declaration.slots.empty())
+    const auto script = catalog.models.rows.at(identity.model[body.slot()]).script;
+    if (!script || catalog.scripts.rows.at(script).declaration.slots.empty())
       continue;
     if (!row.contains("body_installs") || !row.at("body_installs").is_array())
       throw std::invalid_argument("starting body needs authored body_installs for its slots");
@@ -210,30 +236,7 @@ void provision_body_grants(const Json &plan, const Symbols &symbols,
     call.body = body;
     call.step = now;
     call.hz = hz;
-    std::set<std::string> filled;
-    for (auto choices : row.at("body_installs")) {
-      for (auto &choice : choices) {
-        auto &scope = choice.at("scope");
-        for (const char *field : {"object", "avatar"})
-          if (scope.contains(field))
-            scope[field] = to_string(symbols.objects.at(scope.at(field).get<std::string>()));
-        if (scope.contains("owned_on_plot") && scope["owned_on_plot"]["owner"].is_number_integer())
-          scope["owned_on_plot"]["owner"] =
-              "p:" + std::to_string(scope["owned_on_plot"]["owner"].get<PlayerId>());
-      }
-      const auto requested =
-          editing::detail::slot_choices(choices, source, objects_state, perm_state, call);
-      const auto granted =
-          editing::detail::fill_slots(source, requested, authority, players, grants, call);
-      if (granted.reply.at("grants").size() != choices.size())
-        throw std::invalid_argument("starting body slot grant denied: " +
-                                    granted.reply.at("unfilled_slots").dump());
-      for (const auto &choice : choices)
-        filled.insert(choice.at("slot").get<std::string>());
-    }
-    for (const auto &slot : source.declaration.slots)
-      if (!filled.contains(slot))
-        throw std::invalid_argument("starting body has no authored choice for slot: " + slot);
+    provision_body_grants(row.at("body_installs"), symbols, catalog, objects, permissions, call);
   }
 }
 } // namespace amber::step::start

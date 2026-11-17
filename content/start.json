@@ -442,6 +442,75 @@
       "author": 1
     }
   ],
+  "newcomer": {
+    "body_model": "body",
+    "body_installs": [
+      [
+        {
+          "slot": "animate",
+          "scope": {
+            "avatar": "$body"
+          },
+          "rights": [
+            "animate"
+          ],
+          "expires_s": 31536000,
+          "cap": 0,
+          "period_s": 0
+        },
+        {
+          "slot": "camera",
+          "scope": {
+            "avatar": "$body"
+          },
+          "rights": [
+            "camera"
+          ],
+          "expires_s": 31536000,
+          "cap": 0,
+          "period_s": 0
+        }
+      ],
+      [
+        {
+          "slot": "use",
+          "scope": {
+            "owned": "$player"
+          },
+          "rights": [
+            "use"
+          ],
+          "expires_s": 31536000,
+          "cap": 0,
+          "period_s": 0
+        },
+        {
+          "slot": "take",
+          "scope": {
+            "owned": "$player"
+          },
+          "rights": [
+            "take"
+          ],
+          "expires_s": 31536000,
+          "cap": 0,
+          "period_s": 0
+        },
+        {
+          "slot": "move",
+          "scope": {
+            "owned": "$player"
+          },
+          "rights": [
+            "move"
+          ],
+          "expires_s": 31536000,
+          "cap": 0,
+          "period_s": 0
+        }
+      ]
+    ]
+  },
   "profiles": [
     {
       "id": 1,

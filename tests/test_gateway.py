@@ -16,6 +16,101 @@ from gateway.schema import TOOLS, validate
 from gateway.session import Session, Sessions
 
 
+def test_join_cli_saves_private_key_and_continues_the_joined_session(tmp_path, monkeypatch):
+    monkeypatch.delenv("AMBERGRIS_JOIN_AUTH", raising=False)
+
+    async def run():
+        names = set()
+        connections = 0
+
+        async def handler(socket):
+            nonlocal connections
+            connections += 1
+            async for raw in socket:
+                message = json.loads(raw)
+                if message["t"] == "join":
+                    if message["name"] in names:
+                        await socket.send(json.dumps({"t": "bye", "reason": "name_taken"}))
+                        return
+                    names.add(message["name"])
+                    await socket.send(
+                        json.dumps({"t": "joined", "player": "p:9", "key": "fixture-new-key"})
+                    )
+                    await socket.send(
+                        json.dumps({"t": "welcome", "player": "p:9", "body": "o:9.1"})
+                    )
+                elif message["t"] == "look":
+                    await socket.send(
+                        json.dumps(
+                            {
+                                "t": "obs",
+                                "id": message["id"],
+                                "things": [],
+                                "self": {"name": "New player"},
+                            }
+                        )
+                    )
+                elif message["t"] == "do":
+                    await socket.send(
+                        json.dumps(
+                            {"t": "result", "id": message["id"], "ok": True, "effect": "started"}
+                        )
+                    )
+
+        async with serve(handler, "127.0.0.1", 0) as server:
+            sessions = Sessions(f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}")
+            async with TestClient(
+                TestServer(create_app(sessions, Authoring(None, "disabled")))
+            ) as client:
+                address = str(client.make_url("/")).rstrip("/")
+                path = tmp_path / "new.key"
+                joined = await cli.run(
+                    cli.parser().parse_args(
+                        ["--gateway", address, "join", "New player", "--key-file", str(path)]
+                    )
+                )
+                assert joined == {"player": "p:9", "key_file": str(path)}
+                assert path.stat().st_mode & 0o777 == 0o600
+                assert read_key_file(path) == "fixture-new-key"
+                look = await cli.run(
+                    cli.parser().parse_args(["--gateway", address, "--key-file", str(path), "look"])
+                )
+                assert look["self"]["name"] == "New player"
+                action = await cli.run(
+                    cli.parser().parse_args(
+                        [
+                            "--gateway",
+                            address,
+                            "--key-file",
+                            str(path),
+                            "do",
+                            "base.move_to",
+                            "--args",
+                            '{"point":[1,0,0]}',
+                        ]
+                    )
+                )
+                assert action["effect"] == "started"
+                assert connections == 1
+                duplicate = tmp_path / "duplicate.key"
+                refused = await cli.run(
+                    cli.parser().parse_args(
+                        ["--gateway", address, "join", "New player", "--key-file", str(duplicate)]
+                    )
+                )
+                assert refused == {"error": "name_taken"}
+                assert not duplicate.exists()
+                with pytest.raises(FileExistsError):
+                    await cli.run(
+                        cli.parser().parse_args(
+                            ["--gateway", address, "join", "Another", "--key-file", str(path)]
+                        )
+                    )
+                assert names == {"New player"}
+
+    asyncio.run(run())
+
+
 def test_credentials_require_private_files(tmp_path):
     path = tmp_path / "fixture.key"
     path.write_text("labelled-test-credential\n")

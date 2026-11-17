@@ -3,6 +3,9 @@
 #include <type_traits>
 
 namespace amber::net {
+bool join_allowed(const JoinRequest &) {
+  return true;
+}
 Sessions::Sessions(const Profiles &profiles) : profiles_(profiles) {}
 void Sessions::drain(std::vector<Invocation> &ready, std::vector<SessionNotice> &notices,
                      std::vector<SessionOutput> &outputs) {
@@ -43,9 +46,9 @@ void Sessions::reject(net::SessionId id, std::string reason) {
   outputs_.emplace_back(Close{id, 1008, std::move(reason)});
   forget(id);
 }
-void Sessions::accept(const net::Input &input) {
-  std::visit(
-      [&](const auto &message) {
+std::optional<Admission> Sessions::accept(const net::Input &input) {
+  return std::visit(
+      [&](const auto &message) -> std::optional<Admission> {
         using T = std::decay_t<decltype(message)>;
         if constexpr (std::is_same_v<T, net::Connected>) {
           forget(message.session);
@@ -55,28 +58,28 @@ void Sessions::accept(const net::Input &input) {
         } else if constexpr (std::is_same_v<T, net::Control>) {
           const auto found = sessions_.find(message.session);
           if (found == sessions_.end())
-            return;
+            return {};
           auto parsed = parse(message.text);
           if (!parsed.error.empty()) {
             if (!found->second.principal)
               reject(message.session, parsed.error);
             else
               error(message.session, parsed.id, parsed.error);
+          } else if (found->second.principal && !std::holds_alternative<Request>(parsed.message)) {
+            reject(message.session, "already_authenticated");
           } else if (auto *value = std::get_if<Hello>(&parsed.message)) {
             hello(message.session, std::move(*value));
+          } else if (auto *value = std::get_if<JoinRequest>(&parsed.message)) {
+            return Admission{message.session, std::move(*value)};
           } else {
             request(message.session, std::get<Request>(std::move(parsed.message)));
           }
         }
+        return {};
       },
       input);
 }
 void Sessions::hello(net::SessionId id, Hello hello) {
-  auto &session = sessions_.at(id);
-  if (session.principal) {
-    reject(id, "already_authenticated");
-    return;
-  }
   const auto *profile = authenticate(profiles_, hello.key);
   if (!profile) {
     reject(id, "bad_key");
@@ -86,20 +89,23 @@ void Sessions::hello(net::SessionId id, Hello hello) {
     reject(id, "mode_not_allowed");
     return;
   }
-  Principal principal{profile->id,    profile->body, profile->name,
-                      profile->roles, hello.mode,    hello.binary};
-  if (hello.mode == Mode::Play) {
-    const auto old = controlling_.find(profile->id);
+  notices_.emplace_back(establish(id, *profile, hello.mode, hello.binary));
+}
+Authenticated Sessions::establish(net::SessionId id, const Profile &profile, Mode mode,
+                                  bool binary) {
+  Principal principal{profile.id, profile.body, profile.name, profile.roles, mode, binary};
+  if (mode == Mode::Play) {
+    const auto old = controlling_.find(profile.id);
     if (old != controlling_.end()) {
       const auto displaced = old->second;
       send(displaced, {{"t", "bye"}, {"reason", "replaced"}});
       outputs_.emplace_back(Close{displaced, 1000, "replaced"});
       forget(displaced);
     }
-    controlling_[profile->id] = id;
+    controlling_[profile.id] = id;
   }
-  session.principal = principal;
-  notices_.emplace_back(Authenticated{id, principal});
+  sessions_.at(id).principal = principal;
+  return {id, std::move(principal)};
 }
 void Sessions::welcome(net::SessionId id, Json welcome) {
   const auto selected = principal(id);

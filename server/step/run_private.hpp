@@ -95,6 +95,14 @@ void refresh_connections(amber::net::State &net_state, amber::space::State &spac
 } // namespace amber::step
 
 namespace amber::step {
+void install_object_physics(State &, const catalog::State &, const react::State &, ObjectState &,
+                            space::State &, std::span<const Handle>, PhysicsDefaults);
+JoinResult create_join(const net::JoinRequest &, net::Profiles &, perm::State &, ObjectState &,
+                       const catalog::State &, const nlohmann::json &newcomer, ModelId,
+                       const Clock &);
+react::DeferredEffects activate_join(const catalog::State &, react::State &, ObjectState &,
+                                     space::State &, net::State &, State &, const amber::Settings &,
+                                     std::span<const Handle>);
 std::vector<Handle>
 initialize_physics(amber::step::State &step_state, const amber::catalog::State &catalog_state,
                    const amber::react::State &react_state, amber::ObjectState &objects_state,

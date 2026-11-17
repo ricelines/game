@@ -74,6 +74,13 @@ void request(Sessions &sessions, net::SessionId id, Json message) {
   sessions.accept(net::Control{id, message.dump()});
 }
 void protocol() {
+  const auto join = parse(R"({"t":"join","version":1,"name":"Mira"})");
+  require(join.error.empty() && std::get<JoinRequest>(join.message).name == "Mira",
+          "join accepts a name without a credential or request id");
+  for (const auto bad :
+       {R"({"t":"join","version":2,"name":"Mira"})", R"({"t":"join","version":1,"name":false})",
+        R"({"t":"join","version":1,"name":"Mira","purpose":"test"})"})
+    require(!parse(bad).error.empty(), "join wire fields are validated");
   require(std::holds_alternative<Hello>(
               parse(R"({"t":"hello","version":1,"key":"x","mode":"play"})").message),
           "hello parsed");
@@ -122,6 +129,42 @@ void protocol() {
           "event detail projection must be a boolean");
   require(!validate_debug({{"kind", "nav"}, {"around", {0, "x", 0}}}).empty(),
           "numeric diagnostics");
+}
+void joining_uses_the_existing_session() {
+  auto p = profiles();
+  Sessions sessions(p);
+  Wire wire;
+  sessions.accept(Connected{4});
+  const auto admission = sessions.accept(Control{4, R"({"t":"join","version":1,"name":"Mira"})"});
+  require(admission && admission->session == 4 && !sessions.principal(4) && p.rows.size() == 3,
+          "join reaches the step owner before creating or authenticating a player");
+  const auto &join = std::get<JoinRequest>(admission->request);
+  require(join_allowed(join), "the prototype admits joins");
+  const auto key = generate_key();
+  put_profile(p, {3, join.name, Handle::make(18, 1), {}, modes(Mode::Play), {hash_key(key)}});
+  const auto login = sessions.establish(4, p.rows[3], Mode::Play, false);
+  require(login.session == 4 && login.principal.player == 3 &&
+              login.principal.body == Handle::make(18, 1) && !login.principal.binary,
+          "join uses shared establishment with the caller's explicit replication choice");
+  sessions.send(4, {{"t", "joined"}, {"player", "p:3"}, {"key", key}});
+  sessions.welcome(login.session, {{"step", 7}});
+  wire.drain(sessions);
+  require(wire.sent.size() == 2 && wire.sent[0].second["t"] == "joined" &&
+              wire.sent[1].second["t"] == "welcome",
+          "joining replies once before the ordinary welcome without a late authentication notice");
+  request(sessions, 4, {{"t", "look"}, {"id", 1}});
+  const auto ready = wire.drain(sessions);
+  require(ready.size() == 1 && ready[0].principal.player == 3,
+          "the joined connection immediately uses ordinary authenticated controls");
+  require(!sessions.accept(Control{4, R"({"t":"join","version":1,"name":"Other"})"}),
+          "an authenticated connection cannot create another join admission");
+  wire.drain(sessions);
+  require(wire.closed.back().second == "already_authenticated",
+          "authenticated join is rejected by the handshake boundary");
+  connect(sessions, 5, key);
+  wire.drain(sessions);
+  require(sessions.principal(5)->player == 3,
+          "a generated join key reconnects through the ordinary hello path");
 }
 void authentication_and_presentation() {
   auto p = profiles();
@@ -240,6 +283,20 @@ void persistence_and_key_files() {
       [&] { put_profile(p, {3, "duplicate", {}, {}, all_modes, {hash_key("fixture-player")}}); },
       "duplicate credentials rejected");
   require(p.by_key == original && p.rows.size() == 3, "profile rejection leaves index unchanged");
+  auto changed = p.rows[1];
+  changed.key_hashes = {hash_key("replacement"), hash_key("replacement")};
+  rejects([&] { put_profile(p, changed); }, "duplicate keys in one profile are rejected");
+  changed.key_hashes = {"invalid"};
+  rejects([&] { put_profile(p, changed); }, "invalid key hashes are rejected before mutation");
+  require(p.by_key == original && authenticate(p, "fixture-player"),
+          "failed replacement preserves existing authentication");
+  changed.key_hashes = {hash_key("replacement")};
+  put_profile(p, changed);
+  require(!authenticate(p, "fixture-player") && authenticate(p, "replacement")->id == 1 &&
+              authenticate(p, "fixture-watch")->id == 2,
+          "replacement invalidates only the selected player's old key");
+  changed.key_hashes = {hash_key("fixture-player")};
+  put_profile(p, changed);
   snap::Buffer bytes;
   snap::Output out{bytes};
   write_profiles(out, p);
@@ -271,6 +328,7 @@ void persistence_and_key_files() {
 int main() {
   try {
     protocol();
+    joining_uses_the_existing_session();
     authentication_and_presentation();
     lanes_and_orphans();
     untrusted_manifest();

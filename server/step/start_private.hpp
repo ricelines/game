@@ -18,6 +18,10 @@ void bind_relation_reads(react::RelationsRead &, react::AuthoredRelations &, con
 void record_seed(record::Journal &journal, const react::Terms &terms, const catalog::Models &models,
                  const catalog::Scripts &scripts, std::span<const Handle> initial, IdentityRead ids,
                  AuthorityRead auth, AttributionRead makers);
+ModelId newcomer_model(const Json &, const catalog::State &, const react::State &);
+lifecycle::Created install_object(const catalog::State &, ObjectState &, ModelId, ObjectInit);
+void provision_body_grants(const Json &installs, const Symbols &, const catalog::State &,
+                           const ObjectState &, perm::State &, const NativeCall &);
 void provision_body_grants(const Json &, const Symbols &,
                            const amber::catalog::State &catalog_state,
                            const amber::ObjectState &objects_state, amber::perm::State &perm_state,

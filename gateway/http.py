@@ -37,6 +37,15 @@ def create_app(sessions, authoring):
             player_key(request), request.headers.get("X-Ambergris-Session", "cli")
         )
 
+    async def join(request):
+        body = await request.json()
+        if not isinstance(body, dict) or set(body) != {"name"} or not isinstance(body["name"], str):
+            raise ValueError("join requires a name")
+        try:
+            return web.json_response(await sessions.join(body["name"]))
+        except SessionError as error:
+            return web.json_response({"error": str(error)}, status=400)
+
     async def rpc(request):
         identity = None
         try:
@@ -108,6 +117,7 @@ def create_app(sessions, authoring):
         await authoring.close()
         await sessions.close()
 
+    app.router.add_post("/join", join)
     app.router.add_post("/mcp", rpc)
     app.router.add_post("/tools/{name}", tool)
     app.router.add_post("/bake/models", model)

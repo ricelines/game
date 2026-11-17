@@ -152,6 +152,8 @@ def validate_symbols(plan: dict) -> None:
             raise ValueError("Unknown model group")
         if row.get("script") and row["script"] not in scripts:
             raise ValueError(f"Missing script {row['script']}")
+    if plan["newcomer"]["body_model"] not in models:
+        raise ValueError("Missing newcomer body model")
     for profile in plan["profiles"]:
         if "body" not in profile:
             continue

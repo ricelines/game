@@ -164,6 +164,12 @@ struct NativeCompletion {
   std::vector<lifecycle::Rebinding> rebound_objects;
 };
 
+struct JoinResult {
+  PlayerId player = 0;
+  std::string key, refusal;
+  std::vector<Handle> objects;
+};
+
 struct DeliveryTargets {
   std::unordered_map<PlayerId, Handle> present_bodies;
 };

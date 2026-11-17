@@ -162,6 +162,37 @@ void install_catalog(const Json &plan, amber::react::State &react_state,
       react::add_rule(rules, scripts, terms, script.id);
 }
 
+ModelId newcomer_model(const Json &plan, const catalog::State &catalog, const react::State &react) {
+  const auto &newcomer = plan.at("newcomer");
+  const auto name = newcomer.at("body_model").get<std::string>();
+  const auto &models = plan.at("models");
+  const auto found =
+      std::ranges::find_if(models, [&](const auto &row) { return row.at("key") == name; });
+  if (found == models.end())
+    throw std::invalid_argument("unknown newcomer body model");
+  // Initial root models retain their order and ids across catalog revisions and snapshots.
+  auto ordinal = std::distance(models.begin(), found);
+  ModelId model = 0;
+  for (const auto &row : catalog.models.rows)
+    if (row.id && row.part_name.empty() && ordinal-- == 0) {
+      model = row.id;
+      break;
+    }
+  if (!model)
+    throw std::invalid_argument("unknown newcomer body model");
+  if (!newcomer.at("body_installs").is_array())
+    throw std::invalid_argument("newcomer body_installs must be an array");
+  const auto &schema = react.native_declarations.rows.at(react.terms.by_name.at("engine.install"))
+                           .inputs_schema.at("properties")
+                           .at("choices");
+  for (const auto &choices : newcomer.at("body_installs")) {
+    const auto error = check_input(schema, choices);
+    if (!error.empty())
+      throw std::invalid_argument("invalid newcomer body_installs: " + error);
+  }
+  return model;
+}
+
 void bind_relation_reads(react::RelationsRead &reads, react::AuthoredRelations &authored,
                          const react::Terms &terms, const space::PhysicalRelations &physical,
                          std::array<TermId, 4> physical_terms) {

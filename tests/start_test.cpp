@@ -1,5 +1,7 @@
 #include "catalog/catalog.hpp"
+#include "net_fixture.hpp"
 #include "settings.hpp"
+#include "step/run_private.hpp"
 #include "step/start_private.hpp"
 
 #include <chrono>
@@ -23,6 +25,129 @@ template <class Fn> void rejects(Fn fn, const char *message) {
   }
   throw std::runtime_error(message);
 }
+void check_joining(const Json &plan, catalog::State &catalog, react::State &react,
+                   ObjectState &objects, perm::State &permissions, net::State &net,
+                   const Settings &settings, const std::filesystem::path &asset_root) {
+  const auto model = newcomer_model(plan, catalog, react);
+  const step::Clock clock{.step = 7, .hz = 20};
+  const auto expected = static_cast<PlayerId>(net.profiles.rows.size());
+  auto joined = step::create_join({"  New arrival  "}, net.profiles, permissions, objects, catalog,
+                                  plan.at("newcomer"), model, clock);
+  require(joined.player == expected && joined.refusal.empty(),
+          "join did not allocate the next player");
+  const auto &profile = net.profiles.rows.at(joined.player);
+  const auto body = profile.body;
+  const auto ids = identity(objects.objects);
+  require(profile.name == "New arrival" && profile.roles.empty() &&
+              profile.connection_modes == net::modes(net::Mode::Play) &&
+              net::authenticate(net.profiles, joined.key)->id == joined.player,
+          "join did not establish the named, unprivileged player with the returned key");
+  require(ids.valid(body) && ids.model[body.slot()] == model && (ids.flags[body.slot()] & Body) &&
+              objects.objects.owner[body.slot()] == joined.player &&
+              objects.objects.position[body.slot()] == Vec3{},
+          "newcomer body is not owned by the new player at Port Zero");
+  require(permissions.players.rows[joined.player].groups.empty() &&
+              perm::balance(permissions.ledger, perm::Account::player(joined.player)) == 0 &&
+              std::ranges::none_of(
+                  permissions.plots.rows,
+                  [&](const auto &plot) { return plot.id && plot.owner == joined.player; }),
+          "join gave an unsolicited group, land or balance");
+  const auto script = catalog.models.rows[model].script;
+  const auto holder = perm::Holder::script(script, body);
+  require(
+      bool(perm::check_scope(holder, perm::Scope::avatar(body), 3, permissions.grants, clock.step)),
+      "new body cannot animate or see through its avatar");
+  for (auto verb : {perm::Verb::Use, perm::Verb::Take, perm::Verb::Move})
+    require(bool(perm::check_scope(holder, perm::Scope::owned(joined.player), perm::bit(verb),
+                                   permissions.grants, clock.step)),
+            "new body cannot act on its owner's goods across plots");
+  for (auto grant : permissions.players.rows[joined.player].grants_given)
+    require(permissions.grants.rows[grant].issuer == joined.player,
+            "newcomer grants were not issued by the newcomer");
+
+  const auto profiles_before = net.profiles.rows.size(),
+             players_before = permissions.players.rows.size();
+  const auto objects_before = objects.objects.model.size(),
+             grants_before = permissions.grants.rows.size();
+  for (const auto &name : {std::string(" new ARRIVAL "), std::string(""), std::string(33, 'x')}) {
+    const auto refused = step::create_join({name}, net.profiles, permissions, objects, catalog,
+                                           plan.at("newcomer"), model, clock);
+    require(!refused.player &&
+                refused.refusal == (name == " new ARRIVAL " ? "name_taken" : "bad_input"),
+            "join did not reject a duplicate or invalid name");
+  }
+  require(net.profiles.rows.size() == profiles_before &&
+              permissions.players.rows.size() == players_before &&
+              objects.objects.model.size() == objects_before &&
+              permissions.grants.rows.size() == grants_before,
+          "a refused join partially created a player, body or grants");
+  std::string unicode_name;
+  for (int i = 0; i < 32; ++i)
+    unicode_name += "界";
+  const auto second = step::create_join({unicode_name}, net.profiles, permissions, objects, catalog,
+                                        plan.at("newcomer"), model, clock);
+  require(second.player == joined.player + 1,
+          "second join did not preserve Unicode or allocate the next id");
+
+  step::State step;
+  step.clock = clock;
+  space::State space(settings.space, settings.light_cell_m);
+  for (auto object : joined.objects) {
+    const auto &asset = catalog.assets.rows.at(catalog.models.rows[ids.model[object.slot()]].asset);
+    step::import_geometry_asset(step.geometry, space.space, asset, asset_root);
+  }
+  auto effects =
+      step::activate_join(catalog, react, objects, space, net, step, settings, joined.objects);
+  const auto motion = space::body_motion(space.space, ids, body);
+  require(motion && motion->motion == space::Motion::Character,
+          "joining did not install a physical character");
+  const auto start = catalog.mechanical.values.at("events").at("start").get<TermId>();
+  require(std::ranges::any_of(effects.ordered,
+                              [&](const auto &effect) {
+                                const auto *event = std::get_if<react::EventWork>(&effect);
+                                return event && event->receiver == body && event->event == start;
+                              }),
+          "joining did not schedule the real body startup event");
+  net.sessions.accept(net::Connected{100});
+  const auto connected =
+      net.sessions.establish(100, net.profiles.rows[joined.player], net::Mode::Play, false);
+  const auto &appearance = catalog.mechanical.values.at("appearance");
+  step::connection_notice(
+      connected, net, space, step.delivery, catalog, react,
+      {appearance.at("red").get<TermId>(), appearance.at("green").get<TermId>(),
+       appearance.at("blue").get<TermId>(), appearance.at("alpha").get<TermId>(),
+       appearance.at("metallic").get<TermId>(), appearance.at("roughness").get<TermId>()},
+      objects, clock, settings);
+  require(step.delivery.present_bodies.at(joined.player) == body &&
+              net.session_views.rows.at(100).body == body,
+          "joined connection did not become an ordinary player view");
+
+  step::NativeCall clear_script;
+  clear_script.request.caller = catalog.models.rows[model].author;
+  clear_script.arguments = {{"model", "m:" + std::to_string(model)}, {"script", nullptr}};
+  clear_script.step = clock.step;
+  clear_script.hz = clock.hz;
+  require(step::editing::model_script(clear_script, react,
+                                      react::value_read(objects, catalog, react), catalog,
+                                      permissions, start)
+              .changed,
+          "the normal model edit must allow removing the newcomer body's script");
+  const auto configured_model = newcomer_model(plan, catalog, react);
+  require(configured_model == model,
+          "startup must still resolve an edited body model when joining is unavailable");
+  const auto profiles_without_script = net.profiles.rows.size(),
+             players_without_script = permissions.players.rows.size();
+  const auto objects_without_script = objects.objects.model.size(),
+             grants_without_script = permissions.grants.rows.size();
+  const auto unavailable = step::create_join({"Later arrival"}, net.profiles, permissions, objects,
+                                             catalog, plan.at("newcomer"), configured_model, clock);
+  require(!unavailable.player && unavailable.refusal == "refused" &&
+              net.profiles.rows.size() == profiles_without_script &&
+              permissions.players.rows.size() == players_without_script &&
+              objects.objects.model.size() == objects_without_script &&
+              permissions.grants.rows.size() == grants_without_script,
+          "a join with an unavailable body script must refuse before creating anything");
+}
 } // namespace
 int main(int argc, char **argv) {
   try {
@@ -43,6 +168,8 @@ int main(int argc, char **argv) {
     react::Materials &materials = react_state.materials;
     catalog::MechanicalBindings mechanical;
     const auto registry = load_registry(plan, directory / "registry", terms, materials, mechanical);
+    catalog_state.mechanical = mechanical;
+    step::editing::declare_editing(terms, react_state.native_declarations);
     std::ifstream metadata(std::filesystem::path(argv[2]) /
                            plan.at("models").front().at("asset").get<std::string>() /
                            "manifest.json");
@@ -96,7 +223,8 @@ int main(int argc, char **argv) {
     perm::Plots &plots = perm_state.plots;
     perm::Groups &groups = perm_state.groups;
     perm::Players &players = perm_state.players;
-    net::Profiles profiles;
+    net::State net_state{test_net::options()};
+    auto &profiles = net_state.profiles;
     auto profile_plan = plan;
     for (auto &profile : profile_plan["profiles"])
       profile["key_file"] = "keys/" + std::to_string(profile.at("id").get<PlayerId>()) + ".key";
@@ -207,6 +335,8 @@ int main(int argc, char **argv) {
     queue_bootstrap(plan, symbols, terms, queues, 1000000);
     require(queues.causal.size() == plan.at("bootstrap").size(),
             "authored bootstrap events queued");
+    check_joining(plan, catalog_state, react_state, objects_state, perm_state, net_state, settings,
+                  argv[2]);
     const auto elapsed =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
             .count();

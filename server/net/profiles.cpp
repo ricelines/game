@@ -7,8 +7,14 @@
 #include <sys/random.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <unordered_set>
 
 namespace amber::net {
+namespace {
+bool valid_key_hash(std::string_view hash) {
+  return hash.size() == 64 && hash.find_first_not_of("0123456789abcdef") == hash.npos;
+}
+} // namespace
 KeyHash hash_key(std::string_view key) {
   return picosha2::hash256_hex_string(key.begin(), key.end());
 }
@@ -21,7 +27,7 @@ void rebuild_key_index(Profiles &profiles) {
     if (row.id != index || (row.connection_modes & ~all_modes))
       throw std::runtime_error("invalid profile identity or connection modes");
     for (const auto &hash : row.key_hashes) {
-      if (hash.size() != 64 || hash.find_first_not_of("0123456789abcdef") != hash.npos)
+      if (!valid_key_hash(hash))
         throw std::runtime_error("invalid profile key hash");
       if (!profiles.by_key.emplace(hash, row.id).second)
         throw std::runtime_error("duplicate profile key hash");
@@ -31,12 +37,26 @@ void rebuild_key_index(Profiles &profiles) {
 void put_profile(Profiles &profiles, Profile profile) {
   if (!profile.id)
     throw std::runtime_error("profile id must be nonzero");
-  auto candidate = profiles;
-  if (candidate.rows.size() <= profile.id)
-    candidate.rows.resize(std::size_t(profile.id) + 1);
-  candidate.rows[profile.id] = std::move(profile);
-  rebuild_key_index(candidate);
-  profiles = std::move(candidate);
+  if (profile.connection_modes & ~all_modes)
+    throw std::runtime_error("invalid profile identity or connection modes");
+  std::unordered_set<std::string_view> hashes;
+  hashes.reserve(profile.key_hashes.size());
+  for (const auto &hash : profile.key_hashes) {
+    if (!valid_key_hash(hash))
+      throw std::runtime_error("invalid profile key hash");
+    const auto found = profiles.by_key.find(hash);
+    if (!hashes.insert(hash).second ||
+        (found != profiles.by_key.end() && found->second != profile.id))
+      throw std::runtime_error("duplicate profile key hash");
+  }
+  const auto id = profile.id;
+  if (profiles.rows.size() <= id)
+    profiles.rows.resize(std::size_t(id) + 1);
+  for (const auto &hash : profiles.rows[id].key_hashes)
+    profiles.by_key.erase(hash);
+  profiles.rows[id] = std::move(profile);
+  for (const auto &hash : profiles.rows[id].key_hashes)
+    profiles.by_key.emplace(hash, id);
 }
 const Profile *authenticate(const Profiles &profiles, std::string_view key) {
   const auto found = profiles.by_key.find(hash_key(key));
@@ -71,7 +91,7 @@ std::string read_private_key(const std::filesystem::path &path) {
   return key;
 }
 } // namespace
-KeyHash create_key_file(const std::filesystem::path &path) {
+std::string generate_key() {
   std::array<std::uint8_t, 32> random{};
   std::size_t done = 0;
   while (done != random.size()) {
@@ -82,7 +102,10 @@ KeyHash create_key_file(const std::filesystem::path &path) {
       throw std::runtime_error("OS random key generation failed");
     done += std::size_t(count);
   }
-  const auto key = picosha2::bytes_to_hex_string(random.begin(), random.end());
+  return picosha2::bytes_to_hex_string(random.begin(), random.end());
+}
+KeyHash create_key_file(const std::filesystem::path &path) {
+  const auto key = generate_key();
   File file{::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600)};
   if (file.fd < 0)
     throw std::runtime_error("cannot exclusively create private key file: " + path.string());
@@ -91,7 +114,7 @@ KeyHash create_key_file(const std::filesystem::path &path) {
     throw std::runtime_error("cannot set private key file permissions: " + path.string());
   }
   const auto output = key + '\n';
-  done = 0;
+  std::size_t done = 0;
   while (done != output.size()) {
     const auto count = ::write(file.fd, output.data() + done, output.size() - done);
     if (count < 0 && errno == EINTR)

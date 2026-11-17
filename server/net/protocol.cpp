@@ -77,6 +77,17 @@ Parsed parse(std::string_view text) {
     return out;
   }
   const auto operation = row["t"].get<std::string>();
+  if (operation == "join") {
+    out.error = first({fields(row, {"t", "version", "name"}), string(row, "name")});
+    if (!out.error.empty())
+      return out;
+    if (!integer(row["version"], 1) || row["version"] != 1) {
+      out.error = "unsupported protocol version";
+      return out;
+    }
+    out.message = JoinRequest{row["name"]};
+    return out;
+  }
   if (operation == "hello") {
     out.error = first({fields(row, {"t", "version", "key", "mode"}, {"binary"}), string(row, "key"),
                        string(row, "mode")});

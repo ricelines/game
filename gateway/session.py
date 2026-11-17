@@ -36,13 +36,17 @@ class Session:
         self._welcomed = asyncio.get_running_loop().create_future()
 
     async def open(self):
+        return await self._open(
+            {"t": "hello", "version": 1, "key": self.key, "mode": "play", "binary": False}
+        )
+
+    async def join(self, name):
+        return await self._open({"t": "join", "version": 1, "name": name})
+
+    async def _open(self, message):
         self.socket = await connect(self.url, max_size=8 * 1024 * 1024, open_timeout=5)
         self.reader = asyncio.create_task(self._read())
-        await self.socket.send(
-            json.dumps(
-                {"t": "hello", "version": 1, "key": self.key, "mode": "play", "binary": False}
-            )
-        )
+        await self.socket.send(json.dumps(message))
         await asyncio.wait_for(asyncio.shield(self._welcomed), 5)
         return self
 
@@ -54,7 +58,9 @@ class Session:
                     continue
                 message = json.loads(raw)
                 kind = message.get("t")
-                if kind == "welcome":
+                if kind == "joined":
+                    self.key = message["key"]
+                elif kind == "welcome":
                     self.welcome = message
                     if not self._welcomed.done():
                         self._welcomed.set_result(message)
@@ -155,6 +161,16 @@ class Sessions:
         self.url = url
         self.rows = {}
         self.opening = {}
+
+    async def join(self, name):
+        session = Session(self.url, "", "cli")
+        try:
+            await session.join(name)
+        except Exception:
+            await session.close()
+            raise
+        self.rows[(session.key, session.token)] = session
+        return {"player": session.welcome["player"], "key": session.key}
 
     async def get(self, key, token="cli"):
         identity = (key, token)

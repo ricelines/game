@@ -22,6 +22,9 @@ def parser():
     credential.add_argument("--key-file", type=Path, default=os.environ.get("AMBERGRIS_KEY_FILE"))
     root.add_argument("--session", default=os.environ.get("AMBERGRIS_SESSION", "cli"))
     commands = root.add_subparsers(dest="command", required=True)
+    join = commands.add_parser("join", help="Join the world and save a new private player key")
+    join.add_argument("name")
+    join.add_argument("--key-file", type=Path, required=True)
     look = commands.add_parser("look")
     look.add_argument("--limit", type=int)
     inspect = commands.add_parser("inspect")
@@ -83,7 +86,35 @@ def parser():
     return root
 
 
+async def join_world(options):
+    # Reserve the destination before creating the account: the key is returned only once.
+    fd = os.open(options.key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    saved = False
+    try:
+        with os.fdopen(fd, "w") as key_file:
+            os.fchmod(key_file.fileno(), 0o600)
+            async with ClientSession() as client:
+                async with client.post(
+                    options.gateway.rstrip("/") + "/join",
+                    json={"name": options.name},
+                ) as response:
+                    if response.status == 401:
+                        return {"error": "unauthorized", "status": 401}
+                    result = await response.json()
+            if "key" in result:
+                key_file.write(result.pop("key") + "\n")
+                key_file.flush()
+                saved = True
+                result["key_file"] = str(options.key_file)
+            return result
+    finally:
+        if not saved:
+            options.key_file.unlink()
+
+
 async def run(options):
+    if options.command == "join":
+        return await join_world(options)
     if options.command == "fixture":
         arguments = [
             str(options.server),
