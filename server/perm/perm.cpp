@@ -130,6 +130,13 @@ Gate check_right(std::string_view right, Caller caller, const perm::Target &targ
   return {bool(decision),
           decision ? std::string{} : std::string(perm::reason_text(decision.reason))};
 }
+const Plot *plot_at(const Plots &plots, Vec3 position) {
+  for (const auto &plot : plots.rows)
+    if (plot.id && position.x >= plot.bounds[0] && position.y >= plot.bounds[1] &&
+        position.x < plot.bounds[2] && position.y < plot.bounds[3])
+      return &plot;
+  return nullptr;
+}
 std::vector<Handle> update_plots(IdentityRead identity, TransformRead poses, PlotWrite membership,
                                  const Plots &plots, std::span<const Handle> objects,
                                  bool in_world) {
@@ -147,12 +154,8 @@ std::vector<Handle> update_plots(IdentityRead identity, TransformRead poses, Plo
             point.x < plot.bounds[2] && point.y < plot.bounds[3])
           continue;
       }
-      for (const auto &plot : plots.rows)
-        if (plot.id && point.x >= plot.bounds[0] && point.y >= plot.bounds[1] &&
-            point.x < plot.bounds[2] && point.y < plot.bounds[3]) {
-          next = plot.id;
-          break;
-        }
+      if (const auto *plot = plot_at(plots, point))
+        next = plot->id;
     }
     if (membership.plot[object.slot()] != next) {
       membership.plot[object.slot()] = next;

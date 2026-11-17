@@ -77,14 +77,7 @@ place_existing(amber::ObjectState &objects_state, amber::space::State &space_sta
     rotation = {float(values[0] / norm), float(values[1] / norm), float(values[2] / norm),
                 float(values[3] / norm)};
   }
-  const perm::Plot *plot = nullptr;
-  for (const auto &candidate : plots.rows)
-    if (candidate.id && destination.x >= candidate.bounds[0] &&
-        destination.y >= candidate.bounds[1] && destination.x < candidate.bounds[2] &&
-        destination.y < candidate.bounds[3]) {
-      plot = &candidate;
-      break;
-    }
+  const auto *plot = perm::plot_at(plots, destination);
   if (!plot)
     throw std::invalid_argument("destination is outside the region's plots");
   const auto build =

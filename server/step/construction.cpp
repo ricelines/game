@@ -88,13 +88,6 @@ void created_objects(step::NativeCompletion &out, std::span<const Handle> object
   for (auto object : objects)
     out.reply["created"].push_back(to_string(object));
 }
-const perm::Plot *placement_plot(const perm::Plots &plots, Vec3 position) {
-  for (const auto &plot : plots.rows)
-    if (plot.id && position.x >= plot.bounds[0] && position.y >= plot.bounds[1] &&
-        position.x < plot.bounds[2] && position.y < plot.bounds[3])
-      return &plot;
-  return nullptr;
-}
 record::Event structural_record(const step::NativeCall &call, record::Kind kind, std::string name,
                                 std::vector<Handle> objects) {
   record::Event event;
@@ -211,7 +204,7 @@ NativeCompletion create_instance(amber::ObjectState &objects_state,
     if (!std::isfinite(norm) || std::abs(norm - 1.f) > 0.001f)
       throw std::invalid_argument("rotation must be a finite unit quaternion");
   }
-  const auto *plot = placement_plot(plots, position);
+  const auto *plot = perm::plot_at(plots, position);
   if (!plot)
     return structural_denied("build", "land", "creation position has no land parcel",
                              "choose a position inside a land parcel");

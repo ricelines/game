@@ -169,6 +169,7 @@ struct Plot {
 struct Plots {
   std::vector<Plot> rows{Plot{}};
 };
+const Plot *plot_at(const Plots &, Vec3);
 struct Decision {
   Reason reason = Reason::MissingRight;
   GrantId grant = 0;
