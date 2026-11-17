@@ -46,7 +46,6 @@ add_library(amber_step STATIC
   geometry.cpp
   material.cpp
   illumination.cpp
-  measurements.cpp
   metadata.cpp
   physical_actions.cpp
   physical_events.cpp

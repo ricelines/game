@@ -4,7 +4,6 @@
     "volume": "base.volume",
     "mass": "base.mass",
     "capacity": "base.capacity",
-    "assembly_mass": "base.assembly_mass",
     "illuminance": "base.illuminance"
   },
   "appearance": {

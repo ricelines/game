@@ -10,7 +10,7 @@
 using namespace amber;
 using test_runtime::require;
 namespace {
-void mass_light_replication_lifetimes() {
+void light_replication_lifetimes() {
   test_runtime::Fixture f;
   space::State space_state{testspace::settings(), 8};
   auto &space = space_state.space;
@@ -18,20 +18,7 @@ void mass_light_replication_lifetimes() {
   auto &declared = f.objects_state.declared_parts;
   auto &assets = f.catalog_state.assets;
   auto &parameters = f.catalog_state.parameters;
-  f.terms.rows[1].source = react::Source::Intrinsic;
-  f.terms.rows[1].dimensions = {-3, 1, 0, 0, 0, 0, 0, 0};
-  f.terms.rows[2].source = react::Source::Measured;
-  f.terms.rows[2].measurement = react::MeasurementRole::Mass;
-  f.terms.rows[2].dimensions = {0, 1, 0, 0, 0, 0, 0, 0};
-  f.terms.rows[3] = f.terms.rows[2];
-  f.terms.rows[3].id = 3;
-  f.terms.rows[3].measurement = react::MeasurementRole::Runtime;
   f.terms.rows[4].combine = react::Combine::None;
-  f.materials.rows[8][1] = Value(2000.);
-  f.projection->density = 1;
-  f.assets.rows[1].volume = .001;
-  f.assets.rows[2].volume = .002;
-  f.assets.parameter_rows[1].volume = .003;
   const auto root_hash = catalog::sha256("projection root");
   const auto child_hash = catalog::sha256("projection child");
   const auto variant_hash = catalog::sha256("projection variant");
@@ -44,7 +31,6 @@ void mass_light_replication_lifetimes() {
   catalog::Asset asset;
   asset.hash = root_hash;
   asset.maximum = {1, 1, 1};
-  asset.volume = .001;
   asset.canonical_params = "{}";
   asset.replicated = {4};
   asset.manifest = {{"bindings",
@@ -52,12 +38,10 @@ void mass_light_replication_lifetimes() {
                       {"zone", {{"ambient", 7}, {"priority", 2}}}}}};
   assets.rows[root_hash] = asset;
   asset.hash = child_hash;
-  asset.volume = .002;
   asset.manifest["bindings"] = nlohmann::json::object();
   assets.rows[child_hash] = asset;
   asset = assets.rows.at(root_hash);
   asset.hash = variant_hash;
-  asset.volume = .003;
   asset.manifest["bindings"]["light"]["site"] = {1, 0, 1};
   asset.manifest["bindings"]["zone"]["ambient"] = 12;
   assets.rows[variant_hash] = asset;
@@ -97,7 +81,6 @@ void mass_light_replication_lifetimes() {
           "real authored zone sensor failed");
   f.state(root, 4, 100.);
   amber::step::State step_state;
-  step::AssemblyMasses &masses = (step_state.masses = step::AssemblyMasses{{2, 3}, {}, {}});
   step::IlluminationSources &illumination = step_state.illumination_sources;
   observe::Lights &lights = (space_state.lights = observe::Lights{8});
   observe::LightSubscriptions &points =
@@ -105,18 +88,15 @@ void mass_light_replication_lifetimes() {
   observe::ZoneAmbients &zones = space_state.zones;
   observe::ActiveViews &views = (space_state.active_views = observe::ActiveViews{8});
   net::ReplicationIndex replicas{{32, 2, 3, 65536, 1048576}};
-  step::invalidate_mass(masses, identity(f.objects), declared, assembly.objects);
-  react::DeferredEffects effects;
-  step::refresh_mass(masses, *f.projection, declared, f.runtime, 0, 20, {}, effects);
   const auto capacity = space::capacity(space).native_available;
   step::NativeCompletion born;
   born.visible_objects = assembly.objects;
   step::project_visibility(illumination, space_state, replicas, transforms(f.objects),
                            f.catalog_state, *f.projection, born, .05f,
                            amber::step::Clock{.step = 0, .hz = 20});
-  require(masses.rows.at(root.bits).total_kg == 6 && lights.rows.size() == 1 &&
-              zones.rows.value.size() == 1 && space::capacity(space).native_available == capacity,
-          "projections lost assembled mass or duplicated native geometry");
+  require(lights.rows.size() == 1 && zones.rows.value.size() == 1 &&
+              space::capacity(space).native_available == capacity,
+          "projections lost illumination or duplicated native geometry");
   net::view_interest(replicas, 1, {});
   require(
       net::publication(replicas, identity(f.objects), transforms(f.objects), *f.projection, 0, 20)
@@ -135,19 +115,16 @@ void mass_light_replication_lifetimes() {
               lights.rows.at(root.bits).position == Vec3{20, 0, 1},
           "moving light failed to invalidate old and new point ranges");
   f.objects.params[root.slot()] = 1;
-  step::invalidate_mass(masses, identity(f.objects), declared, std::span(&root, 1));
-  step::refresh_mass(masses, *f.projection, declared, f.runtime, 1, 20, {}, effects);
   step::register_illumination(illumination, space_state, transforms(f.objects), f.catalog_state,
                               *f.projection, std::span(&root, 1), .05f,
                               amber::step::Clock{.step = 1, .hz = 20});
   net::register_replication(replicas, root, identity(f.objects), transforms(f.objects), f.models,
                             parameters, assets, *f.projection);
-  require(masses.rows.at(root.bits).total_kg == 10 &&
-              lights.rows.at(root.bits).position == Vec3{21, 0, 1} &&
+  require(lights.rows.at(root.bits).position == Vec3{21, 0, 1} &&
               zones.rows.get(root.slot())->ambient_lux == 12 &&
               replicas.rows.at(root.bits).asset == variant_hash &&
               space::capacity(space).native_available == capacity,
-          "variant projection lost parameter-dependent mass/light/zone or duplicated a sensor");
+          "variant projection lost parameter-dependent light/zone or duplicated a sensor");
 
   f.states[{root, 77}].insert(std::string("kept"), 42.);
   const auto bounds = space::volume_bounds(space, root, space::VolumeKind::Zone);
@@ -171,23 +148,18 @@ void mass_light_replication_lifetimes() {
                            amber::step::Clock{.step = 1, .hz = 20});
   require(hidden.visible_objects.empty() && hidden.hidden_objects.size() == 2 &&
               lights.rows.empty() && zones.rows.value.empty() && replicas.rows.empty() &&
-              masses.rows.at(root.bits).total_kg == 10 &&
               !space::bounds(space, identity(f.objects), root) &&
               std::get<double>(f.states.at({root, 77}).values.at(std::string("kept"))) == 42,
-          "hidden assembly kept ghost projections or lost measured mass/private state");
-
-  step::invalidate_mass(masses, identity(f.objects), declared, assembly.objects);
+          "hidden assembly kept ghost projections or lost private state");
 
   step::retire_physics(space, f.objects_state, physical, step_state, assembly.objects, {}, {},
                        hidden);
   net::SessionViews sessions;
   catalog::InstanceTexts text;
   step::retire_publication(replicas, sessions, text, assembly.objects);
-  for (const auto object : assembly.objects)
-    step::retire_mass(masses, f.runtime, object);
   lifecycle::release_rows(f.objects, parts, declared, assembly.objects);
   require(!identity(f.objects).valid(root) && !identity(f.objects).valid(child) &&
-              masses.rows.empty() && space::capacity(space).native_available == capacity + 3,
+              space::capacity(space).native_available == capacity + 3,
           "owner cleanup left geometry or old-generation projection data");
   auto removed =
       net::publication(replicas, identity(f.objects), transforms(f.objects), *f.projection, 2, 20);
@@ -196,14 +168,11 @@ void mass_light_replication_lifetimes() {
   const auto reused = create(f.objects, init);
   require(identity(f.objects).valid(reused) && reused != root,
           "new object reused a retired identity");
-  step::invalidate_mass(masses, identity(f.objects), declared, std::span(&reused, 1));
-  step::refresh_mass(masses, *f.projection, declared, f.runtime, 2, 20, {}, effects);
   step::register_illumination(illumination, space_state, transforms(f.objects), f.catalog_state,
                               *f.projection, std::span(&reused, 1), .05f,
                               amber::step::Clock{.step = 2, .hz = 20});
-  require(masses.rows.at(reused.bits).total_kg == 4 && lights.rows.empty() &&
-              zones.rows.value.empty() && !replicas.rows.contains(root.bits),
-          "reused slot inherited retired light/zone/mass or replication identity");
+  require(lights.rows.empty() && zones.rows.value.empty() && !replicas.rows.contains(root.bits),
+          "reused slot inherited retired light/zone or replication identity");
 }
 void complete_assembly_refund() {
   test_runtime::Fixture f;
@@ -237,9 +206,9 @@ void complete_assembly_refund() {
 } // namespace
 int main() {
   try {
-    mass_light_replication_lifetimes();
+    light_replication_lifetimes();
     complete_assembly_refund();
-    std::cout << "Direct mass/light/replication lifetime and funded retirement checks passed\n";
+    std::cout << "Direct light/replication lifetime and funded retirement checks passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return 1;

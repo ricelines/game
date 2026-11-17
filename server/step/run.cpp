@@ -156,9 +156,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &zones = space_state.zones;
   auto &active_views = space_state.active_views;
   auto &replication = net_state.replication;
-  auto &masses = step_state.masses;
-  masses =
-      AssemblyMasses{{role("measurements", "mass"), role("measurements", "assembly_mass")}, {}, {}};
   auto &session_views = net_state.session_views;
   auto &illumination_sources = step_state.illumination_sources;
   auto &navigation_requests = step_state.navigation_requests;
@@ -278,8 +275,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
 
   react::initialize_reactions(catalog_state, react_state, values, initial, clock.step, hz,
                               restored.has_value(), setup);
-  invalidate_mass(masses, ids, declared_parts, initial);
-  refresh_mass(masses, values, declared_parts, runtime_measurements, clock.step, hz, {}, setup);
   sync_illuminance_reads(light_subscriptions, subscriptions, ids, poses,
                          role("measurements", "illuminance"), initial);
   register_illumination(illumination_sources, space_state, poses, catalog_state, values, visible,
@@ -402,9 +397,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                          delivered);
           refresh_object_plots(space, objects_state, react_state, catalog_state, clock, {},
                                delivered);
-          invalidate_mass(masses, ids, declared_parts, delivered.changed_objects);
-          refresh_mass(masses, values, declared_parts, runtime_measurements, clock.step, hz, {},
-                       delivered.effects);
           project_visibility(illumination_sources, space_state, replication, poses, catalog_state,
                              values, delivered, settings.light_source_radius_m, clock);
           publish_object_changes(sessions, session_views, ids, auth, parent, model_text,
@@ -412,8 +404,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
           amber::Origin delivery_origin;
           for (auto &record : delivered.records)
             delivery_origin = journal.append(std::move(record));
-          reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
-                            delivered.effects, delivery_origin);
+          reconcile_effects(values, react_state, step_state, scripts, clock, delivered.effects,
+                            delivery_origin);
           publish_effects(std::move(delivered.effects), delivery_origin, clock.step, queues, timers,
                           journal, settings.event_queue_max);
         }
@@ -496,8 +488,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
               row.pending.ready = false;
             }
           }
-          reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
-                            completed.effects, completed.origin);
+          reconcile_effects(values, react_state, step_state, scripts, clock, completed.effects,
+                            completed.origin);
           publish_effects(std::move(completed.effects), completed.origin, clock.step, queues,
                           timers, journal, settings.event_queue_max);
           if (completed.notification) {
@@ -628,7 +620,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
               retire_commerce(perm_state, objects_state, removed, clock.step, completed);
               react::retire_reactions(models, values, react_state, removed, clock.step, hz,
                                       action->call.origin, completed.effects);
-              invalidate_mass(masses, ids, declared_parts, removed);
               retire_illuminance_reads(light_subscriptions, runtime_measurements,
                                        role("measurements", "illuminance"), removed);
               retire_illumination(illumination_sources, lights, zones, light_subscriptions,
@@ -636,8 +627,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
               retire_physics(space, objects_state, physical_relations, step_state, removed,
                              relation_terms, action->call.origin, completed);
               retire_publication(replication, session_views, instance_text, removed);
-              for (auto object : removed)
-                retire_mass(masses, runtime_measurements, object);
               std::erase_if(runtime_measurements.values, [&](const auto &row) {
                 return std::binary_search(removed.begin(), removed.end(), row.first.subject);
               });
@@ -648,9 +637,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             invalidate_execution(execution, ids, states);
             refresh_object_plots(space, objects_state, react_state, catalog_state, clock,
                                  action->call.origin, completed);
-            invalidate_mass(masses, ids, declared_parts, completed.changed_objects);
-            refresh_mass(masses, values, declared_parts, runtime_measurements, clock.step, hz,
-                         action->call.origin, completed.effects);
             sync_illuminance_reads(light_subscriptions, subscriptions, ids, poses,
                                    role("measurements", "illuminance"), completed.changed_objects);
             move_illuminance_reads(light_subscriptions, poses, role("measurements", "illuminance"),
@@ -688,8 +674,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                 completed.effects.ordered.emplace_back(
                     react::EventWork{object, {}, role("events", "start"), {}, action->call.origin});
             const auto first_changed = mutated.size();
-            reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
-                              completed.effects, action->call.origin);
+            reconcile_effects(values, react_state, step_state, scripts, clock, completed.effects,
+                              action->call.origin);
             publish_value_changes(replication, session_views, processes,
                                   std::span(mutated).subspan(first_changed));
             action->changed = completed.changed || completed.effects.changed;
@@ -716,8 +702,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                !objects.plot[timer->event.receiver.slot()];
       });
       const auto first_changed = mutated.size();
-      reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
-                        handler.completed.effects, handler.completed.origin);
+      reconcile_effects(values, react_state, step_state, scripts, clock, handler.completed.effects,
+                        handler.completed.origin);
       publish_value_changes(replication, session_views, processes,
                             std::span(mutated).subspan(first_changed));
       if (auto call = finish_handler_segment(execution, journal, queues, timers, clock.step, hz,
@@ -754,8 +740,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
         if (term.source == react::Source::Setting)
           effects.ordered.emplace_back(react::WatchWork{{object, term.id}, origin});
       react::reconcile_object_priorities(values, react_state, object, effects, clock.step, hz);
-      reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock, effects,
-                        origin);
+      reconcile_effects(values, react_state, step_state, scripts, clock, effects, origin);
       publish_effects(std::move(effects), origin, clock.step, queues, timers, journal,
                       settings.event_queue_max);
     }
@@ -779,8 +764,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     update_frame_illumination(step_state, space_state, poses, values, react_state, physics.moved,
                               physics.dirty_bounds, role("measurements", "illuminance"),
                               light_effects);
-    reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock,
-                      light_effects, {});
+    reconcile_effects(values, react_state, step_state, scripts, clock, light_effects, {});
     publish_effects(std::move(light_effects), {}, clock.step, queues, timers, journal,
                     settings.event_queue_max);
     publish_value_changes(replication, session_views, processes, mutated);

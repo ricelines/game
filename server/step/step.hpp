@@ -822,29 +822,6 @@ void sample_illuminance(observe::LightSubscriptions &, const space::Space &, Ide
                         react::RuntimeMeasurements &, double world_ambient_lux,
                         react::DeferredEffects &);
 
-struct MassRoles {
-  TermId own_mass, assembly_mass;
-};
-struct AssemblyMasses {
-  struct Row {
-    double own_kg, total_kg;
-  };
-  MassRoles roles;
-  std::unordered_map<std::uint64_t, Row> rows;
-  std::unordered_set<std::uint64_t> dirty;
-};
-void validate_mass_roles(const react::Terms &, MassRoles);
-void invalidate_mass(AssemblyMasses &, IdentityRead, const Relation &declared_parts,
-                     std::span<const Handle> changed);
-void refresh_mass(AssemblyMasses &, const react::ValueRead &, const Relation &declared_parts,
-                  react::RuntimeMeasurements &, Step, double hz, const amber::Origin &,
-                  react::DeferredEffects &);
-void retire_mass(AssemblyMasses &, react::RuntimeMeasurements &, Handle);
-void reconcile_mass(AssemblyMasses &, const react::ValueRead &, const Relation &declared_parts,
-                    react::RuntimeMeasurements &, std::span<const FactKey>,
-                    const amber::step::Clock &clock, const amber::Origin &,
-                    react::DeferredEffects &);
-
 void write_timers(snap::Output &, const TimerWheel &, const snap::ObjectSelection & = {});
 void read_timers(snap::Input &, TimerWheel &);
 void write_queues(snap::Output &, const WorkQueues &, const Intents &, std::uint64_t next_record,
@@ -900,9 +877,9 @@ void publish_object_changes(net::Sessions &, net::SessionViews &, IdentityRead, 
                             std::span<const Handle> changed);
 
 void reconcile_effects(const react::ValueRead &values, amber::react::State &react_state,
-                       amber::step::State &step_state, const Relation &declared_parts,
-                       const catalog::Scripts &scripts, const amber::step::Clock &clock,
-                       react::DeferredEffects &effects, const amber::Origin &origin);
+                       amber::step::State &step_state, const catalog::Scripts &scripts,
+                       const amber::step::Clock &clock, react::DeferredEffects &effects,
+                       const amber::Origin &origin);
 void record_send_overflow(record::Journal &, const net::SendOverflow &, Step);
 void publish_effects(react::DeferredEffects &&, const amber::Origin &, Step, WorkQueues &,
                      TimerWheel &, record::Journal &, std::size_t event_limit);
@@ -1049,7 +1026,6 @@ struct State {
   Clock clock;
   GeometryAssets geometry;
   DeliveryTargets delivery;
-  AssemblyMasses masses;
   IlluminationSources illumination_sources;
   NavigationRequests navigation_requests;
   std::vector<FactKey> mutated;

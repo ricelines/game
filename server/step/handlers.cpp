@@ -101,24 +101,15 @@ void invalidate_execution(std::deque<ExecutionFrame> &execution, IdentityRead id
 }
 
 void reconcile_effects(const react::ValueRead &values, amber::react::State &react_state,
-                       amber::step::State &step_state, const Relation &declared_parts,
-                       const catalog::Scripts &scripts, const amber::step::Clock &clock,
-                       react::DeferredEffects &effects, const amber::Origin &origin) {
+                       amber::step::State &step_state, const catalog::Scripts &scripts,
+                       const amber::step::Clock &clock, react::DeferredEffects &effects,
+                       const amber::Origin &origin) {
   const auto now = clock.step;
   const auto hz = clock.hz;
-
-  auto &masses = step_state.masses;
-  auto &runtime_measurements = react_state.runtime_measurements;
 
   auto &mutated = step_state.mutated;
 
   react::reconcile_allocations(values, react_state, effects, now, hz);
-  std::vector<FactKey> facts;
-  for (const auto &effect : effects.ordered)
-    if (const auto *watch = std::get_if<react::WatchWork>(&effect))
-      facts.push_back(watch->source);
-  reconcile_mass(masses, values, declared_parts, runtime_measurements, facts, clock, origin,
-                 effects);
   auto changes =
       react::sync_rule_watches(react_state, values, scripts, effects.ordered, now, hz, origin);
   for (auto &dirty : changes.dirty)

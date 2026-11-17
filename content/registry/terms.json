@@ -243,23 +243,6 @@
     "measurement": "mass"
   },
   {
-    "name": "base.assembly_mass",
-    "kind": "quantity",
-    "source": "measured",
-    "dimensions": [
-      0,
-      1,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "assembly mass",
-    "measurement": "runtime"
-  },
-  {
     "name": "base.illuminance",
     "kind": "quantity",
     "source": "measured",
