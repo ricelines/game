@@ -369,15 +369,6 @@ def test_all_sources_pass_actual_luau_declaration_worker(tmp_path, baked_plan):
         assert result.returncode == 0, (source.name, result.stdout, result.stderr)
 
 
-def test_residents_supply_intentions_without_prepared_solutions():
-    residents = json.loads((ROOT / "content/residents.json").read_text())["agents"]
-    assert len(residents) == 6
-    for row in residents:
-        assert row["key_file"].endswith(".key") and "key" not in row
-        assert row["persona"] and row["purpose"] and row["model"]
-        assert "route" not in row and "source" not in row and "actions" not in row
-
-
 def test_body_pours_into_a_model_without_container_bindings(tmp_path, baked_plan):
     plan = json.loads(json.dumps(baked_plan))
     for profile in plan["profiles"]:

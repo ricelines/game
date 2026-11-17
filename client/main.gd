@@ -22,8 +22,6 @@ var ws_url = "ws://127.0.0.1:8080/ws"
 var server_base = "http://127.0.0.1:8080"
 var key = ""
 var mode = "watch"
-var gateway_url = ""
-var purpose_token = ""
 var browser_diagnostics = false
 var connected = false
 var hello_sent = false
@@ -38,7 +36,6 @@ var terms: Dictionary = {}
 var models: Dictionary = {}
 var materials: Dictionary = {}
 var objects: Dictionary = {}
-var agents: Dictionary = {}
 var records: Dictionary = {}
 var follow_handle = ""
 var selected = ""
@@ -58,7 +55,6 @@ var _click_start = Vector2.ZERO
 var _last_view = Vector3.INF
 var _clock = 0.0
 var _events_clock = 0.0
-var _gateway_clock = 0.0
 var _debug = false
 var _feed_dirty = false
 var _status: Label
@@ -69,12 +65,8 @@ var _inspector: PanelContainer
 var _inspect_title: Label
 var _inspect_body: RichTextLabel
 var _feed: RichTextLabel
-var _tab = "residents"
+var _tab = "explore"
 var _follow_button: Button
-var _purpose_box: TextEdit
-var _purpose_agent: OptionButton
-var _purpose_status: Label
-var _purpose_send: Button
 var _toast: Label
 var _empty: Label
 var _entry
@@ -108,10 +100,6 @@ func _parse_location() -> void:
 					key = value
 				"mode":
 					mode = value
-				"gateway":
-					gateway_url = value
-				"purpose_token":
-					purpose_token = value
 				"quality":
 					render_scale = 0.5 if value == "low" else (1.0 if value == "high" else 0.65)
 				"exposure_lux":
@@ -121,9 +109,7 @@ func _parse_location() -> void:
 		)
 		if supplied is Dictionary:
 			key = str(supplied.get("key", key))
-			purpose_token = str(supplied.get("purpose_token", purpose_token))
 			mode = str(supplied.get("mode", mode))
-			gateway_url = str(supplied.get("gateway", gateway_url))
 			browser_diagnostics = bool(supplied.get("diagnostics", false))
 			ws_url = str(supplied.get("ws", ws_url))
 			exposure_lux = maxf(0.001, float(supplied.get("exposure_lux", exposure_lux)))
@@ -214,7 +200,6 @@ func _build_ui() -> void:
 	_left.add_child(sidebar)
 	var tabs = HBoxContainer.new()
 	sidebar.add_child(tabs)
-	tabs.add_child(UITheme.button("Residents", _show_tab.bind("residents")))
 	tabs.add_child(UITheme.button("Record", _show_tab.bind("record")))
 	tabs.add_child(UITheme.button("Explore", _show_tab.bind("explore")))
 	var scroll = ScrollContainer.new()
@@ -305,9 +290,6 @@ func _sidebar() -> void:
 	for child in _left_content.get_children():
 		child.queue_free()
 	_feed = null
-	_purpose_box = null
-	_purpose_status = null
-	_purpose_send = null
 	if _tab == "record":
 		_left_content.add_child(UITheme.label("What leaves a trace", 20))
 		var subtitle = UITheme.label("Actions, consequences, and their authors.", 12, MUTED)
@@ -338,59 +320,6 @@ func _sidebar() -> void:
 			UITheme.button("Interest cells", func(): world.show_cells = not world.show_cells)
 		)
 		_left_content.add_child(UITheme.button("Navigation", _request_navigation))
-	else:
-		_left_content.add_child(UITheme.label("Other minds, nearby", 20))
-		if agents.is_empty():
-			var waiting = (
-				UITheme
-				. label(
-					"Waiting for inhabitants. Their purposes and decisions come from the connected world.",
-					13,
-					MUTED
-				)
-			)
-			waiting.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			_left_content.add_child(waiting)
-		for id in agents:
-			var agent = agents[id]
-			var card = PanelContainer.new()
-			card.add_theme_stylebox_override(
-				"panel", UITheme.style(Color(0.09, 0.14, 0.16, 0.9), 10)
-			)
-			_left_content.add_child(card)
-			var box = VBoxContainer.new()
-			box.add_theme_constant_override("separation", 7)
-			card.add_child(box)
-			box.add_child(UITheme.label(str(agent.get("name", id)), 17))
-			box.add_child(
-				UITheme.label(str(agent.get("status", "in the world")).to_upper(), 10, AMBER)
-			)
-			var purpose = UITheme.label(str(agent.get("purpose", "")), 12, MUTED)
-			purpose.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			purpose.custom_minimum_size.x = 210
-			box.add_child(purpose)
-			box.add_child(
-				UITheme.button(
-					"Follow " + str(agent.get("name", id)),
-					func(): _follow(str(agent.get("body", "")))
-				)
-			)
-		_left_content.add_child(UITheme.label("GIVE AN AGENT A PURPOSE", 10, AMBER))
-		_purpose_agent = OptionButton.new()
-		for id in agents:
-			_purpose_agent.add_item(str(agents[id].get("name", id)))
-			_purpose_agent.set_item_metadata(_purpose_agent.item_count - 1, id)
-		_left_content.add_child(_purpose_agent)
-		_purpose_box = TextEdit.new()
-		_purpose_box.placeholder_text = "What would you like your agent to pursue?"
-		_purpose_box.custom_minimum_size = Vector2(245, 90)
-		_purpose_box.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-		_left_content.add_child(_purpose_box)
-		_purpose_send = UITheme.button("Send purpose", _send_purpose, true)
-		_left_content.add_child(_purpose_send)
-		_purpose_status = UITheme.label("", 11, MUTED)
-		_purpose_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		_left_content.add_child(_purpose_status)
 
 
 func _connect() -> void:
@@ -426,7 +355,6 @@ func _text(message: Dictionary) -> void:
 			assets.root_url = str(message.get("assets", server_base + "/assets/"))
 			if assets.root_url.begins_with("/"):
 				assets.root_url = server_base + assets.root_url
-			gateway_url = str(message.get("agent_gateway", gateway_url))
 			_send({"t": "view", "pos": _server_array(target)})
 		"terrain":
 			world.add_terrain(message)
@@ -448,8 +376,6 @@ func _text(message: Dictionary) -> void:
 					objects[str(row.h)] = row
 					world.remove(str(row.h))
 					world.invalidate(str(row.h))
-			if message.has("agents"):
-				_set_agents(message.agents)
 		"events":
 			for event in message.get("events", []):
 				records[int(event.id)] = event
@@ -484,15 +410,6 @@ func _text(message: Dictionary) -> void:
 				)
 			else:
 				_notify(reason)
-
-
-func _set_agents(rows: Array) -> void:
-	var changed = JSON.stringify(agents.values()) != JSON.stringify(rows)
-	agents.clear()
-	for row in rows:
-		agents[str(row.id)] = row
-	if changed and _tab == "residents":
-		_sidebar()
 
 
 func _name(handle: String) -> String:
@@ -676,71 +593,6 @@ func _notify(message: String) -> void:
 		_toast.modulate.a = 1.0
 
 
-func _gateway(
-	method: HTTPClient.Method, path: String, body: Dictionary, callback: Callable
-) -> void:
-	var request = HTTPRequest.new()
-	if gateway_url.is_empty():
-		callback.call(false, {})
-		return
-	request.timeout = 4
-	add_child(request)
-	request.request_completed.connect(_gateway_completed.bind(request, callback))
-	var error = request.request(
-		gateway_url.trim_suffix("/") + path,
-		[
-			"Content-Type: application/json",
-			"Authorization: Bearer " + (purpose_token if not purpose_token.is_empty() else key)
-		],
-		method,
-		JSON.stringify(body) if method != HTTPClient.METHOD_GET else ""
-	)
-	if error != OK:
-		request.queue_free()
-		callback.call(false, {})
-
-
-func _send_purpose() -> void:
-	if not is_instance_valid(_purpose_box) or _purpose_agent.item_count == 0:
-		return
-	var purpose = _purpose_box.text.strip_edges()
-	if purpose.is_empty():
-		return
-	var agent = _purpose_agent.get_item_metadata(_purpose_agent.selected)
-	_purpose_status.text = "Sending purpose to the agent…"
-	_gateway(
-		HTTPClient.METHOD_POST,
-		"/api/purpose",
-		{"agent": agent, "purpose": purpose},
-		_purpose_completed
-	)
-
-
-func _gateway_completed(
-	result, code, _headers, bytes, request: HTTPRequest, callback: Callable
-) -> void:
-	request.queue_free()
-	var parsed = JSON.parse_string(bytes.get_string_from_utf8()) if not bytes.is_empty() else {}
-	callback.call(
-		result == HTTPRequest.RESULT_SUCCESS and code >= 200 and code < 300,
-		parsed if parsed is Dictionary else {}
-	)
-
-
-func _purpose_completed(ok: bool, _reply: Dictionary) -> void:
-	if is_instance_valid(_purpose_status):
-		_purpose_status.text = (
-			"Purpose delivered to the model."
-			if ok
-			else "Agent service unavailable. Purpose was not delivered."
-		)
-
-
-func _agents_completed(ok: bool, reply: Dictionary) -> void:
-	if ok:
-		_set_agents(reply.get("agents", []))
-
-
 func _free_camera() -> void:
 	follow_handle = ""
 	_notify("Free camera")
@@ -780,18 +632,10 @@ func _search_objects(query: String, results: VBoxContainer) -> void:
 func _ui_diagnostics() -> Dictionary:
 	if not browser_diagnostics:
 		return {}
-	var result = {"tab": _tab, "purposes": {}}
+	var result = {"tab": _tab}
 	result.controls = UIProbe.controls([_left_content, _inspector, _entry])
 	if _entry.visible:
 		result.connection = _entry.diagnostics()
-	for id in agents:
-		result.purposes[id] = agents[id].get("purpose", "")
-	if is_instance_valid(_purpose_box):
-		result.purpose = {
-			"input": UIProbe.rect(_purpose_box),
-			"send": UIProbe.rect(_purpose_send),
-			"status": _purpose_status.text
-		}
 	if is_instance_valid(_feed):
 		result.record = {
 			"text": _feed.get_parsed_text(),
@@ -868,7 +712,6 @@ func _process(delta: float) -> void:
 		_send({"t": "view", "pos": _server_array(camera.position)})
 	_clock += delta
 	_events_clock += delta
-	_gateway_clock += delta
 	_toast.modulate.a = maxf(0, _toast.modulate.a - delta * 0.08)
 	_empty.visible = protocol.entities.is_empty() and not _entry.visible
 	if _clock > 0.5:
@@ -896,7 +739,6 @@ func _process(delta: float) -> void:
 								{
 									"connected": connected,
 									"entities": protocol.entities.size(),
-									"residents": agents.size(),
 									"assets": assets.cache.size(),
 									"step": protocol.newest_step,
 									"fps": Engine.get_frames_per_second(),
@@ -935,9 +777,6 @@ func _process(delta: float) -> void:
 	if _events_clock > 3 and connected:
 		_events_clock = 0
 		_request_events()
-	if _gateway_clock > 10:
-		_gateway_clock = 0
-		_gateway(HTTPClient.METHOD_GET, "/api/agents", {}, _agents_completed)
 
 
 func _unhandled_input(event: InputEvent) -> void:

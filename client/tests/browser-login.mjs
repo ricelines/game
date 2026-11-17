@@ -114,8 +114,7 @@ try {
     1, "Typed credential did not authenticate exactly once");
   report.stats = await page.evaluate(() => window.ambergris);
   checkpoint("authenticated");
-  // The native-only origin needs no running model gateway to inspect/follow objects.
-  await page.mouse.click(267, 154);
+  // Explore is ready after authentication for inspection and following.
   await page.waitForFunction(
     () =>
       window.ambergris.ui.controls.some((control) => control.kind === "input"),

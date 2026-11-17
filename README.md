@@ -50,21 +50,24 @@ profile. Configuration and profile are inherited by rule fixture subprocesses;
 native run reports record the selected profile and allowance. Neither profile
 retries interrupted handlers.
 
-The server serves the spectator at `http://127.0.0.1:8080`. Open that page and paste the private value from `.runtime/keys/spectator.key` into the masked spectator-key field, then select Connect. The optional debug view requires a key authorized for debug records. Profiles generate these private files at launch; no credential is embedded in exported web assets, persisted by the page, or needed in a URL. The client has camera movement, object inspection, measured facts, maker claims and resident purpose controls. Residents require the gateway below.
+The server serves the spectator at `http://127.0.0.1:8080`. Open that page and paste the private value from `.runtime/keys/spectator.key` into the masked spectator-key field, then select Connect. The optional debug view requires a key authorized for debug records. Profiles generate these private files at launch; no credential is embedded in exported web assets, persisted by the page, or needed in a URL. The client has camera movement, object inspection, measured facts and maker claims.
 
 Start the gateway in another terminal:
 
 ```sh
-python3 bake/run.py -m gateway.service --bake --restricted-host-bake \
-  --purpose-token-file .runtime/keys/spectator.key
+python3 bake/run.py -m gateway.service --bake --restricted-host-bake
 bin/amb --key-file .runtime/keys/mira.key look
 bin/amb --key-file .runtime/keys/mira.key actions
 bin/amb --key-file .runtime/keys/mira.key do base.move_to --args '{"point":[0,8,0]}'
 ```
 
-For an actual model-driven population, add `--residents content/residents.json` and `--resident-report .runtime/resident-report.json`. Supply the model credential through the existing credential wrapper or your process supervisor. The harness accepts purposes and personas; it has no hidden CAD designs or purpose-keyword policy.
+## Play with an agent
 
-Once the gateway is running, open `http://127.0.0.1:8080/?gateway=http://127.0.0.1:8081` and enter the spectator key to see residents and give them purposes. The URL supplies the separate agent service's address; it contains no credential. The bare `http://127.0.0.1:8080` page remains a spectator view without an agent-service connection.
+A person or agent connects with a player's key from a start-file profile or `amb join`.
+An agent program that runs shell commands, such as Claude Code, Codex or Pi, can play
+with `bin/amb --key-file KEY look`, `actions` and `do`. Agents that prefer MCP use
+`/mcp` on the gateway with the same key. Models and credentials stay with whoever
+runs the agent. Open the browser beside it to watch; the browser only spectates.
 
 Native administrative actions use the same `do` operation. Known actions can be called directly from their listed signatures; `actions --name NAME` optionally explains their exact inputs. These include wallets, inventory, gifts, offers, bilateral trades, grants, groups, land, script installation, model defaults, settings, registry definitions and elaboration. The original technical design defines the authority boundaries.
 
@@ -105,8 +108,8 @@ world at its saved boundary without advancing it.
 .tools/bin/cmake --build --preset debug
 .tools/bin/ctest --preset debug
 python3 bake/run.py -m pytest
-.venv/bin/ruff check bake content gateway harness measure tests
-.venv/bin/ruff format --check bake content gateway harness measure tests
+.venv/bin/ruff check bake content gateway measure tests
+.venv/bin/ruff format --check bake content gateway measure tests
 ```
 
 Native deadline tests retain their own strict limits in both build presets.

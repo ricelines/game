@@ -1,4 +1,4 @@
-"""HTTP routing only. Sessions, authoring and residents remain independent services."""
+"""HTTP routing only. Sessions and authoring remain independent services."""
 
 import json
 
@@ -15,46 +15,20 @@ def player_key(request):
     return authorization[7:]
 
 
-def create_app(
-    sessions,
-    authoring,
-    residents=None,
-    *,
-    allowed_origins=(),
-    purpose_token=None,
-    resident_report=None,
-):
-    allowed = set(allowed_origins)
-
+def create_app(sessions, authoring):
     @web.middleware
     async def origin_check(request, handler):
-        origin = request.headers.get("Origin")
-        if origin and origin not in allowed:
+        # The gateway serves non-browser clients; no supplied origin is accepted.
+        if "Origin" in request.headers:
             raise web.HTTPForbidden(text="Origin not allowed")
-        if request.method == "OPTIONS":
-            response = web.Response(status=204)
-        else:
-            try:
-                response = await handler(request)
-            except web.HTTPException as error:
-                response = web.Response(body=error.body, status=error.status, headers=error.headers)
-            except ValueError as error:
-                response = web.json_response(
-                    {"error": "bad_input", "problem": str(error)}, status=400
-                )
-            except (SessionError, OSError, TimeoutError) as error:
-                response = web.json_response(
-                    {"error": "server_unavailable", "problem": str(error)}, status=503
-                )
-        if origin:
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Headers"] = (
-                "Authorization, Content-Type, X-Ambergris-Session, MCP-Protocol-Version, "
-                "Mcp-Method, Mcp-Name"
+        try:
+            return await handler(request)
+        except ValueError as error:
+            return web.json_response({"error": "bad_input", "problem": str(error)}, status=400)
+        except (SessionError, OSError, TimeoutError) as error:
+            return web.json_response(
+                {"error": "server_unavailable", "problem": str(error)}, status=503
             )
-            response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
-        return response
 
     app = web.Application(middlewares=[origin_check], client_max_size=2 * 1024 * 1024)
 
@@ -121,42 +95,16 @@ def create_app(
             raise web.HTTPNotFound(text="No such job for this session") from error
         return web.json_response(result)
 
-    def purpose_auth(request):
-        if not purpose_token or player_key(request) != purpose_token:
-            raise web.HTTPUnauthorized(text="Configured watch/purpose credential required")
-
-    async def agent_list(request):
-        purpose_auth(request)
-        return web.json_response({"agents": residents.public() if residents else []})
-
-    async def purpose(request):
-        purpose_auth(request)
-        if not residents:
-            return web.json_response({"error": "model_service_unavailable"}, status=503)
-        body = await request.json()
-        if not isinstance(body.get("purpose"), str) or not body["purpose"].strip():
-            raise ValueError("purpose must contain text")
-        try:
-            await residents.set_purpose(body.get("agent"), body["purpose"])
-        except KeyError as error:
-            raise web.HTTPNotFound(text="No such agent") from error
-        return web.json_response({"ok": True, "effect": "purpose_updated"})
-
     async def health(_request):
         return web.json_response(
             {
                 "ok": True,
                 "service": "gateway",
                 "bake": "ready" if authoring.pool else "unavailable",
-                "model": "configured" if residents else "unavailable",
             }
         )
 
     async def cleanup(_app):
-        if residents:
-            await residents.close()
-            if resident_report:
-                resident_report(residents.report())
         await authoring.close()
         await sessions.close()
 
@@ -167,9 +115,6 @@ def create_app(
     app.router.add_post("/bake/variants", variant)
     app.router.add_post("/bake/edits", edit_model)
     app.router.add_get("/bake/jobs/{identity}", job)
-    app.router.add_get("/api/agents", agent_list)
-    app.router.add_post("/api/purpose", purpose)
     app.router.add_get("/health", health)
-    app.router.add_route("OPTIONS", "/{tail:.*}", health)
     app.on_cleanup.append(cleanup)
     return app

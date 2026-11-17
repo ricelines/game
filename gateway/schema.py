@@ -1,4 +1,4 @@
-"""The five S5 tools share one schema in CLI, MCP and model harness."""
+"""The five S5 tools share one schema in CLI and MCP."""
 
 
 def object_schema(properties=None, required=()):

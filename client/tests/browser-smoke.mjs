@@ -14,7 +14,8 @@ import { resolve, join, extname } from "node:path";
 
 const root = resolve(import.meta.dirname, "../..");
 const externalURL = process.env.AMB_TEST_URL;
-const label = process.env.AMB_TEST_LABEL || (externalURL ? "integration" : "fixture");
+const label =
+  process.env.AMB_TEST_LABEL || (externalURL ? "integration" : "fixture");
 const assets = resolve(
   process.env.AMB_TEST_ASSETS || join(root, ".cache/benchmark-assets"),
 );
@@ -27,22 +28,16 @@ if (!externalURL && !hashes.length)
   );
 const hash = hashes[0];
 const configuration = JSON.parse(process.env.AMB_TEST_CONFIG || "{}");
-for (const [environment, field] of [
-  ["AMB_TEST_KEY_FILE", "key"],
-  ["AMB_TEST_PURPOSE_TOKEN_FILE", "purpose_token"],
-]) {
-  const path = process.env[environment];
-  if (path) {
-    if ((statSync(path).mode & 0o777) !== 0o600)
-      throw Error("Browser credential file requires mode 0600");
-    configuration[field] = readFileSync(path, "utf8").trim();
-  }
+const keyPath = process.env.AMB_TEST_KEY_FILE;
+if (keyPath) {
+  if ((statSync(keyPath).mode & 0o777) !== 0o600)
+    throw Error("Browser credential file requires mode 0600");
+  configuration.key = readFileSync(keyPath, "utf8").trim();
 }
 function redact(message) {
-  for (const field of ["key", "purpose_token"])
-    if (configuration[field])
-      message = message.replaceAll(configuration[field], "[credential]");
-  return message;
+  return configuration.key
+    ? message.replaceAll(configuration.key, "[credential]")
+    : message;
 }
 const port = 8765;
 const out = join(root, ".cache/client");
@@ -194,16 +189,6 @@ wss.on("connection", (ws) => {
             material: 1,
             owner: "p:1",
           })),
-          agents: [
-            {
-              id: "p:1",
-              name: "Renderer fixture",
-              body: "o:1.1",
-              purpose:
-                "Synthetic rows, actual baked geometry. This is a renderer test.",
-              status: "fixture",
-            },
-          ],
         }),
       );
       ws.send(keyframe());
@@ -294,39 +279,45 @@ try {
   );
   if (assetDelayMs)
     await page.waitForFunction(
-      () => window.ambergris?.loading?.measured === 0 && window.ambergris?.loading?.neutral === 0,
+      () =>
+        window.ambergris?.loading?.measured === 0 &&
+        window.ambergris?.loading?.neutral === 0,
       undefined,
       { timeout: 90000 },
     );
   const joinedMs = Date.now() - began;
-  const minimumAgents = Number(process.env.AMB_TEST_MIN_AGENTS || 0);
-  if (minimumAgents)
-    await page.waitForFunction(
-      (minimum) => window.ambergris?.residents >= minimum,
-      minimumAgents,
-      { timeout: 30000 },
-    );
   await page.waitForTimeout(3000);
   await page.screenshot({ path: join(out, label + ".png") });
   if (process.env.AMB_TEST_FOLLOW_SEARCH) {
-    await page.mouse.click(267, 154);
     await page.mouse.click(150, 267);
     await page.keyboard.type(process.env.AMB_TEST_FOLLOW_SEARCH);
     await page.waitForTimeout(700);
     await page.mouse.click(150, 322);
-    await page.waitForFunction(() => window.ambergris?.selected &&
-      window.ambergris?.inspection_ready, undefined, { timeout: 15000 });
+    await page.waitForFunction(
+      () => window.ambergris?.selected && window.ambergris?.inspection_ready,
+      undefined,
+      { timeout: 15000 },
+    );
     await page.mouse.click(1200, 212);
   } else {
-    const followPoint = JSON.parse(process.env.AMB_TEST_FOLLOW_POINT || "[140,373]");
+    const followPoint = JSON.parse(
+      process.env.AMB_TEST_FOLLOW_POINT || "[140,373]",
+    );
     await page.mouse.click(...followPoint);
   }
-  await page.waitForFunction(() => window.ambergris?.following &&
-    window.ambergris?.selected === window.ambergris?.following &&
-    window.ambergris?.inspection_ready, undefined, { timeout: 15000 });
+  await page.waitForFunction(
+    () =>
+      window.ambergris?.following &&
+      window.ambergris?.selected === window.ambergris?.following &&
+      window.ambergris?.inspection_ready,
+    undefined,
+    { timeout: 15000 },
+  );
   const followed = await page.evaluate(() => window.ambergris.following);
   await page.screenshot({ path: join(out, label + "-follow.png") });
-  const profiler = process.env.AMB_TEST_PROFILE ? await page.context().newCDPSession(page) : null;
+  const profiler = process.env.AMB_TEST_PROFILE
+    ? await page.context().newCDPSession(page)
+    : null;
   if (profiler) {
     await profiler.send("Profiler.enable");
     await profiler.send("Profiler.start");
@@ -386,11 +377,24 @@ try {
     asset: externalURL ? undefined : hash,
   };
   await page.mouse.click(1105, 50);
-  await page.waitForFunction(() => window.ambergris?.following === "", undefined, { timeout: 10000 });
+  await page.waitForFunction(
+    () => window.ambergris?.following === "",
+    undefined,
+    { timeout: 10000 },
+  );
   await page.mouse.click(1290, 50);
-  await page.waitForFunction(() => window.ambergris?.debug === true, undefined, { timeout: 10000 });
+  await page.waitForFunction(
+    () => window.ambergris?.debug === true,
+    undefined,
+    { timeout: 10000 },
+  );
   await page.screenshot({ path: join(out, label + "-debug.png") });
-  report.controls = { follow: true, inspect: true, freeCamera: true, debug: true };
+  report.controls = {
+    follow: true,
+    inspect: true,
+    freeCamera: true,
+    debug: true,
+  };
   writeFileSync(
     join(out, label + "-report.json"),
     JSON.stringify(report, null, 2),
@@ -400,8 +404,14 @@ try {
 } catch (error) {
   console.error(redact(String(error)));
   if (page) {
-    await page.screenshot({ path: join(out, label + "-failure.png"), timeout: 5000 }).catch(() => {});
-    console.error(JSON.stringify(await page.evaluate(() => window.ambergris).catch(() => null)));
+    await page
+      .screenshot({ path: join(out, label + "-failure.png"), timeout: 5000 })
+      .catch(() => {});
+    console.error(
+      JSON.stringify(
+        await page.evaluate(() => window.ambergris).catch(() => null),
+      ),
+    );
   }
   process.exitCode = 1;
 } finally {

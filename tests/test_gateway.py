@@ -2,10 +2,7 @@
 
 import asyncio
 import json
-import subprocess
-import sys
 from copy import deepcopy
-from types import SimpleNamespace
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -17,20 +14,16 @@ from gateway.credentials import read_key_file
 from gateway.http import create_app
 from gateway.schema import TOOLS, validate
 from gateway.session import Session, Sessions
-from harness.resident import Resident, Residents
 
 
-def test_resident_credentials_are_private_files_and_absent_from_public_output(tmp_path):
+def test_credentials_require_private_files(tmp_path):
     path = tmp_path / "fixture.key"
     path.write_text("labelled-test-credential\n")
     path.chmod(0o644)
     with pytest.raises(ValueError, match="0600"):
         read_key_file(path)
     path.chmod(0o600)
-    key = read_key_file(path)
-    row = Resident("p:1", "fixture", key)
-    assert "labelled-test-credential" not in json.dumps(row.public())
-    assert "labelled-test-credential" not in repr(row)
+    assert read_key_file(path) == "labelled-test-credential"
 
 
 def rpc(name="tools/list", arguments=None):
@@ -296,13 +289,7 @@ def test_http_mcp_shape_origins_auth_and_missing_services():
     async def run():
         sessions = Sessions("ws://127.0.0.1:1")
         authoring = Authoring()
-        client = TestClient(
-            TestServer(
-                create_app(
-                    sessions, authoring, allowed_origins=["http://fixture"], purpose_token="watch"
-                )
-            )
-        )
+        client = TestClient(TestServer(create_app(sessions, authoring)))
         await client.start_server()
         body, headers = rpc()
         async with client.post("/mcp", json=body, headers=headers) as reply:
@@ -314,203 +301,14 @@ def test_http_mcp_shape_origins_auth_and_missing_services():
         async with client.get("/mcp") as reply:
             assert reply.status == 405
         async with client.post(
-            "/mcp", json=body, headers={**headers, "Origin": "http://evil"}
+            "/mcp", json=body, headers={**headers, "Origin": "http://localhost:8080"}
         ) as reply:
             assert reply.status == 403
         async with client.post("/mcp", json=body) as reply:
             assert reply.status == 400
-        async with client.post(
-            "/api/purpose",
-            json={"agent": "p:1", "purpose": "arbitrary"},
-            headers={"Authorization": "Bearer watch"},
-        ) as reply:
-            assert reply.status == 503
-            assert (await reply.json())["error"] == "model_service_unavailable"
+        async with client.get("/health") as reply:
+            assert reply.status == 200
+            assert (await reply.json())["bake"] == "unavailable"
         await client.close()
 
     asyncio.run(run())
-
-
-def test_actual_model_adapter_never_executes_a_fallback_on_api_failure():
-    class BrokenAPI:
-        async def create(self, **_arguments):
-            raise RuntimeError("labelled API failure")
-
-    class Tools:
-        def __init__(self):
-            self.welcome = {"body": "o:1.1"}
-            self.calls = []
-
-        def forget_observation(self):
-            pass
-
-        async def tool(self, name, arguments):
-            self.calls.append(name)
-            return {"things": [], "events": []}
-
-    class SessionRows:
-        async def get(self, *_args):
-            return session
-
-    async def run():
-        row = Resident(
-            "p:1", "fixture", "test-credential-not-for-reports", purpose="An arbitrary purpose"
-        )
-        client = SimpleNamespace(responses=BrokenAPI())
-        service = Residents([row], SessionRows(), Authoring(), client=client)
-        report = service.report()
-        assert report["agents"][0]["purpose"] == row.purpose
-        assert report["responses"] == []
-        assert row.key not in json.dumps(report)
-        with pytest.raises(RuntimeError, match="labelled API failure"):
-            await service.turn(row)
-        assert session.calls == ["look"]
-
-    session = Tools()
-    asyncio.run(run())
-
-
-def test_purpose_update_checkpoints_actual_resident_context_without_a_model_call():
-    class SessionRows:
-        async def get(self, key, token):
-            assert key == "private-fixture" and token == "resident-p:6"
-            return self
-
-        async def tool(self, name, arguments):
-            assert name == "cancel" and arguments == {}
-            return {"ok": True}
-
-    async def run():
-        reports = []
-        row = Resident("p:6", "Parked UI resident", "private-fixture", purpose="Initial purpose")
-        service = Residents(
-            [row], SessionRows(), Authoring(), client=object(), report_sink=reports.append
-        )
-        await service.set_purpose("p:6", "An arbitrary purpose supplied by the observer")
-        assert row.revision == 1 and row.wake.is_set()
-        assert reports[-1]["agents"][0]["purpose"] == row.purpose
-        assert reports[-1]["responses"] == []
-        assert "private-fixture" not in json.dumps(reports)
-
-    asyncio.run(run())
-
-
-def test_resident_report_checkpoints_responses_and_retains_reset_context():
-    class CompletedAPI:
-        async def create(self, **_arguments):
-            return SimpleNamespace(id="labelled-response", usage=None, output=[])
-
-    class Tools:
-        welcome = {"body": "o:1.1"}
-        calls = []
-
-        def forget_observation(self):
-            pass
-
-        async def tool(self, name, arguments):
-            self.calls.append((name, arguments))
-            return {"things": [], "fixture_padding": "x" * 250001}
-
-    class SessionRows:
-        async def get(self, *_args):
-            return session
-
-    async def run():
-        reports = []
-        row = Resident("p:1", "fixture", "never-record-this-credential")
-        service = Residents(
-            [row],
-            SessionRows(),
-            Authoring(),
-            client=SimpleNamespace(responses=CompletedAPI()),
-            report_sink=lambda report: reports.append(json.loads(json.dumps(report))),
-        )
-        await service.turn(row)
-        assert len(reports) == 3
-        assert reports[0]["responses"] == []
-        assert reports[0]["agents"][0]["observations"][0]["fresh_context"] is True
-        assert reports[1]["responses"][0]["response"] == "labelled-response"
-        assert reports[1]["agents"][0]["transcript"]
-        final = reports[-1]["agents"][0]
-        assert final["context_resets"] == 1 and not final["transcript"]
-        assert len(final["archived_transcripts"]) == 1
-        assert "fixture_padding" in final["archived_transcripts"][0][-1]["content"]
-        assert row.key not in json.dumps(reports)
-        await service.turn(row)
-        assert session.calls == [("look", {}), ("look", {})]
-
-    session = Tools()
-    asyncio.run(run())
-
-
-def test_resumed_transcript_gets_full_observation_and_concurrent_budget_is_exact():
-    class API:
-        calls = 0
-
-        async def create(self, **_arguments):
-            self.calls += 1
-            identity = self.calls
-            await asyncio.sleep(0)
-            return SimpleNamespace(id=f"labelled-budget-{identity}", usage=None, output=[])
-
-    class SessionRows:
-        welcome = {"body": "o:1.1"}
-
-        def __init__(self):
-            self.looks = []
-
-        async def get(self, *_arguments):
-            return self
-
-        def forget_observation(self):
-            pass
-
-        async def tool(self, name, arguments):
-            self.looks.append((name, arguments))
-            return {"things": [], "body_actions": ["novel.call()"], "player_actions": []}
-
-    async def run():
-        api, sessions = API(), SessionRows()
-        rows = [Resident(f"p:{i}", "fixture", "private-fixture") for i in range(6)]
-        retained = {"role": "assistant", "content": "An actual retained fixture response"}
-        for row in rows:
-            row.transcript = [retained.copy()]
-        residents = Residents(
-            rows,
-            sessions,
-            Authoring(),
-            client=SimpleNamespace(responses=api),
-            max_responses=4,
-        )
-        await asyncio.gather(*(residents.turn(row) for row in rows))
-        assert api.calls == residents.api_attempts == len(residents.measurements) == 4
-        assert residents.budget_reached and residents.stopping
-        assert sessions.looks == [("look", {})] * 6
-        assert all(row.transcript[0] == retained for row in rows)
-        assert all(row.observations[0]["fresh_context"] for row in rows)
-        assert "private-fixture" not in json.dumps(residents.report())
-
-    asyncio.run(run())
-
-
-def test_report_checkpoint_survives_process_killed_without_cleanup(tmp_path):
-    report_path = tmp_path / "actual-report-writer-fixture.json"
-    program = """
-import os, signal, sys
-from pathlib import Path
-from gateway.service import write_resident_report
-from harness.resident import Resident, Residents
-row=Resident('p:1','labelled fixture','never-output-fixture-key')
-row.transcript=[{'type':'function_call_output','call_id':'fixture-call','output':'{}'}]
-residents=Residents([row],None,None,client=object(),
-    report_sink=lambda data:write_resident_report(Path(sys.argv[1]),data))
-residents.measurements=[{'response':'fixture-response','agent':'p:1'}]
-residents.checkpoint()
-os.kill(os.getpid(),signal.SIGKILL)
-"""
-    process = subprocess.run([sys.executable, "-c", program, str(report_path)], check=False)
-    assert process.returncode == -9
-    data = json.loads(report_path.read_text())
-    assert data["responses"][0]["response"] == "fixture-response"
-    assert data["agents"][0]["transcript"][0]["call_id"] == "fixture-call"
-    assert "never-output-fixture-key" not in report_path.read_text()

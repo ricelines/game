@@ -14,7 +14,6 @@ from game_config import add_arguments, check_configuration, configuration, launc
 from game_live_authoring import require, script_state
 
 from gateway.credentials import read_key_file
-from gateway.service import write_resident_report
 from gateway.session import Sessions
 
 
@@ -178,7 +177,7 @@ async def run(options):
                 report.update(status="failed", problem=str(error))
         if native.returncode != 0 or not state.exists():
             report["status"] = "failed"
-        write_resident_report(options.output / "restore-report.json", report)
+        (options.output / "restore-report.json").write_text(json.dumps(report, indent=2))
     return report
 
 

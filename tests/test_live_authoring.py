@@ -9,7 +9,6 @@ from aiohttp.test_utils import TestClient, TestServer
 from gateway.authoring import Authoring
 from gateway.cli import parser
 from gateway.http import create_app
-from harness.resident import AUTHOR_TOOLS, Residents
 
 SOURCE = (
     "from build123d import Box\nPARAMS={'width':(1,0.1,4)}\n"
@@ -279,11 +278,10 @@ def test_baked_job_is_not_done_until_its_native_registration_completes():
     asyncio.run(run())
 
 
-def test_http_cli_and_harness_expose_same_authoring_operations(tmp_path):
+def test_http_and_cli_expose_same_authoring_operations(tmp_path):
     assert parser().parse_args(["look", "--limit", "5"]).limit == 5
     assert parser().parse_args(["variant", "m:5", "--params", '{"width":2}']).params == {"width": 2}
     assert parser().parse_args(["edit-model", "m:5", str(tmp_path / "source.py")]).model == "m:5"
-    assert {"submit_variant", "edit_model"} <= {tool["name"] for tool in AUTHOR_TOOLS}
 
     async def run():
         pool, session = ArtifactQueue(), NativeTransport()
@@ -308,11 +306,5 @@ def test_http_cli_and_harness_expose_same_authoring_operations(tmp_path):
             assert response.status == 202 and "job" in await response.json()
             with pytest.raises(ValueError, match="full m:N"):
                 await author.submit_variant(session, {"model": "5", "params": {}})
-            # Execute through the actual harness dispatcher, without any model API call.
-            residents = Residents([], Sessions(), author, client=object())
-            result = await residents._execute(
-                session, "submit_variant", {"model": "m:5", "params": {"width": 3}}
-            )
-            assert "job" in result
 
     asyncio.run(run())
