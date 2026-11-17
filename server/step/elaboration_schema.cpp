@@ -1,36 +1,8 @@
 #include "catalog/catalog.hpp"
 #include "elaboration_private.hpp"
 
-#include <algorithm>
-
 namespace amber::step {
 namespace {
-void fields(const Json &row, std::initializer_list<std::string_view> required,
-            std::initializer_list<std::string_view> optional = {}) {
-  if (!row.is_object())
-    throw std::invalid_argument("expected an input record");
-  for (auto key : required)
-    if (!row.contains(key))
-      throw std::invalid_argument("missing input: " + std::string(key));
-  for (const auto &[key, value] : row.items()) {
-    (void)value;
-    if (std::find(required.begin(), required.end(), key) == required.end() &&
-        std::find(optional.begin(), optional.end(), key) == optional.end())
-      throw std::invalid_argument("unknown input: " + key);
-  }
-}
-void string(const Json &row, std::string_view key) {
-  if (!row.at(key).is_string())
-    throw std::invalid_argument(std::string(key) + " must be a string");
-}
-template <class Fn> std::string validate(Fn fn) {
-  try {
-    fn();
-    return {};
-  } catch (const std::exception &error) {
-    return error.what();
-  }
-}
 Json schema(Json props, Json required, Json example) {
   return {{"type", "object"},
           {"properties", std::move(props)},
@@ -39,90 +11,6 @@ Json schema(Json props, Json required, Json example) {
           {"examples", Json::array({std::move(example)})}};
 }
 } // namespace
-std::string validate_request_model(const Json &row) {
-  return validate([&] {
-    fields(row, {"note"});
-    string(row, "note");
-  });
-}
-std::string validate_requests(const Json &row) {
-  return validate([&] {
-    fields(row, {}, {"page", "page_size"});
-    for (const auto &[key, value] : row.items())
-      if (!value.is_number_integer() || value.get<double>() < (key == "page" ? 0 : 1) ||
-          value.get<double>() > UINT32_MAX)
-        throw std::invalid_argument(
-            "page must be nonnegative and page_size positive integral values");
-  });
-}
-std::string validate_claim(const Json &row) {
-  return validate([&] {
-    fields(row, {"request"});
-    string(row, "request");
-  });
-}
-std::string validate_answer_rule(const Json &row) {
-  return validate([&] {
-    fields(row, {"request", "kind", "script"}, {"subjects"});
-    string(row, "request");
-    string(row, "script");
-    if (row.at("kind") != "rule")
-      throw std::invalid_argument("rule answer kind required");
-    if (row.contains("subjects")) {
-      if (!row.at("subjects").is_object())
-        throw std::invalid_argument("subjects must map names to full handles");
-      for (const auto &[name, value] : row.at("subjects").items())
-        if (name.empty() || name == "target" || name == "body" || !value.is_string())
-          throw std::invalid_argument(
-              "subject aliases must be strings; target and body are supplied by the server");
-    }
-  });
-}
-std::string validate_answer_patch(const Json &row) {
-  return validate([&] {
-    fields(row, {"request", "kind", "note"});
-    string(row, "request");
-    string(row, "note");
-    if (row.at("kind") != "patch")
-      throw std::invalid_argument("patch answer kind required");
-  });
-}
-std::string validate_answer_detail(const Json &row) {
-  return validate([&] {
-    fields(row, {"request", "kind", "text"});
-    string(row, "request");
-    string(row, "text");
-    if (row.at("kind") != "detail")
-      throw std::invalid_argument("detail answer kind required");
-  });
-}
-std::string validate_answer(const Json &row) {
-  if (!row.is_object() || !row.contains("kind") || !row.at("kind").is_string())
-    return "answer kind required";
-  const auto kind = row.at("kind").get<std::string>();
-  if (kind == "rule")
-    return validate_answer_rule(row);
-  if (kind == "patch")
-    return validate_answer_patch(row);
-  if (kind == "detail")
-    return validate_answer_detail(row);
-  return "answer kind must be rule, patch or detail";
-}
-std::string validate_refuse(const Json &row) {
-  return validate([&] {
-    fields(row, {"request", "text"});
-    string(row, "request");
-    string(row, "text");
-  });
-}
-std::string validate_rule_activation(const Json &row) {
-  return validate([&] {
-    fields(row, {"script", "active"});
-    string(row, "script");
-    if (!row.at("active").is_boolean())
-      throw std::invalid_argument("active must be boolean");
-  });
-}
 ElaborationDeclarations declare_elaboration(react::Terms &terms, react::NativeActions &native) {
   ElaborationDeclarations ids;
   const Json str = {{"type", "string"}},
@@ -157,10 +45,25 @@ ElaborationDeclarations declare_elaboration(react::Terms &terms, react::NativeAc
               {"text", str}},
              {"request", "kind"},
              {{"request", "request:REQUEST_ID"}, {"kind", "rule"}, {"script", "s:SCRIPT_ID"}});
-  answer["oneOf"] = Json::array(
-      {Json{{"properties", {{"kind", {{"const", "rule"}}}}}, {"required", {"script"}}},
-       Json{{"properties", {{"kind", {{"const", "patch"}}}}}, {"required", {"note"}}},
-       Json{{"properties", {{"kind", {{"const", "detail"}}}}}, {"required", {"text"}}}});
+  answer["oneOf"] = Json::array({Json{{"properties",
+                                       {{"request", Json::object()},
+                                        {"kind", {{"enum", {"rule"}}}},
+                                        {"script", Json::object()},
+                                        {"subjects", Json::object()}}},
+                                      {"required", {"script"}},
+                                      {"additionalProperties", false}},
+                                 Json{{"properties",
+                                       {{"request", Json::object()},
+                                        {"kind", {{"enum", {"patch"}}}},
+                                        {"note", Json::object()}}},
+                                      {"required", {"note"}},
+                                      {"additionalProperties", false}},
+                                 Json{{"properties",
+                                       {{"request", Json::object()},
+                                        {"kind", {{"enum", {"detail"}}}},
+                                        {"text", Json::object()}}},
+                                      {"required", {"text"}},
+                                      {"additionalProperties", false}}});
   ids.answer =
       add(react::ElaborationAction::Answer, "engine.answer",
           "Answer an elaboration request. Rule answers run only the immutable script's verified "

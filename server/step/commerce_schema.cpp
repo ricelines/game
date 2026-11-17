@@ -1,42 +1,8 @@
 #include "catalog/catalog.hpp"
 #include "commerce_private.hpp"
 
-#include <algorithm>
-
 namespace amber::step {
 namespace {
-void fields(const Json &row, std::initializer_list<std::string_view> required,
-            std::initializer_list<std::string_view> optional = {}) {
-  if (!row.is_object())
-    throw std::invalid_argument("expected an input record");
-  for (auto key : required)
-    if (!row.contains(key))
-      throw std::invalid_argument("missing input: " + std::string(key));
-  for (const auto &[key, value] : row.items()) {
-    (void)value;
-    if (std::find(required.begin(), required.end(), key) == required.end() &&
-        std::find(optional.begin(), optional.end(), key) == optional.end())
-      throw std::invalid_argument("unknown input: " + key);
-  }
-}
-void id(const Json &row, std::string_view key) {
-  if (!row.at(key).is_string() || row.at(key).get_ref<const std::string &>().empty())
-    throw std::invalid_argument(std::string(key) + " must be an identifier string");
-}
-void amount(const Json &row, std::string_view key) {
-  if (!row.at(key).is_number_integer() ||
-      (row.at(key).is_number_unsigned() && row.at(key).get<std::uint64_t>() > INT64_MAX) ||
-      row.at(key).get<std::int64_t>() < 0)
-    throw std::invalid_argument(std::string(key) + " must be nonnegative whole currency units");
-}
-template <class Fn> std::string validate(Fn fn) {
-  try {
-    fn();
-    return {};
-  } catch (const std::exception &error) {
-    return error.what();
-  }
-}
 Json schema(Json properties, Json required, Json example) {
   return {{"type", "object"},
           {"properties", std::move(properties)},
@@ -45,170 +11,6 @@ Json schema(Json properties, Json required, Json example) {
           {"examples", Json::array({std::move(example)})}};
 }
 } // namespace
-std::string validate_notify(const Json &row) {
-  return validate([&] {
-    fields(row, {"player", "text"});
-    id(row, "player");
-    if (!row.at("text").is_string())
-      throw std::invalid_argument("text must be a string");
-  });
-}
-std::string validate_pay(const Json &row) {
-  return validate([&] {
-    fields(row, {"to", "amount"}, {"from"});
-    id(row, "to");
-    amount(row, "amount");
-    if (row.contains("from"))
-      id(row, "from");
-  });
-}
-std::string validate_balance(const Json &row) {
-  return validate([&] {
-    fields(row, {}, {"account"});
-    if (row.contains("account"))
-      id(row, "account");
-  });
-}
-std::string validate_inventory(const Json &row) {
-  return validate([&] { fields(row, {}); });
-}
-std::string validate_give(const Json &row) {
-  return validate([&] {
-    fields(row, {"recipient"});
-    id(row, "recipient");
-  });
-}
-std::string validate_offer(const Json &row) {
-  return validate([&] {
-    fields(row, {"price"}, {"buyer", "expires_s"});
-    amount(row, "price");
-    if (row.contains("buyer"))
-      id(row, "buyer");
-    if (row.contains("expires_s") &&
-        (!row["expires_s"].is_number() || !std::isfinite(row["expires_s"].get<double>()) ||
-         row["expires_s"].get<double>() < 0))
-      throw std::invalid_argument("expires_s must be finite nonnegative seconds");
-  });
-}
-std::string validate_abandon_plot(const Json &row) {
-  return validate([&] {
-    fields(row, {"plot"});
-    if (!row["plot"].is_number_integer() || row["plot"].get<std::int64_t>() <= 0 ||
-        row["plot"].get<std::uint64_t>() > UINT32_MAX)
-      throw std::invalid_argument("plot must be a positive integer");
-  });
-}
-std::string validate_split_plot(const Json &row) {
-  return validate([&] {
-    fields(row, {"plot"}, {"x", "y"});
-    const auto error = validate_abandon_plot({{"plot", row["plot"]}});
-    if (!error.empty())
-      throw std::invalid_argument(error);
-    if (row.contains("x") == row.contains("y"))
-      throw std::invalid_argument("name exactly one cut axis");
-    const auto &cut = row.at(row.contains("x") ? "x" : "y");
-    if (!cut.is_number() || !std::isfinite(cut.get<float>()) ||
-        std::floor(cut.get<double>()) != cut.get<double>())
-      throw std::invalid_argument("cut must be a whole metre");
-  });
-}
-std::string validate_join_plots(const Json &row) {
-  return validate([&] {
-    fields(row, {"plots"});
-    if (!row["plots"].is_array() || row["plots"].size() != 2)
-      throw std::invalid_argument("name two plots");
-    for (const auto &id : row["plots"]) {
-      const auto error = validate_abandon_plot({{"plot", id}});
-      if (!error.empty())
-        throw std::invalid_argument(error);
-    }
-  });
-}
-std::string validate_offer_plot(const Json &row) {
-  return validate([&] {
-    auto input = row;
-    fields(row, {"plot", "price"}, {"buyer", "expires_s"});
-    if (!row["plot"].is_number_unsigned() && !row["plot"].is_number_integer())
-      throw std::invalid_argument("plot must be a positive integer");
-    if (row["plot"].get<std::int64_t>() <= 0 || row["plot"].get<std::uint64_t>() > UINT32_MAX)
-      throw std::invalid_argument("plot must be a positive integer");
-    input.erase("plot");
-    const auto error = validate_offer(input);
-    if (!error.empty())
-      throw std::invalid_argument(error);
-  });
-}
-std::string validate_set_offer_price(const Json &row) {
-  return validate([&] {
-    fields(row, {"offer", "price"});
-    id(row, "offer");
-    amount(row, "price");
-  });
-}
-std::string validate_offers(const Json &row) {
-  return validate_inventory(row);
-}
-std::string validate_accept(const Json &row) {
-  return validate([&] {
-    fields(row, {"offer", "max_price"}, {"payer", "beneficiary"});
-    amount(row, "max_price");
-    id(row, "offer");
-    if (row.contains("payer"))
-      id(row, "payer");
-    if (row.contains("beneficiary"))
-      id(row, "beneficiary");
-  });
-}
-std::string validate_cancel_offer(const Json &row) {
-  return validate([&] {
-    fields(row, {"offer"});
-    id(row, "offer");
-  });
-}
-std::string validate_trade_open(const Json &row) {
-  return validate([&] {
-    fields(row, {"other"});
-    id(row, "other");
-  });
-}
-std::string validate_trade_change(const Json &row) {
-  return validate([&] {
-    fields(row, {"trade", "money"}, {"goods"});
-    id(row, "trade");
-    amount(row, "money");
-    if (row.contains("goods") && !row["goods"].is_null())
-      id(row, "goods");
-  });
-}
-std::string validate_trade_confirm(const Json &row) {
-  return validate([&] {
-    fields(row, {"trade"});
-    id(row, "trade");
-  });
-}
-std::string validate_trade_cancel(const Json &row) {
-  return validate_trade_confirm(row);
-}
-std::string validate_place_existing(const Json &row) {
-  return validate([&] {
-    fields(row, {"position"}, {"rotation"});
-    for (const auto &[key, n] : {std::pair{"position", 3}, {"rotation", 4}}) {
-      if (!row.contains(key))
-        continue;
-      const auto &values = row.at(key);
-      if (!values.is_array() || values.size() != std::size_t(n))
-        throw std::invalid_argument(std::string(key) + " has wrong vector length");
-      double norm = 0;
-      for (const auto &v : values) {
-        if (!v.is_number() || !std::isfinite(v.get<float>()))
-          throw std::invalid_argument(std::string(key) + " must be finite");
-        norm += v.get<double>() * v.get<double>();
-      }
-      if (n == 4 && (!(norm > 0) || !std::isfinite(norm)))
-        throw std::invalid_argument("rotation must be a nonzero quaternion [x,y,z,w]");
-    }
-  });
-}
 CommerceDeclarations declare_commerce(react::Terms &terms, react::NativeActions &native) {
   CommerceDeclarations ids;
   const Json str = {{"type", "string"}};
@@ -254,11 +56,11 @@ CommerceDeclarations declare_commerce(react::Terms &terms, react::NativeActions 
   ids.abandon_plot = add(react::ExchangeAction::AbandonPlot, "engine.abandon_plot",
                          "Return a lot to the pool and return its contents to their owners.", "",
                          schema({{"plot", plot}}, {"plot"}, {{"plot", 1}}));
-  ids.split_plot =
-      add(react::ExchangeAction::SplitPlot, "engine.split_plot",
-          "Split a lot at one whole-metre x or y coordinate.", "",
-          schema({{"plot", plot}, {"x", {{"type", "integer"}}}, {"y", {{"type", "integer"}}}},
-                 {"plot"}, {{"plot", 1}, {"x", 16}}));
+  auto split = schema({{"plot", plot}, {"x", {{"type", "number"}}}, {"y", {{"type", "number"}}}},
+                      {"plot"}, {{"plot", 1}, {"x", 16}});
+  split["oneOf"] = Json::array({Json{{"required", {"x"}}}, Json{{"required", {"y"}}}});
+  ids.split_plot = add(react::ExchangeAction::SplitPlot, "engine.split_plot",
+                       "Split a lot at one whole-metre x or y coordinate.", "", std::move(split));
   ids.join_plots = add(
       react::ExchangeAction::JoinPlots, "engine.join_plots",
       "Join two same-owner lots sharing a whole edge into one rectangle.", "",

@@ -6,6 +6,7 @@ add_library(amber_step STATIC
   handlers.cpp
   native_actions.cpp
   native_declarations.cpp
+  native_input.cpp
   publication.cpp
   controls.cpp
   run.cpp

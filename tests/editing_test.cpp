@@ -112,9 +112,15 @@ int main() {
     require(ed::declare_editing(f.terms, native).install == declarations.install &&
                 f.terms.rows.size() == count,
             "restored reserved vocabulary changed identities");
-    require(ed::validate_install({{"script", "s:1"}, {"choices", Json::array()}}).empty() &&
-                !ed::validate_install({{"script", "s:1"}, {"unknown", 1}}).empty() &&
-                !ed::validate_edit_detail({{"id", 0}, {"text", "invalid"}}).empty(),
+    require(step::check_input(native.rows.at(declarations.install).inputs_schema,
+                              {{"script", "s:1"}, {"choices", Json::array()}})
+                    .empty() &&
+                !step::check_input(native.rows.at(declarations.install).inputs_schema,
+                                   {{"script", "s:1"}, {"unknown", 1}})
+                     .empty() &&
+                !step::check_input(native.rows.at(declarations.edit_detail).inputs_schema,
+                                   {{"id", 0}, {"text", "invalid"}})
+                     .empty(),
             "native schema validation lost typed input rules");
     f.objects.owner[f.a.slot()] = f.objects.owner[f.b.slot()] = 1;
     f.objects.owner[f.c.slot()] = 2;

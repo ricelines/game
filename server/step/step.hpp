@@ -480,23 +480,8 @@ step::NativeCompletion deliver_mailbox(perm::Players &, net::Sessions &,
                                        const amber::ObjectState &objects_state,
                                        const space::Space &, PlayerId, Handle authenticated_body,
                                        Step);
-std::string validate_notify(const Json &);
+std::string check_input(const Json &schema, const Json &arguments);
 NativeCompletion script_notice(const perm::State &, const NativeCall &);
-std::string validate_pay(const Json &);
-std::string validate_balance(const Json &);
-std::string validate_inventory(const Json &);
-std::string validate_give(const Json &);
-std::string validate_offer(const Json &);
-std::string validate_offer_plot(const Json &);
-std::string validate_set_offer_price(const Json &);
-std::string validate_offers(const Json &);
-std::string validate_accept(const Json &);
-std::string validate_cancel_offer(const Json &);
-std::string validate_trade_open(const Json &);
-std::string validate_trade_change(const Json &);
-std::string validate_trade_confirm(const Json &);
-std::string validate_trade_cancel(const Json &);
-std::string validate_place_existing(const Json &);
 step::NativeCompletion pay(perm::Ledger &ledger, perm::Grants &grants, const perm::Players &players,
                            IdentityRead identity, AuthorityRead authority,
                            const perm::Groups &groups, const step::NativeCall &call);
@@ -556,13 +541,6 @@ struct GrantUpdates {
 };
 GrantUpdates advance_grants(perm::Grants &, perm::Players &, Step now, Step reminder_steps,
                             double hz, std::size_t max_entries);
-std::string validate_grant(const Json &);
-std::string validate_revoke(const Json &);
-std::string validate_list_grants(const Json &);
-std::string validate_preset(const Json &);
-std::string validate_group_create(const Json &);
-std::string validate_group_member(const Json &);
-std::string validate_plot_permissions(const Json &);
 step::NativeCompletion grant(amber::perm::State &perm_state,
                              const amber::ObjectState &objects_state,
                              const amber::catalog::State &catalog_state,
@@ -604,15 +582,6 @@ FixtureCompletion complete_fixture(amber::elaborate::State &elaborate_state,
                                    elaborate::RoleAccess current_role,
                                    const elaborate::FixtureResult &result,
                                    const amber::step::Clock &clock);
-std::string validate_request_model(const Json &);
-std::string validate_requests(const Json &);
-std::string validate_claim(const Json &);
-std::string validate_answer(const Json &);
-std::string validate_answer_rule(const Json &);
-std::string validate_answer_patch(const Json &);
-std::string validate_answer_detail(const Json &);
-std::string validate_refuse(const Json &);
-std::string validate_rule_activation(const Json &);
 step::NativeCompletion request_model(elaborate::Requests &requests, const elaborate::LastGaps &last,
                                      const step::NativeCall &call);
 step::NativeCompletion requests(const elaborate::Requests &requests,
@@ -654,18 +623,6 @@ struct Declarations {
          define_term = 0, define_material = 0, edit_detail = 0;
 };
 Declarations declare_editing(react::Terms &, react::NativeActions &);
-std::string validate_install(const Json &);
-std::string validate_uninstall(const Json &);
-std::string validate_model_script(const Json &);
-std::string validate_edit_text(const Json &);
-std::string validate_model_text(const Json &);
-std::string validate_edit_detail(const Json &);
-std::string validate_set_setting(const Json &);
-std::string validate_model_setting(const Json &);
-std::string validate_patch_state(const Json &);
-std::string validate_relate(const Json &);
-std::string validate_define_term(const Json &);
-std::string validate_define_material(const Json &);
 step::NativeCompletion edit_text(const step::NativeCall &call,
                                  catalog::InstanceTexts &instance_texts,
                                  const catalog::ModelTexts &model_texts, IdentityRead identity);
@@ -852,7 +809,6 @@ revise_model(amber::ObjectState &objects_state, amber::catalog::State &catalog_s
              amber::react::State &react_state, catalog::MeasurementBindings measurement_roles,
              const GeometryAssets &geometry, amber::space::State &space_state,
              amber::perm::State &perm_state, PhysicsDefaults defaults, const NativeCall &call);
-std::string validate_model_edit(const nlohmann::json &);
 TermId declare_model_edit(react::Terms &, react::NativeActions &);
 // Direct lifecycle domain operations; callers compose existing owner functions in order.
 void retire_commerce(amber::perm::State &perm_state, amber::ObjectState &objects_state,
@@ -1004,9 +960,6 @@ NativeCompletion remove_instance(const lifecycle::Parts &, const react::ValueRea
 void install_declared_attachments(amber::ObjectState &objects_state,
                                   amber::space::State &space_state,
                                   std::span<const Handle> objects);
-std::string validate_abandon_plot(const Json &);
-std::string validate_split_plot(const Json &);
-std::string validate_join_plots(const Json &);
 NativeCompletion abandon_plot(perm::State &, ObjectState &, const DeliveryTargets &,
                               const space::Space &, const LandSettings &, const NativeCall &,
                               TermId plot_changed);

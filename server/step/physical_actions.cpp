@@ -184,8 +184,6 @@ std::vector<Handle> closure(const Relation &parts, Handle root) {
   return result;
 }
 Vec3 input_vector(const Json &value) {
-  if (!value.is_array() || value.size() != 3)
-    throw std::invalid_argument("expected vector [x,y,z]");
   Vec3 out{value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>()};
   if (!std::isfinite(out.x) || !std::isfinite(out.y) || !std::isfinite(out.z))
     throw std::invalid_argument("expected finite vector");
@@ -197,8 +195,6 @@ space::Pose input_pose(const Json &value) {
     out.position = input_vector(value.at("position"));
   if (value.contains("rotation")) {
     const auto &q = value.at("rotation");
-    if (!q.is_array() || q.size() != 4)
-      throw std::invalid_argument("expected quaternion [x,y,z,w]");
     out.rotation = {q.at(0), q.at(1), q.at(2), q.at(3)};
     const auto norm = out.rotation.x * out.rotation.x + out.rotation.y * out.rotation.y +
                       out.rotation.z * out.rotation.z + out.rotation.w * out.rotation.w;
@@ -444,9 +440,8 @@ step::NativeCompletion transfer_action(amber::react::State &react_state,
   const auto &quantity = terms.rows[term];
   auto amount = call.arguments.at("amount").get<double>();
   if (!quantity.conserved || quantity.kind != react::Kind::Quantity ||
-      quantity.source != react::Source::State || quantity.combine != react::Combine::None ||
-      !std::isfinite(amount) || amount < 0)
-    throw std::invalid_argument("transfer requires a conserved state quantity and finite amount");
+      quantity.source != react::Source::State || quantity.combine != react::Combine::None)
+    throw std::invalid_argument("transfer requires a conserved state quantity");
   const auto current = react::read_state(properties, processes, source, term, call.step, call.hz);
   const auto received =
       react::read_state(properties, processes, destination, term, call.step, call.hz);
@@ -460,9 +455,6 @@ step::NativeCompletion transfer_action(amber::react::State &react_state,
       destination_process ? destination_process->hi : std::numeric_limits<double>::infinity();
   if (call.arguments.contains("to_max")) {
     const auto bound = call.arguments.at("to_max").get<double>();
-    if (!std::isfinite(bound))
-      throw std::invalid_argument(
-          "destination bound must be finite and use the transfer term's units");
     ceiling = std::min(ceiling, bound);
   }
   amount =

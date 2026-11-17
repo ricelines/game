@@ -84,13 +84,6 @@ void cancellation_effects(NativeCompletion &out, NativeCompletion cancellation) 
                      std::make_move_iterator(cancellation.records.end()));
 }
 } // namespace
-std::string validate_model_edit(const nlohmann::json &value) {
-  if (!value.is_object() || value.size() != 2 || !value.contains("model") ||
-      !value.contains("proposal") || !value.at("model").is_string() ||
-      !value.at("proposal").is_string())
-    return "expected {model:'m:N',proposal:'m:N'}";
-  return {};
-}
 NativeCompletion
 revise_model(amber::ObjectState &objects_state, amber::catalog::State &catalog_state,
              amber::react::State &react_state, catalog::MeasurementBindings measurement_roles,

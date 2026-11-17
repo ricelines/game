@@ -68,15 +68,18 @@ NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
 }
 NativeCompletion split_plot(perm::State &state, ObjectState &objects, const LandSettings &settings,
                             const NativeCall &call, TermId plot_changed) {
+  const auto requested_cut =
+      call.arguments.at(call.arguments.contains("x") ? "x" : "y").get<double>();
+  if (!std::isfinite(float(requested_cut)) || std::floor(requested_cut) != requested_cut)
+    throw std::invalid_argument("cut must be a whole metre");
   const auto id = call.arguments.at("plot").get<PlotId>();
   if (auto refusal = lot(state, id, call))
     return *refusal;
   auto &plot = state.plots.rows[id];
   const bool x = call.arguments.contains("x");
   const auto axis = x ? 0 : 1;
-  const auto cut = call.arguments.at(x ? "x" : "y").get<float>();
-  if (!std::isfinite(cut) || std::floor(cut) != cut || cut <= plot.bounds[axis] ||
-      cut >= plot.bounds[axis + 2])
+  const auto cut = float(requested_cut);
+  if (cut <= plot.bounds[axis] || cut >= plot.bounds[axis + 2])
     return commerce_detail::denied("transfer", "plot:" + std::to_string(id), "invalid cut",
                                    "cut at a whole meter strictly inside the lot");
   if (cut - plot.bounds[axis] < settings.lot_min_m ||

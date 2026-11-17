@@ -122,16 +122,13 @@ void synchronous_workflow() {
               f.texts.rows[1].target == f.target &&
               f.requests.rows[id].status == elaborate::Status::Answered,
           "detail did not retain target attribution or close the actual request");
-  require(!step::validate_answer(
+  react::NativeActions native;
+  const auto declarations = step::declare_elaboration(f.reactive.terms, native);
+  require(!step::check_input(
+               native.rows.at(declarations.answer).inputs_schema,
                {{"request", "request:1"}, {"kind", "rule"}, {"script", "s:1"}, {"tests", tests()}})
                .empty(),
           "caller supplied fixture expectations were accepted");
-  require(!step::validate_answer({{"request", "request:1"},
-                                  {"kind", "rule"},
-                                  {"script", "s:1"},
-                                  {"subjects", {{"body", to_string(f.target)}}}})
-               .empty(),
-          "caller could override the original requester's body");
 }
 void fixture_completion() {
   Fixture f;
@@ -180,6 +177,12 @@ void async_submission(const std::filesystem::path &executable, const std::filesy
   };
   rejects(answer, "rule answer requires explicit ordered input");
   call.order = step::InputOrder{9, 30, 4, 98};
+  for (const auto *alias : {"", "target", "body"}) {
+    call.arguments["subjects"] = {{alias, to_string(f.target)}};
+    rejects(answer, "rule answer accepted an empty or server-owned subject alias");
+    require(f.pending.rows.empty(), "invalid subject alias started a fixture job");
+  }
+  call.arguments.erase("subjects");
   const auto started = answer();
   const auto &job = f.pending.rows.begin()->second;
   require(started.deferred && !started.changed &&

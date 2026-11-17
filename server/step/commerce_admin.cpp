@@ -466,6 +466,8 @@ step::NativeCompletion group_create(perm::Groups &groups, perm::Players &players
   try {
     const auto who = player(call, players);
     const auto name = call.arguments.at("name").get<std::string>();
+    if (name.find_first_not_of(" \t\r\n") == std::string::npos)
+      throw std::invalid_argument("group name must not be empty");
     const auto id = static_cast<GroupId>(groups.rows.size());
     groups.rows.push_back({id, who, name});
     auto &memberships = players.rows[who].groups;

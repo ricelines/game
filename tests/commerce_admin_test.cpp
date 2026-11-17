@@ -212,21 +212,25 @@ int main() {
     auto run = [&](PlayerId player, TermId action, Handle object, Json input) {
       return invoke(call(player, action, object, std::move(input)));
     };
-    require(!ad::validate_grant({{"holder", "p:2"},
-                                 {"scope", {{"account", "p:1"}}},
-                                 {"rights", {"spend"}},
-                                 {"unexpected", 1}})
+    const auto check = [&](TermId action, const Json &input) {
+      return step::check_input(native.rows.at(action).inputs_schema, input);
+    };
+    require(!check(ids.grant, {{"holder", "p:2"},
+                               {"scope", {{"account", "p:1"}}},
+                               {"rights", {"spend"}},
+                               {"unexpected", 1}})
                     .empty() &&
-                ad::validate_revoke({{"grant", "g:1"}}).empty() &&
-                !ad::validate_revoke({{"grant", "grant:1"}}).empty() &&
-                !ad::validate_revoke({{"grant", "g:1"}, {"holder", "p:2"}}).empty() &&
-                !ad::validate_plot_permissions({{"plot", -1}}).empty() &&
-                !ad::validate_group_create({{"name", " \t"}}).empty() &&
-                !ad::validate_group_member({{"group", "g:1"}, {"player", "p:2"}, {"member", true}})
-                     .empty() &&
-                !ad::validate_preset({{"group", "g:1"}}).empty() &&
-                native.rows.at(ids.grant).inputs_schema["properties"]["holder"].contains("oneOf"),
-            "structured administration schemas accepted malformed inputs or hid holder shape");
+                check(ids.revoke, {{"grant", "g:1"}}).empty() &&
+                !check(ids.revoke, {{"grant", "g:1"}, {"holder", "p:2"}}).empty() &&
+                !check(ids.plot_permissions, {{"plot", -1}}).empty(),
+            "administration input checking accepted malformed input records");
+    require(
+        run(1, ids.revoke, {}, {{"grant", "grant:1"}}).reply["error"] == "bad_input" &&
+            run(1, ids.group_create, {}, {{"name", " \t"}}).reply["error"] == "bad_input" &&
+            run(1, ids.group_member, {}, {{"group", "g:1"}, {"player", "p:2"}, {"member", true}})
+                    .reply["error"] == "bad_input" &&
+            run(1, ids.preset, f.a, {{"group", "g:1"}}).reply["error"] == "bad_input",
+        "administration actions accepted malformed identifiers or a blank group name");
     const auto created_group = run(1, ids.group_create, f.a, {{"name", "Independent workshop"}});
     require(created_group.changed && created_group.reply.at("group") == "group:1" &&
                 groups.rows[1].controller == 1 && players.rows[1].groups == std::vector<GroupId>{1},
@@ -600,9 +604,9 @@ int main() {
         !run(0, ids.grant, {},
              {{"holder", "p:2"}, {"scope", {{"object", to_string(f.a)}}}, {"rights", {"use"}}})
                 .reply["ok"] &&
-            !ad::validate_grant(
+            !run(1, ids.grant, {},
                  {{"holder", "p:0"}, {"scope", {{"object", to_string(f.a)}}}, {"rights", {"use"}}})
-                 .empty(),
+                 .reply["ok"],
         "the native boundary refuses root as an actor and as a grant holder");
     require(step::rights(Json::array({"use", "land_transfer", "land_return"}),
                          perm::ScopeKind::AllLand) ==

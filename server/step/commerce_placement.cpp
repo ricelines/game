@@ -67,12 +67,17 @@ place_existing(amber::ObjectState &objects_state, amber::space::State &space_sta
   if (!allowed)
     return commerce_detail::denied(allowed.reason, "move", to_string(item.root.object), who);
   const auto position = call.arguments.at("position").get<std::array<float, 3>>();
+  if (std::ranges::any_of(position, [](float value) { return !std::isfinite(value); }))
+    throw std::invalid_argument("position must be finite");
   const Vec3 destination{position[0], position[1], position[2]};
   auto rotation = transforms.rotation[item.root.object.slot()];
   if (call.arguments.contains("rotation")) {
     const auto values = call.arguments.at("rotation").get<std::array<double, 4>>();
     const auto norm = std::sqrt(values[0] * values[0] + values[1] * values[1] +
                                 values[2] * values[2] + values[3] * values[3]);
+    if (!(norm > 0) || !std::isfinite(norm) ||
+        std::ranges::any_of(values, [](double value) { return !std::isfinite(float(value)); }))
+      throw std::invalid_argument("rotation must be a finite nonzero quaternion [x,y,z,w]");
     rotation = {float(values[0] / norm), float(values[1] / norm), float(values[2] / norm),
                 float(values[3] / norm)};
   }

@@ -13,6 +13,138 @@ react::EventWork event(TermId id) {
   e.event = id;
   return e;
 }
+void native_action_input_contracts() {
+  react::Terms terms;
+  react::NativeActions native;
+  declare_commerce(terms, native);
+  declare_admin(terms, native);
+  editing::declare_editing(terms, native);
+  declare_elaboration(terms, native);
+  declare_construction_actions(terms, native);
+  declare_physical_actions(terms, native);
+  const auto check = [&](std::string_view name, const Json &arguments) {
+    return check_input(native.rows.at(terms.by_name.at(std::string(name))).inputs_schema,
+                       arguments);
+  };
+  for (const auto &[name, arguments] : std::initializer_list<std::pair<std::string_view, Json>>{
+           {"engine.pay", {{"to", "p:2"}, {"amount", INT64_MAX}}},
+           {"engine.trade_change", {{"trade", "trade:1"}, {"money", 0}, {"goods", nullptr}}},
+           {"engine.set_setting",
+            {{"values", {{"novel.gain", 2.5}, {"novel.on", true}, {"novel.default", nullptr}}}}},
+           {"engine.split_plot", {{"plot", 1}, {"x", 8.0}}},
+           {"engine.grant",
+            {{"holder", {{"script", "s:1"}, {"on", "world"}}},
+             {"scope", {{"object", "o:1.1"}}},
+             {"rights", {"use", "use"}}}},
+           {"engine.revoke",
+            {{"holder", "p:2"}, {"scope", {{"owned_on_plot", {{"owner", "p:1"}, {"plot", 1}}}}}}},
+           {"engine.relate", {{"term", UINT32_MAX}, {"other", "o:1.1"}, {"present", true}}},
+           {"engine.define_term",
+            {{"proposal",
+              {{"name", "heat"},
+               {"kind", "quantity"},
+               {"along", 0},
+               {"paired", 0},
+               {"priority", 0}}}}},
+           {"engine.create", {{"model", "m:1"}, {"material", 1}, {"position", {0, 0, 0}}}},
+           {"engine.create",
+            {{"model", "m:1"}, {"material", "novel.metal"}, {"position", {0, 0, 0}}}},
+           {"engine.answer",
+            {{"request", "request:1"},
+             {"kind", "rule"},
+             {"script", "s:1"},
+             {"subjects", {{"door", "o:1.1"}}}}},
+           {"engine.answer",
+            {{"request", "request:1"}, {"kind", "detail"}, {"text", "A detail"}}}}) {
+    const auto problem = check(name, arguments);
+    require(problem.empty(), (std::string(name) + ": " + problem).c_str());
+  }
+  const auto wrapped_id = (std::uint64_t{1} << 32) + 1;
+  for (const auto &[name, arguments] : std::initializer_list<std::pair<std::string_view, Json>>{
+           {"engine.plot_permissions", {{"plot", wrapped_id}, {"everyone", {"enter"}}}},
+           {"engine.grant",
+            {{"holder", "p:2"}, {"scope", {{"plot", wrapped_id}}}, {"rights", {"enter"}}}},
+           {"engine.grant",
+            {{"holder", "p:2"},
+             {"scope", {{"owned_on_plot", {{"owner", "p:1"}, {"plot", wrapped_id}}}}},
+             {"rights", {"use"}}}},
+           {"engine.install",
+            {{"script", "s:1"},
+             {"choices",
+              {{{"slot", "enter"},
+                {"scope", {{"plot", wrapped_id}}},
+                {"rights", {"enter"}},
+                {"expires_s", 60}}}}}},
+           {"engine.install",
+            {{"script", "s:1"},
+             {"choices",
+              {{{"slot", "use"},
+                {"scope", {{"owned_on_plot", {{"owner", "p:1"}, {"plot", wrapped_id}}}}},
+                {"rights", {"use"}},
+                {"expires_s", 60}}}}}},
+           {"engine.create", {{"model", "m:1"}, {"material", wrapped_id}, {"position", {0, 0, 0}}}},
+           {"engine.reconfigure", {{"model", "m:1"}, {"material", wrapped_id}}},
+           {"engine.relate", {{"term", wrapped_id}, {"other", "o:1.1"}, {"present", true}}},
+           {"engine.relate", {{"term", -4294967295LL}, {"other", "o:1.1"}, {"present", true}}},
+           {"engine.define_material", {{"material", wrapped_id}, {"values", Json::object()}}},
+           {"engine.define_term",
+            {{"proposal", {{"name", "heat"}, {"kind", "quantity"}, {"along", wrapped_id}}}}},
+           {"engine.define_term",
+            {{"proposal",
+              {{"name", "touch"},
+               {"kind", "action"},
+               {"inputs", {{{"name", "amount"}, {"term", wrapped_id}}}}}}}},
+           {"engine.define_term",
+            {{"proposal", {{"name", "metal"}, {"kind", "material"}}},
+             {"choice", {{"same_as", wrapped_id}}}}},
+           {"engine.pay", {{"to", "p:2"}, {"amount", -1}}},
+           {"engine.pay", {{"to", "p:2"}, {"amount", 1.0}}},
+           {"engine.pay", {{"to", "p:2"}, {"amount", true}}},
+           {"engine.pay", {{"to", "p:2"}, {"amount", std::uint64_t{1} << 63}}},
+           {"engine.pay", {{"to", "p:2"}, {"amount", 0}, {"extra", true}}},
+           {"engine.set_setting", {{"values", {{"novel.gain", "loud"}}}}},
+           {"engine.patch_state", {{"values", {{"novel.gain", nullptr}}}}},
+           {"engine.split_plot", {{"plot", 1}}},
+           {"engine.split_plot", {{"plot", 1}, {"x", 8}, {"y", 8}}},
+           {"engine.join_plots", {{"plots", {1}}}},
+           {"engine.join_plots", {{"plots", {1, 2, 3}}}},
+           {"engine.grant",
+            {{"holder", "p:2"}, {"scope", {{"object", "o:1.1"}}}, {"rights", Json::array()}}},
+           {"engine.grant",
+            {{"holder", "p:2"},
+             {"scope", {{"object", "o:1.1"}, {"owned", "p:1"}}},
+             {"rights", {"use"}}}},
+           {"engine.grant",
+            {{"holder", "p:2"},
+             {"scope", {{"owned_on_plot", {{"owner", "p:1"}}}}},
+             {"rights", {"use"}}}},
+           {"engine.revoke", Json::object()},
+           {"engine.revoke", {{"grant", "g:1"}, {"holder", "p:2"}}},
+           {"engine.reconfigure", {{"model", "m:1"}, {"params", std::uint64_t{1} << 32}}},
+           {"engine.create", {{"model", "m:1"}, {"material", false}, {"position", {0, 0, 0}}}},
+           {"engine.attach", {{"parent", "o:1.1"}, {"local_pose", {{"rotation", {0, 0, 1}}}}}},
+           {"engine.edit_detail", {{"id", std::uint64_t{1} << 32}, {"text", "A detail"}}},
+           {"engine.answer",
+            {{"request", "request:1"},
+             {"kind", "rule"},
+             {"script", "s:1"},
+             {"note", "foreign field"}}},
+           {"engine.answer",
+            {{"request", "request:1"}, {"kind", "patch"}, {"text", "wrong field"}}},
+           {"engine.define_term",
+            {{"proposal", {{"name", "metal"}, {"kind", "material"}}}, {"choice", Json::object()}}},
+           {"engine.define_term",
+            {{"proposal", {{"name", "metal"}, {"kind", "material"}}},
+             {"choice", {{"same_as", 1}, {"none_fits", "distinct"}}}}}}) {
+    const auto problem = check(name, arguments);
+    require(!problem.empty(), (std::string(name) + " accepted " + arguments.dump()).c_str());
+  }
+  const auto problem = check(
+      "engine.attach", {{"parent", "o:1.1"}, {"local_pose", {{"position", {0, "north", 0}}}}});
+  require(problem.find("local_pose.position[1]") != std::string::npos &&
+              problem.find("number") != std::string::npos,
+          "nested input error did not identify its field and required type");
+}
 void storing_discards_work_without_a_suspended_execution() {
   WorkQueues queues;
   TimerWheel wheel;
@@ -373,6 +505,7 @@ void mixed_due_replacement_preserves_events_across_rebucketing() {
 }
 } // namespace
 int main() {
+  native_action_input_contracts();
   storing_discards_work_without_a_suspended_execution();
   publication_stamps_completed_origin();
   ordering_and_overflow();

@@ -1838,3 +1838,53 @@ def test_land_offer_limit_changes_cancel_and_reopen_quotes(tmp_path, baked_plan)
         )
     )
     assert state["script_errors"] == 0
+
+
+def test_native_bad_inputs_return_signatures_without_changing_money_or_grants(tmp_path, baked_plan):
+    async def exercise(owner, tenant):
+        owner_balance = (await owner.act("engine.balance"))["balance"]
+        tenant_balance = (await tenant.act("engine.balance"))["balance"]
+        grants = await owner.request("inspect", target="grants")
+        given = {row["id"] for row in grants["given"]}
+        invalid = [
+            ("engine.pay", {"to": "p:3", "amount": amount}) for amount in (-1, 0.5, True, 1 << 63)
+        ]
+        invalid.extend(
+            [
+                ("engine.pay", {"to": "p:3"}),
+                ("engine.pay", {"to": "p:3", "amount": 1, "unexpected": True}),
+                (
+                    "engine.grant",
+                    {
+                        "holder": "p:3",
+                        "scope": {"account": "p:2"},
+                        "rights": [],
+                        "cap": 10,
+                    },
+                ),
+                (
+                    "engine.grant",
+                    {
+                        "holder": "p:3",
+                        "scope": {"owned_on_plot": {"owner": "p:2"}},
+                        "rights": ["use"],
+                    },
+                ),
+                ("engine.group_create", {"name": " \t"}),
+            ]
+        )
+        for action, arguments in invalid:
+            result = await owner.act(action, **arguments)
+            assert result["ok"] is False and result["error"] == "bad_input", result
+            assert result["signature"].startswith(action + "(") and result["problem"], result
+        assert (await owner.act("engine.balance"))["balance"] == owner_balance
+        assert (await tenant.act("engine.balance"))["balance"] == tenant_balance
+        assert {
+            row["id"] for row in (await owner.request("inspect", target="grants"))["given"]
+        } == given
+        assert (await owner.act("engine.pay", to="p:3", amount=1))["ok"]
+        assert (await owner.act("engine.balance"))["balance"] == owner_balance - 1
+        assert (await tenant.act("engine.balance"))["balance"] == tenant_balance + 1
+
+    state = asyncio.run(live_land_world(tmp_path, baked_plan, exercise, edit=land_player_fixture))
+    assert state["script_errors"] == 0

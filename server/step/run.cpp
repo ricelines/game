@@ -561,6 +561,11 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
               roles = profiles.rows[*player].roles;
             const bool architect = std::ranges::find(roles, "architect") != roles.end();
             try {
+              if (const auto error = check_input(
+                      native_declarations.rows.at(action->call.request.action).inputs_schema,
+                      action->call.arguments);
+                  !error.empty())
+                throw std::invalid_argument(error);
               completed = std::visit(
                   [&](auto operation) {
                     using Operation = decltype(operation);
@@ -602,13 +607,11 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                   action->resolution.native_operation);
             } catch (const std::exception &error) {
               completed.result = record::Result::Denied;
-              completed.reply = {
-                  {"ok", false},
-                  {"error", "bad_input"},
-                  {"problem", error.what()},
-                  {"signature", react::action_signature(terms, native_declarations,
-                                                        action->call.request.action)}};
+              completed.reply = {{"ok", false}, {"error", "bad_input"}, {"problem", error.what()}};
             }
+            if (completed.reply.value("error", "") == "bad_input")
+              completed.reply["signature"] =
+                  react::action_signature(terms, native_declarations, action->call.request.action);
             change_custody(objects_state, space_state, relation_terms, plots, illumination_sources,
                            completed);
             discard_script_work(queues, timers, completed.hidden_objects);

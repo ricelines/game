@@ -90,15 +90,11 @@ NativeCompletion native_construction(amber::ObjectState &objects_state,
     break;
   }
   case react::ConstructionAction::ReviseModel: {
-    if (const auto error = validate_model_edit(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = revise_model(objects_state, catalog_state, react_state, measurement_roles, geometry,
                        space_state, perm_state, physics_defaults, call);
     break;
   }
   case react::ConstructionAction::PlaceExisting: {
-    if (const auto error = validate_place_existing(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = place_existing(objects_state, space_state, relation_terms, perm_state, geometry,
                          catalog_state, physics_roles, physics_defaults, react_state, call);
     break;
@@ -129,118 +125,80 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
   NativeCompletion out;
   switch (operation) {
   case react::ExchangeAction::AbandonPlot: {
-    if (const auto error = validate_abandon_plot(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out =
         abandon_plot(perm_state, objects_state, delivery, space, settings.land, call, plot_changed);
     break;
   }
   case react::ExchangeAction::SplitPlot: {
-    if (const auto error = validate_split_plot(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = split_plot(perm_state, objects_state, settings.land, call, plot_changed);
     break;
   }
   case react::ExchangeAction::JoinPlots: {
-    if (const auto error = validate_join_plots(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = join_plots(perm_state, objects_state, settings.land, call, plot_changed);
     break;
   }
   case react::ExchangeAction::ReturnGoods: {
-    if (const auto error = validate_inventory(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = return_goods(perm_state, objects_state, delivery, space, call);
     break;
   }
   case react::ExchangeAction::OfferPlot: {
-    if (const auto error = validate_offer_plot(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = offer_plot(perm_state, call);
     break;
   }
   case react::ExchangeAction::SetOfferPrice: {
-    if (const auto error = validate_set_offer_price(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = set_offer_price(offers, call);
     break;
   }
   case react::ExchangeAction::Notify: {
-    if (const auto error = validate_notify(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = script_notice(perm_state, call);
     break;
   }
   case react::ExchangeAction::Pay: {
-    if (const auto error = validate_pay(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = step::pay(ledger, grants, players, identity, authority_read, groups, call);
     break;
   }
   case react::ExchangeAction::Balance: {
-    if (const auto error = validate_balance(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = step::balance(ledger, players, identity, authority_read, groups, call);
     break;
   }
   case react::ExchangeAction::Inventory: {
-    if (const auto error = validate_inventory(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = inventory(players, call);
     break;
   }
   case react::ExchangeAction::Give: {
-    if (const auto error = validate_give(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = give(perm_state, objects_state, space, delivery, mailbox_max, call);
     break;
   }
   case react::ExchangeAction::Offer: {
-    if (const auto error = validate_offer(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = offer(perm_state, objects_state, space, call);
     break;
   }
   case react::ExchangeAction::Offers: {
-    if (const auto error = validate_offers(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = step::offers(offers, players, identity, authority_read, call);
     break;
   }
   case react::ExchangeAction::Accept: {
-    if (const auto error = validate_accept(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = step::accept(perm_state, objects_state, space_state, delivery, settings, call,
                        plot_changed);
     break;
   }
   case react::ExchangeAction::CancelOffer: {
-    if (const auto error = validate_cancel_offer(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = cancel_offer(perm_state, objects_state, call);
     break;
   }
   case react::ExchangeAction::TradeOpen: {
-    if (const auto error = validate_trade_open(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = trade_open(trades, players, identity, delivery, call);
     break;
   }
   case react::ExchangeAction::TradeChange: {
-    if (const auto error = validate_trade_change(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = trade_change(perm_state, objects_state, space, call);
     break;
   }
   case react::ExchangeAction::TradeConfirm: {
-    if (const auto error = validate_trade_confirm(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = trade_confirm(perm_state, objects_state, space, delivery, call);
     break;
   }
   case react::ExchangeAction::TradeCancel: {
-    if (const auto error = validate_trade_cancel(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = trade_cancel(trades, offers, permission_bits, identity, parts, call);
     break;
   }
@@ -263,44 +221,30 @@ NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
   NativeCompletion out;
   switch (operation) {
   case react::PermissionAction::Grant: {
-    if (const auto error = validate_grant(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = grant(perm_state, objects_state, catalog_state, react_state, call);
     break;
   }
   case react::PermissionAction::Revoke: {
-    if (const auto error = validate_revoke(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = revoke(perm_state, objects_state, architect, call);
     break;
   }
   case react::PermissionAction::ListGrants: {
-    if (const auto error = validate_list_grants(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = list_grants(grants, players, call);
     break;
   }
   case react::PermissionAction::Preset: {
-    if (const auto error = validate_preset(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = preset(objects_state, object_presets, perm_state, call);
     break;
   }
   case react::PermissionAction::GroupCreate: {
-    if (const auto error = validate_group_create(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = group_create(groups, players, call);
     break;
   }
   case react::PermissionAction::GroupMember: {
-    if (const auto error = validate_group_member(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = group_member(groups, players, call);
     break;
   }
   case react::PermissionAction::PlotPermissions: {
-    if (const auto error = validate_plot_permissions(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = plot_permissions(perm_state, settings, call,
                            react_state.terms.by_name.at("base.plot_changed"));
     break;
@@ -317,22 +261,16 @@ NativeCompletion native_scripts(amber::catalog::State &catalog_state,
   NativeCompletion out;
   switch (operation) {
   case react::ScriptAction::Install: {
-    if (const auto error = editing::validate_install(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = editing::install_script(call, react_state, catalog_state, objects_state, perm_state,
                                   start_event);
     break;
   }
   case react::ScriptAction::Uninstall: {
-    if (const auto error = editing::validate_uninstall(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = editing::uninstall_script(call, react_state, values, catalog_state, perm_state,
                                     start_event);
     break;
   }
   case react::ScriptAction::ModelScript: {
-    if (const auto error = editing::validate_model_script(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = editing::model_script(call, react_state, values, catalog_state, perm_state, start_event);
     break;
   }
@@ -352,34 +290,24 @@ NativeCompletion native_values(const perm::Players &players, const catalog::Mode
   NativeCompletion out;
   switch (operation) {
   case react::ValueAction::SetSetting: {
-    if (const auto error = editing::validate_set_setting(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = editing::set_setting(call, react_state, values);
     break;
   }
   case react::ValueAction::ModelSetting: {
-    if (const auto error = editing::validate_model_setting(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = editing::model_setting(call, react_state, values, models, players);
     break;
   }
   case react::ValueAction::WorldSetting: {
-    if (const auto error = editing::validate_set_setting(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     const auto before = outdoor_lux(react_state);
     out = editing::world_setting(call, react_state, values, roles);
     out.world_ambient_changed = outdoor_lux(react_state) != before;
     break;
   }
   case react::ValueAction::PatchState: {
-    if (const auto error = editing::validate_patch_state(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = editing::patch_state(call, properties, processes, values, roles);
     break;
   }
   case react::ValueAction::Relate: {
-    if (const auto error = editing::validate_relate(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = editing::relate(call, authored_relations, relations, values, relation_terms);
     break;
   }
@@ -392,23 +320,17 @@ NativeCompletion native_writing(catalog::State &catalog_state, react::State &rea
   NativeCompletion out;
   switch (operation) {
   case react::WritingAction::EditText: {
-    if (const auto error = editing::validate_edit_text(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = call.request.target ? editing::edit_text(call, catalog_state.instance_text,
                                                    catalog_state.model_text, identity)
                               : editing::world_text(call, react_state.world_scripts);
     break;
   }
   case react::WritingAction::ModelText: {
-    if (const auto error = editing::validate_model_text(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = editing::model_text(call, catalog_state.model_text, catalog_state.models, identity,
                               players);
     break;
   }
   case react::WritingAction::EditDetail: {
-    if (const auto error = editing::validate_edit_detail(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = editing::edit_detail(call, catalog_state.authored_text);
     break;
   }
@@ -437,15 +359,11 @@ NativeCompletion native_registry(amber::catalog::State &catalog_state,
   NativeCompletion out;
   switch (operation) {
   case react::RegistryAction::DefineTerm: {
-    if (const auto error = editing::validate_define_term(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = editing::define_term(call, roles, terms, materials, rules, mechanical, registry,
                                registry_directory);
     break;
   }
   case react::RegistryAction::DefineMaterial: {
-    if (const auto error = editing::validate_define_material(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = editing::define_material(call, roles, react_state, values, catalog_state, geometry, space,
                                    physics_roles, physics_defaults, registry_directory);
     break;
@@ -479,36 +397,23 @@ NativeCompletion native_elaboration(amber::catalog::State &catalog_state,
   NativeCompletion out;
   switch (operation) {
   case react::ElaborationAction::RequestModel: {
-    if (const auto error = validate_request_model(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = request_model(requests, last_gaps, call);
     break;
   }
   case react::ElaborationAction::Requests: {
-    if (const auto error = validate_requests(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = step::requests(requests, gap_counts, elaborator, call.hz, call);
     break;
   }
   case react::ElaborationAction::Claim: {
-    if (const auto error = validate_claim(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = claim(requests, elaborator, call);
     break;
   }
   case react::ElaborationAction::RuleActivation: {
-    if (const auto error = validate_rule_activation(call.arguments); !error.empty())
-      throw std::invalid_argument(error);
     out = rule_activation(scripts, react_state, queues, values, architect || elaborator, call);
     break;
   }
   case react::ElaborationAction::Answer:
   case react::ElaborationAction::Refuse: {
-    const auto error = operation == react::ElaborationAction::Refuse
-                           ? validate_refuse(call.arguments)
-                           : validate_answer(call.arguments);
-    if (!error.empty())
-      throw std::invalid_argument(error);
     const auto close = [&](AnswerCompletion completion) {
       if (completion.notification) {
         const auto &notice = *completion.notification;

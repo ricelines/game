@@ -51,13 +51,6 @@ lifecycle::Binding instance_binding(const nlohmann::json &value, const catalog::
   const auto parsed = std::from_chars(text.data() + 2, text.data() + text.size(), model);
   if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || !model)
     throw std::invalid_argument("invalid model identifier");
-  if (value.contains("params") &&
-      (!value.at("params").is_number_integer() || value.at("params").get<std::int64_t>() < 0 ||
-       value.at("params").get<std::uint64_t>() > UINT32_MAX))
-    throw std::invalid_argument("params must be a nonnegative parameter id");
-  if (value.contains("material") && value.at("material").is_number() &&
-      !value.at("material").is_number_integer())
-    throw std::invalid_argument("material must be a term id or material name");
   const auto params = value.value("params", std::uint32_t{0});
   (void)catalog::resolve_asset(models, parameters, model, params);
   const auto material = !value.contains("material") ? models.rows.at(model).material
@@ -187,16 +180,12 @@ NativeCompletion create_instance(amber::ObjectState &objects_state,
     return structural_denied("live_caller", to_string(input.receiver),
                              "creation requires a live caller", "enter the world with a body");
   const auto &point = call.arguments.at("position");
-  if (!point.is_array() || point.size() != 3)
-    throw std::invalid_argument("position must be [x,y,z]");
   const Vec3 position{point.at(0), point.at(1), point.at(2)};
   if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
     throw std::invalid_argument("position must be finite");
   Quat rotation{};
   if (call.arguments.contains("rotation")) {
     const auto &q = call.arguments.at("rotation");
-    if (!q.is_array() || q.size() != 4)
-      throw std::invalid_argument("rotation must be [x,y,z,w]");
     rotation = {q.at(0), q.at(1), q.at(2), q.at(3)};
     const auto norm = rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z +
                       rotation.w * rotation.w;

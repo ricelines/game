@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <charconv>
-#include <cmath>
 #include <set>
 
 namespace amber::step::editing::detail {
@@ -68,9 +67,8 @@ Value scalar(const Json &value, const react::Term &term) {
       throw std::invalid_argument("flag value must be boolean");
     return Value(value.get<bool>());
   }
-  if (term.kind != react::Kind::Quantity || !value.is_number() ||
-      !std::isfinite(value.get<double>()))
-    throw std::invalid_argument("quantity value must be finite numeric");
+  if (term.kind != react::Kind::Quantity || !value.is_number())
+    throw std::invalid_argument("quantity value must be numeric");
   return value.is_number_integer() ? Value(value.get<std::int64_t>()) : Value(value.get<double>());
 }
 step::NativeCompletion result(bool changed, Json extra) {

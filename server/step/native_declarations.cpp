@@ -8,8 +8,10 @@ void declare_construction_actions(react::Terms &terms, react::NativeActions &dec
   const Json quaternion = {
       {"type", "array"}, {"items", {{"type", "number"}}}, {"minItems", 4}, {"maxItems", 4}};
   const Json str = {{"type", "string"}};
-  const Json material = {{"anyOf", Json::array({str, {{"type", "integer"}, {"minimum", 1}}})}};
-  const Json params = {{"type", "integer"}, {"minimum", 0}};
+  const Json material = {
+      {"anyOf",
+       Json::array({str, {{"type", "integer"}, {"minimum", 1}, {"maximum", UINT32_MAX}}})}};
+  const Json params = {{"type", "integer"}, {"minimum", 0}, {"maximum", UINT32_MAX}};
   const auto add = [&](std::string name, std::string description, std::string right, bool reach,
                        Json properties, Json required, react::NativeOperation operation) {
     catalog::declare_native(declarations, terms, std::move(name), std::move(description),

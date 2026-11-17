@@ -184,12 +184,13 @@ void land_browse_and_actions() {
   require(child && inspect()["held"][0]["issuer"] == Json{{"script", "s:1"}, {"on", "world"}} &&
               inspect()["held"][0]["parent"] == "g:" + std::to_string(grant.grant),
           "grant inspection attributes a delegated world grant to its script rather than root");
-  require(step::validate_grant({{"holder", {{"script", "s:1"}, {"on", "world"}}},
-                                {"scope", {{"account", "p:2"}}},
-                                {"rights", {"spend"}},
-                                {"cap", 50},
-                                {"period_s", 1},
-                                {"expires_s", 5}})
+  require(step::check_input(react_state.native_declarations.rows.at(admin.grant).inputs_schema,
+                            {{"holder", {{"script", "s:1"}, {"on", "world"}}},
+                             {"scope", {{"account", "p:2"}}},
+                             {"rights", {"spend"}},
+                             {"cap", 50},
+                             {"period_s", 1},
+                             {"expires_s", 5}})
               .empty(),
           "world-script grant syntax accepts its published holder identifier");
   require(

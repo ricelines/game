@@ -197,8 +197,11 @@ void script_spending() {
   f.pay(pay_args(100, false));
   for (const auto &amount : {nlohmann::json(-1), nlohmann::json(.5)}) {
     const nlohmann::json arguments{{"from", "p:2"}, {"to", "p:3"}, {"amount", amount}};
-    require(!step::validate_pay(arguments).empty(),
-            "the production payment boundary rejects negative or fractional currency");
+    require(
+        !step::check_input(f.declarations.rows.at(f.f.terms.by_name.at("engine.pay")).inputs_schema,
+                           arguments)
+             .empty(),
+        "the production payment boundary rejects negative or fractional currency");
   }
   require(f.grants.rows[larger].spent == 0 &&
               perm::balance(f.ledger, perm::Account::player(2)) == 66,

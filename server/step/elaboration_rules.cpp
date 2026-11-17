@@ -23,6 +23,9 @@ step::NativeCompletion answer_rule(amber::elaborate::State &elaborate_state,
                                      runtime,         script.tests,        {}};
   if (call.arguments.contains("subjects"))
     for (const auto &[name, value] : call.arguments.at("subjects").items()) {
+      if (name.empty() || name == "target" || name == "body")
+        throw std::invalid_argument(
+            "subject aliases must be nonempty; target and body are supplied by the server");
       const auto h = parse_handle(value.get<std::string>());
       if (!h)
         throw std::invalid_argument("fixture aliases need complete object handles");

@@ -127,9 +127,9 @@ ActionRun begin_action(const amber::catalog::State &catalog_state,
     return run;
   }
   try {
-    if (!run.call.arguments.is_object())
-      throw std::invalid_argument("action args must be an input record");
     if (resolution.route != react::Route::Native) {
+      if (!run.call.arguments.is_object())
+        throw std::invalid_argument("action args must be an input record");
       if (const auto *value = std::get_if<Value>(&request.args); value && !value->present())
         request.args = decode_arguments(values.terms.rows[request.action], run.call.arguments,
                                         std::holds_alternative<ScriptHolder>(request.caller)
