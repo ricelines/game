@@ -37,11 +37,10 @@ void publish_intent_endings(amber::step::State &step_state, const react::Terms &
                             TermId arrived, TermId blocked, TermId cancelled,
                             const amber::ObjectState &objects_state, net::Sessions &sessions,
                             record::Journal &journal, Step now, std::size_t event_queue_max);
-void update_frame_illumination(amber::step::State &step_state, amber::space::State &space_state,
-                               TransformRead, const react::ValueRead &,
-                               amber::react::State &react_state, std::span<const Handle> moved,
-                               std::span<const space::Bounds> dirty_bounds, TermId illuminance,
-                               react::DeferredEffects &);
+react::DeferredEffects update_frame_illumination(State &, space::State &, TransformRead,
+                                                 const react::ValueRead &, react::State &,
+                                                 const catalog::Scripts &,
+                                                 const space::StepResult &, TermId illuminance);
 void sample_motion(std::vector<observe::MotionSample> &motion,
                    SparseColumn<std::pair<Handle, Vec3>> &previous_positions,
                    std::span<const Handle> moved, const space::Space &space, IdentityRead ids,
@@ -110,7 +109,9 @@ void restore_pending_captures(elaborate::CaptureRefs &captures,
 } // namespace amber::step::checkpoint
 
 namespace amber::step {
-std::optional<std::vector<PlannedInvocation>>
+void refresh_rule_reactions(const ObjectState &, const catalog::State &, const react::State &,
+                            space::State &, step::State &, std::span<const ScriptId>);
+std::optional<std::vector<react::PlannedInvocation>>
 prepare_reactive(amber::react::State &react_state, const react::ValueRead &values,
                  const catalog::Scripts &scripts, amber::step::State &step_state,
                  ForegroundItem item, Step now, double hz);

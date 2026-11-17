@@ -74,7 +74,7 @@ struct Fixture {
     contribute(third, 11, 1);
     reconcile_allocations(f.values(), f.react_state, f.effects, now, 20);
     for (auto object : {f.a, f.b, third})
-      f.bind(consumer, object);
+      f.baseline(object);
     f.effects = {};
   }
   double count(Handle object) const {
@@ -129,7 +129,7 @@ void thresholds_and_relation_rebinding() {
   x.f.scripts.rows[x.consumer].declaration.watches[0].thresholds = {
       {Threshold::Predicate::Above, 1000}};
   for (auto h : {x.f.a, x.f.b, x.third})
-    x.f.bind(x.consumer, h);
+    x.f.baseline(h);
   x.contribute(x.f.a, 11, 8);
   x.publish();
   require(x.count(x.f.a) == 0 && x.count(x.f.b) == 0,
@@ -194,15 +194,15 @@ void priority_scopes_and_retirement() {
           "unrelated model scope selects no primary demand rows");
   x.now = 20;
   const std::array retired{x.f.a};
-  retire_reactions(x.f.models, x.f.values(), x.f.react_state, retired, x.now, 20, {}, x.f.effects);
+  retire_reactions(x.f.values(), x.f.react_state, retired, x.now, 20, {}, x.f.effects);
   destroy(x.f.objects, x.f.a);
   x.publish();
   near(get_share(x.f.allocations, x.subject, 11, x.f.b), 5,
        "retired demander leaves only surviving primary contributions");
-  require(watch_consumers(x.f.subscriptions, x.f.a).empty(), "retirement removes exact consumer");
+  require(!has_watch(x.f.react_state, x.f.values(), x.f.scripts, {x.f.a, 11}, x.now, 20),
+          "retired objects cannot consume quantity changes");
   const std::array retired_subject{x.subject};
-  retire_reactions(x.f.models, x.f.values(), x.f.react_state, retired_subject, x.now, 20, {},
-                   x.f.effects);
+  retire_reactions(x.f.values(), x.f.react_state, retired_subject, x.now, 20, {}, x.f.effects);
   require(x.f.allocations.values.empty(), "subject retirement removes current allocations");
 }
 void batch_retirement_reconciles_live_circuits() {
@@ -215,8 +215,10 @@ void batch_retirement_reconciles_live_circuits() {
   x.publish();
   near(get_share(x.f.allocations, x.substitute, 11, x.f.b), 3,
        "second circuit divides supply before retirement");
+  require(x.count(x.f.a) == 1 && x.count(x.f.b) == 1,
+          "actual quantity handlers establish both objects' script state");
   const std::array retired{x.subject, x.f.a};
-  retire_reactions(x.f.models, x.f.values(), x.f.react_state, retired, x.now, 20, {}, x.f.effects);
+  retire_reactions(x.f.values(), x.f.react_state, retired, x.now, 20, {}, x.f.effects);
   require(identity(x.f.objects).valid(x.subject) && identity(x.f.objects).valid(x.f.a),
           "reaction retirement finishes while identities remain live");
   near(get_share(x.f.allocations, x.subject, 11, x.f.b), 0,
@@ -225,6 +227,8 @@ void batch_retirement_reconciles_live_circuits() {
        "retired demander loses its allocation on another circuit");
   near(get_share(x.f.allocations, x.substitute, 11, x.f.b), 4,
        "surviving circuit reallocates supply to its remaining demander");
+  require(!x.f.states.contains({x.f.a, x.consumer}) && x.count(x.f.b) == 1,
+          "batch retirement removes the retired script state and preserves the live state");
 }
 void snapshot_answers_and_immediate_share_reads() {
   Fixture x;
@@ -235,16 +239,15 @@ void snapshot_answers_and_immediate_share_reads() {
   snap::Buffer bytes;
   snap::Output out{bytes};
   write_shared(out, x.f.shared, x.f.gives_to, x.f.allocations);
-  write_script_states(out, x.f.states, x.f.subscriptions);
+  write_script_states(out, x.f.states, x.f.watch_answers);
   bytes.resize(out.adapter().writtenBytesCount());
   snap::Input in{bytes.data(), bytes.size()};
   read_shared(in, x.f.shared, x.f.gives_to, x.f.allocations, x.f.objects.generation.size());
-  read_script_states(in, x.f.states, x.f.subscriptions);
+  read_script_states(in, x.f.states, x.f.watch_answers);
   snap::check_complete(in);
-  require(
-      check_changed(x.f.subscriptions, x.f.values(), x.f.allocations, {x.subject, 11}, 0, 20, {})
-          .deliveries.empty(),
-      "restored composite answers do not replay callbacks");
+  require(evaluate_watch(x.f.react_state, x.f.values(), x.f.scripts, {{x.subject, 11}, {}}, 0, 20)
+              .invocations.empty(),
+          "restored composite answers do not replay callbacks");
   const auto script = x.f.add(R"(return {kind='instance',contributes={'novel.wanted'},on={
     ['novel.cue']=function(self)
       local subject=self:related('novel.link','out')[1]
@@ -254,7 +257,14 @@ void snapshot_answers_and_immediate_share_reads() {
       self:contribute(subject,'novel.wanted',2)
       self.state.later=self:get_share(subject,'novel.wanted')
     end}})");
-  const InvocationPlan call{{script, "novel.cue"}, x.f.a, {}, 6, {}, {}};
+  const std::array installed{x.consumer, script};
+  set_instances(x.f.installed, x.f.a, installed, x.f.scripts);
+  project_instance(x.f.triggers, x.f.installed, x.f.scripts, x.f.terms, x.f.a);
+  const auto handlers = dispatch(x.f.triggers, x.f.values(), x.f.a, 6, 0, 20);
+  require(handlers.size() == 1, "the test event selects its installed contribution writer");
+  PlannedInvocation call{handlers.front(), {}};
+  call.input.receiver = x.f.a;
+  call.input.trigger = 6;
   x.f.run(std::span(&call, 1));
   const auto &state = x.f.states.at({x.f.a, script}).values;
   near(std::get<double>(state.at(std::string("first"))), 3,

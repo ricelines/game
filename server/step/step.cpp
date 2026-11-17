@@ -4,9 +4,6 @@
 
 namespace amber::step {
 namespace {
-ThresholdKey key(const react::ThresholdToken &token) {
-  return {token.source, token.consumer, token.script, token.watch_index};
-}
 void put_timer(TimerWheel &wheel, react::Timer timer) {
   const Step delta = timer.due - wheel.now;
   const unsigned level = delta < (Step{1} << 8)    ? 0
@@ -16,17 +13,17 @@ void put_timer(TimerWheel &wheel, react::Timer timer) {
   const auto index = static_cast<unsigned>((timer.due >> (8 * level)) & 255);
   auto &bucket = wheel.levels[level][index];
   if (timer.threshold)
-    wheel.thresholds.emplace(key(*timer.threshold), TimerLocation{level, index, bucket.size()});
+    wheel.thresholds.emplace(*timer.threshold, TimerLocation{level, index, bucket.size()});
   bucket.push_back(std::move(timer));
 }
 void remove_timer(TimerWheel &wheel, TimerLocation location) {
   auto &bucket = wheel.levels[location.level][location.bucket];
   if (bucket[location.index].threshold)
-    wheel.thresholds.erase(key(*bucket[location.index].threshold));
+    wheel.thresholds.erase(*bucket[location.index].threshold);
   if (location.index != bucket.size() - 1) {
     bucket[location.index] = std::move(bucket.back());
     if (bucket[location.index].threshold)
-      wheel.thresholds.at(key(*bucket[location.index].threshold)) = location;
+      wheel.thresholds.at(*bucket[location.index].threshold) = location;
   }
   bucket.pop_back();
 }
@@ -35,7 +32,7 @@ std::vector<react::Timer> take_bucket(TimerWheel &wheel, unsigned level, unsigne
   wheel.levels[level][index].clear();
   for (const auto &timer : rows)
     if (timer.threshold)
-      wheel.thresholds.erase(key(*timer.threshold));
+      wheel.thresholds.erase(*timer.threshold);
   return rows;
 }
 void cascade(TimerWheel &wheel, unsigned level) {
@@ -50,7 +47,7 @@ void append_inputs(WorkQueues &queues, std::vector<Work> inputs) {
 }
 void schedule(TimerWheel &wheel, react::Timer timer) {
   if (timer.threshold) {
-    const auto found = wheel.thresholds.find(key(*timer.threshold));
+    const auto found = wheel.thresholds.find(*timer.threshold);
     if (found != wheel.thresholds.end()) {
       const auto location = found->second;
       remove_timer(wheel, location);
@@ -83,16 +80,17 @@ void discard_script_work(WorkQueues &queues, TimerWheel &wheel, std::span<const 
           remove_timer(wheel, {level, bucket, index});
     }
 }
-void cancel_threshold(TimerWheel &wheel, const ThresholdKey &key) {
+void cancel_threshold(TimerWheel &wheel, FactKey key) {
   if (const auto found = wheel.thresholds.find(key); found != wheel.thresholds.end())
     remove_timer(wheel, found->second);
 }
-void cancel_source_thresholds(TimerWheel &wheel, const react::Subscriptions &subscriptions,
-                              FactKey source) {
-  if (const auto found = subscriptions.rows.find(source); found != subscriptions.rows.end())
-    for (const auto &binding : found->second)
-      cancel_threshold(wheel,
-                       {source, binding.consumer.object, binding.consumer.script, binding.index});
+void apply_thresholds(TimerWheel &wheel, std::vector<react::ThresholdChange> changes) {
+  for (auto &change : changes) {
+    if (change.timer)
+      schedule(wheel, std::move(*change.timer));
+    else
+      cancel_threshold(wheel, change.source);
+  }
 }
 void promote_due(TimerWheel &wheel, Step now, WorkQueues &queues) {
   while (wheel.now < now) {

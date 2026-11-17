@@ -47,16 +47,10 @@ struct BackgroundItem {
   amber::Origin origin;
   std::uint32_t version = 0;
 };
-struct ThresholdToken {
-  FactKey source;
-  Handle consumer;
-  ScriptId script = 0;
-  std::uint32_t watch_index = 0;
-};
 struct Timer {
   Step due = 0;
   react::EventWork event;
-  std::optional<react::ThresholdToken> threshold;
+  std::optional<FactKey> threshold;
 };
 
 enum class Kind { Quantity, Flag, Event, Relation, Action, Material };
@@ -257,24 +251,7 @@ struct WatchDeclaration {
   std::vector<Threshold> thresholds;
 };
 
-struct WatchBinding {
-  ScriptKey consumer;
-  std::uint32_t index = 0;
-  WatchAnswer last = Answer{};
-  WatchDeclaration declaration;
-};
-
-struct Subscriptions {
-  std::unordered_map<FactKey, std::vector<WatchBinding>, FactKeyHash> rows;
-};
-
-struct WatchDelivery {
-  ScriptKey consumer;
-  std::uint32_t index;
-  WatchAnswer value;
-  std::vector<RelationDelta> relations;
-  Handle source;
-};
+using WatchAnswers = std::unordered_map<FactKey, WatchAnswer, FactKeyHash>;
 
 struct AllocationRows {
   std::unordered_map<FactKey, std::unordered_map<std::uint64_t, double>, FactKeyHash> values;
@@ -418,8 +395,7 @@ struct RunOutcome {
 
 struct WatchRun {
   FactKey source;
-  std::uint32_t index;
-  WatchAnswer value;
+  std::optional<WatchAnswer> value;
 };
 
 struct InvocationInput {
@@ -433,7 +409,7 @@ struct InvocationInput {
   std::optional<Caller> action_caller;
   Handle action_body, action_target;
   RunDeadline deadline{};
-  std::optional<WatchRun> watch;
+  std::shared_ptr<WatchRun> watch;
 };
 
 struct CompletedInvocation {
@@ -478,25 +454,20 @@ struct RuleChange {
   std::vector<RuleVersion> active, retired;
 };
 
-enum class SyncMode { Initial, Change, Restore };
+struct PlannedInvocation {
+  HandlerRef handler;
+  InvocationInput input;
+};
 
-struct WatchChanges {
-  std::vector<react::WatchWork> dirty;
-  std::vector<react::Timer> timers;
+struct ThresholdChange {
+  FactKey source;
+  std::optional<Timer> timer;
 };
 
 struct WatchResult {
-  std::vector<WatchDelivery> deliveries;
-  std::vector<react::Timer> timers;
-};
-
-struct InvocationPlan {
-  HandlerRef handler;
-  Handle receiver, sender;
-  TermId trigger = 0;
-  EventPayload payload;
-  std::vector<Handle> acquired;
-  std::optional<WatchRun> watch{};
+  std::vector<PlannedInvocation> invocations;
+  std::vector<ThresholdChange> thresholds;
+  bool modeled = false;
 };
 
 using ObjectSelection = std::optional<std::span<const Handle>>;
@@ -585,30 +556,23 @@ Answer read_shared(const SharedColumns &, const RelationsRead &, Handle, const T
 Answer read_runtime_measurement(const RuntimeMeasurements &, FactKey);
 Answer read(const ValueRead &, Handle, TermId, Step, double hz);
 
-std::vector<HandlerRef> dispatch(const Triggers &, IdentityRead, std::span<const TermId> flags,
-                                 Handle receiver, TermId trigger);
 std::vector<HandlerRef> dispatch(const Triggers &, const ValueRead &, Handle receiver,
                                  TermId trigger, Step, double hz);
 
-std::optional<std::pair<HandlerRef, std::size_t>> find_handler(const Triggers &, const ValueRead &,
-                                                               ScriptKey, TermId, Step, double hz);
-void acknowledge_watch(Subscriptions &, ScriptKey, const WatchRun &);
-
+std::optional<HandlerRef> find_handler(const Triggers &, const ValueRead &, ScriptKey, TermId, Step,
+                                       double hz);
 RelationAnswer read_relation(const Relation &, Handle);
-
-std::vector<WatchDelivery> check_watch(Subscriptions &, FactKey, const WatchAnswer &,
-                                       ScriptId recipient = 0);
 std::optional<Step> next_crossing(const Process &, const Threshold &, Step now, double hz);
-bool valid_threshold(const react::ThresholdToken &, IdentityRead, const Processes &,
-                     const Subscriptions &, Step now, double hz);
-void bind_watch(Subscriptions &, WatchBinding);
-void unbind_watch(Subscriptions &, ScriptKey, std::uint32_t index);
-void retire_subscriptions(Subscriptions &, Handle);
-std::vector<FactKey> watch_sources(const Subscriptions &, ScriptKey);
-std::vector<FactKey> watch_sources(const Subscriptions &, Handle subject);
-std::vector<ScriptKey> watch_consumers(const Subscriptions &, Handle object);
-std::vector<react::Timer> threshold_timers(const Subscriptions &, const Processes &, FactKey,
-                                           Step now, double hz, const amber::Origin &);
+WatchResult evaluate_watch(const State &, const ValueRead &, const catalog::Scripts &,
+                           const WatchWork &, Step, double hz);
+WatchResult evaluate_catch_up(const State &, const ValueRead &, const catalog::Scripts &,
+                              const BackgroundItem &, Step, double hz);
+bool has_watch(const State &, const ValueRead &, const catalog::Scripts &, FactKey, Step,
+               double hz);
+std::optional<Timer> threshold_timer(const State &, const ValueRead &, const catalog::Scripts &,
+                                     FactKey, Step, double hz, const amber::Origin &);
+void baseline_watches(State &, const ValueRead &, const catalog::Scripts &, Handle, Step, double hz,
+                      const amber::Origin &, DeferredEffects &);
 
 void validate_shared_terms(const Terms &);
 std::vector<FactKey> allocation_inputs(const Terms &, FactKey);
@@ -633,8 +597,6 @@ bool set_contribution(SharedColumns &, GivesTo &, const Term &, Handle from, Han
 void withdraw_contributor(SharedColumns &, GivesTo &, const Terms &, Handle, DeferredEffects &);
 bool set_relation(Relation &, TermId, Handle from, Handle to, bool present, DeferredEffects &);
 bool apply_derived_fact(RuntimeMeasurements &, const DerivedFactInput &, DeferredEffects &);
-void retire_object(Properties &, Processes &, ScriptStates &, RandomStates &, Handle,
-                   std::span<const ScriptId> installed_scripts);
 
 ScriptValidation validate_script(std::string_view, const Terms &, const ScriptDeclaration &,
                                  const RightsDeclaration &);
@@ -705,32 +667,11 @@ RuleChange add_rule(RuleVersions &, const catalog::Scripts &, const Terms &, Scr
 RuleChange set_rule_enabled(RuleVersions &, RuleKey, bool);
 std::vector<RuleVersion> latest_rules(const RuleVersions &);
 void project_rules(Triggers &, const RuleVersions &);
-std::vector<ScriptId> rule_scripts(const RuleVersions &, const ValueRead &, Handle, Step,
-                                   double hz);
-std::vector<TermId> rule_watch_terms(const RuleVersions &, const ValueRead &, Handle, ScriptId,
-                                     Step, double hz);
-
-WatchChanges sync_watches(amber::react::State &react_state, const ValueRead &, ScriptKey,
-                          const ScriptDeclaration &, Step now, double hz, const amber::Origin &,
-                          SyncMode, std::optional<std::span<const TermId>> allowed_terms = {});
-void remove_watches(Subscriptions &, ScriptKey);
-WatchChanges sync_rule_watches(amber::react::State &react_state, const ValueRead &,
-                               const catalog::Scripts &, std::span<const Effect>, Step, double hz,
-                               const amber::Origin &);
-std::vector<Handle> source_consumers(const ValueRead &, FactKey, const WatchDeclaration &);
-WatchResult check_changed(Subscriptions &, const ValueRead &, const AllocationRows &, FactKey, Step,
-                          double hz, const amber::Origin &, ScriptId recipient = 0);
-
-std::vector<InvocationPlan> plan_deliveries(const WatchResult &, const Triggers &,
-                                            const catalog::Scripts &, const ValueRead &, Step,
-                                            double hz);
-bool has_applicable_watch(const Subscriptions &, const Triggers &, const catalog::Scripts &,
-                          const ValueRead &, FactKey, Step, double hz);
-std::vector<react::BackgroundItem> catch_up(const SharedColumns &, IdentityRead,
-                                            const catalog::Scripts &, const Terms &,
-                                            const RuleVersion &, const amber::Origin &);
-bool catch_up_valid(const react::BackgroundItem &, const RuleVersions &, const ValueRead &, Step,
-                    double hz);
+std::vector<ScriptId> rule_scripts(const Triggers &, const ValueRead &, Handle, Step, double hz);
+std::vector<BackgroundItem> catch_up(const ValueRead &, const catalog::Scripts &,
+                                     const RuleVersion &, const amber::Origin &);
+bool catch_up_valid(const BackgroundItem &, const Triggers &, const catalog::Scripts &,
+                    const ValueRead &);
 void cancel_catch_up(std::deque<BackgroundItem> &, const RuleVersion &);
 
 void write_instances(snap::Output &, const InstanceScripts &, IdentityRead, ObjectSelection = {});
@@ -740,25 +681,23 @@ void read_instances(snap::Input &, InstanceScripts &, std::size_t slots);
 void install_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
                        const ValueRead &, std::span<const Handle>, Step, double hz,
                        const amber::Origin &, DeferredEffects &);
-void restore_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
-                       const ValueRead &, std::span<const Handle>, Step, double hz,
-                       const amber::Origin &, DeferredEffects &);
 void initialize_reactions(const amber::catalog::State &catalog_state,
                           amber::react::State &react_state, const ValueRead &values,
-                          std::span<const Handle> initial, Step now, double hz, bool restored,
+                          std::span<const Handle> initial, Step now, double hz,
                           DeferredEffects &effects);
 
 void rebind_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
                       const ValueRead &, std::span<const Handle>, Step, double hz,
                       const amber::Origin &, DeferredEffects &);
-void retire_reactions(const catalog::Models &, const ValueRead &, amber::react::State &react_state,
-                      std::span<const Handle>, Step, double hz, const amber::Origin &,
-                      DeferredEffects &);
+void refresh_plot_settings(const ValueRead &, State &, const catalog::Scripts &,
+                           std::span<const Handle>, Step, double hz, const amber::Origin &,
+                           DeferredEffects &);
+void retire_reactions(const ValueRead &, amber::react::State &react_state, std::span<const Handle>,
+                      Step, double hz, const amber::Origin &, DeferredEffects &);
 
 // True means cached rule state changed and the caller must persist its registry pin.
 bool update_rule(catalog::Scripts &, amber::react::State &react_state, std::deque<BackgroundItem> &,
-                 const ValueRead &, ScriptId, RuleMode, Step now, double hz, const amber::Origin &,
-                 DeferredEffects &);
+                 const ValueRead &, ScriptId, RuleMode, const amber::Origin &, DeferredEffects &);
 void reconcile_allocations(const ValueRead &, amber::react::State &react_state, DeferredEffects &,
                            Step, double hz);
 void reconcile_priority(const ValueRead &, amber::react::State &react_state, SettingKey,
@@ -775,9 +714,9 @@ void read_relations(snap::Input &, AuthoredRelations &, std::size_t slots);
 void write_shared(snap::Output &, const SharedColumns &, const GivesTo &, const AllocationRows &,
                   const SnapshotSelection & = {});
 void read_shared(snap::Input &, SharedColumns &, GivesTo &, AllocationRows &, std::size_t slots);
-void write_script_states(snap::Output &, const ScriptStates &, const Subscriptions &,
+void write_script_states(snap::Output &, const ScriptStates &, const WatchAnswers &,
                          const SnapshotSelection & = {});
-void read_script_states(snap::Input &, ScriptStates &, Subscriptions &);
+void read_script_states(snap::Input &, ScriptStates &, WatchAnswers &);
 void write_world_scripts(snap::Output &, const std::vector<WorldScript> &);
 void read_world_scripts(snap::Input &, std::vector<WorldScript> &);
 void write_random(snap::Output &, const RandomStates &, const SnapshotSelection & = {});
@@ -818,7 +757,7 @@ struct State {
   RandomStates random;
   Triggers triggers;
   RuleVersions rules;
-  Subscriptions subscriptions;
+  WatchAnswers watch_answers;
   InstanceScripts installations;
   std::vector<WorldScript> world_scripts;
   NativeActions native_declarations;

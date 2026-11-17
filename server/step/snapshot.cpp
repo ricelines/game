@@ -22,12 +22,6 @@ template <class S> void serialize(S &s, react::BackgroundItem &v) {
   s.object(v.origin);
   s.value4b(v.version);
 }
-template <class S> void serialize(S &s, react::ThresholdToken &v) {
-  s.object(v.source);
-  s.object(v.consumer);
-  s.value4b(v.script);
-  s.value4b(v.watch_index);
-}
 template <class S> void serialize(S &s, react::Timer &v) {
   s.value8b(v.due);
   s.object(v.event);
@@ -69,7 +63,7 @@ void write_timers(snap::Output &out, const TimerWheel &wheel,
   if (!selected.all)
     std::erase_if(rows, [&](const react::Timer &timer) {
       return !selected.contains(timer.event.receiver) ||
-             (timer.threshold && !selected.contains(timer.threshold->consumer));
+             (timer.threshold && !selected.contains(timer.threshold->subject));
     });
   out.container(rows, snap::max_collection());
 }
@@ -99,7 +93,7 @@ void write_queues(snap::Output &out, const WorkQueues &q, const Intents &intents
               return false;
           },
           item.work);
-      if (include && (!item.threshold || selected.contains(item.threshold->consumer)))
+      if (include && (!item.threshold || selected.contains(item.threshold->subject)))
         kept.push_back(&item);
     }
     out.container(kept, snap::max_collection(),

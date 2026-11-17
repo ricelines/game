@@ -97,8 +97,7 @@ FixtureCompletion complete_fixture(amber::elaborate::State &elaborate_state,
     if (error.empty()) {
       const auto before = elaboration_detail::activation_state(scripts);
       if (react::update_rule(scripts, react_state, queues.background, values, script.id,
-                             react::RuleMode::Validated, clock.step, clock.hz, out.origin,
-                             out.effects))
+                             react::RuleMode::Validated, out.origin, out.effects))
         out.changed_scripts = elaboration_detail::changed_activations(scripts, before);
       out.notification = elaborate::close_rule_answer(requests, pending, check, now);
       out.effects.changed = true;

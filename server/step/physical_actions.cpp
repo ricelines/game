@@ -27,6 +27,7 @@ struct SweepBinding {
   const perm::Plots &plots;
   react::State &react_state;
   react::ValueRead values;
+  const catalog::Scripts &scripts;
 };
 struct PartPoseBinding {
   space::Space &space;
@@ -37,6 +38,7 @@ struct PartPoseBinding {
   const perm::Plots &plots;
   react::State &react_state;
   react::ValueRead values;
+  const catalog::Scripts &scripts;
   std::size_t batch_max;
 };
 struct QueryBinding {
@@ -532,16 +534,6 @@ int cancel_motion_binding(lua_State *L) {
   lua_pushboolean(L, true);
   return 1;
 }
-void changed_plot_settings(react::State &react_state, const react::ValueRead &values,
-                           std::span<const Handle> crossed, Invocation &invocation) {
-  for (const auto object : crossed) {
-    for (const auto &term : values.terms.rows)
-      if (term.source == react::Source::Setting)
-        invocation.effects->ordered.emplace_back(react::WatchWork{{object, term.id}, {}});
-    react::reconcile_object_priorities(values, react_state, object, *invocation.effects,
-                                       invocation.step, invocation.hz);
-  }
-}
 int move_part_binding(lua_State *L) {
   auto &b = *static_cast<PartPoseBinding *>(react::binding_data(L));
   auto &i = react::invocation(L);
@@ -564,11 +556,14 @@ int move_part_binding(lua_State *L) {
       luaL_error(L, "move_part: %s", space::status_text(result.status));
     if (b.declared_parts.out.get(part.slot())) {
       const auto objects = closure(b.declared_parts, part);
-      changed_plot_settings(b.react_state, b.values,
-                            perm::update_plots(b.objects, b.plots, objects, true), i);
+      react::refresh_plot_settings(b.values, b.react_state, b.scripts,
+                                   perm::update_plots(b.objects, b.plots, objects, true), i.step,
+                                   i.hz, i.origin, *i.effects);
     } else
-      changed_plot_settings(b.react_state, b.values,
-                            perm::update_plots(b.objects, b.plots, std::span(&part, 1), true), i);
+      react::refresh_plot_settings(
+          b.values, b.react_state, b.scripts,
+          perm::update_plots(b.objects, b.plots, std::span(&part, 1), true), i.step, i.hz, i.origin,
+          *i.effects);
     ++moved;
   };
   if (lua_istable(L, 2)) {
@@ -609,8 +604,9 @@ int sweep_binding(lua_State *L) {
       space::translate(b.space, b.identity, b.transforms, subject, translation, float(1 / i.hz));
   mechanical_result(i, before != b.transforms.position[subject.slot()], std::span(&subject, 1));
   const auto objects = closure(b.declared_parts, subject);
-  changed_plot_settings(b.react_state, b.values,
-                        perm::update_plots(b.objects, b.plots, objects, true), i);
+  react::refresh_plot_settings(b.values, b.react_state, b.scripts,
+                               perm::update_plots(b.objects, b.plots, objects, true), i.step, i.hz,
+                               i.origin, *i.effects);
   operation(L, {result.status, result.contact ? result.contact->object : Handle{}});
   lua_pushvector(L, result.actual.position.x, result.actual.position.y, result.actual.position.z);
   lua_setfield(L, -2, "position");
@@ -751,10 +747,10 @@ void bind_physical(react::State &react_state, amber::ObjectState &objects_state,
       NavigationBinding{intents, endings, identity, players, grants, plots});
   const auto sweep = std::make_shared<SweepBinding>(
       SweepBinding{space, identity, transforms, declared_parts, objects_state.objects, plots,
-                   react_state, values});
+                   react_state, values, catalog_state.scripts});
   const auto parts = std::make_shared<PartPoseBinding>(
       PartPoseBinding{space, identity, transforms, declared_parts, objects_state.objects, plots,
-                      react_state, values, part_batch_max});
+                      react_state, values, catalog_state.scripts, part_batch_max});
   const auto query = std::make_shared<QueryBinding>(QueryBinding{space, identity, transforms});
   const auto sound = std::make_shared<SoundBinding>(
       SoundBinding{hearing, identity, transforms, listeners, instance_texts, model_texts});

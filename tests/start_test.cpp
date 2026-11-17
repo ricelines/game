@@ -59,7 +59,6 @@ int main(int argc, char **argv) {
           require(!script.declaration.approved && !script.declaration.active,
                   "source cannot approve an initial rule");
     }
-    catalog::Scripts &scripts = catalog_state.scripts;
     Symbols symbols;
     install_catalog(plan, react_state, registry.hash, pins, vm_settings, argv[2],
                     directory / "scripts", catalog_state, symbols);
@@ -136,10 +135,9 @@ int main(int argc, char **argv) {
                 perm::balance(ledger, perm::Account::group(2)) == 25 &&
                 perm::balance(ledger, perm::Account::player(1)) == 0,
             "startup aliased an object or group account to its controller's player wallet");
-    react::RuleVersions &rules = react_state.rules;
-    for (const auto &script : scripts.rows)
-      if (script.id && script.declaration.kind == react::ScriptDeclaration::Kind::Rule)
-        react::add_rule(rules, scripts, terms, script.id);
+    react::initialize_reactions(catalog_state, react_state,
+                                react::value_read(objects_state, catalog_state, react_state),
+                                created, 0, 20, initial);
     perm::Grants &grants = perm_state.grants;
     install_grants(plan, symbols, objects_state, perm_state, catalog_state, react_state,
                    amber::step::Clock{.step = 0, .hz = 20});

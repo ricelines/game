@@ -71,6 +71,8 @@ struct Fixture {
     f.models.rows[2].asset = std::string(64, 'b');
     f.models.rows[3].id = 3;
     f.models.rows[3].asset = std::string(64, 'c');
+    react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
+    react::project_model(f.triggers, f.models, f.scripts, f.terms, 2);
     ObjectInit init;
     init.model = 3;
     init.owner = 2;
@@ -95,12 +97,11 @@ struct Fixture {
     f.state(f.a, 1, 0);
     f.state(f.c, 1, 20);
     set_rate(f.react_state, f.terms.rows[1], f.a, 1, 0, 100, 0, 20, f.effects);
-    auto armed = react::sync_watches(f.react_state, f.values(), {f.a, script},
-                                     f.scripts.rows[script].declaration, 0, 20, {},
-                                     react::SyncMode::Initial);
-    for (auto &timer : armed.timers)
-      step::schedule(timers, std::move(timer));
-    f.bind(unrelated, f.c);
+    f.baseline(f.a);
+    if (auto timer =
+            react::threshold_timer(f.react_state, f.values(), f.scripts, {f.a, 1}, 0, 20, {}))
+      step::schedule(timers, std::move(*timer));
+    f.baseline(f.c);
     f.states[{f.c, unrelated}].insert(std::string("private"), std::string("unrelated"));
     const std::array<ScriptId, 1> explicit_scripts{script};
     react::set_instances(f.installed, f.b, explicit_scripts, f.scripts);
@@ -214,8 +215,11 @@ struct Fixture {
     captures.rows["capture-remote"] = {
         "capture-remote", "remote.amb.zst", elaborate::CaptureStatus::Ready, {}};
     motion = {{f.a, {1, 2, 3}, {.1f, .2f, .3f}, false}, {f.c, {9, 9, 9}, {}, true}};
-    const react::InvocationPlan cue{{script, "novel.cue", 1, 1, true}, f.a, f.b, 6, {}, {}};
-    f.run(std::span<const react::InvocationPlan>(&cue, 1), 12);
+    react::PlannedInvocation cue{{script, "novel.cue", 1, 1, true}, {}};
+    cue.input.receiver = f.a;
+    cue.input.sender = f.b;
+    cue.input.trigger = 6;
+    f.run(std::span(&cue, 1), 12);
     for (std::size_t i = 0; i < extra; ++i) {
       ObjectInit object;
       object.model = 2;

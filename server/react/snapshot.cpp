@@ -40,17 +40,6 @@ template <class S> void serialize(S &s, RelationAnswer &v) {
   snap::field(s, v.out);
   snap::field(s, v.in);
 }
-template <class S> void serialize(S &s, Threshold &v) {
-  snap::field(s, v.predicate);
-  snap::field(s, v.value);
-}
-template <class S> void serialize(S &s, WatchBinding &v) {
-  snap::field(s, v.consumer);
-  snap::field(s, v.index);
-  snap::field(s, v.last);
-  snap::field(s, v.declaration.term);
-  snap::field(s, v.declaration.thresholds);
-}
 
 namespace {
 template <class Map, class Pred> void write_map(snap::Output &out, const Map &map, Pred include) {
@@ -186,7 +175,7 @@ void read_shared(snap::Input &in, SharedColumns &shared, GivesTo &gives,
   });
 }
 void write_script_states(snap::Output &out, const ScriptStates &states,
-                         const Subscriptions &subscriptions, const SnapshotSelection &selected) {
+                         const WatchAnswers &watch_answers, const SnapshotSelection &selected) {
   std::vector<ScriptKey> keys;
   for (const auto &[key, state] : states) {
     (void)state;
@@ -197,21 +186,10 @@ void write_script_states(snap::Output &out, const ScriptStates &states,
     snap::field(s, key);
     write_map(s, states.at(key).values, [](const auto &) { return true; });
   });
-  std::vector<std::pair<FactKey, std::vector<WatchBinding>>> rows;
-  for (const auto &[source, bindings] : subscriptions.rows) {
-    std::vector<WatchBinding> included;
-    for (const auto &binding : bindings)
-      if (selected.contains(binding.consumer.object))
-        included.push_back(binding);
-    if (!included.empty())
-      rows.emplace_back(source, std::move(included));
-  }
-  out.container(rows, snap::max_collection(), [](snap::Output &s, auto &row) {
-    snap::field(s, row.first);
-    snap::field(s, row.second);
-  });
+  write_map(out, watch_answers,
+            [&](const FactKey &source) { return selected.contains(source.subject); });
 }
-void read_script_states(snap::Input &in, ScriptStates &states, Subscriptions &subscriptions) {
+void read_script_states(snap::Input &in, ScriptStates &states, WatchAnswers &watch_answers) {
   states.clear();
   std::vector<ScriptKey> keys;
   in.container(keys, snap::max_collection(), [&](snap::Input &s, ScriptKey &key) {
@@ -220,7 +198,7 @@ void read_script_states(snap::Input &in, ScriptStates &states, Subscriptions &su
     read_map(s, entries);
     states[key].restore(std::move(entries));
   });
-  read_map(in, subscriptions.rows);
+  read_map(in, watch_answers);
 }
 void write_world_scripts(snap::Output &out, const std::vector<WorldScript> &world) {
   auto rows = world;

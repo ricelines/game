@@ -100,24 +100,12 @@ void invalidate_execution(std::deque<ExecutionFrame> &execution, IdentityRead id
     }
 }
 
-void reconcile_effects(const react::ValueRead &values, amber::react::State &react_state,
-                       amber::step::State &step_state, const catalog::Scripts &scripts,
-                       const amber::step::Clock &clock, react::DeferredEffects &effects,
-                       const amber::Origin &origin) {
-  const auto now = clock.step;
-  const auto hz = clock.hz;
-
-  auto &mutated = step_state.mutated;
-
-  react::reconcile_allocations(values, react_state, effects, now, hz);
-  auto changes =
-      react::sync_rule_watches(react_state, values, scripts, effects.ordered, now, hz, origin);
-  for (auto &dirty : changes.dirty)
-    effects.ordered.emplace_back(std::move(dirty));
-  for (auto &timer : changes.timers)
-    effects.ordered.emplace_back(std::move(timer));
+void reconcile_effects(const react::ValueRead &values, react::State &react_state,
+                       step::State &step_state, const Clock &clock,
+                       react::DeferredEffects &effects) {
+  react::reconcile_allocations(values, react_state, effects, clock.step, clock.hz);
   for (const auto &effect : effects.ordered)
     if (const auto *watch = std::get_if<react::WatchWork>(&effect))
-      mutated.push_back(watch->source);
+      step_state.mutated.push_back(watch->source);
 }
 } // namespace amber::step

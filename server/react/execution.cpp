@@ -45,7 +45,6 @@ bool start_invocation(amber::react::State &react_state, const amber::ObjectState
 
   auto &states = react_state.states;
   auto &random = react_state.random;
-  auto &subscriptions = react_state.subscriptions;
   auto &triggers = react_state.triggers;
   auto &declared_parts = objects_state.declared_parts;
   auto attribution = amber::attribution(std::as_const(objects_state.objects));
@@ -65,12 +64,13 @@ bool start_invocation(amber::react::State &react_state, const amber::ObjectState
   // candidate waited. Eligibility itself must not recreate retired state.
   const auto current = find_handler(triggers, values, {input.receiver, handler.script},
                                     input.trigger, input.step, input.hz);
-  if (!current || current->first.function != handler.function ||
-      current->first.version != handler.version ||
+  if (!current || current->function != handler.function || current->version != handler.version ||
       !scripts.rows.at(handler.script).declaration.active)
     return false;
-  if (input.watch)
-    acknowledge_watch(subscriptions, {input.receiver, handler.script}, *input.watch);
+  if (input.watch && input.watch->value) {
+    react_state.watch_answers[input.watch->source] = std::move(*input.watch->value);
+    input.watch->value.reset();
+  }
   invocation.self = {input.receiver, handler.script};
   invocation.step = input.step;
   invocation.hz = input.hz;

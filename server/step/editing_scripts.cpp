@@ -54,7 +54,6 @@ bool synchronize(amber::react::State &react_state, const react::ValueRead &value
   const auto now = clock.step;
   const auto hz = clock.hz;
 
-  auto &subscriptions = react_state.subscriptions;
   auto &states = react_state.states;
   auto &shared = react_state.shared;
   auto &gives = react_state.gives_to;
@@ -76,17 +75,17 @@ bool synchronize(amber::react::State &react_state, const react::ValueRead &value
     }
   for (auto old : before)
     if (std::find(after.begin(), after.end(), old) == after.end()) {
-      react::remove_watches(subscriptions, {object, old});
       states.erase({object, old});
       permissions_changed |= revoke_holder(grants, players, {object, old});
       withdraw_removed(shared, gives, values.terms, scripts, object, old, remaining, effects);
+      for (const auto &watch : scripts.rows[old].declaration.watches)
+        effects.ordered.emplace_back(react::WatchWork{{object, watch.term}, origin});
     }
   for (auto added : after)
     if (std::find(before.begin(), before.end(), added) == before.end()) {
       const auto &declaration = scripts.rows[added].declaration;
-      detail::watches(effects,
-                      react::sync_watches(react_state, values, {object, added}, declaration, now,
-                                          hz, origin, react::SyncMode::Change));
+      for (const auto &watch : declaration.watches)
+        effects.ordered.emplace_back(react::WatchWork{{object, watch.term}, origin});
       if (start_event && declaration.active &&
           std::find(declaration.handlers.begin(), declaration.handlers.end(), start_event) !=
               declaration.handlers.end())
@@ -377,16 +376,17 @@ void rebind_scripts(const amber::catalog::State &catalog_state, amber::react::St
   for (const auto &binding : out.rebound_objects)
     rebound.push_back(binding.object);
   // Definition edits are rare; inspect their actual model and instance rows.
-  for (const auto &model : models.rows)
-    if (model.id &&
-        (std::binary_search(out.changed_models.begin(), out.changed_models.end(), model.id) ||
-         (model.script && std::binary_search(out.changed_scripts.begin(), out.changed_scripts.end(),
-                                             model.script)))) {
-      react::project_model(triggers, models, scripts, values.terms, model.id);
-      for (std::uint32_t slot = 1; slot < identity.model.size(); ++slot)
-        if (identity.model[slot] == model.id)
-          rebound.push_back(identity.at(slot));
-    }
+  if (!out.changed_models.empty() || !out.changed_scripts.empty())
+    for (const auto &model : models.rows)
+      if (model.id &&
+          (std::binary_search(out.changed_models.begin(), out.changed_models.end(), model.id) ||
+           (model.script && std::binary_search(out.changed_scripts.begin(),
+                                               out.changed_scripts.end(), model.script)))) {
+        react::project_model(triggers, models, scripts, values.terms, model.id);
+        for (std::uint32_t slot = 1; slot < identity.model.size(); ++slot)
+          if (identity.model[slot] == model.id)
+            rebound.push_back(identity.at(slot));
+      }
   unique(rebound);
   std::erase_if(rebound, [&](Handle object) { return !identity.valid(object); });
   unique(out.created_objects);

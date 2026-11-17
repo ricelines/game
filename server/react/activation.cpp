@@ -7,13 +7,11 @@
 namespace amber::react {
 bool update_rule(catalog::Scripts &scripts, amber::react::State &react_state,
                  std::deque<BackgroundItem> &background, const ValueRead &values, ScriptId id,
-                 RuleMode mode, Step now, double hz, const amber::Origin &origin,
-                 DeferredEffects &effects) {
+                 RuleMode mode, const amber::Origin &origin, DeferredEffects &effects) {
   auto &vm = react_state.vm;
 
   auto &rules = react_state.rules;
   auto &triggers = react_state.triggers;
-  auto &subscriptions = react_state.subscriptions;
 
   if (!id || id >= scripts.rows.size() || scripts.rows[id].id != id ||
       scripts.rows[id].declaration.kind != react::ScriptDeclaration::Kind::Rule)
@@ -67,32 +65,9 @@ bool update_rule(catalog::Scripts &scripts, amber::react::State &react_state,
       scripts.rows[script].declaration.active = false;
       react::set_activation(vm, script, scripts.rows[script].declaration.approved, false);
     }
-    std::vector<ScriptKey> consumers;
-    for (const auto &[source, bindings] : subscriptions.rows) {
-      (void)source;
-      for (const auto &binding : bindings)
-        if (binding.consumer.script == script &&
-            std::find(consumers.begin(), consumers.end(), binding.consumer) == consumers.end())
-          consumers.push_back(binding.consumer);
-    }
-    for (auto consumer : consumers) {
-      const auto allowed = react::rule_watch_terms(rules, values, consumer.object, script, now, hz);
-      if (allowed.empty()) {
-        react::remove_watches(subscriptions, consumer);
-        continue;
-      }
-      auto changes = react::sync_watches(react_state, values, consumer,
-                                         scripts.rows.at(script).declaration, now, hz, origin,
-                                         react::SyncMode::Change, std::span<const TermId>(allowed));
-      for (auto &dirty : changes.dirty)
-        effects.ordered.emplace_back(std::move(dirty));
-      for (auto &timer : changes.timers)
-        effects.ordered.emplace_back(std::move(timer));
-    }
   }
   for (const auto &active : change.active)
-    for (auto &item :
-         react::catch_up(values.shared, values.identity, scripts, values.terms, active, origin))
+    for (auto &item : react::catch_up(values, scripts, active, origin))
       effects.background.push_back(std::move(item));
   effects.changed = true;
   return true;

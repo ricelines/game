@@ -42,7 +42,6 @@ struct Fixture {
   catalog::Scripts &scripts = catalog_state.scripts;
   react::InstanceScripts &installations = react_state.installations;
   react::Triggers &triggers = react_state.triggers;
-  react::Subscriptions &subscriptions = react_state.subscriptions;
   Fixture()
       : values{terms,        identity(objects),
                objects.plot, objects.params,
@@ -438,8 +437,7 @@ void model_rebind_retires_only_removed_installations() {
   react::project_model(f.triggers, f.models, f.scripts, f.terms, 2);
   react::project_model(f.triggers, f.models, f.scripts, f.terms, 3);
   react::project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
-  f.bind(old, f.a);
-  f.bind(keep, f.a);
+  f.baseline(f.a);
   f.states[{f.a, old}].insert(std::string("retired"), true);
   f.states[{f.a, keep}].insert(std::string("saved"), std::string("surviving state"));
   react::set_contribution(f.shared, f.gives_to, f.terms.rows[4], f.a, f.b, 10, f.effects);
@@ -486,10 +484,11 @@ void model_rebind_retires_only_removed_installations() {
               bool(perm::check(perm::Holder::script(keep, f.a), perm::Verb::Transfer, target,
                                players, grants, 12)),
           "the retired script actually loses its former authority");
+  f.state(f.a, 1, 4);
+  const auto watching = f.changed({f.a, 1});
   require(f.shared[4].get(f.b.slot())->parts.empty() && f.shared[2].get(f.b.slot())->total == 7 &&
-              react::watch_sources(f.subscriptions, ScriptKey{f.a, old}).empty() &&
-              !react::watch_sources(f.subscriptions, ScriptKey{f.a, keep}).empty(),
-          "removed behavior withdraws contributions and watches without disturbing survivors");
+              watching.size() == 1 && watching[0].handler.script == keep,
+          "removed behavior withdraws contributions and only the surviving watch responds");
   std::size_t starts = 0;
   bool withdrew = false;
   for (const auto &effect : effects.ordered) {

@@ -43,8 +43,11 @@ bool installed_caller(const catalog::State &catalog_state, const react::State &r
                                             values.identity, caller.object);
   if (std::ranges::find(installed, caller.script) != installed.end())
     return true;
-  installed = react::rule_scripts(react_state.rules, values, caller.object, now, hz);
-  return std::ranges::find(installed, caller.script) != installed.end();
+  for (auto trigger : scripts.rows[caller.script].declaration.handlers)
+    if (react::find_handler(react_state.triggers, values, {caller.object, caller.script}, trigger,
+                            now, hz))
+      return true;
+  return false;
 }
 } // namespace
 ActionRun begin_action(const amber::catalog::State &catalog_state,

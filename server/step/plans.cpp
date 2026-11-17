@@ -11,12 +11,6 @@ bool in_reach(Vec3 point, Bounds target, float reach) {
   const auto z = std::clamp(point.z, target.minimum.z, target.maximum.z) - point.z;
   return x * x + y * y + z * z <= reach * reach;
 }
-bool valid_event(const EventTurn &turn, IdentityRead identity, const react::Processes &processes,
-                 const react::Subscriptions &subscriptions, Step now, double hz) {
-  if (turn.threshold)
-    return react::valid_threshold(*turn.threshold, identity, processes, subscriptions, now, hz);
-  return !turn.event.receiver || identity.valid(turn.event.receiver);
-}
 EventPayload normalize_arguments(const react::Terms &terms, TermId action, EventPayload args) {
   auto *fields = std::get_if<std::vector<EventField>>(&args);
   if (!fields)
@@ -35,10 +29,11 @@ EventPayload normalize_arguments(const react::Terms &terms, TermId action, Event
   }
   return args;
 }
-std::vector<PlannedInvocation> plan_event(const react::Triggers &triggers,
-                                          const react::ValueRead &values,
-                                          const react::EventWork &event, Step now, double hz) {
-  std::vector<PlannedInvocation> plans;
+std::vector<react::PlannedInvocation> plan_event(const react::Triggers &triggers,
+                                                 const react::ValueRead &values,
+                                                 const react::EventWork &event, Step now,
+                                                 double hz) {
+  std::vector<react::PlannedInvocation> plans;
   for (const auto &handler :
        react::dispatch(triggers, values, event.receiver, event.event, now, hz)) {
     if (event.recipient_script && event.recipient_script != handler.script)
@@ -55,12 +50,11 @@ std::vector<PlannedInvocation> plan_event(const react::Triggers &triggers,
   }
   return plans;
 }
-std::vector<PlannedInvocation> plan_action(const react::Triggers &triggers,
-                                           const react::ValueRead &values,
-                                           const react::Resolution &resolution,
-                                           const ActionRequest &request, Handle body,
-                                           const amber::Origin &origin, Step now, double hz) {
-  std::vector<PlannedInvocation> plans;
+std::vector<react::PlannedInvocation>
+plan_action(const react::Triggers &triggers, const react::ValueRead &values,
+            const react::Resolution &resolution, const ActionRequest &request, Handle body,
+            const amber::Origin &origin, Step now, double hz) {
+  std::vector<react::PlannedInvocation> plans;
   if (!resolution || resolution.route == react::Route::Native)
     return plans;
   const auto *player = std::get_if<PlayerId>(&request.caller);
@@ -86,116 +80,78 @@ std::vector<PlannedInvocation> plan_action(const react::Triggers &triggers,
   }
   return plans;
 }
-WatchPlan plan_watch(react::Subscriptions &subscriptions, const react::ValueRead &values,
-                     const react::AllocationRows &allocations, const react::Triggers &triggers,
-                     const catalog::Scripts &scripts, const react::WatchWork &work, Step now,
-                     double hz) {
-  WatchPlan plan;
-  plan.modeled =
-      react::has_applicable_watch(subscriptions, triggers, scripts, values, work.source, now, hz);
-  auto result =
-      react::check_changed(subscriptions, values, allocations, work.source, now, hz, work.origin);
-  plan.changes.timers.insert(plan.changes.timers.end(),
-                             std::make_move_iterator(result.timers.begin()),
-                             std::make_move_iterator(result.timers.end()));
-  for (auto &delivery : react::plan_deliveries(result, triggers, scripts, values, now, hz)) {
-    react::InvocationInput input;
-    input.receiver = delivery.receiver;
-    input.sender = delivery.sender;
-    input.trigger = delivery.trigger;
-    input.payload = std::move(delivery.payload);
-    input.acquired = std::move(delivery.acquired);
-    input.watch = std::move(delivery.watch);
-    input.step = now;
-    input.hz = hz;
-    input.origin = work.origin;
-    plan.invocations.push_back({std::move(delivery.handler), std::move(input)});
+void refresh_rule_thresholds(TimerWheel &timers, const react::State &react_state,
+                             const react::ValueRead &values, const catalog::Scripts &scripts,
+                             std::span<const ScriptId> changed, const Clock &clock) {
+  std::vector<TermId> terms;
+  for (auto script : changed) {
+    const auto &declaration = scripts.rows.at(script).declaration;
+    if (declaration.kind == react::ScriptDeclaration::Kind::Rule)
+      for (const auto &watch : declaration.watches)
+        terms.push_back(watch.term);
   }
-  if (!plan.modeled && values.identity.valid(work.source.subject) &&
-      values.terms.rows.at(work.source.term).combine != react::Combine::None &&
-      work.source.term < values.shared.size() &&
-      values.shared[work.source.term].get(work.source.subject.slot()))
-    plan.shared_gap = work.source;
-  return plan;
-}
-WatchPlan plan_background(amber::react::State &react_state, const react::ValueRead &values,
-                          const catalog::Scripts &scripts, const react::BackgroundItem &item,
-                          Step now, double hz) {
-  auto &subscriptions = react_state.subscriptions;
-  auto &allocations = react_state.allocations;
-  auto &triggers = react_state.triggers;
-  auto &rules = react_state.rules;
-
-  WatchPlan result;
-  if (!react::catch_up_valid(item, rules, values, now, hz))
-    return result;
-  const auto &declaration = scripts.rows.at(item.script).declaration;
-  for (const auto &watch : declaration.watches)
-    if (watch.term == item.trigger)
-      for (auto consumer : react::source_consumers(values, {item.receiver, item.trigger}, watch)) {
-        const auto allowed = react::rule_watch_terms(rules, values, consumer, item.script, now, hz);
-        if (std::find(allowed.begin(), allowed.end(), item.trigger) == allowed.end())
-          continue;
-        auto changes = react::sync_watches(
-            react_state, values, {consumer, item.script}, declaration, now, hz, item.origin,
-            react::SyncMode::Change, std::span<const TermId>(allowed));
-        result.changes.dirty.insert(result.changes.dirty.end(), changes.dirty.begin(),
-                                    changes.dirty.end());
-        result.changes.timers.insert(result.changes.timers.end(), changes.timers.begin(),
-                                     changes.timers.end());
-      }
-  auto changed =
-      react::check_changed(subscriptions, values, allocations, {item.receiver, item.trigger}, now,
-                           hz, item.origin, item.script);
-  result.changes.timers.insert(result.changes.timers.end(), changed.timers.begin(),
-                               changed.timers.end());
-  for (auto &delivery : react::plan_deliveries(changed, triggers, scripts, values, now, hz)) {
-    react::InvocationInput input;
-    input.receiver = delivery.receiver;
-    input.sender = delivery.sender;
-    input.trigger = delivery.trigger;
-    input.payload = std::move(delivery.payload);
-    input.acquired = std::move(delivery.acquired);
-    input.watch = std::move(delivery.watch);
-    input.step = now;
-    input.hz = hz;
-    input.origin = item.origin;
-    result.invocations.push_back({std::move(delivery.handler), std::move(input)});
-  }
-  return result;
-}
-std::optional<std::vector<PlannedInvocation>>
-prepare_reactive(amber::react::State &react_state, const react::ValueRead &values,
-                 const catalog::Scripts &scripts, amber::step::State &step_state,
-                 ForegroundItem item, Step now, double hz) {
-  auto &subscriptions = react_state.subscriptions;
-  auto &allocations = react_state.allocations;
-  auto &triggers = react_state.triggers;
-  auto &queues = step_state.queues;
-  auto &timers = step_state.timers;
-  auto &gaps = step_state.gaps;
-
-  if (auto *event = std::get_if<react::EventWork>(&item.work)) {
-    EventTurn turn{std::move(*event), std::move(item.threshold)};
-    if (!valid_event(turn, values.identity, values.processes, subscriptions, now, hz))
-      return {};
-    if (turn.threshold) {
-      enqueue_watch(queues, {turn.threshold->source, turn.event.origin});
-      return std::vector<PlannedInvocation>{};
+  if (terms.empty())
+    return;
+  std::vector<react::ThresholdChange> changes;
+  for (const auto &[fact, location] : timers.thresholds)
+    if (std::find(terms.begin(), terms.end(), fact.term) != terms.end()) {
+      const auto &timer = timers.levels[location.level][location.bucket][location.index];
+      changes.push_back({fact, react::threshold_timer(react_state, values, scripts, fact,
+                                                      clock.step, clock.hz, timer.event.origin)});
     }
-    return plan_event(triggers, values, turn.event, now, hz);
+  apply_thresholds(timers, std::move(changes));
+}
+
+namespace {
+void refresh_selector_thresholds(TimerWheel &timers, const react::State &react_state,
+                                 const react::ValueRead &values, const catalog::Scripts &scripts,
+                                 const react::WatchWork &work, Step now, double hz) {
+  for (const auto &[term, trigger] : react_state.triggers) {
+    if (term == work.source.term || term >= values.processes.size() ||
+        !values.processes[term].get(work.source.subject.slot()) ||
+        std::none_of(trigger.by_flag.begin(), trigger.by_flag.end(),
+                     [&](const auto &entry) { return entry.first == work.source.term; }))
+      continue;
+    const FactKey fact{work.source.subject, term};
+    auto origin = work.origin;
+    if (const auto found = timers.thresholds.find(fact); found != timers.thresholds.end()) {
+      const auto location = found->second;
+      origin = timers.levels[location.level][location.bucket][location.index].event.origin;
+    }
+    if (auto timer = react::threshold_timer(react_state, values, scripts, fact, now, hz, origin))
+      schedule(timers, std::move(*timer));
+    else
+      cancel_threshold(timers, fact);
+  }
+}
+} // namespace
+
+std::optional<std::vector<react::PlannedInvocation>>
+prepare_reactive(react::State &react_state, const react::ValueRead &values,
+                 const catalog::Scripts &scripts, step::State &step_state, ForegroundItem item,
+                 Step now, double hz) {
+  if (auto *event = std::get_if<react::EventWork>(&item.work)) {
+    if (item.threshold) {
+      if (step_state.timers.thresholds.contains(*item.threshold))
+        return {};
+      enqueue_watch(step_state.queues, {*item.threshold, event->origin});
+      return std::vector<react::PlannedInvocation>{};
+    }
+    if (event->receiver && !values.identity.valid(event->receiver))
+      return {};
+    return plan_event(react_state.triggers, values, *event, now, hz);
   }
   const auto &watch = std::get<react::WatchWork>(item.work);
   if (!values.identity.valid(watch.source.subject))
     return {};
-  cancel_source_thresholds(timers, subscriptions, watch.source);
-  auto planned = plan_watch(subscriptions, values, allocations, triggers, scripts, watch, now, hz);
-  if (planned.shared_gap)
-    gaps.push_back({planned.shared_gap->subject, planned.shared_gap->term, 0, 0, watch.origin});
-  for (auto &dirty : planned.changes.dirty)
-    enqueue_watch(queues, std::move(dirty));
-  for (auto &timer : planned.changes.timers)
-    schedule(timers, std::move(timer));
+  auto planned = react::evaluate_watch(react_state, values, scripts, watch, now, hz);
+  if (values.terms.rows.at(watch.source.term).kind == react::Kind::Flag)
+    refresh_selector_thresholds(step_state.timers, react_state, values, scripts, watch, now, hz);
+  if (!planned.modeled && values.terms.rows.at(watch.source.term).combine != react::Combine::None &&
+      watch.source.term < values.shared.size() &&
+      values.shared[watch.source.term].get(watch.source.subject.slot()))
+    step_state.gaps.push_back({watch.source.subject, watch.source.term, 0, 0, watch.origin});
+  apply_thresholds(step_state.timers, std::move(planned.thresholds));
   return std::move(planned.invocations);
 }
 } // namespace amber::step

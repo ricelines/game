@@ -45,8 +45,8 @@ void round_trip_and_real_vm_continuation() {
               react::read_state(loaded.f.properties, loaded.f.processes, original.f.a, 1, 20, 20)
                       .value.numeric() == 1 &&
               step::timers(loaded.timers).size() == step::timers(original.timers).size() &&
-              loaded.f.subscriptions.rows.at({original.f.a, 1}).front().last ==
-                  original.f.subscriptions.rows.at({original.f.a, 1}).front().last &&
+              loaded.f.watch_answers.at({original.f.a, 1}) ==
+                  original.f.watch_answers.at({original.f.a, 1}) &&
               loaded.profiles.by_key == original.profiles.by_key &&
               loaded.grants.by_key == original.grants.by_key,
           "restore preserves the live closed-form process, pending crossing and last watch answer");
@@ -65,17 +65,21 @@ void round_trip_and_real_vm_continuation() {
     require(outcome.status == react::RunOutcome::Status::Ok,
             "fresh VM loads the same immutable compiled fixture artifacts");
   }
-  const auto before = loaded.f.subscriptions.rows.at({original.f.a, 1}).front().last;
-  auto changes = react::sync_watches(
-      loaded.f.react_state, loaded.f.values(), {original.f.a, original.script},
-      loaded.f.scripts.rows[original.script].declaration, 12, 20, {}, react::SyncMode::Restore);
-  require(changes.dirty.empty() && changes.timers.empty() &&
-              loaded.f.subscriptions.rows.at({original.f.a, 1}).front().last == before,
-          "runtime watch rehydration preserves saved last answers and does not duplicate timers");
-  const react::InvocationPlan cue{
-      {original.script, "novel.cue", 1, 1, true}, original.f.a, original.f.b, 6, {}, {}};
-  original.f.run(std::span<const react::InvocationPlan>(&cue, 1), 13);
-  loaded.f.run(std::span<const react::InvocationPlan>(&cue, 1), 13);
+  const auto before = loaded.f.watch_answers.at({original.f.a, 1});
+  react::project_model(loaded.f.triggers, loaded.f.models, loaded.f.scripts, loaded.f.terms, 1);
+  react::DeferredEffects restored_effects;
+  const std::array restored_objects{original.f.a};
+  react::install_reactions(loaded.f.catalog_state, loaded.f.react_state, loaded.f.values(),
+                           restored_objects, 12, 20, {}, restored_effects);
+  require(restored_effects.ordered.empty() &&
+              loaded.f.watch_answers.at({original.f.a, 1}) == before,
+          "runtime restoration preserves saved answers and pending timers");
+  react::PlannedInvocation cue{{original.script, "novel.cue", 1, 1, true}, {}};
+  cue.input.receiver = original.f.a;
+  cue.input.sender = original.f.b;
+  cue.input.trigger = 6;
+  original.f.run(std::span(&cue, 1), 13);
+  loaded.f.run(std::span(&cue, 1), 13);
   require(original.f.states.at({original.f.a, original.script}) ==
                   loaded.f.states.at({original.f.a, original.script}) &&
               original.f.random == loaded.f.random,

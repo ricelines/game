@@ -194,50 +194,44 @@ void process_thresholds_and_transfer() {
           "insufficient transfer no mutation");
   near(read_state(f.properties, f.processes, f.a, 1, 50, 20).value.numeric(), 2.5,
        "failed transfer retains value");
-  Subscriptions subs;
-  bind_watch(subs,
-             {{f.a, 1}, 0, Answer{true, Value(3.0)}, {1, {{Threshold::Predicate::Below, 2}}}});
-  const react::ThresholdToken token{{f.a, 1}, f.a, 1, 0};
-  require(valid_threshold(token, identity(f.objects), f.processes, subs, 60, 20),
-          "current process actually crosses the subscribed predicate");
-  require(!valid_threshold(token, identity(f.objects), f.processes, subs, 50, 20),
-          "a timer cannot wake a predicate that has not crossed");
-  require(check_watch(subs, {f.a, 1}, Answer{true, Value(3.0)}).empty(), "change back is silent");
-  require(check_watch(subs, {f.a, 1}, Answer{true, Value(1.0)}).size() == 1, "threshold delivery");
 }
-void subscription_removal_and_relations() {
-  Fixture f;
-  Subscriptions subscriptions;
-  const ScriptKey consumer{f.b, 7};
-  const FactKey source{f.b, 1};
-  bind_watch(subscriptions, {consumer, 0, Answer{}, {1, {}}});
-  unbind_watch(subscriptions, consumer, 0);
-  bind_watch(subscriptions, {consumer, 0, Answer{}, {1, {}}});
-  bind_watch(subscriptions, {consumer, 1, Answer{}, {2, {}}});
-  require(watch_sources(subscriptions, consumer).size() == 2,
-          "consumer lookup reads its watched terms");
-  unbind_watch(subscriptions, consumer, 0);
-  require(!subscriptions.rows.contains(source) && subscriptions.rows.contains({f.b, 2}),
-          "unbind touches selected watch only");
-  retire_subscriptions(subscriptions, f.b);
-  require(subscriptions.rows.empty(), "consumer retirement removes its primary watch rows");
-  Relation relation;
-  DeferredEffects effects;
-  bind_watch(subscriptions, {{f.a, 8}, 0, RelationAnswer{}, {2, {}}});
-  set_relation(relation, 2, f.b, f.a, true, effects);
-  auto deliveries = check_watch(subscriptions, {f.a, 2}, read_relation(relation, f.a));
-  require(deliveries.size() == 1 && deliveries[0].relations.size() == 1 &&
-              deliveries[0].relations[0].other == f.b && deliveries[0].relations[0].added &&
-              deliveries[0].relations[0].incoming,
-          "relation watch carries other endpoint and direction");
-  acknowledge_watch(subscriptions, {f.a, 8}, {{f.a, 2}, 0, deliveries[0].value});
-  set_relation(relation, 2, f.b, f.a, false, effects);
-  deliveries = check_watch(subscriptions, {f.a, 2}, read_relation(relation, f.a));
-  require(deliveries.size() == 1 && !deliveries[0].relations[0].added,
-          "empty relation is delivered after removal");
-  retire_subscriptions(subscriptions, f.a);
-  require(subscriptions.rows.empty(), "source retirement clears self subscription");
+void watched_thresholds_and_relations() {
+  test_runtime::Fixture f;
+  const auto script = f.add(R"(return {kind='instance',watches={
+    {term='novel.heat',thresholds={{predicate='below',value=2}}},'novel.link'},on={
+    ['novel.heat']=function(self) self.state.crossed=true end,
+    ['novel.link']=function(self,_,edge)
+      self.state.other=edge.other;self.state.added=edge.added;self.state.incoming=edge.incoming
+    end}})");
+  set_instances(f.installed, f.a, std::span(&script, 1), f.scripts);
+  project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
+  f.state(f.a, 1, 3);
+  set_rate(f.react_state, f.terms.rows[1], f.a, -1, 0, 10, 0, 20, f.effects);
+  f.baseline(f.a);
+  const auto timer = threshold_timer(f.react_state, f.values(), f.scripts, {f.a, 1}, 0, 20, {});
+  require(timer && timer->due == 21 && f.changed({f.a, 1}, 20).empty(),
+          "the current process wakes only at the strict subscribed crossing");
+  require(f.changed({f.a, 1}, 0).empty(), "an unchanged threshold predicate is silent");
+  f.run(f.changed({f.a, 1}, 21), 21);
+  require(std::get<bool>(f.states.at({f.a, script}).values.at(std::string("crossed"))),
+          "the crossing invokes the real installed handler");
+  set_relation(f.relations.at(3), 3, f.b, f.a, true, f.effects);
+  f.run(f.changed({f.a, 3}));
+  const auto &state = f.states.at({f.a, script}).values;
+  require(std::get<Handle>(state.at(std::string("other"))) == f.b &&
+              std::get<bool>(state.at(std::string("added"))) &&
+              std::get<bool>(state.at(std::string("incoming"))),
+          "relation handler receives the other endpoint and incoming direction");
+  set_relation(f.relations.at(3), 3, f.b, f.a, false, f.effects);
+  f.run(f.changed({f.a, 3}));
+  require(!std::get<bool>(state.at(std::string("added"))),
+          "removing the last relation delivers the removal to the handler");
+  set_instances(f.installed, f.a, {}, f.scripts);
+  project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
+  set_relation(f.relations.at(3), 3, f.b, f.a, true, f.effects);
+  require(f.changed({f.a, 3}).empty(), "uninstalled handlers receive no later relation changes");
 }
+
 void allocation_rows_track_current_nonzero_shares_only() {
   Fixture f;
   AllocationRows allocations;
@@ -330,8 +324,10 @@ void dispatch_order() {
   row.by_flag.push_back({2, {2, "flag"}});
   row.by_model[1] = {3, "model"};
   row.by_instance[f.a.bits] = {{4, "instance"}};
-  const std::array<TermId, 1> flags{2};
-  auto handlers = dispatch(triggers, identity(f.objects), flags, f.a, 1);
+  f.terms.rows[2].kind = Kind::Flag;
+  f.properties.resize(3);
+  f.properties[2].set(f.a.slot(), Value(true));
+  auto handlers = dispatch(triggers, f.values(), f.a, 1, 0, 20);
   require(handlers.size() == 4 && handlers[0].script == 1 && handlers[3].script == 4,
           "dispatch material flag model instance order");
 }
@@ -736,8 +732,9 @@ void luau_bound_values_and_events() {
   require(execute(cyclic, cycle_state, cycle_effects, f.a, 2).status == RunOutcome::Status::Error,
           "cyclic event table rejected before recursion");
 
-  auto armed = threshold_timers(Subscriptions{}, f.processes, {f.a, 1}, 0, 20, {});
-  require(armed.empty(), "unsubscribed process schedules nothing");
+  const auto armed =
+      threshold_timer(f.react_state, projection, f.catalog_state.scripts, {f.a, 1}, 0, 20, {});
+  require(!armed, "an unwatched process schedules nothing");
 }
 void synchronous_actions_and_nested_deadlines() {
   Fixture f;
@@ -966,7 +963,7 @@ int main() {
   source_resolution();
   owner_value_view_reads_bound_relations();
   process_thresholds_and_transfer();
-  subscription_removal_and_relations();
+  watched_thresholds_and_relations();
   allocation_rows_track_current_nonzero_shares_only();
   contribution_and_allocation();
   equal_sharing_caps_demands_and_preserves_other_subjects();

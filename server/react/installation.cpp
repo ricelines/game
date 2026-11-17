@@ -4,79 +4,64 @@
 #include <algorithm>
 
 namespace amber::react {
-namespace {
-void install_with_mode(const amber::catalog::State &catalog_state, amber::react::State &react_state,
-                       const ValueRead &values, std::span<const Handle> objects, Step now,
-                       double hz, const amber::Origin &origin, DeferredEffects &effects,
-                       react::SyncMode mode) {
-
-  auto &models = catalog_state.models;
-  auto &scripts_table = catalog_state.scripts;
-  auto &instances = react_state.installations;
-  auto &rules = react_state.rules;
-  auto &triggers = react_state.triggers;
-  auto &subscriptions = react_state.subscriptions;
-
-  for (auto h : objects) {
-    react::project_instance(triggers, instances, scripts_table, values.terms, h);
-    auto scripts = react::installed_scripts(models, instances, values.identity, h);
-    auto applicable = react::rule_scripts(rules, values, h, now, hz);
-    scripts.insert(scripts.end(), applicable.begin(), applicable.end());
-    if (mode == react::SyncMode::Change)
-      for (auto consumer : watch_consumers(subscriptions, h))
-        if (std::find(scripts.begin(), scripts.end(), consumer.script) == scripts.end())
-          react::remove_watches(subscriptions, consumer);
-    for (const auto id : scripts) {
-      const auto &script = scripts_table.rows.at(id);
-      const auto allowed = react::rule_watch_terms(rules, values, h, id, now, hz);
-      auto changes = react::sync_watches(
-          react_state, values, {h, id}, script.declaration, now, hz, origin, mode,
-          script.declaration.kind == react::ScriptDeclaration::Kind::Rule
-              ? std::optional<std::span<const TermId>>(allowed)
-              : std::nullopt);
-      for (auto &work : changes.dirty)
-        effects.ordered.emplace_back(std::move(work));
-      for (auto &timer : changes.timers)
-        effects.ordered.emplace_back(std::move(timer));
+void install_reactions(const catalog::State &catalog, State &state, const ValueRead &values,
+                       std::span<const Handle> objects, Step now, double hz,
+                       const amber::Origin &origin, DeferredEffects &effects) {
+  for (auto object : objects) {
+    project_instance(state.triggers, state.installations, catalog.scripts, values.terms, object);
+    baseline_watches(state, values, catalog.scripts, object, now, hz, origin, effects);
+  }
+}
+void rebind_reactions(const catalog::State &catalog, State &state, const ValueRead &values,
+                      std::span<const Handle> objects, Step now, double hz,
+                      const amber::Origin &origin, DeferredEffects &effects) {
+  for (auto object : objects) {
+    project_instance(state.triggers, state.installations, catalog.scripts, values.terms, object);
+    // Rebinding can change baked, intrinsic and setting answers without a write.
+    // Preserve prior answers, including watches removed by this edit.
+    for (const auto &[term, trigger] : state.triggers) {
+      (void)trigger;
+      const auto kind = values.terms.rows.at(term).kind;
+      const FactKey fact{object, term};
+      if ((kind == Kind::Quantity || kind == Kind::Flag || kind == Kind::Relation) &&
+          (state.watch_answers.contains(fact) ||
+           has_watch(state, values, catalog.scripts, fact, now, hz)))
+        effects.ordered.emplace_back(WatchWork{fact, origin});
     }
   }
 }
-} // namespace
-void install_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
-                       const ValueRead &values, std::span<const Handle> objects, Step now,
-                       double hz, const amber::Origin &origin, DeferredEffects &effects) {
-
-  install_with_mode(catalog_state, react_state, values, objects, now, hz, origin, effects,
-                    react::SyncMode::Initial);
+void refresh_plot_settings(const ValueRead &values, State &state, const catalog::Scripts &scripts,
+                           std::span<const Handle> objects, Step now, double hz,
+                           const amber::Origin &origin, DeferredEffects &effects) {
+  if (objects.empty())
+    return;
+  std::vector<std::pair<TermId, bool>> settings;
+  for (const auto &[term, trigger] : state.triggers) {
+    if (values.terms.rows[term].source == Source::Setting)
+      settings.emplace_back(term, false);
+    for (const auto &[flag, handler] : trigger.by_flag)
+      if (handler.enabled && values.terms.rows[flag].source == Source::Setting)
+        settings.emplace_back(flag, true);
+  }
+  // Keep the selector role when a setting flag is also watched directly.
+  std::sort(settings.begin(), settings.end(), [](const auto &a, const auto &b) {
+    return a.first == b.first ? a.second > b.second : a.first < b.first;
+  });
+  settings.erase(std::unique(settings.begin(), settings.end(),
+                             [](const auto &a, const auto &b) { return a.first == b.first; }),
+                 settings.end());
+  for (auto object : objects) {
+    for (const auto &[term, selector] : settings)
+      if (selector || has_watch(state, values, scripts, {object, term}, now, hz))
+        effects.ordered.emplace_back(WatchWork{{object, term}, origin});
+    reconcile_object_priorities(values, state, object, effects, now, hz);
+  }
 }
-void restore_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
-                       const ValueRead &values, std::span<const Handle> objects, Step now,
-                       double hz, const amber::Origin &origin, DeferredEffects &effects) {
-
-  install_with_mode(catalog_state, react_state, values, objects, now, hz, origin, effects,
-                    react::SyncMode::Restore);
-}
-void rebind_reactions(const amber::catalog::State &catalog_state, amber::react::State &react_state,
-                      const ValueRead &values, std::span<const Handle> objects, Step now, double hz,
+void retire_reactions(const ValueRead &values, amber::react::State &react_state,
+                      std::span<const Handle> objects, Step now, double hz,
                       const amber::Origin &origin, DeferredEffects &effects) {
-
-  auto &subscriptions = react_state.subscriptions;
-
-  install_with_mode(catalog_state, react_state, values, objects, now, hz, origin, effects,
-                    react::SyncMode::Change);
-  // Binding changes can alter intrinsic, baked and default answers without a
-  // state write. Include subscribers on other objects following this source;
-  // preserve their saved answers so the ordinary driver compares actual values.
-  for (auto object : objects)
-    for (auto source : watch_sources(subscriptions, object))
-      effects.ordered.emplace_back(react::WatchWork{source, origin});
-}
-void retire_reactions(const catalog::Models &models, const ValueRead &values,
-                      amber::react::State &react_state, std::span<const Handle> objects, Step now,
-                      double hz, const amber::Origin &origin, DeferredEffects &effects) {
   auto &instances = react_state.installations;
   auto &triggers = react_state.triggers;
-  auto &subscriptions = react_state.subscriptions;
   auto &properties = react_state.properties;
   auto &processes = react_state.processes;
   auto &settings = react_state.instance_settings;
@@ -87,9 +72,6 @@ void retire_reactions(const catalog::Models &models, const ValueRead &values,
   auto &relations = react_state.authored_relations;
 
   for (auto h : objects) {
-    const auto consumers = watch_consumers(subscriptions, h);
-    for (const auto key : consumers)
-      react::remove_watches(subscriptions, key);
     react::withdraw_contributor(shared, gives_to, values.terms, h, effects);
     for (auto &[term, relation] : relations) {
       const auto *out = relation.out.get(h.slot());
@@ -112,11 +94,19 @@ void retire_reactions(const catalog::Models &models, const ValueRead &values,
       }
   }
   reconcile_allocations(values, react_state, effects, now, hz);
+  std::vector<Handle> retired(objects.begin(), objects.end());
+  std::sort(retired.begin(), retired.end());
+  std::erase_if(states, [&](const auto &row) {
+    return std::binary_search(retired.begin(), retired.end(), row.first.object);
+  });
   for (auto h : objects) {
-    auto installed = react::installed_scripts(models, instances, values.identity, h);
-    react::retire_subscriptions(subscriptions, h);
-    react::retire_object(properties, processes, states, random, h, installed);
-    std::erase_if(states, [&](const auto &row) { return row.first.object == h; });
+    for (const auto &term : values.terms.rows)
+      react_state.watch_answers.erase({h, term.id});
+    for (auto &column : properties)
+      column.erase(h.slot());
+    for (auto &column : processes)
+      column.erase(h.slot());
+    random.erase(h.bits);
     for (auto &column : settings.columns)
       column.erase(h.slot());
     instances.erase(h.slot());
@@ -128,7 +118,7 @@ void retire_reactions(const catalog::Models &models, const ValueRead &values,
 }
 void initialize_reactions(const amber::catalog::State &catalog_state,
                           amber::react::State &react_state, const ValueRead &values,
-                          std::span<const Handle> initial, Step now, double hz, bool restored,
+                          std::span<const Handle> initial, Step now, double hz,
                           DeferredEffects &effects) {
   auto &models = catalog_state.models;
   auto &scripts = catalog_state.scripts;
@@ -141,11 +131,6 @@ void initialize_reactions(const amber::catalog::State &catalog_state,
       react::project_model(triggers, models, scripts, values.terms, model.id);
   react::project_rules(triggers, rules);
   react::project_world(react_state, scripts);
-  if (restored)
-    react::restore_reactions(catalog_state, react_state, values, initial, now, hz, {}, effects);
-  else
-    react::install_reactions(catalog_state, react_state, values, initial, now, hz, {}, effects);
-  for (auto object : initial)
-    react::reconcile_object_priorities(values, react_state, object, effects, now, hz);
+  react::install_reactions(catalog_state, react_state, values, initial, now, hz, {}, effects);
 }
 } // namespace amber::react

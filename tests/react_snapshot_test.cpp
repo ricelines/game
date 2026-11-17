@@ -23,9 +23,8 @@ void reaction_roundtrip_and_capture() {
   states[{a, 4}].insert(std::int64_t{1}, 4.0);
   states[{a, 4}].insert(std::string("1"), std::string("different"));
   states[{outside, 4}].insert(std::string("x"), 99.0);
-  Subscriptions subscriptions;
-  bind_watch(subscriptions,
-             {{b, 4}, 0, Answer{true, Value(3.0)}, {1, {{Threshold::Predicate::Below, 2}}}});
+  WatchAnswers watch_answers{{{b, 1}, Answer{true, Value(3.0)}},
+                             {{outside, 1}, Answer{true, Value(90.0)}}};
   RandomStates random{{a.bits, 345}, {outside.bits, 567}};
   AuthoredRelations relations;
   DeferredEffects effects;
@@ -45,7 +44,7 @@ void reaction_roundtrip_and_capture() {
   write_properties(out, props, processes, selection);
   write_relations(out, relations, selection);
   write_shared(out, shared, gives, allocations, selection);
-  write_script_states(out, states, subscriptions, selection);
+  write_script_states(out, states, watch_answers, selection);
   write_random(out, random, selection);
   out.adapter().flush();
   bytes.resize(out.adapter().writtenBytesCount());
@@ -53,7 +52,7 @@ void reaction_roundtrip_and_capture() {
   Processes loaded_processes;
   ScriptStates loaded_states;
   loaded_states[{a, 4}].insert(std::string("stale"), std::string(500, 'x'));
-  Subscriptions loaded_subscriptions;
+  WatchAnswers loaded_answers;
   RandomStates loaded_random;
   AuthoredRelations loaded_relations;
   SharedColumns loaded_shared;
@@ -63,7 +62,7 @@ void reaction_roundtrip_and_capture() {
   read_properties(in, loaded_props, loaded_processes, 4);
   read_relations(in, loaded_relations, 4);
   read_shared(in, loaded_shared, loaded_gives, loaded_allocations, 4);
-  read_script_states(in, loaded_states, loaded_subscriptions);
+  read_script_states(in, loaded_states, loaded_answers);
   read_random(in, loaded_random);
   snap::check_complete(in);
   require(loaded_props[1].get(a.slot()) && !loaded_props[1].get(outside.slot()),
@@ -84,10 +83,8 @@ void reaction_roundtrip_and_capture() {
           "restore rebuilds the persistent charge from the saved entries");
   require(loaded_random.size() == 1 && loaded_random.at(a.bits) == 345,
           "RNG selected full handle restored");
-  require(loaded_subscriptions.rows.at({b, 1})[0].last == subscriptions.rows.at({b, 1})[0].last,
-          "saved watch answer survives snapshot");
-  require(watch_sources(loaded_subscriptions, ScriptKey{b, 4}) == std::vector<FactKey>{{b, 1}},
-          "consumer lookup finds the restored primary row");
+  require(loaded_answers.size() == 1 && loaded_answers.at({b, 1}) == watch_answers.at({b, 1}),
+          "capture restores selected consumer answers and excludes unselected subjects");
   require(loaded_relations.at(2).in.get(b.slot())->front() == a, "bidirectional relation restored");
   require(loaded_gives.get(b.slot())->front().subject == a, "contribution reverse restored");
   require(get_share(loaded_allocations, a, 2, b) == 10 &&
@@ -203,10 +200,10 @@ void world_installations_and_state_survive_only_full_snapshots() {
   bytes.resize(out.adapter().writtenBytesCount());
   std::vector<WorldScript> restored;
   ScriptStates restored_states;
-  Subscriptions restored_subscriptions;
+  WatchAnswers restored_answers;
   snap::Input in{bytes.data(), bytes.size()};
   read_world_scripts(in, restored);
-  read_script_states(in, restored_states, restored_subscriptions);
+  read_script_states(in, restored_states, restored_answers);
   snap::check_complete(in);
   const auto *installation = world_script(restored, 7);
   require(restored.size() == 1 && installation && installation->space == "civic" &&
@@ -223,7 +220,7 @@ void world_installations_and_state_survive_only_full_snapshots() {
   capture.resize(capture_out.adapter().writtenBytesCount());
   snap::Input capture_in{capture.data(), capture.size()};
   read_world_scripts(capture_in, restored);
-  read_script_states(capture_in, restored_states, restored_subscriptions);
+  read_script_states(capture_in, restored_states, restored_answers);
   snap::check_complete(capture_in);
   require(restored.empty() && restored_states.size() == 1 && restored_states.contains({object, 2}),
           "local object capture retained world installation state");

@@ -769,6 +769,7 @@ int main(int argc, char **argv) {
     scripts.rows[rule_id].declaration.approved = true;
     scripts.rows[rule_id].declaration.active = true;
     react::add_rule(rules, scripts, terms, rule_id);
+    react::project_rules(react_state.triggers, rules);
     require(react::load_script(vm, rule_code, scripts.rows[rule_id].declaration).status ==
                 react::RunOutcome::Status::Ok,
             "actual applicable rule VM load");
@@ -787,6 +788,7 @@ int main(int argc, char **argv) {
                 with_rule["script_states"][1]["state"][0]["value"] == 19,
             "owner inspection omitted actual applicable world-rule state");
     react::set_rule_enabled(rules, {4, 2, false}, false);
+    react::project_rules(react_state.triggers, rules);
     require(inspect(call).fields["script_states"].size() == 1,
             "inspection exposed a no-longer-applicable rule state as an installed script");
     call.principal.player = 2;

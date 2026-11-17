@@ -7,7 +7,6 @@ add_library(amber_react STATIC
   installation.cpp
   activation.cpp
   install_dispatch.cpp
-  install_watches.cpp
   snapshot.cpp
   allocation.cpp
   action_declarations.cpp

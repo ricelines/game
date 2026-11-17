@@ -346,16 +346,6 @@ bool apply_derived_fact(RuntimeMeasurements &measurements, const DerivedFactInpu
   dirty(effects, input.source.subject, input.source.term);
   return true;
 }
-void retire_object(Properties &props, Processes &processes, ScriptStates &states,
-                   RandomStates &random, Handle object, std::span<const ScriptId> scripts) {
-  for (auto &column : props)
-    column.erase(object.slot());
-  for (auto &column : processes)
-    column.erase(object.slot());
-  for (auto script : scripts)
-    states.erase({object, script});
-  random.erase(object.bits);
-}
 namespace {
 struct Demand {
   Handle from;

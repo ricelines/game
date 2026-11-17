@@ -48,7 +48,7 @@ perm::HolderControl installed_holder(perm::Holder selected, const perm::Players 
   auto &models = catalog_state.models;
   auto &scripts = catalog_state.scripts;
   auto &instances = react_state.installations;
-  auto &rules = react_state.rules;
+  auto &triggers = react_state.triggers;
 
   if (selected.kind == perm::HolderKind::Player) {
     if (!selected.id || selected.id >= players.rows.size())
@@ -64,7 +64,7 @@ perm::HolderControl installed_holder(perm::Holder selected, const perm::Players 
   if (!identity.valid(object))
     throw std::invalid_argument("unknown current script holder");
   auto installed = react::installed_scripts(models, instances, identity, object);
-  const auto applicable_rules = react::rule_scripts(rules, values, object, call.step, call.hz);
+  const auto applicable_rules = react::rule_scripts(triggers, values, object, call.step, call.hz);
   installed.insert(installed.end(), applicable_rules.begin(), applicable_rules.end());
   return {selected, authority.owner[object.slot()],
           std::find(installed.begin(), installed.end(), selected.id) != installed.end()};

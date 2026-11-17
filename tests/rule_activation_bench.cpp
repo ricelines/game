@@ -20,13 +20,11 @@ void run(unsigned unrelated) {
     end},tests={{when={steps=0},expect={subject='target',term='novel.signal',equals=1}}}})");
   react::add_rule(f.rules, f.scripts, f.terms, script);
   react::project_rules(f.triggers, f.rules);
-  react::GivesTo gives;
   constexpr unsigned count = 10000;
   const auto start = std::chrono::steady_clock::now();
   for (unsigned i = 1; i <= count; ++i) {
     react::DeferredEffects effects;
-    react::set_contribution(f.shared, gives, f.terms.rows[4], f.c, f.a, i, effects);
-    react::sync_rule_watches(f.react_state, f.values(), f.scripts, effects.ordered, i, 20, {});
+    react::set_contribution(f.shared, f.gives_to, f.terms.rows[4], f.c, f.a, i, effects);
     const auto plans = f.changed({f.a, 4}, i);
     test_runtime::require(plans.size() == 1, "benchmark must admit the actual term-fallback rule");
     f.effects = {};
@@ -38,11 +36,15 @@ void run(unsigned unrelated) {
           react::read(f.values(), f.b, 2, count, 20).value.numeric() == count,
       "benchmark must preserve real Luau state and authoritative result");
   std::cout << unrelated
-            << " unrelated objects: contribution + primary rule/watch resolution + "
-               "actual Luau/state write "
+            << " unrelated objects: contribution + direct rule/watch resolution + "
+               "actual Luau/state write + in-memory journal "
             << std::chrono::duration<double, std::nano>(elapsed).count() / count << " ns/op\n";
 }
 int main() {
+  std::cout
+      << "Scope: one source and one related rule consumer; unrelated objects never contribute. "
+         "Includes dispatch, actual invocation, Lua, state and in-memory journal. "
+         "Excludes physics, transport, snapshots and pacing.\n";
   run(0);
   run(100000);
 }

@@ -103,7 +103,7 @@ void install_grants(const Json &plan, const Symbols &symbols,
   auto &models = catalog_state.models;
   auto &scripts = catalog_state.scripts;
   auto &instances = react_state.installations;
-  auto &rules = react_state.rules;
+  auto &triggers = react_state.triggers;
   auto &plots = perm_state.plots;
   auto &grants = perm_state.grants;
   auto &players = perm_state.players;
@@ -124,7 +124,7 @@ void install_grants(const Json &plan, const Symbols &symbols,
     if (!values.identity.valid(object) || !script || script >= scripts.rows.size())
       throw std::invalid_argument("unknown initial script grant holder");
     auto installed = react::installed_scripts(models, instances, values.identity, object);
-    const auto applicable = react::rule_scripts(rules, values, object, now, hz);
+    const auto applicable = react::rule_scripts(triggers, values, object, now, hz);
     installed.insert(installed.end(), applicable.begin(), applicable.end());
     const bool exists = std::find(installed.begin(), installed.end(), script) != installed.end();
     return {perm::Holder::script(script, object), authority.owner[object.slot()], exists};

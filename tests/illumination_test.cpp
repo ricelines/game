@@ -32,11 +32,13 @@ void world_ambient_edits_refresh_lighting() {
           "world ambient test uses actual visible geometry");
   const auto watcher = f.add(R"(return {kind='model',watches={'novel.result'},
     on={['novel.result']=function(self)end}})");
-  f.bind(watcher, f.b);
+  f.models.rows[1].script = watcher;
+  re::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
+  f.baseline(f.b);
   auto &points = space_state.light_subscriptions;
   auto &views = space_state.active_views;
-  bi::sync_illuminance_reads(points, f.subscriptions, identity(f.objects), transforms(f.objects), 2,
-                             std::span(&f.b, 1));
+  bi::sync_illuminance_reads(points, f.react_state, f.values(), f.scripts, transforms(f.objects), 2,
+                             std::span(&f.b, 1), {.step = 10, .hz = 20});
   ob::track_view(views, 1, {0, 0, 1}, 30);
   ob::track_view(views, 2, {100, 0, 1}, 30);
   const auto sample = [&] {
@@ -106,7 +108,9 @@ void actual_lighting_watch_sampling() {
   f.state(zone, 5, 2);
   const auto watcher = f.add(R"(return {kind='model',watches={'novel.result'},
     on={['novel.result']=function(self)end}})");
-  f.bind(watcher, f.a);
+  f.models.rows[1].script = watcher;
+  re::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
+  f.baseline(f.a);
   auto &points = space_state.light_subscriptions;
   auto &views = space_state.active_views;
   ob::track_view(views, 1, {30, 0, 1}, 1);
@@ -136,8 +140,8 @@ void actual_lighting_watch_sampling() {
   };
   install(f.c, 0);
   install(zone, 0);
-  bi::sync_illuminance_reads(points, f.subscriptions, identity(f.objects), transforms(f.objects), 2,
-                             std::span(&f.a, 1));
+  bi::sync_illuminance_reads(points, f.react_state, f.values(), f.scripts, transforms(f.objects), 2,
+                             std::span(&f.a, 1), {.step = 0, .hz = 20});
   require(points.rows.size() == 1, "actual watched runtime term creates one sample point");
   auto sample = [&](Step now) {
     f.effects = {};
@@ -212,20 +216,75 @@ void actual_lighting_watch_sampling() {
           "retirement removes exact-generation subscription and runtime answer");
   const auto second = f.add(R"(return {kind='model', watches={'novel.result'},
     on={['novel.result']=function(self)end}})");
-  f.bind(second, f.c, re::SyncMode::Change);
-  bi::sync_illuminance_reads(points, f.subscriptions, identity(f.objects), transforms(f.objects), 2,
-                             std::span(&f.c, 1));
+  f.models.rows[2].script = second;
+  re::project_model(f.triggers, f.models, f.scripts, f.terms, 2);
+  f.baseline(f.c);
+  bi::sync_illuminance_reads(points, f.react_state, f.values(), f.scripts, transforms(f.objects), 2,
+                             std::span(&f.c, 1), {.step = 61, .hz = 20});
   require(points.rows.contains({f.c.bits, 2}), "own runtime watch creates its actual sample point");
-  re::remove_watches(f.subscriptions, {f.c, second});
-  bi::sync_illuminance_reads(points, f.subscriptions, identity(f.objects), transforms(f.objects), 2,
-                             std::span(&f.c, 1));
+  f.models.rows[2].script = 0;
+  re::project_model(f.triggers, f.models, f.scripts, f.terms, 2);
+  bi::sync_illuminance_reads(points, f.react_state, f.values(), f.scripts, transforms(f.objects), 2,
+                             std::span(&f.c, 1), {.step = 61, .hz = 20});
   require(points.rows.empty(), "removing own runtime watch removes its sample point");
+}
+void rule_lighting_tracks_current_applicability() {
+  test_runtime::Fixture f;
+  space::State space_state(testspace::settings(), 8);
+  f.terms.rows[2].source = re::Source::Measured;
+  f.terms.rows[2].measurement = re::MeasurementRole::Runtime;
+  const auto local = f.add(R"(return {kind='instance',watches={'novel.result'},
+    on={['novel.result']=function(self)end}})");
+  re::set_instances(f.installed, f.c, std::span(&local, 1), f.scripts);
+  re::project_instance(f.triggers, f.installed, f.scripts, f.terms, f.c);
+  f.baseline(f.c);
+  auto &points = space_state.light_subscriptions;
+  const step::Clock clock{.step = 0, .hz = 20};
+  const auto sync = [&](Handle object) {
+    bi::sync_illuminance_reads(points, f.react_state, f.values(), f.scripts, transforms(f.objects),
+                               2, std::span(&object, 1), clock);
+  };
+  const auto flag = [&](Handle object, bool value) {
+    re::set_state(f.properties, f.processes, f.terms.rows[5], object, Value(value), 0, 20,
+                  f.effects);
+  };
+  sync(f.c);
+  flag(f.a, true);
+  const auto rule = f.add(R"(return {kind='rule',applies_to={flag='novel.ready'},
+    watches={'novel.result'},on={['novel.result']=function(self)end},
+    tests={{when={steps=0},expect={subject='target',term='novel.result',equals=7}}}})");
+  std::deque<re::BackgroundItem> background;
+  re::update_rule(f.scripts, f.react_state, background, f.values(), rule, re::RuleMode::Enable, {},
+                  f.effects);
+  bi::refresh_illuminance_reads(points, f.react_state, f.values(), f.scripts, transforms(f.objects),
+                                2, clock, true);
+  require(points.rows.size() == 2 && points.rows.contains({f.a.bits, 2}) &&
+              points.rows.contains({f.c.bits, 2}),
+          "activating a light watch samples matching existing objects and keeps installed watches");
+  bi::sample_illuminance(points, space_state.space, identity(f.objects), space_state.lights,
+                         space_state.zones, f.runtime, 7, f.effects);
+  require(re::read(f.values(), f.a, 2, 0, 20).value.numeric() == 7,
+          "a newly applicable rule receives the current light measurement");
+  flag(f.b, true);
+  sync(f.b);
+  flag(f.a, false);
+  sync(f.a);
+  require(points.rows.size() == 2 && points.rows.contains({f.b.bits, 2}) &&
+              points.rows.contains({f.c.bits, 2}),
+          "ordinary flag changes add and remove only the changed object's light sampling");
+  re::update_rule(f.scripts, f.react_state, background, f.values(), rule, re::RuleMode::Disable, {},
+                  f.effects);
+  bi::refresh_illuminance_reads(points, f.react_state, f.values(), f.scripts, transforms(f.objects),
+                                2, clock, false);
+  require(points.rows.size() == 1 && points.rows.contains({f.c.bits, 2}),
+          "disabling a world rule stops its sampling and preserves the installed instance watch");
 }
 } // namespace
 int main() {
   try {
     world_ambient_edits_refresh_lighting();
     actual_lighting_watch_sampling();
+    rule_lighting_tracks_current_applicability();
     std::cout
         << "Actual geometry, light/ambient processes and runtime watch sampling checks passed.\n";
   } catch (const std::exception &error) {

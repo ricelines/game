@@ -106,7 +106,7 @@ step::NativeCompletion rule_activation(catalog::Scripts &scripts, amber::react::
   const auto changed = react::update_rule(
       scripts, react_state, queues.background, values, id,
       call.arguments.at("active").get<bool>() ? react::RuleMode::Enable : react::RuleMode::Disable,
-      call.step, call.hz, call.origin, out.effects);
+      call.origin, out.effects);
   if (changed)
     out.changed_scripts = elaboration_detail::changed_activations(scripts, before);
   out.changed = out.effects.changed;

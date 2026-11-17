@@ -156,12 +156,10 @@ void initialize_case(const Case &test, amber::react::State &react_state,
   const auto now = clock.step;
   const auto hz = clock.hz;
 
-  auto &shared = react_state.shared;
-
   apply_given(react_state, values, test, now, hz, effects);
   react::reconcile_allocations(values, react_state, effects, now, hz);
   for (const auto &rule : activated.active)
-    for (auto &item : react::catch_up(shared, values.identity, scripts, values.terms, rule, {}))
+    for (auto &item : react::catch_up(values, scripts, rule, {}))
       enqueue_background(queues, std::move(item));
 }
 std::optional<NativeCall> prepare_action(const Case &test, const react::Terms &terms,

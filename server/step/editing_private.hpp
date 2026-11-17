@@ -32,6 +32,5 @@ Value scalar(const Json &value, const react::Term &term);
 step::NativeCompletion result(bool changed, Json extra = Json::object());
 step::NativeCompletion failed(const std::exception &error);
 std::vector<Handle> instances(IdentityRead identity, ModelId model);
-void watches(react::DeferredEffects &effects, react::WatchChanges changed);
 bool role(std::span<const std::string> roles, std::string_view name);
 } // namespace amber::step::editing::detail

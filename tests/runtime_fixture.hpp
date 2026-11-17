@@ -38,7 +38,7 @@ struct Fixture {
   InstanceScripts &installed = react_state.installations;
   Triggers &triggers = react_state.triggers;
   RuleVersions &rules = react_state.rules;
-  Subscriptions &subscriptions = react_state.subscriptions;
+  WatchAnswers &watch_answers = react_state.watch_answers;
   ScriptStates &states = react_state.states;
   RandomStates &random = react_state.random;
   DeferredEffects effects;
@@ -95,33 +95,35 @@ struct Fixture {
   void state(Handle object, TermId term, double value, Step now = 0) {
     set_state(properties, processes, terms.rows[term], object, Value(value), now, 20, effects);
   }
-  void bind(ScriptId id, Handle object, SyncMode mode = SyncMode::Initial) {
-    (void)sync_watches(react_state, values(), {object, id}, scripts.rows[id].declaration, 0, 20, {},
-                       mode);
+  void baseline(Handle object) {
+    baseline_watches(react_state, values(), scripts, object, 0, 20, {}, effects);
   }
-  std::vector<InvocationPlan> changed(FactKey fact, Step now = 0) {
-    auto result = check_changed(subscriptions, values(), allocations, fact, now, 20, {});
-    auto plans = plan_deliveries(result, triggers, scripts, values(), now, 20);
-    return plans;
+  std::vector<PlannedInvocation> changed(FactKey fact, Step now = 0) {
+    return evaluate_watch(react_state, values(), scripts, {fact, {}}, now, 20).invocations;
   }
-  void run(std::span<const InvocationPlan> plans, Step now = 0) {
+  void run(std::span<const PlannedInvocation> plans, Step now = 0) {
+    record::Journal journal(8, {});
     for (const auto &plan : plans) {
       Invocation invocation;
-      invocation.self = {plan.receiver, plan.handler.script};
-      invocation.sender = plan.sender;
-      invocation.trigger = plan.trigger;
-      invocation.payload = plan.payload;
-      invocation.acquired = plan.acquired;
-      invocation.step = now;
-      invocation.hz = 20;
-      invocation.state = &states[invocation.self];
-      invocation.random = &random[plan.receiver.bits];
-      invocation.effects = &effects;
-      if (plan.watch)
-        acknowledge_watch(subscriptions, invocation.self, *plan.watch);
-      const auto result = run_handler(vm, plan.handler, invocation);
-      if (result.status != RunOutcome::Status::Ok)
-        throw std::runtime_error(result.error);
+      CompletedInvocation completed;
+      auto input = plan.input;
+      input.step = now;
+      require(start_invocation(react_state, objects_state, 0, catalog_state, journal, plan.handler,
+                               std::move(input), invocation, completed),
+              "the selected installed handler starts");
+      if (completed.outcome.status != RunOutcome::Status::Ok)
+        throw std::runtime_error(completed.outcome.error);
+      finish_invocation(identity(objects), attribution(objects), models, scripts, journal,
+                        invocation, completed);
+      effects.changed |= completed.effects.changed;
+      effects.ordered.insert(effects.ordered.end(),
+                             std::make_move_iterator(completed.effects.ordered.begin()),
+                             std::make_move_iterator(completed.effects.ordered.end()));
+      effects.consulted_handles.insert(effects.consulted_handles.end(),
+                                       completed.effects.consulted_handles.begin(),
+                                       completed.effects.consulted_handles.end());
+      effects.background.insert(effects.background.end(), completed.effects.background.begin(),
+                                completed.effects.background.end());
     }
   }
 };

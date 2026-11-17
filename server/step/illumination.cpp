@@ -224,26 +224,38 @@ void advance_illumination(IlluminationSources &sources, amber::space::State &spa
     return !advances(process(values.processes, Handle{bits}, term->second), now, hz);
   });
 }
-void sync_illuminance_reads(observe::LightSubscriptions &points,
-                            const react::Subscriptions &subscriptions, IdentityRead identity,
+void sync_illuminance_reads(observe::LightSubscriptions &points, const react::State &react_state,
+                            const react::ValueRead &values, const catalog::Scripts &scripts,
                             TransformRead transforms, TermId illuminance,
-                            std::span<const Handle> consumers) {
-  std::vector<Handle> obsolete;
-  for (const auto &[key, point] : points.rows) {
-    (void)key;
-    const auto found = subscriptions.rows.find({point.subject, illuminance});
-    if (!identity.valid(point.subject) || found == subscriptions.rows.end() ||
-        found->second.empty())
-      obsolete.push_back(point.subject);
-  }
-  for (auto object : obsolete)
-    observe::unsubscribe(points, object, illuminance);
+                            std::span<const Handle> consumers, const Clock &clock) {
   for (auto object : consumers) {
-    if (identity.valid(object))
-      if (const auto source = subscriptions.rows.find({object, illuminance});
-          source != subscriptions.rows.end() && !source->second.empty() &&
-          !points.rows.contains({object.bits, illuminance}))
+    if (values.identity.valid(object) &&
+        react::has_watch(react_state, values, scripts, {object, illuminance}, clock.step,
+                         clock.hz)) {
+      if (!points.rows.contains({object.bits, illuminance}))
         observe::subscribe(points, {object, transforms.position[object.slot()], illuminance});
+    } else
+      observe::unsubscribe(points, object, illuminance);
+  }
+}
+void refresh_illuminance_reads(observe::LightSubscriptions &points, const react::State &react_state,
+                               const react::ValueRead &values, const catalog::Scripts &scripts,
+                               TransformRead transforms, TermId illuminance, const Clock &clock,
+                               bool discover) {
+  if (discover) {
+    for (std::uint32_t slot = 1; slot < values.identity.model.size(); ++slot)
+      if (values.identity.model[slot]) {
+        const auto object = values.identity.at(slot);
+        sync_illuminance_reads(points, react_state, values, scripts, transforms, illuminance,
+                               std::span(&object, 1), clock);
+      }
+  } else {
+    for (auto row = points.rows.begin(); row != points.rows.end();) {
+      const auto point = (row++)->second;
+      if (point.measured_term == illuminance)
+        sync_illuminance_reads(points, react_state, values, scripts, transforms, illuminance,
+                               std::span(&point.subject, 1), clock);
+    }
   }
 }
 void move_illuminance_reads(observe::LightSubscriptions &points, TransformRead transforms,
@@ -279,11 +291,14 @@ void sample_illuminance(observe::LightSubscriptions &points, const space::Space 
                               {{point.subject, point.measured_term}, Value(answer), {}}, effects);
   }
 }
-void update_frame_illumination(amber::step::State &step_state, amber::space::State &space_state,
-                               TransformRead transforms, const react::ValueRead &values,
-                               amber::react::State &react_state, std::span<const Handle> moved,
-                               std::span<const space::Bounds> dirty_bounds, TermId illuminance,
-                               react::DeferredEffects &effects) {
+react::DeferredEffects
+update_frame_illumination(State &step_state, space::State &space_state, TransformRead transforms,
+                          const react::ValueRead &values, react::State &react_state,
+                          const catalog::Scripts &scripts, const space::StepResult &physics,
+                          TermId illuminance) {
+  react::DeferredEffects effects;
+  const auto &moved = physics.moved;
+  const auto &dirty_bounds = physics.dirty_bounds;
   auto &sources = step_state.illumination_sources;
   const auto &changed = step_state.mutated;
   const auto &clock = step_state.clock;
@@ -296,7 +311,6 @@ void update_frame_illumination(amber::step::State &step_state, amber::space::Sta
   auto &zones = space_state.zones;
   auto &points = space_state.light_subscriptions;
   auto &views = space_state.active_views;
-  auto &subscriptions = react_state.subscriptions;
   auto &measurements = react_state.runtime_measurements;
 
   move_illumination(lights, points, views, transforms, moved);
@@ -307,11 +321,15 @@ void update_frame_illumination(amber::step::State &step_state, amber::space::Sta
   changed_sources.reserve(changed.size());
   for (const auto fact : changed)
     changed_sources.push_back(fact.subject);
-  sync_illuminance_reads(points, subscriptions, values.identity, transforms, illuminance,
-                         changed_sources);
+  std::sort(changed_sources.begin(), changed_sources.end());
+  changed_sources.erase(std::unique(changed_sources.begin(), changed_sources.end()),
+                        changed_sources.end());
+  sync_illuminance_reads(points, react_state, values, scripts, transforms, illuminance,
+                         changed_sources, clock);
   illumination_values_changed(sources, space_state, values, changed, now, hz);
   advance_illumination(sources, space_state, values, now, hz);
   sample_illuminance(points, world, values.identity, lights, zones, measurements,
                      outdoor_lux(react_state), effects);
+  return effects;
 }
 } // namespace amber::step

@@ -267,7 +267,7 @@ void saved_work_continues_in_causal_order_with_typed_payload_and_origin() {
   enqueue_background(q, {body, 12, 8, origin, 6});
   TimerWheel wheel;
   wheel.now = 200;
-  schedule(wheel, {65536, emitted, react::ThresholdToken{{body, 8}, body, 5, 2}});
+  schedule(wheel, {65536, emitted, FactKey{body, 8}});
   Intents moving;
   const auto intent = start_move(moving, body, Handle::make(22, 4), origin, .35f);
   snap::Buffer queues, timers;
@@ -299,7 +299,7 @@ void saved_work_continues_in_causal_order_with_typed_payload_and_origin() {
   require(!pop_foreground(restored), "pending network inputs are not restored");
   promote_due(restored_wheel, 65536, restored);
   const auto fired = pop_foreground(restored);
-  require(fired && fired->threshold && fired->threshold->watch_index == 2 &&
+  require(fired && fired->threshold && *fired->threshold == FactKey{body, 8} &&
               std::get<react::EventWork>(fired->work).origin == origin,
           "saved threshold token did not fire with provenance");
   const auto ending = cancel_move(restored_intents, body);
@@ -312,16 +312,16 @@ void threshold_replacement_preserves_other_events_and_cascade_locations() {
   TimerWheel wheel;
   WorkQueues q;
   const auto subject = Handle::make(70, 1), other = Handle::make(71, 1);
-  const react::ThresholdToken token{{subject, 8}, subject, 5, 2};
-  auto threshold = [&](Step due, react::ThresholdToken version, std::uint64_t cause) {
+  const FactKey token{subject, 8};
+  auto threshold = [&](Step due, FactKey version, std::uint64_t cause) {
     auto e = event(8);
-    e.receiver = version.consumer;
+    e.receiver = version.subject;
     e.origin = {cause, 12, {2, 7}, 3.5, false};
     return react::Timer{due, std::move(e), version};
   };
   schedule(wheel, threshold(70000, token, 40));
   auto sibling = token;
-  sibling.consumer = other;
+  sibling.subject = other;
   schedule(wheel, threshold(70000, sibling, 41));
   schedule(wheel, {70000, event(100), {}});
   schedule(wheel, {70000, event(101), {}});
@@ -365,35 +365,22 @@ void threshold_replacement_preserves_other_events_and_cascade_locations() {
 }
 void threshold_identity_and_exact_cancellation() {
   const auto subject = Handle::make(7, 1);
-  const react::ThresholdToken first{{subject, 8}, subject, 5, 2};
-  auto timer = [&](Step due, react::ThresholdToken token) {
+  const FactKey first{subject, 8};
+  auto timer = [&](Step due, FactKey token) {
     auto e = event(8);
-    e.receiver = token.consumer;
+    e.receiver = token.subject;
     e.origin.cause = due;
     return react::Timer{due, e, token};
   };
   TimerWheel identities;
   schedule(identities, timer(10, first));
-  for (unsigned field = 0; field < 5; ++field) {
-    auto distinct = first;
-    if (field == 0)
-      distinct.source.subject = Handle::make(subject.slot(), 2);
-    else if (field == 1)
-      distinct.source.term = 9;
-    else if (field == 2)
-      distinct.consumer = Handle::make(subject.slot(), 2);
-    else if (field == 3)
-      ++distinct.script;
-    else
-      ++distinct.watch_index;
-    schedule(identities, timer(10, distinct));
-  }
-  require(timers(identities).size() == 6 && identities.thresholds.size() == 6,
-          "threshold identity includes full source/consumer generations, script and watch index");
-  cancel_threshold(identities, {first.source, first.consumer, first.script, first.watch_index});
-  require(timers(identities).size() == 5,
-          "rate with no crossing cancels precisely its pending key");
-  cancel_threshold(identities, {first.source, first.consumer, first.script, first.watch_index});
+  schedule(identities, timer(10, {Handle::make(subject.slot(), 2), 8}));
+  schedule(identities, timer(10, {subject, 9}));
+  require(timers(identities).size() == 3 && identities.thresholds.size() == 3,
+          "threshold identity includes the full object generation and watched term");
+  cancel_threshold(identities, first);
+  require(timers(identities).size() == 2, "a rate with no crossing cancels only its watched fact");
+  cancel_threshold(identities, first);
   snap::Buffer bytes;
   snap::Output out{bytes};
   write_timers(out, identities);
@@ -402,7 +389,7 @@ void threshold_identity_and_exact_cancellation() {
   snap::Input in{bytes.data(), bytes.size()};
   read_timers(in, restored);
   snap::check_complete(in);
-  require(timers(restored).size() == 5 && restored.thresholds.size() == 5,
+  require(timers(restored).size() == 2 && restored.thresholds.size() == 2,
           "snapshot restores only current pending keys");
   WorkQueues q;
   promote_due(restored, 10, q);
@@ -412,21 +399,21 @@ void threshold_identity_and_exact_cancellation() {
             "remaining exact identities retain their cause");
     ++fired;
   }
-  require(fired == 5 && restored.thresholds.empty(), "cancelled key never wakes after restore");
+  require(fired == 2 && restored.thresholds.empty(), "cancelled key never wakes after restore");
 }
 void one_same_due_fixture_continues_after_snapshot() {
   TimerWheel uninterrupted;
   const auto subject = Handle::make(9, 2);
-  react::ThresholdToken token{{subject, 4}, subject, 3, 1};
-  auto make_threshold = [&](TermId id, react::ThresholdToken version) {
+  FactKey token{subject, 4};
+  auto make_threshold = [&](TermId id, FactKey version) {
     auto e = event(id);
-    e.receiver = version.consumer;
+    e.receiver = version.subject;
     e.origin.cause = id;
     return react::Timer{70000, e, version};
   };
   schedule(uninterrupted, make_threshold(20, token));
   auto sibling = token;
-  ++sibling.watch_index;
+  ++sibling.term;
   schedule(uninterrupted, make_threshold(21, sibling));
   schedule(uninterrupted, {70000, event(22), {}});
   schedule(uninterrupted, {70000, event(23), {}});
@@ -459,7 +446,7 @@ void one_same_due_fixture_continues_after_snapshot() {
 void mixed_due_replacement_preserves_events_across_rebucketing() {
   TimerWheel original;
   const auto subject = Handle::make(15, 3);
-  react::ThresholdToken token{{subject, 6}, subject, 7, 1};
+  FactKey token{subject, 6};
   auto e = event(30);
   e.receiver = subject;
   e.origin.cause = 60;

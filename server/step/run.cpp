@@ -125,7 +125,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &states = react_state.states;
   auto &triggers = react_state.triggers;
   auto &rules = react_state.rules;
-  auto &subscriptions = react_state.subscriptions;
 
   auto &players = perm_state.players;
   auto &groups = perm_state.groups;
@@ -207,10 +206,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     start::install_profiles(plan, symbols, profiles, players, std::filesystem::current_path());
     perm::update_plots(objects, plots, initial, true);
     start::install_money(plan, symbols, ids, auth, players, groups, ledger);
-    start::install_grants(plan, symbols, objects_state, perm_state, catalog_state, react_state,
-                          clock);
-    start::provision_body_grants(plan, symbols, catalog_state, objects_state, perm_state, profiles,
-                                 clock.step, hz);
   }
 
   react::RuleChange fixture_rule_change;
@@ -273,10 +268,15 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   if (!restored)
     start::record_seed(journal, terms, models, scripts, initial, ids, auth, attribution(objects));
 
-  react::initialize_reactions(catalog_state, react_state, values, initial, clock.step, hz,
-                              restored.has_value(), setup);
-  sync_illuminance_reads(light_subscriptions, subscriptions, ids, poses,
-                         role("measurements", "illuminance"), initial);
+  react::initialize_reactions(catalog_state, react_state, values, initial, clock.step, hz, setup);
+  if (!restored) {
+    start::install_grants(plan, symbols, objects_state, perm_state, catalog_state, react_state,
+                          clock);
+    start::provision_body_grants(plan, symbols, catalog_state, objects_state, perm_state, profiles,
+                                 clock.step, hz);
+  }
+  sync_illuminance_reads(light_subscriptions, react_state, values, scripts, poses,
+                         role("measurements", "illuminance"), initial, clock);
   register_illumination(illumination_sources, space_state, poses, catalog_state, values, visible,
                         settings.light_source_radius_m, clock);
   for (auto object : visible)
@@ -404,8 +404,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
           amber::Origin delivery_origin;
           for (auto &record : delivered.records)
             delivery_origin = journal.append(std::move(record));
-          reconcile_effects(values, react_state, step_state, scripts, clock, delivered.effects,
-                            delivery_origin);
+          reconcile_effects(values, react_state, step_state, clock, delivered.effects);
           publish_effects(std::move(delivered.effects), delivery_origin, clock.step, queues, timers,
                           journal, settings.event_queue_max);
         }
@@ -432,7 +431,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
         auto admitted = next_work(queues, frame, fixture_results, authored, Monotonic::now());
         if (!admitted)
           break;
-        std::vector<PlannedInvocation> plans;
+        std::vector<react::PlannedInvocation> plans;
         if (auto *item = std::get_if<ForegroundItem>(&*admitted)) {
           if (auto *input_work = std::get_if<InputWork>(&item->work)) {
             const auto id = input_work->id;
@@ -479,6 +478,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                         "elaborator") != profiles.rows[actor].roles.end();
           auto completed = complete_fixture(elaborate_state, step_state, scripts, react_state,
                                             values, {actor, elaborator}, *result, clock);
+          refresh_rule_reactions(objects_state, catalog_state, react_state, space_state, step_state,
+                                 completed.changed_scripts);
           if (!completed.changed_scripts.empty()) {
             registry = catalog::read_registry(
                 registry_directory,
@@ -488,8 +489,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
               row.pending.ready = false;
             }
           }
-          reconcile_effects(values, react_state, step_state, scripts, clock, completed.effects,
-                            completed.origin);
+          reconcile_effects(values, react_state, step_state, clock, completed.effects);
           publish_effects(std::move(completed.effects), completed.origin, clock.step, queues,
                           timers, journal, settings.event_queue_max);
           if (completed.notification) {
@@ -525,15 +525,13 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
           continue;
         } else {
           auto &background = std::get<react::BackgroundItem>(*admitted);
-          if (!react::catch_up_valid(background, rules, values, clock.step, hz)) {
-            --frame.background;
-            continue;
-          }
-          auto planned = plan_background(react_state, values, scripts, background, clock.step, hz);
-          for (auto &dirty : planned.changes.dirty)
-            enqueue_watch(queues, std::move(dirty));
-          for (auto &timer : planned.changes.timers)
-            schedule(timers, std::move(timer));
+          auto planned =
+              react::evaluate_catch_up(react_state, values, scripts, background, clock.step, hz);
+          // Registry changes already refresh existing timers with their rate-setting origin.
+          std::erase_if(planned.thresholds, [&](const auto &change) {
+            return timers.thresholds.contains(change.source);
+          });
+          apply_thresholds(timers, std::move(planned.thresholds));
           plans = std::move(planned.invocations);
         }
         // The deque retains active Invocation addresses across nested calls.
@@ -621,7 +619,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             if (!removed.empty()) {
               // Every owner sees the old identities until all cleanup is complete.
               retire_commerce(perm_state, objects_state, removed, clock.step, completed);
-              react::retire_reactions(models, values, react_state, removed, clock.step, hz,
+              react::retire_reactions(values, react_state, removed, clock.step, hz,
                                       action->call.origin, completed.effects);
               retire_illuminance_reads(light_subscriptions, runtime_measurements,
                                        role("measurements", "illuminance"), removed);
@@ -637,11 +635,14 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             }
             editing::rebind_scripts(catalog_state, react_state, values, perm_state,
                                     role("events", "start"), clock, action->call.origin, completed);
+            refresh_rule_reactions(objects_state, catalog_state, react_state, space_state,
+                                   step_state, completed.changed_scripts);
             invalidate_execution(execution, ids, states);
             refresh_object_plots(space, objects_state, react_state, catalog_state, clock,
                                  action->call.origin, completed);
-            sync_illuminance_reads(light_subscriptions, subscriptions, ids, poses,
-                                   role("measurements", "illuminance"), completed.changed_objects);
+            sync_illuminance_reads(light_subscriptions, react_state, values, scripts, poses,
+                                   role("measurements", "illuminance"), completed.changed_objects,
+                                   clock);
             move_illuminance_reads(light_subscriptions, poses, role("measurements", "illuminance"),
                                    completed.changed_objects);
             project_visibility(illumination_sources, space_state, replication, poses, catalog_state,
@@ -677,8 +678,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                 completed.effects.ordered.emplace_back(
                     react::EventWork{object, {}, role("events", "start"), {}, action->call.origin});
             const auto first_changed = mutated.size();
-            reconcile_effects(values, react_state, step_state, scripts, clock, completed.effects,
-                              action->call.origin);
+            reconcile_effects(values, react_state, step_state, clock, completed.effects);
             publish_value_changes(replication, session_views, processes,
                                   std::span(mutated).subspan(first_changed));
             action->changed = completed.changed || completed.effects.changed;
@@ -705,8 +705,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                !objects.plot[timer->event.receiver.slot()];
       });
       const auto first_changed = mutated.size();
-      reconcile_effects(values, react_state, step_state, scripts, clock, handler.completed.effects,
-                        handler.completed.origin);
+      reconcile_effects(values, react_state, step_state, clock, handler.completed.effects);
       publish_value_changes(replication, session_views, processes,
                             std::span(mutated).subspan(first_changed));
       if (auto call = finish_handler_segment(execution, journal, queues, timers, clock.step, hz,
@@ -739,11 +738,9 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     for (const auto object : crossed_plots) {
       const auto origin = move_origin(intents, object);
       react::DeferredEffects effects;
-      for (const auto &term : terms.rows)
-        if (term.source == react::Source::Setting)
-          effects.ordered.emplace_back(react::WatchWork{{object, term.id}, origin});
-      react::reconcile_object_priorities(values, react_state, object, effects, clock.step, hz);
-      reconcile_effects(values, react_state, step_state, scripts, clock, effects, origin);
+      react::refresh_plot_settings(values, react_state, scripts, std::span(&object, 1), clock.step,
+                                   hz, origin, effects);
+      reconcile_effects(values, react_state, step_state, clock, effects);
       publish_effects(std::move(effects), origin, clock.step, queues, timers, journal,
                       settings.event_queue_max);
     }
@@ -763,11 +760,10 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
 
     for (auto object : physics.moved)
       net::moved(replication, object, poses);
-    react::DeferredEffects light_effects;
-    update_frame_illumination(step_state, space_state, poses, values, react_state, physics.moved,
-                              physics.dirty_bounds, role("measurements", "illuminance"),
-                              light_effects);
-    reconcile_effects(values, react_state, step_state, scripts, clock, light_effects, {});
+    auto light_effects =
+        update_frame_illumination(step_state, space_state, poses, values, react_state, scripts,
+                                  physics, role("measurements", "illuminance"));
+    reconcile_effects(values, react_state, step_state, clock, light_effects);
     publish_effects(std::move(light_effects), {}, clock.step, queues, timers, journal,
                     settings.event_queue_max);
     publish_value_changes(replication, session_views, processes, mutated);

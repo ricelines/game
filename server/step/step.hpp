@@ -40,26 +40,13 @@ using Work = std::variant<react::EventWork, react::WatchWork, InputWork>;
 
 struct ForegroundItem {
   Work work;
-  std::optional<react::ThresholdToken> threshold;
+  std::optional<FactKey> threshold;
 };
 struct WorkQueues {
   std::deque<ForegroundItem> causal, turns;
   std::deque<react::BackgroundItem> background;
   std::unordered_set<FactKey, FactKeyHash> watch_queued;
   std::size_t emitted_events = 0;
-};
-struct ThresholdKey {
-  FactKey source;
-  Handle consumer;
-  ScriptId script = 0;
-  std::uint32_t watch_index = 0;
-  bool operator==(const ThresholdKey &) const = default;
-};
-struct ThresholdKeyHash {
-  std::size_t operator()(const ThresholdKey &key) const {
-    return FactKeyHash{}(key.source) ^ (ScriptKeyHash{}({key.consumer, key.script}) << 1) ^
-           (static_cast<std::size_t>(key.watch_index) << 2);
-  }
 };
 struct TimerLocation {
   unsigned level = 0, bucket = 0;
@@ -70,7 +57,7 @@ struct TimerWheel {
   std::array<std::array<std::vector<react::Timer>, 256>, 4> levels;
   // Derived from pending threshold rows, never serialized. Ordinary timers
   // retain independent entries, including multiple events on the same target.
-  std::unordered_map<ThresholdKey, TimerLocation, ThresholdKeyHash> thresholds;
+  std::unordered_map<FactKey, TimerLocation, FactKeyHash> thresholds;
 };
 enum class PushResult { Queued, Coalesced, Overflow };
 using IntentId = std::uint64_t;
@@ -112,10 +99,6 @@ struct Frame {
   Monotonic::time_point started, handler_deadline, boundary;
   std::size_t foreground = 0, background = 0;
 };
-struct EventTurn {
-  react::EventWork event;
-  std::optional<react::ThresholdToken> threshold;
-};
 struct Input {
   std::uint64_t id = 0;
   net::ControlKind kind;
@@ -141,16 +124,6 @@ struct InputCompletion {
 };
 struct Bounds {
   Vec3 minimum, maximum;
-};
-struct PlannedInvocation {
-  react::HandlerRef handler;
-  react::InvocationInput input;
-};
-struct WatchPlan {
-  bool modeled = false;
-  std::optional<FactKey> shared_gap;
-  std::vector<PlannedInvocation> invocations;
-  react::WatchChanges changes;
 };
 struct InputOrder {
   std::uint64_t input = 0, session = 0, sequence = 0, request = 0;
@@ -313,8 +286,10 @@ PushResult enqueue_watch(WorkQueues &, react::WatchWork);
 void enqueue_background(WorkQueues &, react::BackgroundItem);
 void schedule(TimerWheel &, react::Timer);
 void discard_script_work(WorkQueues &, TimerWheel &, std::span<const Handle>);
-void cancel_threshold(TimerWheel &, const ThresholdKey &);
-void cancel_source_thresholds(TimerWheel &, const react::Subscriptions &, FactKey);
+void cancel_threshold(TimerWheel &, FactKey);
+void apply_thresholds(TimerWheel &, std::vector<react::ThresholdChange>);
+void refresh_rule_thresholds(TimerWheel &, const react::State &, const react::ValueRead &,
+                             const catalog::Scripts &, std::span<const ScriptId>, const Clock &);
 void rebuild_queue_index(WorkQueues &);
 std::vector<react::Timer> timers(const TimerWheel &);
 
@@ -346,21 +321,13 @@ InputCompletion complete_input(Inputs &, std::uint64_t, nlohmann::json reply);
 
 bool in_reach(Vec3 actor_point, Bounds target, float reach_m);
 
-bool valid_event(const EventTurn &, IdentityRead, const react::Processes &,
-                 const react::Subscriptions &, Step now, double hz);
 EventPayload normalize_arguments(const react::Terms &, TermId action, EventPayload);
-std::vector<PlannedInvocation> plan_event(const react::Triggers &, const react::ValueRead &,
-                                          const react::EventWork &, Step, double hz);
-std::vector<PlannedInvocation> plan_action(const react::Triggers &, const react::ValueRead &,
-                                           const react::Resolution &, const ActionRequest &,
-                                           Handle authenticated_body, const amber::Origin &, Step,
-                                           double hz);
-
-WatchPlan plan_watch(react::Subscriptions &, const react::ValueRead &,
-                     const react::AllocationRows &, const react::Triggers &,
-                     const catalog::Scripts &, const react::WatchWork &, Step, double hz);
-WatchPlan plan_background(amber::react::State &react_state, const react::ValueRead &,
-                          const catalog::Scripts &, const react::BackgroundItem &, Step, double hz);
+std::vector<react::PlannedInvocation> plan_event(const react::Triggers &, const react::ValueRead &,
+                                                 const react::EventWork &, Step, double hz);
+std::vector<react::PlannedInvocation> plan_action(const react::Triggers &, const react::ValueRead &,
+                                                  const react::Resolution &, const ActionRequest &,
+                                                  Handle authenticated_body, const amber::Origin &,
+                                                  Step, double hz);
 
 struct VolumeGeometry {
   space::GeometryId geometry;
@@ -767,9 +734,12 @@ void illumination_values_changed(IlluminationSources &, amber::space::State &spa
 void invalidate_world_illumination(space::State &);
 void advance_illumination(IlluminationSources &, amber::space::State &space_state,
                           const react::ValueRead &, Step, double hz);
-void sync_illuminance_reads(observe::LightSubscriptions &, const react::Subscriptions &,
-                            IdentityRead, TransformRead, TermId illuminance,
-                            std::span<const Handle> consumers);
+void sync_illuminance_reads(observe::LightSubscriptions &, const react::State &,
+                            const react::ValueRead &, const catalog::Scripts &, TransformRead,
+                            TermId illuminance, std::span<const Handle>, const Clock &);
+void refresh_illuminance_reads(observe::LightSubscriptions &, const react::State &,
+                               const react::ValueRead &, const catalog::Scripts &, TransformRead,
+                               TermId illuminance, const Clock &, bool discover);
 void move_illuminance_reads(observe::LightSubscriptions &, TransformRead, TermId illuminance,
                             std::span<const Handle> moved);
 void retire_illuminance_reads(observe::LightSubscriptions &, react::RuntimeMeasurements &,
@@ -832,10 +802,8 @@ void publish_object_changes(net::Sessions &, net::SessionViews &, IdentityRead, 
                             ParentRead, const catalog::ModelTexts &, const catalog::InstanceTexts &,
                             std::span<const Handle> changed);
 
-void reconcile_effects(const react::ValueRead &values, amber::react::State &react_state,
-                       amber::step::State &step_state, const catalog::Scripts &scripts,
-                       const amber::step::Clock &clock, react::DeferredEffects &effects,
-                       const amber::Origin &origin);
+void reconcile_effects(const react::ValueRead &, react::State &, step::State &, const Clock &,
+                       react::DeferredEffects &);
 void record_send_overflow(record::Journal &, const net::SendOverflow &, Step);
 void publish_effects(react::DeferredEffects &&, const amber::Origin &, Step, WorkQueues &,
                      TimerWheel &, record::Journal &, std::size_t event_limit);

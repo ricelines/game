@@ -257,8 +257,8 @@ void removed_parts_use_ordinary_retirement() {
           "geometry replacement leaves retired identities live for owner cleanup");
   step::NativeCompletion cleanup;
   step::retire_commerce(x.perm_state, x.f.objects_state, result.removed_objects, 0, cleanup);
-  react::retire_reactions(x.f.models, *x.f.projection, x.f.react_state, result.removed_objects, 0,
-                          20, {}, cleanup.effects);
+  react::retire_reactions(*x.f.projection, x.f.react_state, result.removed_objects, 0, 20, {},
+                          cleanup.effects);
   lifecycle::release_rows(x.f.objects, x.parts, x.declared, result.removed_objects);
   require(!identity(x.f.objects).valid(a[1]) && !x.grants.rows[grant].live &&
               !x.f.properties[1].get(a[1].slot()) &&

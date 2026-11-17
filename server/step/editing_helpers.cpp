@@ -95,12 +95,6 @@ std::vector<Handle> instances(IdentityRead identity, ModelId model) {
       result.push_back(identity.at(slot));
   return result;
 }
-void watches(react::DeferredEffects &effects, react::WatchChanges changed) {
-  for (auto &work : changed.dirty)
-    effects.ordered.push_back(std::move(work));
-  for (auto &timer : changed.timers)
-    effects.ordered.push_back(std::move(timer));
-}
 bool role(std::span<const std::string> roles, std::string_view name) {
   return std::find(roles.begin(), roles.end(), name) != roles.end();
 }

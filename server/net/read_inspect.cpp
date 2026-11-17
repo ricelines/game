@@ -150,7 +150,7 @@ Json object_record(const amber::catalog::State &catalog_state,
   auto &players = perm_state.players;
   auto &grants = perm_state.grants;
   auto &states = react_state.states;
-  auto &rules = react_state.rules;
+  auto &triggers = react_state.triggers;
 
   auto result = view_detail::description(
       view_detail::describe(catalog_state, react_state, values, object, now, hz, inspection_terms));
@@ -203,7 +203,7 @@ Json object_record(const amber::catalog::State &catalog_state,
       perm::check(perm::Holder::player(call.principal.player), perm::Verb::Edit, target, players,
                   grants, now)) {
     auto installed_ids = react::installed_scripts(models, instances, identity, object);
-    const auto applicable = react::rule_scripts(rules, values, object, now, hz);
+    const auto applicable = react::rule_scripts(triggers, values, object, now, hz);
     installed_ids.insert(installed_ids.end(), applicable.begin(), applicable.end());
     std::sort(installed_ids.begin(), installed_ids.end());
     installed_ids.erase(std::unique(installed_ids.begin(), installed_ids.end()),

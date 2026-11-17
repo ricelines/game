@@ -1,4 +1,5 @@
 #include "runtime_fixture.hpp"
+#include "step/run_private.hpp"
 #include "step/step.hpp"
 
 #include <iostream>
@@ -186,23 +187,25 @@ void explicit_watch_planning_and_live_dispatch() {
   project_model(f.triggers, f.models, f.scripts, f.terms, 1);
   f.shared.resize(5);
   f.shared[4].set(f.a.slot(), Shared{0, {}});
-  auto gap = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers, f.scripts,
-                              {{f.a, 4}, {}}, 1, 20);
-  require(!gap.modeled && gap.shared_gap == FactKey{f.a, 4} && gap.invocations.empty(),
-          "bare quantity handler gained an implicit watch");
+  step::State step_state;
+  auto gap = step::prepare_reactive(f.react_state, f.values(), f.scripts, step_state,
+                                    {react::WatchWork{{f.a, 4}, {}}, {}}, 1, 20);
+  require(gap && gap->empty() && step_state.gaps.size() == 1 && step_state.gaps[0].target == f.a &&
+              step_state.gaps[0].term == 4,
+          "bare quantity handler leaves a real shared-quantity gap");
   const auto watcher = f.add(R"(return {kind='instance',watches={'novel.signal'},
     on={['novel.signal']=function(self)self.state.woke=true end}})");
   const std::array ids{watcher};
   set_instances(f.installed, f.a, ids, f.scripts);
   project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
-  f.bind(watcher, f.a);
-  const auto unchanged = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
-                                          f.scripts, {{f.a, 4}, {}}, 1, 20);
-  require(unchanged.modeled && !unchanged.shared_gap && unchanged.invocations.empty(),
+  f.baseline(f.a);
+  const auto unchanged =
+      react::evaluate_watch(f.react_state, f.values(), f.scripts, {{f.a, 4}, {}}, 1, 20);
+  require(unchanged.modeled && unchanged.invocations.empty(),
           "applicable explicit watch failed to model an unchanged answer");
   f.shared[4].set(f.a.slot(), Shared{1, {}});
-  const auto changed = step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers,
-                                        f.scripts, {{f.a, 4}, {}}, 1, 20);
+  const auto changed =
+      react::evaluate_watch(f.react_state, f.values(), f.scripts, {{f.a, 4}, {}}, 1, 20);
   require(changed.invocations.size() == 1 && changed.invocations[0].handler.script == watcher &&
               changed.invocations[0].input.receiver == f.a,
           "changed shared value did not select the actual subscribed handler");
@@ -218,8 +221,8 @@ void explicit_watch_planning_and_live_dispatch() {
   require(before.empty() && after.size() == 1 && after[0].handler.script == rule,
           "dispatch did not resolve the current authored selector value");
   const auto stale = Handle::make(f.a.slot(), f.a.generation() + 1);
-  require(!step::valid_event({{stale, {}, 6, {}, {}}, {}}, identity(f.objects), f.processes,
-                             f.subscriptions, 1, 20),
+  require(!step::prepare_reactive(f.react_state, f.values(), f.scripts, step_state,
+                                  {react::EventWork{stale, {}, 6, {}, {}}, {}}, 1, 20),
           "stale queued event passed full-generation validation");
 }
 

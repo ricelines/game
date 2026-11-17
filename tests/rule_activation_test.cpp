@@ -12,11 +12,9 @@ struct Runner {
   test_runtime::Fixture f{1000};
   std::deque<BackgroundItem> background;
   void activate(ScriptId id, RuleMode mode, DeferredEffects &effects) {
-    update_rule(f.scripts, f.react_state, background, f.values(), id, mode, 0, 20, {}, effects);
+    update_rule(f.scripts, f.react_state, background, f.values(), id, mode, {}, effects);
   }
   void changed(DeferredEffects &effects) {
-    auto changes =
-        sync_rule_watches(f.react_state, f.values(), f.scripts, effects.ordered, 0, 20, {});
     std::vector<FactKey> facts;
     auto add = [&](FactKey fact) {
       if (std::find(facts.begin(), facts.end(), fact) == facts.end())
@@ -25,8 +23,6 @@ struct Runner {
     for (const auto &effect : effects.ordered)
       if (const auto *work = std::get_if<react::WatchWork>(&effect))
         add(work->source);
-    for (const auto &work : changes.dirty)
-      add(work.source);
     for (auto fact : facts)
       f.run(f.changed(fact));
   }
@@ -51,7 +47,7 @@ void first_contribution_and_late_relation() {
   const auto id = f.add(rule());
   DeferredEffects effects;
   r.activate(id, RuleMode::Enable, effects);
-  require(effects.background.empty() && f.subscriptions.rows.empty(),
+  require(effects.background.empty() && f.watch_answers.empty(),
           "activation on an absent quantity creates no unrelated subscriptions");
   set_contribution(f.shared, f.gives_to, f.terms.rows[4], f.c, f.a, 2, effects);
   r.changed(effects);
@@ -62,8 +58,6 @@ void first_contribution_and_late_relation() {
   require(r.runs(f.b, id) == 1 && r.runs(f.a, id) == 0 &&
               read(f.values(), f.b, 2, 0, 20).value.numeric() == 6,
           "the term's authored fallback discovers a newly related material consumer");
-  require(watch_sources(f.subscriptions, ScriptKey{f.b, id}) == std::vector<FactKey>{{f.b, 4}},
-          "the primary row retains the consumer and its watched term");
   effects = {};
   set_contribution(f.shared, f.gives_to, f.terms.rows[4], f.c, f.a, 3, effects);
   r.changed(effects);
@@ -81,40 +75,36 @@ void catchup_is_filtered_and_replacement_preserves_state() {
     on={['novel.signal']=function(self)self.state.seen=true end}})");
   set_instances(f.installed, f.c, std::span(&ordinary, 1), f.scripts);
   project_instance(f.triggers, f.installed, f.scripts, f.terms, f.c);
-  f.bind(ordinary, f.c);
+  f.baseline(f.c);
   set_contribution(f.shared, f.gives_to, f.terms.rows[4], f.c, f.a, 8, f.effects);
   const auto id = f.add(rule());
   DeferredEffects effects;
   r.activate(id, RuleMode::Enable, effects);
   require(effects.background.size() == 1, "catch-up copies only actual shared quantity holders");
   const auto item = effects.background.front();
-  require(catch_up_valid(item, f.rules, f.values(), 0, 20), "current catch-up is applicable");
-  const auto &declaration = f.scripts.rows[id].declaration;
-  for (auto object :
-       source_consumers(f.values(), {item.receiver, item.trigger}, declaration.watches[0])) {
-    const auto allowed = rule_watch_terms(f.rules, f.values(), object, id, 0, 20);
-    if (!allowed.empty())
-      sync_watches(f.react_state, f.values(), {object, id}, declaration, 0, 20, {},
-                   SyncMode::Change, std::span<const TermId>(allowed));
-  }
-  auto checked = check_changed(f.subscriptions, f.values(), f.allocations,
-                               {item.receiver, item.trigger}, 0, 20, {}, id);
-  auto plans = plan_deliveries(checked, f.triggers, f.scripts, f.values(), 0, 20);
-  require(plans.size() == 1 && plans[0].receiver == f.b,
+  require(catch_up_valid(item, f.triggers, f.scripts, f.values()),
+          "current catch-up is applicable");
+  auto plans = evaluate_catch_up(f.react_state, f.values(), f.scripts, item, 0, 20).invocations;
+  require(plans.size() == 1 && plans[0].input.receiver == f.b,
           "catch-up resolves the current selector and term fallback");
   f.run(plans);
   require(r.runs(f.b, id) == 1 && !f.states.contains({f.c, ordinary}),
           "rule catch-up does not consume another script's pending answer");
   const auto foreground = f.changed({f.a, 4});
-  require(foreground.size() == 1 && foreground[0].handler.script == ordinary,
-          "ordinary pending watch remains deliverable after filtered catch-up");
+  require(foreground.size() == 2 && std::any_of(foreground.begin(), foreground.end(),
+                                                [&](const auto &plan) {
+                                                  return plan.handler.script == ordinary &&
+                                                         plan.input.receiver == f.c;
+                                                }),
+          "queued change independently reaches the rule and ordinary consumer after catch-up");
   f.run(foreground);
   const auto newer = f.add(rule());
   effects = {};
   r.activate(newer, RuleMode::Enable, effects);
-  require(watch_sources(f.subscriptions, ScriptKey{f.b, id}).empty() &&
-              !catch_up_valid(item, f.rules, f.values(), 0, 20) && r.runs(f.b, id) == 1,
-          "replacement removes old subscriptions and catch-up while retaining flat state");
+  const auto current = dispatch(f.triggers, f.values(), f.b, 4, 0, 20);
+  require(current.size() == 1 && current[0].script == newer &&
+              !catch_up_valid(item, f.triggers, f.scripts, f.values()) && r.runs(f.b, id) == 2,
+          "replacement changes future dispatch and catch-up while retaining prior flat state");
 }
 void partial_replacement_and_timer_retirement() {
   Runner r;
@@ -132,8 +122,9 @@ void partial_replacement_and_timer_retirement() {
   const auto newer = f.add(rule());
   effects = {};
   r.activate(newer, RuleMode::Enable, effects);
-  require(f.scripts.rows[old].declaration.active &&
-              watch_sources(f.subscriptions, ScriptKey{f.a, old}).size() == 1,
+  const auto retained = dispatch(f.triggers, f.values(), f.a, 1, 0, 20);
+  require(f.scripts.rows[old].declaration.active && retained.size() == 1 &&
+              retained[0].script == old,
           "partial replacement retains the nonoverlapping live trigger");
   effects = {};
   set_state(f.properties, f.processes, f.terms.rows[1], f.a, Value(3.0), 0, 20, effects);
@@ -147,14 +138,13 @@ void partial_replacement_and_timer_retirement() {
   r.activate(threshold, RuleMode::Enable, effects);
   set_state(f.properties, f.processes, f.terms.rows[1], f.b, Value(0.0), 0, 20, effects);
   set_rate(f.react_state, f.terms.rows[1], f.b, 1, 0, 10, 0, 20, effects);
-  auto changes =
-      sync_rule_watches(f.react_state, f.values(), f.scripts, effects.ordered, 0, 20, {});
-  require(!changes.timers.empty(), "current process arms its authored crossing");
-  const auto token = *changes.timers.front().threshold;
+  const auto timer = threshold_timer(f.react_state, f.values(), f.scripts, {f.b, 1}, 0, 20, {});
+  require(timer.has_value(), "current process arms its authored crossing");
   effects = {};
   r.activate(threshold, RuleMode::Disable, effects);
-  require(!valid_threshold(token, identity(f.objects), f.processes, f.subscriptions, 41, 20),
-          "a disabled subscription suppresses its old pending timer when due");
+  require(evaluate_watch(f.react_state, f.values(), f.scripts, {*timer->threshold, {}}, 41, 20)
+              .invocations.empty(),
+          "a disabled rule cannot receive its old pending crossing");
 }
 } // namespace
 int main() {

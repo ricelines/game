@@ -19,17 +19,6 @@ react::HandlerRef handler(const catalog::Script &source, const react::Terms &ter
 RuleKey key(const react::RuleVersion &rule) {
   return {rule.trigger, rule.selector, rule.flag_selector};
 }
-bool matches(const react::RuleVersion &rule, const react::ValueRead &values, Handle object,
-             Step now, double hz) {
-  if (!values.identity.valid(object))
-    return false;
-  if (!rule.flag_selector)
-    return values.identity.material[object.slot()] == rule.selector;
-  const auto value = react::read(values, object, rule.selector, now, hz);
-  return value.present && (value.value.kind == Value::Kind::Boolean
-                               ? value.value.boolean
-                               : value.value.is_numeric() && value.value.numeric() != 0);
-}
 } // namespace
 void set_instances(InstanceScripts &instances, Handle object, std::span<const ScriptId> ids,
                    const catalog::Scripts &scripts) {
@@ -186,60 +175,105 @@ void project_rules(react::Triggers &triggers, const react::RuleVersions &version
       table.by_material[rule.selector] = rule.handler;
   }
 }
-std::vector<ScriptId> rule_scripts(const react::RuleVersions &versions,
-                                   const react::ValueRead &values, Handle object, Step now,
-                                   double hz) {
+std::vector<ScriptId> rule_scripts(const Triggers &triggers, const ValueRead &values, Handle object,
+                                   Step now, double hz) {
   std::vector<ScriptId> ids;
-  for (const auto &rule : latest_rules(versions))
-    if (rule.handler.enabled && matches(rule, values, object, now, hz) &&
-        std::find(ids.begin(), ids.end(), rule.handler.script) == ids.end())
-      ids.push_back(rule.handler.script);
+  if (!values.identity.valid(object))
+    return ids;
+  auto add = [&](const HandlerRef &handler) {
+    if (handler.enabled && std::find(ids.begin(), ids.end(), handler.script) == ids.end())
+      ids.push_back(handler.script);
+  };
+  for (const auto &[term, row] : triggers) {
+    (void)term;
+    if (const auto material = row.by_material.find(values.identity.material[object.slot()]);
+        material != row.by_material.end())
+      add(material->second);
+    for (const auto &[flag, handler] : row.by_flag) {
+      const auto value = read(values, object, flag, now, hz);
+      if (value.present && (value.value.kind == Value::Kind::Boolean
+                                ? value.value.boolean
+                                : value.value.is_numeric() && value.value.numeric() != 0))
+        add(handler);
+    }
+  }
   return ids;
 }
-std::vector<TermId> rule_watch_terms(const react::RuleVersions &versions,
-                                     const react::ValueRead &values, Handle object, ScriptId script,
-                                     Step now, double hz) {
-  std::vector<TermId> terms;
-  for (const auto &rule : latest_rules(versions))
-    if (rule.handler.enabled && rule.handler.script == script &&
-        matches(rule, values, object, now, hz))
-      terms.push_back(rule.trigger);
-  return terms;
+namespace {
+bool holds_quantity(const ValueRead &values, Handle object, TermId term) {
+  const auto &definition = values.terms.rows.at(term);
+  if (definition.combine != Combine::None)
+    return term < values.shared.size() && values.shared[term].get(object.slot());
+  if (definition.source == Source::State)
+    return (term < values.properties.size() && values.properties[term].get(object.slot())) ||
+           (term < values.processes.size() && values.processes[term].get(object.slot()));
+  if (definition.source == Source::Measured && definition.measurement == MeasurementRole::Runtime)
+    return values.runtime.values.contains({object, term});
+  if (definition.source == Source::Setting)
+    return term < values.instance_settings.columns.size() &&
+           values.instance_settings.columns[term].get(object.slot());
+  return false;
 }
-std::vector<react::BackgroundItem>
-catch_up(const react::SharedColumns &shared, IdentityRead identity, const catalog::Scripts &scripts,
-         const react::Terms &terms, const react::RuleVersion &rule, const amber::Origin &origin) {
-  std::vector<react::BackgroundItem> items;
+} // namespace
+std::vector<BackgroundItem> catch_up(const ValueRead &values, const catalog::Scripts &scripts,
+                                     const RuleVersion &rule, const amber::Origin &origin) {
+  std::vector<BackgroundItem> items;
   const auto &declaration = scripts.rows.at(rule.handler.script).declaration;
-  const bool watched = std::any_of(declaration.watches.begin(), declaration.watches.end(),
-                                   [&](const auto &watch) { return watch.term == rule.trigger; });
-  if (!rule.handler.enabled || !watched ||
-      terms.rows.at(rule.trigger).kind != react::Kind::Quantity || rule.trigger >= shared.size())
+  const auto &term = values.terms.rows.at(rule.trigger);
+  if (!rule.handler.enabled || term.kind != Kind::Quantity ||
+      std::none_of(declaration.watches.begin(), declaration.watches.end(),
+                   [&](const auto &watch) { return watch.term == rule.trigger; }))
     return items;
-  for (auto slot : shared[rule.trigger].slot_of) {
-    const auto object = identity.at(slot);
-    if (identity.valid(object))
+  auto add = [&](Handle object) {
+    if (values.identity.valid(object))
       items.push_back({object, rule.trigger, rule.handler.script, origin, rule.handler.version});
+  };
+  if (term.combine != Combine::None) {
+    if (term.id < values.shared.size())
+      for (auto slot : values.shared[term.id].slot_of)
+        add(values.identity.at(slot));
+  } else if (term.source == Source::State) {
+    const auto *properties =
+        term.id < values.properties.size() ? &values.properties[term.id] : nullptr;
+    if (properties)
+      for (auto slot : properties->slot_of)
+        add(values.identity.at(slot));
+    if (term.id < values.processes.size())
+      for (auto slot : values.processes[term.id].slot_of)
+        if (!properties || !properties->get(slot))
+          add(values.identity.at(slot));
+  } else if (term.source == Source::Measured && term.measurement == MeasurementRole::Runtime) {
+    for (const auto &[fact, value] : values.runtime.values) {
+      (void)value;
+      if (fact.term == term.id)
+        add(fact.subject);
+    }
+  } else if (term.source == Source::Setting && term.id < values.instance_settings.columns.size()) {
+    for (auto slot : values.instance_settings.columns[term.id].slot_of)
+      add(values.identity.at(slot));
   }
   return items;
 }
-bool catch_up_valid(const react::BackgroundItem &item, const react::RuleVersions &versions,
-                    const react::ValueRead &values, Step now, double hz) {
-  (void)now;
-  (void)hz;
-  if (!values.identity.valid(item.receiver) || item.trigger >= values.shared.size() ||
-      !values.shared[item.trigger].get(item.receiver.slot()))
+bool catch_up_valid(const BackgroundItem &item, const Triggers &triggers,
+                    const catalog::Scripts &scripts, const ValueRead &values) {
+  if (!values.identity.valid(item.receiver) || !holds_quantity(values, item.receiver, item.trigger))
     return false;
-  for (auto it = versions.history.rbegin(); it != versions.history.rend(); ++it)
-    if (it->trigger == item.trigger && it->handler.script == item.script &&
-        it->handler.version == item.version) {
-      if (!it->handler.enabled)
-        return false;
-      const auto selected = key(*it);
-      return std::none_of(versions.history.rbegin(), it,
-                          [&](const auto &later) { return key(later) == selected; });
-    }
-  return false;
+  const auto found = triggers.find(item.trigger);
+  if (found == triggers.end())
+    return false;
+  const auto &declaration = scripts.rows.at(item.script).declaration;
+  const auto selector = values.terms.by_name.at(declaration.selector);
+  auto current = [&](const HandlerRef &handler) {
+    return handler.enabled && handler.script == item.script && handler.version == item.version;
+  };
+  if (values.terms.rows.at(selector).kind == Kind::Flag) {
+    const auto &flags = found->second.by_flag;
+    const auto flag = std::find_if(flags.begin(), flags.end(),
+                                   [&](const auto &row) { return row.first == selector; });
+    return flag != flags.end() && current(flag->second);
+  }
+  const auto material = found->second.by_material.find(selector);
+  return material != found->second.by_material.end() && current(material->second);
 }
 void cancel_catch_up(std::deque<BackgroundItem> &background, const react::RuleVersion &rule) {
   std::erase_if(background, [&](const auto &item) {

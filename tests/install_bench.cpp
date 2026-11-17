@@ -28,7 +28,7 @@ void watches(unsigned count) {
     set_instances(f.installed, h, std::span(&script, 1), f.scripts);
     project_instance(f.triggers, f.installed, f.scripts, f.terms, h);
     f.state(h, 1, 0);
-    f.bind(script, h);
+    f.baseline(h);
   }
   constexpr unsigned iterations = 2000;
   std::vector<double> samples;
@@ -88,8 +88,9 @@ void school_parts() {
 }
 } // namespace
 int main() {
-  std::cout << "Scope: actual value mutation, direct watch lookup, comparison and Luau; "
-               "no physics, transport, snapshots, journal or pacing. The 300-part workload "
+  std::cout << "Scope: actual value mutation, direct watch lookup, comparison, invocation and "
+               "in-memory journal; "
+               "no physics, transport, snapshots or pacing. The 300-part workload "
                "measures the school's shared-environment process update, not swimming geometry.\n";
   watches(100);
   watches(1000);

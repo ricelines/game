@@ -9,7 +9,7 @@ namespace amber::step {
 struct ActionRun {
   NativeCall call;
   react::Resolution resolution;
-  std::vector<PlannedInvocation> handlers;
+  std::vector<react::PlannedInvocation> handlers;
   std::size_t next_handler = 0, handled = 0;
   std::uint64_t previous_intent = 0;
   bool changed = false;
@@ -30,7 +30,7 @@ ActionOutcome finish_action(ActionRun &, const Intents &, const space::Space &, 
 ActionOutcome finish_native(ActionRun &, const NativeCompletion &, IdentityRead, AttributionRead,
                             const catalog::Models &, const catalog::Scripts &, record::Journal &);
 struct HandlerRun {
-  PlannedInvocation plan;
+  react::PlannedInvocation plan;
   react::Invocation invocation;
   react::CompletedInvocation completed;
   bool started = false;

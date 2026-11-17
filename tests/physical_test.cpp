@@ -326,7 +326,7 @@ void immediate_part_motion_reallocates_plot_priority() {
     ['novel.priority']=function(self,_,value) self.state.observed=value end}})");
   react::set_instances(f.f.installed, f.f.b, std::span(&watcher, 1), f.f.scripts);
   react::project_instance(f.f.triggers, f.f.installed, f.f.scripts, f.f.terms, f.f.b);
-  f.f.bind(watcher, f.f.b);
+  f.f.baseline(f.f.b);
   const auto script = f.load(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={
     ['novel.touch']=function(self,_,args)
       local circuit=self:related('novel.link','out')[1]

@@ -6,6 +6,7 @@
 
 #include "runtime_fixture.hpp"
 #include "step/action_private.hpp"
+#include "step/run_private.hpp"
 
 namespace {
 using namespace amber;
@@ -517,6 +518,63 @@ void placement_and_custody_use_current_priority_fallback() {
   require(react::get_share(f.f.allocations, f.f.a, demand, item.root) == 0 &&
               react::get_share(f.f.allocations, f.f.a, demand, f.f.b) == 1,
           "same effective priority on placement left a stale old-plot dependency");
+}
+
+void placement_enables_a_plot_selected_process_rule() {
+  Fixture f;
+  const auto item = f.item(1, {-4, 0, 0}, false);
+  f.store(item.root, 1);
+  f.f.terms.rows[5].source = react::Source::Setting;
+  f.f.world.values[5] = Value(false);
+  f.f.plots.rows[2][5] = Value(true);
+  const auto rule = f.f.add(R"(return {kind='rule',applies_to={flag='novel.ready'},
+    watches={{term='novel.heat',thresholds={{predicate='above',value=2}}}},on={
+    ['novel.heat']=function(self,_,value)
+      self.state.count=(self.state.count or 0)+1;self.state.last=value end},
+    tests={{when={steps=0},expect={subject='target',term='novel.heat',equals=0}}}})");
+  react::add_rule(f.f.rules, f.f.scripts, f.f.terms, rule);
+  react::project_rules(f.f.triggers, f.f.rules);
+  f.f.state(item.root, 1, 0);
+  react::set_rate(f.react_state, f.f.terms.rows[1], item.root, 1, 0, 4, 0, 20, f.f.effects);
+  record::Journal journal(100, {});
+  const auto publish = [&](react::DeferredEffects effects, Step now) {
+    step::publish_effects(std::move(effects), {}, now, f.step_state.queues, f.step_state.timers,
+                          journal, 1000);
+  };
+  const auto drain = [&](Step now) {
+    step::promote_due(f.step_state.timers, now, f.step_state.queues);
+    while (auto work = step::pop_foreground(f.step_state.queues)) {
+      auto plans = step::prepare_reactive(f.react_state, f.f.values(), f.f.scripts, f.step_state,
+                                          std::move(*work), now, 20);
+      if (!plans)
+        continue;
+      f.f.run(*plans, now);
+      publish(std::move(f.f.effects), now);
+      f.f.effects = {};
+    }
+  };
+  publish(std::move(f.f.effects), 0);
+  f.f.effects = {};
+  drain(0);
+  require(!f.f.states.contains({item.root, rule}),
+          "the running process is silent while the inherited selector is false");
+  f.plots.rows[2].preset = 1;
+  auto placed = f.place(PlayerId{1}, {{"position", {4, 5, 0}}}, item.root);
+  require(placed.changed && f.f.objects.plot[item.root.slot()] == 2 &&
+              react::read(f.f.values(), item.root, 5, 20, 20).value == Value(true),
+          "real inventory placement enables the destination plot's selector flag");
+  publish(std::move(placed.effects), 20);
+  drain(20);
+  require(!f.f.states.contains({item.root, rule}),
+          "placement changes rule eligibility without invoking the quantity handler");
+  drain(40);
+  require(!f.f.states.contains({item.root, rule}), "the strict threshold is silent at equality");
+  drain(41);
+  drain(80);
+  const auto &state = f.f.states.at({item.root, rule}).values;
+  require(std::get<double>(state.at(std::string("count"))) == 1 &&
+              std::abs(std::get<double>(state.at(std::string("last"))) - 2.05) < 1e-9,
+          "the plot-selected rule receives its real process crossing once after placement");
 }
 
 void logical_inventory_root_reveals_its_actual_declared_part() {
@@ -1045,9 +1103,12 @@ void plot_changes_dispatch_before_authority_is_removed() {
       for (const auto &handler :
            react::dispatch(f.f.triggers, f.f.values(), event.receiver, event.event, 20, 20))
         if (handler.script == event.recipient_script) {
-          const std::array plans{react::InvocationPlan{
-              handler, event.receiver, event.sender, event.event, event.payload, {}}};
-          f.f.run(plans, 20);
+          react::PlannedInvocation plan{handler, {}};
+          plan.input.receiver = event.receiver;
+          plan.input.sender = event.sender;
+          plan.input.trigger = event.event;
+          plan.input.payload = event.payload;
+          f.f.run(std::span(&plan, 1), 20);
           ++received;
         }
     }
@@ -1176,6 +1237,7 @@ int main() {
     gifts_bounce_and_keep_unrelated_seated_bodies_alive();
     cancelling_a_visible_held_trade_keeps_its_escrow_pose();
     placement_and_custody_use_current_priority_fallback();
+    placement_enables_a_plot_selected_process_rule();
     logical_inventory_root_reveals_its_actual_declared_part();
     script_inventory_placement_uses_its_own_grants();
     retirement_keeps_the_surviving_trade_side_before_free();

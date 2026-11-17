@@ -509,6 +509,7 @@ int main() {
       on={['novel.cue']=function(self)end}})");
     f.state(f.a, 5, 1);
     react::add_rule(f.rules, f.scripts, f.terms, rule);
+    react::project_rules(f.triggers, f.rules);
     const auto rule_grant =
         run(1, ids.grant, f.a,
             {{"holder", {{"script", "s:" + std::to_string(rule)}, {"on", to_string(f.a)}}},

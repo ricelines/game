@@ -198,7 +198,6 @@ void refresh_object_plots(const space::Space &space, const ObjectState &objects_
                           const Clock &clock, const amber::Origin &origin, NativeCompletion &out) {
   const auto values = react::value_read(objects_state, catalog_state, react_state);
   const auto identity = values.identity;
-  const auto &terms = react_state.terms;
 
   out.changed_objects.insert(out.changed_objects.end(), out.visible_objects.begin(),
                              out.visible_objects.end());
@@ -217,16 +216,35 @@ void refresh_object_plots(const space::Space &space, const ObjectState &objects_
   }
   unique(out.crossed_plots);
   std::erase_if(out.crossed_plots, [&](Handle object) { return !identity.valid(object); });
-  for (auto object : out.crossed_plots) {
-    auto dirty = react::watch_sources(react_state.subscriptions, object);
-    std::erase_if(dirty, [&](FactKey fact) {
-      return terms.rows.at(fact.term).source != react::Source::Setting;
-    });
-    for (auto source : dirty)
-      out.effects.ordered.emplace_back(react::WatchWork{source, origin});
-    react::reconcile_object_priorities(values, react_state, object, out.effects, clock.step,
-                                       clock.hz);
+  react::refresh_plot_settings(values, react_state, catalog_state.scripts, out.crossed_plots,
+                               clock.step, clock.hz, origin, out.effects);
+}
+
+void refresh_rule_reactions(const ObjectState &objects_state, const catalog::State &catalog_state,
+                            const react::State &react_state, space::State &space_state,
+                            step::State &step_state, std::span<const ScriptId> changed) {
+  if (changed.empty())
+    return;
+  const auto values = react::value_read(objects_state, catalog_state, react_state);
+  const auto &scripts = catalog_state.scripts;
+  refresh_rule_thresholds(step_state.timers, react_state, values, scripts, changed,
+                          step_state.clock);
+  const auto illuminance =
+      catalog_state.mechanical.values.at("measurements").at("illuminance").get<TermId>();
+  bool affected = false, discover = false;
+  for (auto script : changed) {
+    const auto &declaration = scripts.rows.at(script).declaration;
+    if (declaration.kind == react::ScriptDeclaration::Kind::Rule &&
+        std::any_of(declaration.watches.begin(), declaration.watches.end(),
+                    [&](const auto &watch) { return watch.term == illuminance; })) {
+      affected = true;
+      discover |= declaration.active;
+    }
   }
+  if (affected)
+    refresh_illuminance_reads(space_state.light_subscriptions, react_state, values, scripts,
+                              transforms(objects_state.objects), illuminance, step_state.clock,
+                              discover);
 }
 
 void publish_catalog_changes(net::Sessions &sessions, net::SessionViews &views,
