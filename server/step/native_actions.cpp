@@ -172,6 +172,12 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
     out = hold_goods(perm_state, objects_state, delivery, space, mailbox_max, call);
     break;
   }
+  case react::ExchangeAction::Notify: {
+    if (const auto error = validate_notify(call.arguments); !error.empty())
+      throw std::invalid_argument(error);
+    out = script_notice(perm_state, call);
+    break;
+  }
   case react::ExchangeAction::Pay: {
     if (const auto error = validate_pay(call.arguments); !error.empty())
       throw std::invalid_argument(error);

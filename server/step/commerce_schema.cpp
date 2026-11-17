@@ -45,6 +45,14 @@ Json schema(Json properties, Json required, Json example) {
           {"examples", Json::array({std::move(example)})}};
 }
 } // namespace
+std::string validate_notify(const Json &row) {
+  return validate([&] {
+    fields(row, {"player", "text"});
+    id(row, "player");
+    if (!row.at("text").is_string())
+      throw std::invalid_argument("text must be a string");
+  });
+}
 std::string validate_pay(const Json &row) {
   return validate([&] {
     fields(row, {"to", "amount"}, {"from"});
@@ -210,6 +218,10 @@ CommerceDeclarations declare_commerce(react::Terms &terms, react::NativeActions 
     return catalog::declare_native(native, terms, std::move(name), std::move(description),
                                    std::move(right), false, std::move(input), operation);
   };
+  ids.notify = add(react::ExchangeAction::Notify, "engine.notify",
+                   "Send a notice to a player who granted this script authority.", "",
+                   schema({{"player", str}, {"text", str}}, {"player", "text"},
+                          {{"player", "p:PLAYER_ID"}, {"text", "Your lot needs tax credit."}}));
   ids.pay =
       add(react::ExchangeAction::Pay, "engine.pay",
           "Transfer whole currency units between player, object or group accounts. Scripts need an "

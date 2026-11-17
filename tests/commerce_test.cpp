@@ -821,6 +821,44 @@ void login_delivers_complete_mailbox_without_native_capacity_or_identity_changes
   require(deliver(f.bodies[1], 23) == 0 && delivered.records.empty(),
           "repeated authenticated hello cannot duplicate delivered goods or records");
 }
+void script_notices_need_a_live_recipient_grant_and_keep_unicode() {
+  Fixture f;
+  const auto caller = ScriptHolder{1, f.f.a};
+  const auto args = nlohmann::json{{"player", "p:2"}, {"text", "hello"}};
+  auto refused = [&](Caller actor) {
+    const auto out = f.call(f.ids.notify, actor, args);
+    require(!out.reply.at("ok").get<bool>() && out.result == record::Result::Denied &&
+                out.reply.at("denied").at("fix") ==
+                    "ask the player to give this script a grant first" &&
+                out.notices.empty(),
+            "notice escaped grant requirement");
+  };
+  refused(caller);
+  refused(PlayerId{2});
+  const auto holder = perm::Holder::script(1, f.f.a);
+  const auto grant =
+      perm::create_grant(f.grants, f.players, perm::Holder::player(2),
+                         {2, holder, perm::Scope::owned(2), perm::bit(perm::Verb::Use), 0, 0, 100},
+                         {perm::Scope::owned(2), 2, perm::all_rights}, {holder, 1, true}, 1);
+  require(bool(grant), "notice grant fixture");
+  std::string text;
+  for (int i = 0; i < 281; ++i)
+    text += "界";
+  auto out = f.call(f.ids.notify, caller, {{"player", "p:2"}, {"text", text}});
+  require(out.reply.at("ok") == true && out.records.size() == 1 &&
+              out.records[0].name == "notify" && out.notices.size() == 1 &&
+              out.notices[0].second.at("text").get<std::string>() == text.substr(0, 280 * 3) &&
+              out.notices[0].second.at("on") == to_string(f.f.a),
+          "notice text was not cut at code points");
+  net::Profiles profiles;
+  net::Sessions sessions(profiles);
+  step::notify(f.players, sessions, 1, out.notices[0].first, out.notices[0].second);
+  require(f.players.rows[2].notices.size() == 1 &&
+              f.players.rows[2].notices[0] == out.notices[0].second,
+          "absent recipient did not retain script notice");
+  perm::revoke(f.grants, f.players, grant.grant);
+  refused(caller);
+}
 void returns_use_inventory_with_static_occupants_and_ignore_full_mailboxes() {
   Fixture f;
   f.players.rows[2].mailbox.push_back(Handle::make(900, 1));
@@ -942,6 +980,7 @@ void land_editing_preserves_grants_and_refreshes_objects() {
 } // namespace
 int main() {
   try {
+    script_notices_need_a_live_recipient_grant_and_keep_unicode();
     returns_use_inventory_with_static_occupants_and_ignore_full_mailboxes();
     land_refusals_have_fixes_and_denial_records();
     land_editing_preserves_grants_and_refreshes_objects();

@@ -1,6 +1,42 @@
 #include "commerce_private.hpp"
 
 namespace amber::step {
+NativeCompletion script_notice(const perm::State &state, const NativeCall &call) {
+  const auto recipient = commerce_detail::player_id(call.arguments.at("player"), state.players);
+  const auto caller = commerce_detail::actor(call);
+  bool allowed = false;
+  if (caller.kind == perm::HolderKind::Script)
+    for (auto id : state.players.rows[recipient].grants_given) {
+      const auto &grant = state.grants.rows[id];
+      if (grant.live && (!grant.expires_step || grant.expires_step > call.step) &&
+          grant.holder == caller) {
+        allowed = true;
+        break;
+      }
+    }
+  if (!allowed)
+    return commerce_detail::denied(
+        "notice", "p:" + std::to_string(recipient),
+        "only a script holding this player's live grant may send a notice",
+        "ask the player to give this script a grant first");
+  auto text = call.arguments.at("text").get<std::string>();
+  std::size_t end = 0, points = 0;
+  while (end < text.size()) {
+    if ((static_cast<unsigned char>(text[end]) & 0xc0) != 0x80 && points++ == 280)
+      break;
+    ++end;
+  }
+  text.resize(end);
+  auto out = commerce_detail::result(true);
+  out.notices.emplace_back(recipient, Json{{"kind", "notice"},
+                                           {"from", "s:" + std::to_string(caller.id)},
+                                           {"on", to_string(caller.installed_on)},
+                                           {"text", text}});
+  commerce_detail::record(out, call, "notify", {caller.installed_on},
+                          {{"player", recipient}, {"text", text}});
+  return out;
+}
+
 void notify(perm::Players &players, net::Sessions &sessions, std::size_t mailbox_max,
             PlayerId player, Json notice) {
   if (!player)

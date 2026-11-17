@@ -505,10 +505,10 @@ void bind_metadata(const amber::ObjectState &objects_state,
 
 using Json = nlohmann::json;
 struct CommerceDeclarations {
-  TermId pay = 0, balance = 0, inventory = 0, give = 0, offer = 0, offers = 0, accept = 0,
-         cancel_offer = 0, trade_open = 0, trade_change = 0, trade_confirm = 0, trade_cancel = 0,
-         place_existing = 0, offer_plot = 0, set_offer_price = 0, return_goods = 0,
-         abandon_plot = 0, split_plot = 0, join_plots = 0;
+  TermId notify = 0, pay = 0, balance = 0, inventory = 0, give = 0, offer = 0, offers = 0,
+         accept = 0, cancel_offer = 0, trade_open = 0, trade_change = 0, trade_confirm = 0,
+         trade_cancel = 0, place_existing = 0, offer_plot = 0, set_offer_price = 0,
+         return_goods = 0, abandon_plot = 0, split_plot = 0, join_plots = 0;
 };
 CommerceDeclarations declare_commerce(react::Terms &, react::NativeActions &);
 struct OfferExpired {
@@ -528,6 +528,8 @@ step::NativeCompletion deliver_mailbox(perm::Players &, net::Sessions &,
                                        const amber::ObjectState &objects_state,
                                        const space::Space &, PlayerId, Handle authenticated_body,
                                        Step);
+std::string validate_notify(const Json &);
+NativeCompletion script_notice(const perm::State &, const NativeCall &);
 std::string validate_pay(const Json &);
 std::string validate_balance(const Json &);
 std::string validate_inventory(const Json &);
