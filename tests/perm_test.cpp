@@ -13,6 +13,23 @@ void require(bool condition, const char *message) {
     throw std::runtime_error(message);
 }
 
+void check_indexes(const amber::perm::State &state) {
+  Grants rebuilt;
+  rebuilt.rows = state.grants.rows;
+  auto people = state.players;
+  rebuild_grant_lookup(rebuilt, people);
+  const auto &g = state.grants;
+  require(g.by_key == rebuilt.by_key && g.script_held == rebuilt.script_held &&
+              g.children == rebuilt.children && g.by_plot == rebuilt.by_plot &&
+              g.by_object == rebuilt.by_object && g.all_land == rebuilt.all_land &&
+              g.expiring == rebuilt.expiring,
+          "incremental grant indexes differ from restored live rows");
+  for (std::size_t i = 0; i < people.rows.size(); ++i)
+    require(people.rows[i].grants_held == state.players.rows[i].grants_held &&
+                people.rows[i].grants_given == state.players.rows[i].grants_given,
+            "player grant lists differ from restored live rows");
+}
+
 struct Fixture {
   amber::perm::State perm_state;
 
@@ -31,6 +48,56 @@ struct Fixture {
     return result.grant;
   }
 };
+
+void grant_indexes_follow_every_lifetime_change() {
+  Fixture f;
+  auto &state = f.perm_state;
+  state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
+  const auto object = Handle::make(20, 1);
+  const auto script = Holder::script(7, object);
+  const auto parent = f.grant(1, script, Scope::plot(1), 1, 31);
+  const auto child = create_grant(f.grants, f.players, script,
+                                  {1, Holder::player(2), Scope::plot(1), 8, 0, 0, 900},
+                                  {Scope::plot(1), 1, 31}, {Holder::player(2), 2, false}, 2);
+  require(bool(child), "index test delegation failed");
+  f.grant(1, Holder::player(3), Scope::owned_on_plot(1, 1), 1, bit(Verb::Use));
+  f.grant(1, Holder::player(3), Scope::object(object), 1, bit(Verb::Use));
+  f.grant(1, Holder::player(3), Scope::avatar(object), 1, 1);
+  f.grant(1, script, Scope::account(Account::object(object)), 1, 1, 50, 100);
+  const auto root = create_root_grant(f.grants, f.players,
+                                      {0, script, Scope::all_land(), Rights{24} << 8, 0, 0, 1000},
+                                      {script, 1, true}, 1);
+  require(bool(root) && f.grants.by_object.at(object.bits).size() == 3 &&
+              f.grants.script_held.at(object.bits).at(7).size() == 3 &&
+              f.grants.children.at(parent) == std::vector<GrantId>{child.grant},
+          "grant references were not indexed in both directions");
+  check_indexes(state);
+  const auto other = split_plot(state, 1, 0, 8, 3);
+  check_indexes(state);
+  require(f.grants.reminders.contains({900, child.grant}),
+          "script-issued player grant lost its reminder");
+  Grants restored_grants;
+  restored_grants.rows = f.grants.rows;
+  auto restored_players = f.players;
+  rebuild_grant_lookup(restored_grants, restored_players);
+  require(restored_grants.reminders == f.grants.reminders,
+          "restore lost delegated land grant reminders");
+  join_plots(state, 1, other);
+  check_indexes(state);
+  revoke(f.grants, f.players, parent);
+  require(!f.grants.rows[child.grant].live, "parent revoke retained child");
+  check_indexes(state);
+  change_plot_owner(state, 1, 2);
+  check_indexes(state);
+  revoke_object(f.grants, f.players, object);
+  require(f.grants.by_object.empty() && f.grants.script_held.empty() && f.grants.all_land.empty(),
+          "retired object retained scope or script grants");
+  check_indexes(state);
+  f.grant(2, Holder::player(3), Scope::plot(1), 2, 24, 0, 0, 20);
+  check_indexes(state);
+  advance_grants(f.grants, f.players, 20, 0, 100);
+  check_indexes(state);
+}
 
 void changing_plot_owner_clears_only_old_owner_authority() {
   Fixture f;
@@ -60,6 +127,7 @@ void changing_plot_owner_clears_only_old_owner_authority() {
               f.grants.rows[unrelated].live && !state.offers.rows[1].live &&
               state.offers.expiring.empty(),
           "plot sale did not clear precisely old-owner grants, children and offers");
+  check_indexes(state);
   require(change_plot_owner(state, 1, 0).empty() && f.grants.rows[root.grant].live,
           "abandon removed root authority");
 }
@@ -78,7 +146,8 @@ void split_copies_grant_parent_and_deadlines() {
   const auto copied_parent = f.grants.by_key.at({f.grants.rows[parent].holder, Scope::plot(next)});
   const auto copied_child = f.grants.by_key.at({Holder::player(2), Scope::plot(next)});
   require(f.grants.rows[copied_child].parent == copied_parent &&
-              f.grants.reminders.contains({100, copied_parent}),
+              f.grants.reminders.contains({100, copied_parent}) &&
+              f.grants.reminders.contains({100, copied_child}),
           "copied delegation or reminder lost");
   require(advance_grants(f.grants, f.players, 99, 0, 100).expired.empty(), "split expired early");
   const auto expired = advance_grants(f.grants, f.players, 100, 0, 100).expired;
@@ -190,8 +259,8 @@ void plot_offer_snapshots_keep_remote_maker_and_its_authority() {
   State restored;
   snap::Input in{bytes.data(), bytes.size()};
   read_players(in, restored.players, restored.ledger, restored.plots, restored.groups);
-  read_grants(in, restored.grants, restored.offers, restored.trades, restored.owner_limits,
-              objects.model.size());
+  read_grants(in, restored.grants, restored.players, restored.offers, restored.trades,
+              restored.owner_limits, objects.model.size());
   snap::check_complete(in);
   const auto &row = restored.offers.rows[offered.offer];
   require(row.plot == 1 && row.maker == maker && row.price == 25 && row.buyer == 2 &&
@@ -750,6 +819,7 @@ void next_owner_limits_preserve_fair_use_and_clear_old_script_grants() {
           "installed behavior lost implicit own-object edit after sale");
   limits.erase(object.slot()); // Explicit owner cleanup precedes storage destruction and reuse.
   destroy(objects, object);
+  check_indexes(f.perm_state);
   const auto replacement = create(objects, init);
   require(
       !check(script, Verb::Use,
@@ -780,7 +850,9 @@ struct GoodsFixture : Fixture {
                  100, true, 2);
   }
   SwapResult buy(OfferId id, Buyer buyer, std::size_t mailbox_max = 100) {
-    return accept(perm_state, objects_state, buyer, current(), id, 50, mailbox_max, 3);
+    auto result = accept(perm_state, objects_state, buyer, current(), id, 50, mailbox_max, 3);
+    check_indexes(perm_state);
+    return result;
   }
 };
 
@@ -1012,7 +1084,7 @@ void offer_deadlines_skip_completed_quotes_and_rebuild_on_restore() {
     GoodsFixture restored;
     restored.objects = f.objects;
     snap::Input in{bytes.data(), bytes.size()};
-    read_grants(in, restored.grants, restored.offers, trades, restored.limits,
+    read_grants(in, restored.grants, restored.players, restored.offers, trades, restored.limits,
                 restored.objects.generation.size());
     snap::check_complete(in);
     require(restored.offers.expiring.size() == 1 && advance(restored, 99).empty() &&
@@ -1271,8 +1343,8 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
   Groups restored_groups;
   snap::Input in{bytes.data(), bytes.size()};
   read_players(in, restored.players, restored.ledger, restored_plots, restored_groups);
-  read_grants(in, restored.grants, restored.offers, restored_trades, restored.limits,
-              restored.objects.generation.size());
+  read_grants(in, restored.grants, restored.players, restored.offers, restored_trades,
+              restored.limits, restored.objects.generation.size());
   snap::check_complete(in);
   require(restored_plots.rows[1].banned == std::vector<PlayerId>{3} &&
               restored_groups.rows[1].name == "Authored group" &&
@@ -1291,6 +1363,7 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
               Account::player(4), 11, 5)
                   .reason == Reason::Allowance,
           "restored child enlarged shared allowance");
+  check_indexes(restored.perm_state);
   const auto result = confirm_trade(restored.perm_state, restored.objects_state, trade, 2,
                                     {restored.current(), Target{}}, bodies, 5);
   require(result.completed && restored.current().owner == 2 &&
@@ -1308,6 +1381,7 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
 
 int main() {
   try {
+    grant_indexes_follow_every_lifetime_change();
     split_copies_grant_parent_and_deadlines();
     changing_plot_owner_clears_only_old_owner_authority();
     plot_sales_recheck_price_authority_and_burn_pool_payments();

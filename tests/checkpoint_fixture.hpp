@@ -179,7 +179,7 @@ struct Fixture {
     grants.rows[3] = {
         3, 3, 0,   perm::Holder::player(3), perm::Scope::object(f.c), perm::all_rights, 0, 0, 0,
         0, 0, true};
-    perm::rebuild_grant_lookup(grants);
+    perm::rebuild_grant_lookup(grants, players);
     offers.rows.resize(3);
     offers.rows[1] = {1, 1, 2, f.b, 5, 500, 1, true, {part}};
     offers.rows[2] = {2, 3, 0, f.c, 2, 500, 0, true, {}};

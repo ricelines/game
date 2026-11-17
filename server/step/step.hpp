@@ -281,7 +281,7 @@ Json failure(std::string);
 } // namespace amber::step::authoring
 
 namespace amber::step {
-inline constexpr char runtime_version[] = "ambergris-0.5";
+inline constexpr char runtime_version[] = "ambergris-0.6";
 
 struct NavigationRequests {
   struct Request {

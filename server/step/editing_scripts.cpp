@@ -20,14 +20,9 @@ std::vector<ScriptId> extras(const react::InstanceScripts &instances, Handle obj
   return {};
 }
 bool revoke_holder(perm::Grants &grants, perm::Players &players, ScriptKey key) {
-  std::vector<GrantId> ids;
-  const auto holder = perm::Holder::script(key.script, key.object);
-  for (const auto &grant : grants.rows)
-    if (grant.live && grant.holder == holder)
-      ids.push_back(grant.id);
-  if (!ids.empty())
-    perm::revoke_many(grants, players, ids);
-  return !ids.empty();
+  const auto held =
+      perm::held_grants(grants, players, perm::Holder::script(key.script, key.object));
+  return !perm::revoke_many(grants, players, held).empty();
 }
 void withdraw_removed(react::SharedColumns &shared, react::GivesTo &gives,
                       const react::Terms &terms, const catalog::Scripts &scripts, Handle object,

@@ -464,7 +464,7 @@ Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_st
   }
   {
     auto in = snap::section_input(view, snap::tags[6]);
-    perm::read_grants(in, grants, offers, trades, limits, objects.generation.size());
+    perm::read_grants(in, grants, players, offers, trades, limits, objects.generation.size());
     snap::check_complete(in);
   }
   {

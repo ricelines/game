@@ -84,13 +84,18 @@ SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Han
     return false;
   };
   std::vector<GrantId> pending;
-  for (const auto &grant : grants.rows) {
-    const bool holder = grant.holder.kind == HolderKind::Player
-                            ? selected.players.contains(grant.holder.id)
-                            : selected.objects.contains(grant.holder.installed_on);
-    if (grant.id && holder && scope_selected(grant.scope))
-      pending.push_back(grant.id);
-  }
+  const auto append = [&](std::span<const GrantId> held) {
+    for (auto id : held)
+      if (scope_selected(grants.rows[id].scope))
+        pending.push_back(id);
+  };
+  for (auto player : selected.players)
+    if (player < players.rows.size())
+      append(players.rows[player].grants_held);
+  for (auto object : selected.objects.objects)
+    if (const auto found = grants.script_held.find(object); found != grants.script_held.end())
+      for (const auto &[script, held] : found->second)
+        append(held);
   while (!pending.empty()) {
     auto id = pending.back();
     pending.pop_back();
@@ -132,8 +137,6 @@ template <class S> void serialize(S &s, Account &v) {
 }
 template <class S> void serialize(S &s, Player &v) {
   snap::field(s, v.groups);
-  snap::field(s, v.grants_held);
-  snap::field(s, v.grants_given);
   snap::field(s, v.inventory);
   snap::field(s, v.mailbox);
   s.container(v.notices, snap::max_collection(), [](S &stream, nlohmann::json &notice) {
@@ -216,8 +219,6 @@ void write_players(snap::Output &out, const Players &players, const Ledger &ledg
       }
       std::erase_if(row.inventory, [&](Handle h) { return !selected->objects.contains(h); });
       std::erase_if(row.mailbox, [&](Handle h) { return !selected->objects.contains(h); });
-      std::erase_if(row.grants_given, [&](GrantId g) { return !selected->grants.contains(g); });
-      std::erase_if(row.grants_held, [&](GrantId g) { return !selected->grants.contains(g); });
     }
   out.container(selected ? player_rows : players.rows, snap::max_collection());
   auto included = [&](Account) { return !selected; };
@@ -295,14 +296,14 @@ void write_grants(snap::Output &out, const Grants &grants, const Offers &offers,
       kept.set(slot, *row);
   snap::write_sparse(out, kept, field);
 }
-void read_grants(snap::Input &in, Grants &grants, Offers &offers, Trades &trades,
+void read_grants(snap::Input &in, Grants &grants, Players &players, Offers &offers, Trades &trades,
                  OwnerLimits &limits, std::size_t slots) {
   snap::field(in, grants.rows);
   snap::field(in, offers.rows);
   snap::field(in, trades.rows);
   snap::read_sparse(in, limits, [](snap::Input &s, Rights &value) { s.value4b(value); });
   limits.rebuild_positions(slots);
-  rebuild_grant_lookup(grants);
+  rebuild_grant_lookup(grants, players);
   rebuild_offer_deadlines(offers);
 }
 } // namespace amber::perm

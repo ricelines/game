@@ -105,6 +105,11 @@ struct Grant {
 struct Grants {
   std::vector<Grant> rows{Grant{}};
   std::unordered_map<GrantKey, GrantId, GrantKeyHash> by_key;
+  std::unordered_map<std::uint64_t, std::map<ScriptId, std::vector<GrantId>>> script_held;
+  std::unordered_map<GrantId, std::vector<GrantId>> children;
+  std::unordered_map<PlotId, std::vector<GrantId>> by_plot;
+  std::unordered_map<std::uint64_t, std::vector<GrantId>> by_object;
+  std::vector<GrantId> all_land;
   // Each live deadline has one ordered (step,id) entry, erased on removal.
   std::set<std::pair<Step, GrantId>> expiring, reminders;
 };
@@ -320,7 +325,8 @@ std::vector<GrantId> revoke_objects(Grants &, Players &, std::span<const Handle>
 
 GrantDeadlines advance_grants(Grants &, Players &, Step now, Step reminder_steps,
                               std::size_t max_entries);
-void rebuild_grant_lookup(Grants &);
+std::span<const GrantId> held_grants(const Grants &, const Players &, Holder);
+void rebuild_grant_lookup(Grants &, Players &);
 
 TransferResult pay(Ledger &, Grants &, Holder, AccountTarget payer, Account recipient,
                    std::int64_t amount, Step);
@@ -396,7 +402,7 @@ void write_players(snap::Output &, const Players &, const Ledger &, const Plots 
 void read_players(snap::Input &, Players &, Ledger &, Plots &, Groups &);
 void write_grants(snap::Output &, const Grants &, const Offers &, const Trades &,
                   const OwnerLimits &, const SnapshotSelection * = nullptr);
-void read_grants(snap::Input &, Grants &, Offers &, Trades &, OwnerLimits &,
+void read_grants(snap::Input &, Grants &, Players &, Offers &, Trades &, OwnerLimits &,
                  std::size_t object_slots);
 
 struct State {
@@ -412,6 +418,11 @@ struct State {
 } // namespace amber::perm
 
 namespace amber::perm {
+struct PlotHolder {
+  Holder holder;
+  Rights verbs;
+};
+std::vector<PlotHolder> plot_holders(const Plot &, const Grants &, Step);
 nlohmann::json plot_record(const Plots &, const Grants &, PlotId, float port_spacing_m, Step,
                            const Offers & = {}, PlayerId caller = 0);
-}
+} // namespace amber::perm

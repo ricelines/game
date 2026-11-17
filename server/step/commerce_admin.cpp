@@ -339,14 +339,11 @@ step::NativeCompletion revoke(amber::perm::State &perm_state,
                           "have its issuer revoke it, or relinquish a grant held by this caller");
           ids.push_back(found->second);
         }
-      } else if (issuer.kind == perm::HolderKind::Player) {
-        for (auto id : players.rows[who].grants_given)
-          if (grants.rows[id].holder == selected)
-            ids.push_back(id);
       } else
-        for (const auto &grant : grants.rows)
-          if (grant.live && grant.holder == selected && allowed(grant))
-            ids.push_back(grant.id);
+        for (auto id : perm::held_grants(grants, players, selected))
+          if (issuer.kind == perm::HolderKind::Player ? grants.rows[id].issuer == who
+                                                      : allowed(grants.rows[id]))
+            ids.push_back(id);
     }
     const auto removed = perm::revoke_many(grants, players, ids);
     Json revoked = Json::array();
@@ -373,14 +370,12 @@ step::NativeCompletion list_grants(const perm::Grants &grants, const perm::Playe
       return result(false, {{"held", rows(players.rows[who].grants_held)},
                             {"given", rows(players.rows[who].grants_given)}});
     }
-    std::vector<GrantId> held, given;
-    for (const auto &grant : grants.rows)
-      if (grant.live) {
-        if (grant.holder == issuer)
-          held.push_back(grant.id);
-        if (grant.parent && grants.rows[grant.parent].holder == issuer)
-          given.push_back(grant.id);
-      }
+    const auto held = perm::held_grants(grants, players, issuer);
+    std::vector<GrantId> given;
+    for (auto id : held)
+      if (const auto children = grants.children.find(id); children != grants.children.end())
+        given.insert(given.end(), children->second.begin(), children->second.end());
+    std::sort(given.begin(), given.end());
     return result(false, {{"held", rows(held)}, {"given", rows(given)}});
   } catch (const std::exception &error) {
     return bad_input(error.what());

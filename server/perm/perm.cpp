@@ -6,6 +6,37 @@
 #include <unordered_set>
 
 namespace amber::perm {
+std::vector<PlotHolder> plot_holders(const Plot &plot, const Grants &grants, Step now) {
+  std::vector<PlotHolder> result;
+  const auto append = [&](GrantId id) {
+    const auto &grant = grants.rows[id];
+    if (grant.expires_step && now >= grant.expires_step)
+      return;
+    Rights verbs = 0;
+    if (grant.scope == Scope::plot(plot.id))
+      verbs = grant.verbs;
+    else if (plot.kind == PlotKind::Lot && !grant.issuer && grant.scope.kind == ScopeKind::AllLand)
+      verbs = grant.verbs >> 8;
+    if (!(verbs & ((Rights{1} << unsigned(LandVerb::Transfer)) |
+                   (Rights{1} << unsigned(LandVerb::Return)))) ||
+        (grant.holder.kind == HolderKind::Player && grant.holder.id == plot.owner))
+      return;
+    const auto found = std::find_if(result.begin(), result.end(), [&](const PlotHolder &row) {
+      return row.holder == grant.holder;
+    });
+    if (found == result.end())
+      result.push_back({grant.holder, verbs});
+    else
+      found->verbs |= verbs;
+  };
+  std::vector<GrantId> candidates = grants.all_land;
+  if (const auto found = grants.by_plot.find(plot.id); found != grants.by_plot.end())
+    candidates.insert(candidates.end(), found->second.begin(), found->second.end());
+  std::sort(candidates.begin(), candidates.end());
+  for (auto id : candidates)
+    append(id);
+  return result;
+}
 nlohmann::json plot_record(const Plots &plots, const Grants &grants, PlotId id,
                            float port_spacing_m, Step now, const Offers &offers, PlayerId caller) {
   using Json = nlohmann::json;
@@ -34,20 +65,10 @@ nlohmann::json plot_record(const Plots &plots, const Grants &grants, PlotId id,
   }
   const auto port = std::int64_t(std::round((b[0] + b[2]) / (2 * port_spacing_m)));
   Json rights = Json::array();
-  for (const auto &grant : grants.rows) {
-    if (!grant.live || (grant.expires_step && now >= grant.expires_step))
-      continue;
-    Rights verbs = 0;
-    if (grant.scope == Scope::plot(id))
-      verbs = grant.verbs;
-    else if (plot.kind == PlotKind::Lot && !grant.issuer && grant.scope.kind == ScopeKind::AllLand)
-      verbs = grant.verbs >> 8;
-    if (!(verbs & 24) || (grant.holder.kind == HolderKind::Player && grant.holder.id == plot.owner))
-      continue;
-    Json holder = grant.holder.kind == HolderKind::Player
-                      ? Json("p:" + std::to_string(grant.holder.id))
-                      : Json{{"script", "s:" + std::to_string(grant.holder.id)},
-                             {"on", to_string(grant.holder.installed_on)}};
+  for (const auto &[held, verbs] : plot_holders(plot, grants, now)) {
+    Json holder = held.kind == HolderKind::Player ? Json("p:" + std::to_string(held.id))
+                                                  : Json{{"script", "s:" + std::to_string(held.id)},
+                                                         {"on", to_string(held.installed_on)}};
     Json names = Json::array();
     constexpr const char *land_verbs[]{"build", "enter", "run_scripts", "transfer", "return"};
     for (unsigned bit = 0; bit < 5; ++bit)
@@ -236,38 +257,95 @@ void spend(Grants &grants, GrantId id, std::int64_t amount, Step now) {
   }
 }
 
-std::vector<GrantId> erase_marked(Grants &grants, Players &players,
-                                  const std::vector<bool> &marked) {
+template <class Map, class Key> void prune_grants(Map &map, const Key &key, const Grants &grants) {
+  const auto found = map.find(key);
+  if (found == map.end())
+    return;
+  std::erase_if(found->second, [&](GrantId id) { return !grants.rows[id].live; });
+  if (found->second.empty())
+    map.erase(found);
+}
+std::vector<GrantId> erase_grants(Grants &grants, Players &players, std::span<const GrantId> ids) {
   std::vector<GrantId> removed;
-  std::vector<PlayerId> affected;
-  for (auto &grant : grants.rows) {
-    if (!grant.live || !marked[grant.id])
+  std::set<PlayerId> people;
+  std::map<std::uint64_t, std::set<ScriptId>> scripts;
+  std::set<GrantId> parents;
+  std::set<PlotId> plots;
+  std::set<std::uint64_t> objects;
+  bool all_land = false;
+  for (auto id : ids) {
+    auto &grant = grants.rows[id];
+    if (!grant.live)
       continue;
     grants.by_key.erase({grant.holder, grant.scope});
-    grants.expiring.erase({grant.expires_step, grant.id});
-    grants.reminders.erase({grant.expires_step, grant.id});
-    grant.live = false;
-    removed.push_back(grant.id);
-    affected.push_back(grant.issuer);
+    grants.expiring.erase({grant.expires_step, id});
+    grants.reminders.erase({grant.expires_step, id});
+    people.insert(grant.issuer);
     if (grant.holder.kind == HolderKind::Player)
-      affected.push_back(grant.holder.id);
+      people.insert(grant.holder.id);
+    else
+      scripts[grant.holder.installed_on.bits].insert(grant.holder.id);
+    if (grant.parent)
+      parents.insert(grant.parent);
+    switch (grant.scope.kind) {
+    case ScopeKind::Plot:
+    case ScopeKind::OwnedOnPlot:
+      plots.insert(PlotId(grant.scope.subject));
+      break;
+    case ScopeKind::Object:
+    case ScopeKind::Avatar:
+      objects.insert(grant.scope.subject);
+      break;
+    case ScopeKind::Account:
+      if (grant.scope.account_kind == AccountKind::Object)
+        objects.insert(grant.scope.subject);
+      break;
+    case ScopeKind::AllLand:
+      all_land = true;
+      break;
+    case ScopeKind::Owned:
+      break;
+    }
+    grant.live = false;
+    removed.push_back(id);
   }
-  std::sort(affected.begin(), affected.end());
-  affected.erase(std::unique(affected.begin(), affected.end()), affected.end());
-  for (auto id : affected) {
-    std::erase_if(players.rows[id].grants_given, [&](GrantId grant) { return marked[grant]; });
-    std::erase_if(players.rows[id].grants_held, [&](GrantId grant) { return marked[grant]; });
+  const auto dead = [&](GrantId id) { return !grants.rows[id].live; };
+  for (auto person : people) {
+    std::erase_if(players.rows[person].grants_given, dead);
+    std::erase_if(players.rows[person].grants_held, dead);
   }
+  for (const auto &[object, holders] : scripts) {
+    auto found = grants.script_held.find(object);
+    for (auto script : holders)
+      prune_grants(found->second, script, grants);
+    if (found->second.empty())
+      grants.script_held.erase(found);
+  }
+  for (auto parent : parents)
+    prune_grants(grants.children, parent, grants);
+  for (auto plot : plots)
+    prune_grants(grants.by_plot, plot, grants);
+  for (auto object : objects)
+    prune_grants(grants.by_object, object, grants);
+  if (all_land)
+    std::erase_if(grants.all_land, dead);
   return removed;
 }
 
-std::vector<GrantId> remove_marked(Grants &grants, Players &players, std::vector<bool> &marked) {
-  // Explicit revocation closes over children immediately. Automatic expiration
-  // can drain its index in batches: a child's expiry never exceeds its parent's.
-  for (const auto &grant : grants.rows)
-    if (grant.live && grant.parent && marked[grant.parent])
-      marked[grant.id] = true;
-  return erase_marked(grants, players, marked);
+std::vector<GrantId> remove_grants(Grants &grants, Players &players,
+                                   std::span<const GrantId> roots) {
+  std::vector<GrantId> pending(roots.begin(), roots.end()), ids;
+  std::unordered_set<GrantId> visited;
+  for (std::size_t at = 0; at < pending.size(); ++at) {
+    const auto id = pending[at];
+    if (!id || id >= grants.rows.size() || !grants.rows[id].live || !visited.insert(id).second)
+      continue;
+    ids.push_back(id);
+    if (const auto found = grants.children.find(id); found != grants.children.end())
+      pending.insert(pending.end(), found->second.begin(), found->second.end());
+  }
+  std::sort(ids.begin(), ids.end());
+  return erase_grants(grants, players, ids);
 }
 
 bool covered(const Grant &parent, const ScopeControl &control) {
@@ -453,7 +531,33 @@ Reason validate_grant(const Grants &grants, const Players &players, const GrantR
     return Reason::InvalidScope;
   return Reason::Allowed;
 }
-void index_grant(Grants &grants, const Grant &grant, bool needs_expiry) {
+void index_grant(Grants &grants, Players &players, const Grant &grant, bool needs_expiry) {
+  players.rows[grant.issuer].grants_given.push_back(grant.id);
+  if (grant.holder.kind == HolderKind::Player)
+    players.rows[grant.holder.id].grants_held.push_back(grant.id);
+  else
+    grants.script_held[grant.holder.installed_on.bits][grant.holder.id].push_back(grant.id);
+  if (grant.parent)
+    grants.children[grant.parent].push_back(grant.id);
+  switch (grant.scope.kind) {
+  case ScopeKind::Plot:
+  case ScopeKind::OwnedOnPlot:
+    grants.by_plot[PlotId(grant.scope.subject)].push_back(grant.id);
+    break;
+  case ScopeKind::Object:
+  case ScopeKind::Avatar:
+    grants.by_object[grant.scope.subject].push_back(grant.id);
+    break;
+  case ScopeKind::Account:
+    if (grant.scope.account_kind == AccountKind::Object)
+      grants.by_object[grant.scope.subject].push_back(grant.id);
+    break;
+  case ScopeKind::AllLand:
+    grants.all_land.push_back(grant.id);
+    break;
+  case ScopeKind::Owned:
+    break;
+  }
   grants.by_key.emplace(GrantKey{grant.holder, grant.scope}, grant.id);
   if (grant.expires_step) {
     grants.expiring.emplace(grant.expires_step, grant.id);
@@ -467,10 +571,7 @@ GrantResult add_grant(Grants &grants, Players &players, const GrantRequest &requ
   grants.rows.push_back({id, request.issuer, parent_id, request.holder, request.scope,
                          request.verbs, request.cap, 0, request.period_steps, now,
                          request.expires_step, true});
-  index_grant(grants, grants.rows.back(), needs_expiry);
-  players.rows[request.issuer].grants_given.push_back(id);
-  if (request.holder.kind == HolderKind::Player)
-    players.rows[request.holder.id].grants_held.push_back(id);
+  index_grant(grants, players, grants.rows.back(), needs_expiry);
   return {Reason::Allowed, id};
 }
 
@@ -550,11 +651,7 @@ std::vector<GrantId> revoke(Grants &grants, Players &players, GrantId id) {
 }
 
 std::vector<GrantId> revoke_many(Grants &grants, Players &players, std::span<const GrantId> ids) {
-  std::vector<bool> marked(grants.rows.size());
-  for (auto id : ids)
-    if (id != 0 && id < grants.rows.size())
-      marked[id] = true;
-  return remove_marked(grants, players, marked);
+  return remove_grants(grants, players, ids);
 }
 
 std::vector<GrantId> revoke_object(Grants &grants, Players &players, Handle object) {
@@ -563,23 +660,15 @@ std::vector<GrantId> revoke_object(Grants &grants, Players &players, Handle obje
 
 std::vector<GrantId> revoke_objects(Grants &grants, Players &players,
                                     std::span<const Handle> objects) {
-  std::unordered_set<std::uint64_t> handles;
-  handles.reserve(objects.size());
-  for (auto handle : objects)
-    handles.insert(handle.bits);
-  std::vector<bool> marked(grants.rows.size());
-  for (const auto &grant : grants.rows) {
-    const bool scope =
-        (grant.scope.kind == ScopeKind::Object || grant.scope.kind == ScopeKind::Avatar ||
-         (grant.scope.kind == ScopeKind::Account &&
-          grant.scope.account_kind == AccountKind::Object)) &&
-        handles.contains(grant.scope.subject);
-    const bool installed =
-        grant.holder.kind == HolderKind::Script && handles.contains(grant.holder.installed_on.bits);
-    if (grant.live && (scope || installed))
-      marked[grant.id] = true;
+  std::vector<GrantId> ids;
+  for (auto object : objects) {
+    if (const auto found = grants.by_object.find(object.bits); found != grants.by_object.end())
+      ids.insert(ids.end(), found->second.begin(), found->second.end());
+    if (const auto found = grants.script_held.find(object.bits); found != grants.script_held.end())
+      for (const auto &[script, held] : found->second)
+        ids.insert(ids.end(), held.begin(), held.end());
   }
-  return remove_marked(grants, players, marked);
+  return remove_grants(grants, players, ids);
 }
 
 GrantDeadlines advance_grants(Grants &grants, Players &players, Step now, Step reminder_steps,
@@ -587,15 +676,16 @@ GrantDeadlines advance_grants(Grants &grants, Players &players, Step now, Step r
   GrantDeadlines result;
   std::size_t consumed = 0;
   if (!grants.expiring.empty() && grants.expiring.begin()->first <= now && max_entries) {
-    std::vector<bool> marked(grants.rows.size());
+    std::vector<GrantId> ids;
     while (consumed < max_entries && !grants.expiring.empty() &&
            grants.expiring.begin()->first <= now) {
       const auto id = grants.expiring.begin()->second;
       grants.expiring.erase(grants.expiring.begin());
-      marked[id] = grants.rows[id].live;
+      ids.push_back(id);
       ++consumed;
     }
-    result.expired = erase_marked(grants, players, marked);
+    std::sort(ids.begin(), ids.end());
+    result.expired = erase_grants(grants, players, ids);
   }
   const auto reminder_end = now > std::numeric_limits<Step>::max() - reminder_steps
                                 ? std::numeric_limits<Step>::max()
@@ -612,19 +702,32 @@ GrantDeadlines advance_grants(Grants &grants, Players &players, Step now, Step r
   return result;
 }
 
-void rebuild_grant_lookup(Grants &grants) {
+std::span<const GrantId> held_grants(const Grants &grants, const Players &players, Holder holder) {
+  if (holder.kind == HolderKind::Player)
+    return players.rows[holder.id].grants_held;
+  const auto object = grants.script_held.find(holder.installed_on.bits);
+  if (object == grants.script_held.end())
+    return {};
+  const auto script = object->second.find(holder.id);
+  return script == object->second.end() ? std::span<const GrantId>{} : script->second;
+}
+void rebuild_grant_lookup(Grants &grants, Players &players) {
   grants.by_key.clear();
+  grants.script_held.clear();
+  grants.children.clear();
+  grants.by_plot.clear();
+  grants.by_object.clear();
+  grants.all_land.clear();
   grants.expiring.clear();
   grants.reminders.clear();
+  for (auto &player : players.rows) {
+    player.grants_held.clear();
+    player.grants_given.clear();
+  }
   for (const auto &grant : grants.rows)
-    if (grant.live) {
-      if (grant.expires_step) {
-        grants.expiring.emplace(grant.expires_step, grant.id);
-        if (monetary(grant.scope) || grant.holder.kind == HolderKind::Script)
-          grants.reminders.emplace(grant.expires_step, grant.id);
-      }
-      grants.by_key.emplace(GrantKey{grant.holder, grant.scope}, grant.id);
-    }
+    if (grant.live)
+      index_grant(grants, players, grant,
+                  monetary(grant.scope) || grant.holder.kind == HolderKind::Script || grant.parent);
 }
 
 TransferResult pay(Ledger &ledger, Grants &grants, Holder actor, AccountTarget payer,
@@ -777,24 +880,18 @@ void close_plot_offers(Offers &offers, PlotId id) {
 
 std::vector<GrantId> change_plot_owner(State &state, PlotId id, PlayerId owner) {
   auto &plot = state.plots.rows.at(id);
-  std::vector<bool> marked(state.grants.rows.size());
+  std::vector<GrantId> ids;
   if (plot.owner)
-    for (const auto &grant : state.grants.rows)
-      if (grant.live && grant.issuer == plot.owner &&
-          (grant.scope == Scope::plot(id) || grant.scope == Scope::owned_on_plot(plot.owner, id)))
-        marked[grant.id] = true;
-  auto removed = remove_marked(state.grants, state.players, marked);
+    if (const auto found = state.grants.by_plot.find(id); found != state.grants.by_plot.end())
+      for (auto grant_id : found->second)
+        if (state.grants.rows[grant_id].issuer == plot.owner)
+          ids.push_back(grant_id);
+  auto removed = remove_grants(state.grants, state.players, ids);
   close_plot_offers(state.offers, id);
   plot.owner = owner;
   return removed;
 }
 
-namespace {
-bool on_plot(Scope scope, PlotId id) {
-  return (scope.kind == ScopeKind::Plot || scope.kind == ScopeKind::OwnedOnPlot) &&
-         scope.subject == id;
-}
-} // namespace
 PlotId split_plot(State &state, PlotId id, int axis, float cut, Step now) {
   auto &plot = state.plots.rows[id];
   auto upper = plot;
@@ -803,23 +900,22 @@ PlotId split_plot(State &state, PlotId id, int axis, float cut, Step now) {
   plot.bounds[axis + 2] = cut;
   upper.bounds[axis] = cut;
   state.plots.rows.push_back(std::move(upper));
-  const auto count = state.grants.rows.size();
+  std::vector<GrantId> originals;
+  if (const auto found = state.grants.by_plot.find(id); found != state.grants.by_plot.end())
+    originals = found->second;
+  std::sort(originals.begin(), originals.end());
   std::map<GrantId, GrantId> copies;
-  for (std::size_t i = 1; i < count; ++i) {
+  for (auto i : originals) {
     auto grant = state.grants.rows[i];
-    if (!grant.live || (grant.expires_step && grant.expires_step <= now) ||
-        !on_plot(grant.scope, id))
+    if (grant.expires_step && grant.expires_step <= now)
       continue;
     grant.id = GrantId(state.grants.rows.size());
     copies.emplace(GrantId(i), grant.id);
     grant.scope.subject = next;
     if (copies.contains(grant.parent))
       grant.parent = copies.at(grant.parent);
-    index_grant(state.grants, grant,
-                monetary(grant.scope) || grant.holder.kind == HolderKind::Script);
-    state.players.rows[grant.issuer].grants_given.push_back(grant.id);
-    if (grant.holder.kind == perm::HolderKind::Player)
-      state.players.rows[grant.holder.id].grants_held.push_back(grant.id);
+    index_grant(state.grants, state.players, grant,
+                monetary(grant.scope) || grant.holder.kind == HolderKind::Script || grant.parent);
     state.grants.rows.push_back(grant);
   }
 
@@ -833,11 +929,10 @@ std::vector<GrantId> join_plots(State &state, PlotId a, PlotId b) {
   left.bounds = {std::min(l[0], r[0]), std::min(l[1], r[1]), std::max(l[2], r[2]),
                  std::max(l[3], r[3])};
   right.id = 0;
-  std::vector<GrantId> ids;
-  for (const auto &grant : state.grants.rows)
-    if (grant.live && on_plot(grant.scope, b))
-      ids.push_back(grant.id);
-  const auto removed = revoke_many(state.grants, state.players, ids);
+  const auto found = state.grants.by_plot.find(b);
+  const auto removed = found == state.grants.by_plot.end()
+                           ? std::vector<GrantId>{}
+                           : revoke_many(state.grants, state.players, found->second);
   close_plot_offers(state.offers, a);
   close_plot_offers(state.offers, b);
   return removed;
