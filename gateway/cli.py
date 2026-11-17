@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from aiohttp import ClientSession
+from websockets.asyncio.client import connect
 
 from gateway.credentials import read_key_file
 
@@ -25,6 +26,15 @@ def parser():
     join = commands.add_parser("join", help="Join the world and save a new private player key")
     join.add_argument("name")
     join.add_argument("--key-file", type=Path, required=True)
+    operator = commands.add_parser("operator", help="Manage a player from the server host")
+    operator.add_argument("--key-file", type=Path, default=Path(".runtime/keys/operator.key"))
+    operator.add_argument("--world", default="ws://127.0.0.1:8080/ws")
+    operations = operator.add_subparsers(dest="op", required=True)
+    role = operations.add_parser("role")
+    role.add_argument("player")
+    role.add_argument("role", choices=("architect", "elaborator"))
+    role.add_argument("on", choices=("on", "off"))
+    operations.add_parser("key").add_argument("player")
     look = commands.add_parser("look")
     look.add_argument("--limit", type=int)
     inspect = commands.add_parser("inspect")
@@ -112,9 +122,29 @@ async def join_world(options):
             options.key_file.unlink()
 
 
+async def operate(options):
+    message = {
+        "t": "operator",
+        "version": 1,
+        "key": read_key_file(options.key_file),
+        "op": options.op,
+        "player": options.player,
+    }
+    if options.op == "role":
+        message.update(role=options.role, on=options.on == "on")
+    async with connect(options.world, open_timeout=5) as socket:
+        await socket.send(json.dumps(message))
+        result = json.loads(await asyncio.wait_for(socket.recv(), 5))
+    if result.pop("t") == "bye":
+        return {"error": result["reason"]}
+    return result
+
+
 async def run(options):
     if options.command == "join":
         return await join_world(options)
+    if options.command == "operator":
+        return await operate(options)
     if options.command == "fixture":
         arguments = [
             str(options.server),

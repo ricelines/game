@@ -215,7 +215,8 @@ void answer_query(amber::net::State &net_state, amber::space::State &space_state
                               loaded_settings, perm_state, now, request);
     break;
   case net::ControlKind::Events:
-    reply = net::read_events(feed, views, settings.sight_m, settings.events_per_response, request);
+    reply = net::read_events(feed, views, net_state.profiles, settings.sight_m,
+                             settings.events_per_response, request);
     break;
   case net::ControlKind::Debug:
     reply = net::read_debug(space, values.identity, now, settings.sight_m, {}, request);

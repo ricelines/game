@@ -25,6 +25,119 @@ template <class Fn> void rejects(Fn fn, const char *message) {
   }
   throw std::runtime_error(message);
 }
+void check_operator(net::State &net, perm::State &permissions, catalog::State &catalog,
+                    const ObjectState &objects, const Settings &settings, PlayerId player,
+                    const std::string &old_key) {
+  const auto group = settings.land.way_group;
+  const step::Clock clock{.step = 8, .hz = settings.clock.step_hz};
+  const std::string credential = "test host credential";
+  const auto operator_hash = net::hash_key(credential);
+  record::Journal journal(10, {});
+  net::SessionId next_session = 200;
+  auto command = [&](Json fields) {
+    const auto session = next_session++;
+    fields.update({{"t", "operator"}, {"version", 1}});
+    net.sessions.accept(net::Connected{session});
+    const auto admitted = net.sessions.accept(net::Control{session, fields.dump()});
+    require(admitted.has_value(), "operator wire command did not reach step admission");
+    step::admit_operator(*admitted, net, permissions, operator_hash, settings, journal, clock);
+    std::vector<net::Invocation> ready;
+    std::vector<net::SessionNotice> notices;
+    std::vector<net::SessionOutput> outputs;
+    net.sessions.drain(ready, notices, outputs);
+    require(ready.empty() && !net.sessions.principal(session),
+            "operator command authenticated as a game player");
+    for (const auto &output : outputs)
+      if (const auto *send = std::get_if<net::Send>(&output); send && send->session == session)
+        return send->message;
+    throw std::runtime_error("operator command produced no reply");
+  };
+  auto role = Json{{"key", credential},
+                   {"op", "role"},
+                   {"player", "p:" + std::to_string(player)},
+                   {"role", "architect"},
+                   {"on", true}};
+  auto forged = role;
+  forged["key"] = "not the host credential";
+  require(command(forged).at("reason") == "bad_key" && net.profiles.rows[player].roles.empty(),
+          "a forged operator credential changed roles");
+  const auto model = std::ranges::find_if(catalog.models.rows, [&](const auto &row) {
+                       return row.id && row.group == group;
+                     })->id;
+  step::NativeCall edit;
+  edit.request.caller = player;
+  edit.arguments = {{"model", "m:" + std::to_string(model)}, {"text", {{"name", "Operator test"}}}};
+  auto edit_model = [&] {
+    return step::editing::model_text(edit, catalog.model_text, catalog.models,
+                                     identity(objects.objects), permissions.players);
+  };
+  require(!edit_model().reply.at("ok").get<bool>(), "unprivileged newcomer edited a shared model");
+  require(command(role).at("ok") && edit_model().changed,
+          "operator's architect grant did not permit an actual group model edit");
+  const auto holder = perm::Holder::player(player);
+  const auto wallet = perm::Account::player(player);
+  const auto root = perm::AccountTarget::player(0);
+  auto pay = [&](perm::Holder payer, std::int64_t amount) {
+    return perm::pay(permissions.ledger, permissions.grants, payer, root, wallet, amount,
+                     clock.step);
+  };
+  require(pay(holder, settings.architect_allowance - 2) &&
+              perm::balance(permissions.ledger, wallet) == settings.architect_allowance - 2 &&
+              pay(holder, 3).reason == perm::Reason::Allowance,
+          "operator promotion must provide a usable capped root allowance");
+  const auto body = net.profiles.rows[player].body;
+  const auto script = catalog.models.rows[objects.objects.model[body.slot()]].script;
+  const auto child = perm::Holder::script(script, body);
+  const auto scope = perm::Scope::account(root.account);
+  const auto delegated = perm::create_grant(
+      permissions.grants, permissions.players, holder,
+      {player, child, scope, 1, 2,
+       step::duration_steps(settings.architect_period_seconds, clock.hz),
+       clock.step + step::duration_steps(settings.architect_expiry_seconds, clock.hz)},
+      {scope, 0, 1}, {child, player, true}, clock.step);
+  require(delegated && pay(child, 1),
+          "the architect's actual body script can spend a bounded child of the allowance");
+  require(command(role).at("ok") && pay(holder, 2).reason == perm::Reason::Allowance &&
+              perm::balance(permissions.ledger, wallet) == settings.architect_allowance - 1,
+          "repeated architect promotion must not reset the allowance already spent");
+  step::NativeCall leave;
+  leave.request.caller = player;
+  leave.arguments = {{"group", "group:" + std::to_string(group)},
+                     {"player", "p:" + std::to_string(player)},
+                     {"member", false}};
+  require(!step::group_member(permissions.groups, permissions.players, leave)
+               .reply.at("ok")
+               .get<bool>(),
+          "a game action removed operator-controlled membership");
+  role["on"] = false;
+  require(command(role).at("ok") && !edit_model().reply.at("ok").get<bool>() &&
+              net.profiles.rows[player].roles.empty(),
+          "operator's architect revoke did not remove shared model edit authority");
+  require(pay(holder, 1).reason == perm::Reason::MissingRight &&
+              pay(child, 1).reason == perm::Reason::MissingRight &&
+              perm::balance(permissions.ledger, wallet) == settings.architect_allowance - 1,
+          "demotion must revoke the allowance and its child without removing earned money");
+  const auto reply =
+      command({{"key", credential}, {"op", "key"}, {"player", "p:" + std::to_string(player)}});
+  const auto replacement = reply.at("key").get<std::string>();
+  require(!net::authenticate(net.profiles, old_key) &&
+              net::authenticate(net.profiles, replacement)->id == player &&
+              net.sessions.principal(100)->player == player,
+          "key replacement did not replace authentication while retaining the live session");
+  const auto records = journal.take();
+  require(records.size() == 5 && records.front().at("kind") == "denial" &&
+              std::ranges::all_of(std::span(records).subspan(1),
+                                  [](const auto &row) {
+                                    return row.at("kind") == "system" &&
+                                           row.at("name") == "operator";
+                                  }),
+          "operator changes and denial were not recorded");
+  const auto recorded = Json(records).dump();
+  require(recorded.find(replacement) == std::string::npos &&
+              recorded.find(credential) == std::string::npos &&
+              recorded.find(old_key) == std::string::npos,
+          "operator event record contains a plaintext credential");
+}
 void check_joining(const Json &plan, catalog::State &catalog, react::State &react,
                    ObjectState &objects, perm::State &permissions, net::State &net,
                    const Settings &settings, const std::filesystem::path &asset_root) {
@@ -121,6 +234,7 @@ void check_joining(const Json &plan, catalog::State &catalog, react::State &reac
   require(step.delivery.present_bodies.at(joined.player) == body &&
               net.session_views.rows.at(100).body == body,
           "joined connection did not become an ordinary player view");
+  check_operator(net, permissions, catalog, objects, settings, joined.player, joined.key);
 
   step::NativeCall clear_script;
   clear_script.request.caller = catalog.models.rows[model].author;
@@ -235,6 +349,13 @@ int main(int argc, char **argv) {
     auto settings = amber::read_settings(AMBER_CONFIG_PATH);
     settings.land.way_group = plan.at("land").at("way_group").get<GroupId>();
     space::State land_space(settings.space, settings.light_cell_m);
+    auto player_controlled_ways = plan;
+    for (auto &group : player_controlled_ways["groups"])
+      if (group.at("id") == settings.land.way_group)
+        group["controller"] = 1;
+    perm::State invalid_land;
+    rejects([&] { install_land(player_controlled_ways, invalid_land, land_space, settings.land); },
+            "the architects' way group must be controlled by root");
     install_land(plan, perm_state, land_space, settings.land);
     perm::update_plots(objects, plots, created, true);
     require(plan.at("land").at("lots") == Json::array({{{"owner", 2}, {"at", {8, 50}}},

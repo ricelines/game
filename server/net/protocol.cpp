@@ -1,6 +1,7 @@
 #include "net.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <initializer_list>
 
 namespace amber::net {
@@ -77,6 +78,51 @@ Parsed parse(std::string_view text) {
     return out;
   }
   const auto operation = row["t"].get<std::string>();
+  if (operation == "operator") {
+    if (!row.contains("op") || !row["op"].is_string()) {
+      out.error = "op must be role or key";
+      return out;
+    }
+    const auto &op = row["op"].get_ref<const std::string &>();
+    if (op != "role" && op != "key") {
+      out.error = "op must be role or key";
+      return out;
+    }
+    out.error =
+        first({op == "role" ? fields(row, {"t", "version", "key", "op", "player", "role", "on"})
+                            : fields(row, {"t", "version", "key", "op", "player"}),
+               string(row, "key"), string(row, "player"), string(row, "role")});
+    if (!out.error.empty())
+      return out;
+    if (!integer(row["version"], 1) || row["version"] != 1) {
+      out.error = "unsupported protocol version";
+      return out;
+    }
+    const auto &name = row["player"].get_ref<const std::string &>();
+    PlayerId player = 0;
+    if (!name.starts_with("p:")) {
+      out.error = "player must be p:N";
+      return out;
+    }
+    const auto parsed = std::from_chars(name.data() + 2, name.data() + name.size(), player);
+    if (parsed.ec != std::errc{} || parsed.ptr != name.data() + name.size() || !player) {
+      out.error = "player must be a complete positive p:N identifier";
+      return out;
+    }
+    if (op == "role") {
+      if (row["role"] != "architect" && row["role"] != "elaborator") {
+        out.error = "role must be architect or elaborator";
+        return out;
+      }
+      if (!row["on"].is_boolean()) {
+        out.error = "on must be a boolean";
+        return out;
+      }
+    }
+    out.message = OperatorRequest{row["key"], op, player, row.value("role", std::string{}),
+                                  row.value("on", false)};
+    return out;
+  }
   if (operation == "join") {
     out.error = first({fields(row, {"t", "version", "name"}), string(row, "name")});
     if (!out.error.empty())

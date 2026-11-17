@@ -214,6 +214,9 @@ void land_browse_and_actions() {
 
 void events_projection(bool benchmark) {
   vi::SessionViews views;
+  vi::Profiles profiles;
+  profiles.rows.resize(3);
+  profiles.rows[2].id = 2;
   views.rows[1].eye = {};
   vi::RecordFeed feed{{}, 4096};
   const std::string thing = "o:7.1";
@@ -241,7 +244,7 @@ void events_projection(bool benchmark) {
   call.principal.player = 2;
   call.principal.mode = net::Mode::Watch;
   call.request.fields = {{"since", 1}, {"root", 7}, {"thing", thing}, {"limit", 2}};
-  auto result = vi::read_events(feed, views, 30, 40, call).fields;
+  auto result = vi::read_events(feed, views, profiles, 30, 40, call).fields;
   require(result["events"].size() == 2 && result["events"][0]["id"] == 6 &&
               result["events"][1]["id"] == 7 && result["events_omitted"] == 1 &&
               result["oldest_available"] == 1 && result["newest"] == 7 &&
@@ -249,7 +252,7 @@ void events_projection(bool benchmark) {
           "events ring changed chronological order, filters, privacy or omitted count");
   const auto full = result;
   call.request.fields["detail"] = false;
-  result = vi::read_events(feed, views, 30, 40, call).fields;
+  result = vi::read_events(feed, views, profiles, 30, 40, call).fields;
   require(result["events_omitted"] == full["events_omitted"] &&
               result["oldest_available"] == full["oldest_available"] &&
               result["newest"] == full["newest"] && result["events"][0] == full["events"][0] &&
@@ -261,25 +264,33 @@ void events_projection(bool benchmark) {
           "summary query changed privacy/filter/causal attribution or copied heavy details");
   call.request.fields.erase("detail");
   call.request.fields["since"] = 6;
-  result = vi::read_events(feed, views, 30, 40, call).fields;
+  result = vi::read_events(feed, views, profiles, 30, 40, call).fields;
   require(result["events"].size() == 1 && result["events"][0]["id"] == 7 &&
               result["events_omitted"] == 0,
           "events since filter changed");
+  call.request.fields["since"] = 1;
+  call.request.fields["limit"] = 10;
+  profiles.rows[2].roles = {"architect"};
+  require(vi::read_events(feed, views, profiles, 30, 40, call).fields["events"].size() == 4,
+          "an existing session immediately gains the profile's operator-assigned event visibility");
+  profiles.rows[2].roles.clear();
+  require(vi::read_events(feed, views, profiles, 30, 40, call).fields["events"].size() == 3,
+          "role removal immediately removes remote event visibility without reconnecting");
   call.principal.mode = net::Mode::Debug;
   call.request.fields["since"] = 1;
   call.request.fields["limit"] = 1;
-  result = vi::read_events(feed, views, 30, 40, call).fields;
+  result = vi::read_events(feed, views, profiles, 30, 40, call).fields;
   require(result["events"].size() == 1 && result["events"][0]["id"] == 7 &&
               result["events_omitted"] == 3,
           "debug visibility or single-result wrap changed");
   call.request.fields["detail"] = false;
-  const auto debug_summary = vi::read_events(feed, views, 30, 40, call).fields;
+  const auto debug_summary = vi::read_events(feed, views, profiles, 30, 40, call).fields;
   require(debug_summary["events"][0]["id"] == 7 &&
               debug_summary["events_omitted"] == result["events_omitted"],
           "summary query changed debug visibility or tail selection");
   call.request.fields.erase("detail");
   call.request.fields["root"] = 999;
-  result = vi::read_events(feed, views, 30, 40, call).fields;
+  result = vi::read_events(feed, views, profiles, 30, 40, call).fields;
   require(result["events"].empty() && result["events_omitted"] == 0,
           "empty filtered events query invented rows");
   if (!benchmark)
@@ -295,7 +306,7 @@ void events_projection(bool benchmark) {
   std::vector<double> samples;
   for (int i = 0; i < 110; ++i) {
     const auto started = std::chrono::steady_clock::now();
-    result = vi::read_events(feed, views, 30, 40, call).fields;
+    result = vi::read_events(feed, views, profiles, 30, 40, call).fields;
     const auto us =
         std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - started)
             .count();
@@ -476,6 +487,9 @@ int main(int argc, char **argv) {
                                   Handle::make(visible.slot(), visible.generation() + 1), 1, 15,
                                   catalog::AuthoredTextKind::Detail, "Different generation");
     vi::SessionViews views;
+    vi::Profiles profiles;
+    profiles.rows.resize(3);
+    profiles.rows[2].id = 2;
     observe::ActiveViews &active = (space_state.active_views = observe::ActiveViews(8));
     space_state.lights = observe::Lights(8);
 
@@ -491,7 +505,7 @@ int main(int argc, char **argv) {
     };
     net::Invocation call;
     call.session = 11;
-    call.principal = {2, body, "Observer", {}, net::Mode::Play, false};
+    call.principal = {2, body, "Observer", net::Mode::Play, false};
     call.request.kind = net::ControlKind::Look;
     call.request.fields = Json::object();
     auto first = look(call).fields;
@@ -833,11 +847,11 @@ int main(int argc, char **argv) {
          {{"id", 3}, {"root", 3}, {"actor", "p:2"}, {"things", Json::array()}}}};
     vi::append_records(feed, records, identity(scene.objects), transforms(scene.objects));
     call.request.fields = {{"since", 0}};
-    auto filtered = vi::read_events(feed, views, 30, 40, call).fields;
+    auto filtered = vi::read_events(feed, views, profiles, 30, 40, call).fields;
     require(filtered["events"].size() == 1 && filtered["events"][0]["id"] == 3,
             "ordinary feed excludes remote world records");
     call.principal.mode = net::Mode::Debug;
-    require(vi::read_events(feed, views, 30, 40, call).fields["events"].size() == 2,
+    require(vi::read_events(feed, views, profiles, 30, 40, call).fields["events"].size() == 2,
             "explicit debug feed can show retained global records");
     vi::remove_session(views, active, hearing, 11);
     require(!views.rows.contains(11) && !active.rows.contains(11) && !hearing.queues.contains(11),

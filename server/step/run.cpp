@@ -208,6 +208,13 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     start::install_money(plan, symbols, ids, auth, players, groups, ledger);
   }
 
+  net::KeyHash operator_key;
+  if (launch.network) {
+    const auto key_path = launch.data / "keys" / "operator.key";
+    std::filesystem::create_directories(key_path.parent_path());
+    operator_key = std::filesystem::exists(key_path) ? net::hash_key_file(key_path)
+                                                     : net::create_key_file(key_path);
+  }
   const auto newcomer_model =
       launch.network ? start::newcomer_model(plan, catalog_state, react_state) : ModelId{};
   react::RuleChange fixture_rule_change;
@@ -419,6 +426,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             notices.emplace_back(sessions.establish(
                 admission->session, profiles.rows[joined.player], net::Mode::Play, false));
           }
+        } else {
+          admit_operator(*admission, net_state, perm_state, operator_key, settings, journal, clock);
         }
       }
       for (const auto &notice : notices)

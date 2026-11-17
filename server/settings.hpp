@@ -23,6 +23,8 @@ struct Settings {
   std::uint32_t control_max, repl_every, repl_delay_ms;
   double snapshot_seconds;
   double grant_reminder_seconds;
+  std::int64_t architect_allowance;
+  double architect_period_seconds, architect_expiry_seconds;
   std::size_t deadlines_per_step;
   float light_cell_m, light_source_radius_m;
   std::uint32_t gap_captures;

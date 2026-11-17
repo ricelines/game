@@ -51,6 +51,8 @@ void install_land(const Json &plan, perm::State &perm, space::State &space,
   if (!settings.way_group || settings.way_group >= groups.rows.size() ||
       !groups.rows[settings.way_group].id)
     throw std::invalid_argument("unknown way group");
+  if (groups.rows[settings.way_group].controller)
+    throw std::invalid_argument("the way group must be controlled by root");
   for (const auto &row : plan.at("land").value("lots", Json::array())) {
     const auto at = row.at("at").get<std::array<float, 2>>();
     const auto depth =

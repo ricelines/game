@@ -46,6 +46,9 @@ Settings read_settings(const std::filesystem::path &path, std::string_view profi
   s.mailbox_max = size("permissions", "MAILBOX_MAX");
   s.grant_reminder_seconds = real("permissions", "GRANT_REMINDER_SECONDS");
   s.deadlines_per_step = size("permissions", "DEADLINES_PER_STEP");
+  s.architect_allowance = get.operator()<std::int64_t>("operator", "ARCHITECT_ALLOWANCE");
+  s.architect_period_seconds = real("operator", "ARCHITECT_PERIOD_SECONDS");
+  s.architect_expiry_seconds = real("operator", "ARCHITECT_EXPIRY_SECONDS");
   s.gap_captures = size("elaboration", "GAP_CAPTURES");
   s.capture_m = f("elaboration", "CAPTURE_M");
   s.fixture_limits = {size("elaboration", "FIXTURE_TIMEOUT_MS"),

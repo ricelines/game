@@ -492,6 +492,10 @@ step::NativeCompletion group_member(const perm::Groups &groups, perm::Players &p
     const auto present = call.arguments.at("member").get<bool>();
     if (id >= groups.rows.size() || groups.rows[id].id != id)
       throw std::invalid_argument("unknown group");
+    if (!groups.rows[id].controller)
+      return denied("group_operator", "group:" + std::to_string(id),
+                    "only the operator may change this group's membership",
+                    "ask the server operator to change the role");
     if (groups.rows[id].controller != who && (member != who || present))
       return denied("group_controller", "group:" + std::to_string(id),
                     "only the group controller may change another membership",

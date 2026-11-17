@@ -56,7 +56,7 @@ void pending_views_track_only_their_current_contents() {
   const observe::Settings settings{30, 1.5f, 256, 1, .1f, .1, 40, 8, 40};
   auto refresh = [&](net::SessionId session, Handle body) {
     nt::Authenticated recipient{session,
-                                {PlayerId(session), body, "Observer", {}, net::Mode::Play, false}};
+                                {PlayerId(session), body, "Observer", net::Mode::Play, false}};
     nt::refresh_view(catalog, react, views, scene.space_state, scene.objects_state, step, settings,
                      120, recipient, 40);
   };

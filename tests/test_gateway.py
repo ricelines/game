@@ -111,6 +111,52 @@ def test_join_cli_saves_private_key_and_continues_the_joined_session(tmp_path, m
     asyncio.run(run())
 
 
+def test_operator_cli_uses_private_host_key(tmp_path):
+    path = tmp_path / "operator.key"
+    path.write_text("fixture-operator-key\n")
+    path.chmod(0o600)
+
+    async def run():
+        received = []
+
+        async def handler(socket):
+            message = json.loads(await socket.recv())
+            received.append(message)
+            await socket.send(json.dumps({"t": "operator", "ok": True}))
+
+        async with serve(handler, "127.0.0.1", 0) as server:
+            world = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+            result = await cli.run(
+                cli.parser().parse_args(
+                    [
+                        "operator",
+                        "--key-file",
+                        str(path),
+                        "--world",
+                        world,
+                        "role",
+                        "p:9",
+                        "architect",
+                        "on",
+                    ]
+                )
+            )
+            assert result == {"ok": True}
+            assert received == [
+                {
+                    "t": "operator",
+                    "version": 1,
+                    "key": "fixture-operator-key",
+                    "op": "role",
+                    "player": "p:9",
+                    "role": "architect",
+                    "on": True,
+                }
+            ]
+
+    asyncio.run(run())
+
+
 def test_credentials_require_private_files(tmp_path):
     path = tmp_path / "fixture.key"
     path.write_text("labelled-test-credential\n")

@@ -97,6 +97,8 @@ void refresh_connections(amber::net::State &net_state, amber::space::State &spac
 namespace amber::step {
 void install_object_physics(State &, const catalog::State &, const react::State &, ObjectState &,
                             space::State &, std::span<const Handle>, PhysicsDefaults);
+void admit_operator(const net::Admission &, net::State &, perm::State &, const net::KeyHash &,
+                    const amber::Settings &, record::Journal &, const Clock &);
 JoinResult create_join(const net::JoinRequest &, net::Profiles &, perm::State &, ObjectState &,
                        const catalog::State &, const nlohmann::json &newcomer, ModelId,
                        const Clock &);

@@ -74,6 +74,29 @@ void request(Sessions &sessions, net::SessionId id, Json message) {
   sessions.accept(net::Control{id, message.dump()});
 }
 void protocol() {
+  const auto role = parse(
+      R"({"t":"operator","version":1,"key":"host-test","op":"role","player":"p:2","role":"architect","on":true})");
+  const auto &role_request = std::get<OperatorRequest>(role.message);
+  require(role.error.empty() && role_request.player == 2 && role_request.op == "role" &&
+              role_request.role == "architect" && role_request.on,
+          "operator roles parse as host admission without a request id");
+  const auto rekey =
+      parse(R"({"t":"operator","version":1,"key":"host-test","op":"key","player":"p:2"})");
+  require(rekey.error.empty() && std::get<OperatorRequest>(rekey.message).op == "key",
+          "operator replacement parses independently of a player session");
+  for (const auto player : {"p:0", "p:-1", "p:4294967297", "p:2suffix", "o:2.1", "p:"}) {
+    const Json message = {
+        {"t", "operator"}, {"version", 1}, {"key", "host-test"}, {"op", "key"}, {"player", player}};
+    require(!parse(message.dump()).error.empty(),
+            "operator player identifiers are complete and never narrow to another player");
+  }
+  for (
+      const auto bad :
+      {R"({"t":"operator","version":1,"key":"host-test","op":"role","player":"p:2","role":"root","on":true})",
+       R"({"t":"operator","version":1,"key":"host-test","op":"role","player":"p:2","role":"architect","on":1})",
+       R"({"t":"operator","version":1,"key":"host-test","op":"key","player":"p:2","on":true})",
+       R"({"t":"operator","version":2,"key":"host-test","op":"key","player":"p:2"})"})
+    require(!parse(bad).error.empty(), "operator wire fields match the selected operation");
   const auto join = parse(R"({"t":"join","version":1,"name":"Mira"})");
   require(join.error.empty() && std::get<JoinRequest>(join.message).name == "Mira",
           "join accepts a name without a credential or request id");
@@ -166,6 +189,27 @@ void joining_uses_the_existing_session() {
   require(sessions.principal(5)->player == 3,
           "a generated join key reconnects through the ordinary hello path");
 }
+void operator_admission_is_not_a_player_session() {
+  auto p = profiles();
+  Sessions sessions(p);
+  Wire wire;
+  sessions.accept(Connected{8});
+  const auto admission = sessions.accept(Control{
+      8,
+      R"({"t":"operator","version":1,"key":"host-test","op":"role","player":"p:1","role":"elaborator","on":true})"});
+  require(admission && admission->session == 8 &&
+              std::get<OperatorRequest>(admission->request).player == 1 && !sessions.principal(8) &&
+              p.rows[1].roles.size() == 2,
+          "operator transport defers key authority and role mutation to the step owner");
+  connect(sessions, 9);
+  wire.drain(sessions);
+  require(!sessions.accept(Control{
+              9, R"({"t":"operator","version":1,"key":"host-test","op":"key","player":"p:1"})"}),
+          "a player connection cannot switch to operator admission");
+  wire.drain(sessions);
+  require(wire.closed.back().second == "already_authenticated",
+          "operator admission uses the existing handshake boundary");
+}
 void authentication_and_presentation() {
   auto p = profiles();
   Wire wire;
@@ -177,7 +221,6 @@ void authentication_and_presentation() {
               wire.last()["mode"] == "play" && wire.last()["binary"] == false &&
               wire.last()["asset_root"] == "/assets",
           "welcome extras cannot override auth");
-  require(sessions.principal(1)->roles == p.rows[1].roles, "authored roles preserved");
   connect(sessions, 2, "fixture-player", "watch", true);
   wire.drain(sessions);
   require(sessions.principal(1).has_value(), "watch does not replace controlling session");
@@ -329,6 +372,7 @@ int main() {
   try {
     protocol();
     joining_uses_the_existing_session();
+    operator_admission_is_not_a_player_session();
     authentication_and_presentation();
     lanes_and_orphans();
     untrusted_manifest();

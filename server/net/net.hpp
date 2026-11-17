@@ -262,10 +262,16 @@ struct Hello {
 struct JoinRequest {
   std::string name;
 };
+struct OperatorRequest {
+  std::string key, op;
+  PlayerId player = 0;
+  std::string role;
+  bool on = false;
+};
 bool join_allowed(const JoinRequest &);
 struct Admission {
   SessionId session;
-  std::variant<JoinRequest> request;
+  std::variant<JoinRequest, OperatorRequest> request;
 };
 std::string_view operation_name(ControlKind);
 struct Request {
@@ -274,7 +280,7 @@ struct Request {
   Json fields = Json::object();
 };
 struct Parsed {
-  std::variant<std::monostate, Hello, JoinRequest, Request> message;
+  std::variant<std::monostate, Hello, JoinRequest, OperatorRequest, Request> message;
   std::uint64_t id = 0;
   std::string error;
 };
@@ -295,7 +301,6 @@ struct Principal {
   PlayerId player = 0;
   Handle body;
   std::string name;
-  std::vector<std::string> roles;
   Mode mode = Mode::Watch;
   bool binary = false;
 };
@@ -446,8 +451,8 @@ Reply read_inspect(const amber::catalog::State &catalog_state,
                    const amber::Settings &settings, const Invocation &call);
 void append_records(RecordFeed &feed, std::span<const Json> records, IdentityRead identity,
                     TransformRead transforms);
-Reply read_events(const RecordFeed &feed, const SessionViews &sessions, float radius_m,
-                  std::size_t default_limit, const Invocation &call);
+Reply read_events(const RecordFeed &feed, const SessionViews &sessions, const Profiles &,
+                  float radius_m, std::size_t default_limit, const Invocation &call);
 Reply read_debug(const space::Space &space, IdentityRead identity, Step now, float default_radius_m,
                  Json stats, const Invocation &call);
 struct ReplicationIndex {

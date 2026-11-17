@@ -71,6 +71,8 @@ std::optional<Admission> Sessions::accept(const net::Input &input) {
             hello(message.session, std::move(*value));
           } else if (auto *value = std::get_if<JoinRequest>(&parsed.message)) {
             return Admission{message.session, std::move(*value)};
+          } else if (auto *value = std::get_if<OperatorRequest>(&parsed.message)) {
+            return Admission{message.session, std::move(*value)};
           } else {
             request(message.session, std::get<Request>(std::move(parsed.message)));
           }
@@ -93,7 +95,7 @@ void Sessions::hello(net::SessionId id, Hello hello) {
 }
 Authenticated Sessions::establish(net::SessionId id, const Profile &profile, Mode mode,
                                   bool binary) {
-  Principal principal{profile.id, profile.body, profile.name, profile.roles, mode, binary};
+  Principal principal{profile.id, profile.body, profile.name, mode, binary};
   if (mode == Mode::Play) {
     const auto old = controlling_.find(profile.id);
     if (old != controlling_.end()) {

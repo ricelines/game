@@ -76,6 +76,11 @@ MAILBOX_MAX = 100
 GRANT_REMINDER_SECONDS = 30 # tuning: notify issuers before expiring script/spending authority
 DEADLINES_PER_STEP = 256 # tuning: due grant/offer cleanup waits in its index beyond this batch
 
+[operator]
+ARCHITECT_ALLOWANCE = 1000000
+ARCHITECT_PERIOD_SECONDS = 604800
+ARCHITECT_EXPIRY_SECONDS = 31536000
+
 [elaboration]
 GAP_CAPTURES = 3
 CAPTURE_M = 10.0

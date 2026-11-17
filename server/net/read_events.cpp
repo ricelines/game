@@ -28,16 +28,17 @@ void append_records(RecordFeed &feed, std::span<const Json> records, IdentityRea
       feed.rows.pop_front();
   }
 }
-net::Reply read_events(const RecordFeed &feed, const SessionViews &sessions, float radius_m,
-                       std::size_t default_limit, const net::Invocation &call) {
+net::Reply read_events(const RecordFeed &feed, const SessionViews &sessions,
+                       const Profiles &profiles, float radius_m, std::size_t default_limit,
+                       const net::Invocation &call) {
   const auto since = call.request.fields.value("since", std::uint64_t{});
   const auto root = call.request.fields.value("root", std::uint64_t{});
   const auto thing = call.request.fields.value("thing", std::string{});
   const auto limit = call.request.fields.value("limit", default_limit);
   const bool detailed = call.request.fields.value("detail", true);
+  const auto &roles = profiles.rows.at(call.principal.player).roles;
   const bool privileged = call.principal.mode == net::Mode::Debug ||
-                          std::find(call.principal.roles.begin(), call.principal.roles.end(),
-                                    "architect") != call.principal.roles.end();
+                          std::find(roles.begin(), roles.end(), "architect") != roles.end();
   const auto player = "p:" + std::to_string(call.principal.player);
   Vec3 eye;
   if (const auto session = sessions.rows.find(call.session); session != sessions.rows.end())

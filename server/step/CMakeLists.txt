@@ -12,6 +12,7 @@ add_library(amber_step STATIC
   run.cpp
   connections.cpp
   joining.cpp
+  operator.cpp
   fixture_cases.cpp
   lifecycle.cpp
   snapshot.cpp
