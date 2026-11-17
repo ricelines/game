@@ -481,7 +481,7 @@ void moving_between_equal_priority_plots_rebinds_future_dependencies() {
   f.f.terms.rows[demand].paired = supply;
   f.f.plots.rows[1][priority] = Value(5.);
   f.f.plots.rows[2][priority] = Value(5.);
-  f.f.objects.plot[f.f.b.slot()] = 3;
+  set_plot(f.f.objects, f.f.b.slot(), 3);
   f.f.instance_settings.columns.resize(f.f.terms.rows.size());
   f.f.instance_settings.columns[priority].set(f.f.b.slot(), Value(4.));
   react::GivesTo gives;
@@ -871,14 +871,14 @@ void returns_use_inventory_with_static_occupants_and_ignore_full_mailboxes() {
   f.delivery.present_bodies.erase(2);
   auto absent = f.item(2, {-4, 0, 0});
   for (auto h : absent.objects)
-    f.f.objects.plot[h.slot()] = 1;
+    set_plot(f.f.objects, h.slot(), 1);
   const auto returned = f.call(f.ids.return_goods, PlayerId{1}, {}, absent.root);
   require(returned.reply.at("location") == "mailbox" && f.players.rows[2].mailbox.size() == 2,
           "an absent owner with a full mailbox cannot receive a return");
   f.delivery.present_bodies[2] = f.bodies[1];
   auto present = f.item(2, {-8, 0, 0});
   for (auto h : present.objects)
-    f.f.objects.plot[h.slot()] = 1;
+    set_plot(f.f.objects, h.slot(), 1);
   testspace::Box mesh({1, 1, 1});
   const auto geometry =
       space::import_geometry(f.world, {mesh.mesh, {}, mesh.triangles, mesh.bounds});
@@ -938,7 +938,7 @@ void land_refusals_have_fixes_and_denial_records() {
   denied(f.call(f.ids.return_goods, PlayerId{1}, {}, own.root), "pick it up instead");
   auto other = f.item(2, {-6, 0, 0});
   for (auto h : other.objects)
-    f.f.objects.plot[h.slot()] = 1;
+    set_plot(f.f.objects, h.slot(), 1);
   const auto grant =
       perm::create_grant(f.grants, f.players, perm::Holder::player(1),
                          {1, perm::Holder::player(2), perm::Scope::plot(1), 1, 0, 0, 100},
@@ -1058,12 +1058,14 @@ void land_editing_preserves_grants_and_refreshes_objects() {
   require(
       split.changed && f.plots.rows.size() == 4 && f.plots.rows[1].bounds[2] == -10 &&
           f.plots.rows[3].bounds[0] == -10 && f.objects_state.objects.plot[item.root.slot()] == 3 &&
+          step::plot_things(f.objects_state, 3) == std::vector{item.root} &&
           !f.offers.rows[1].live &&
           bool(perm::check_scope(perm::Holder::player(3), perm::Scope::plot(3), 1, f.grants, 20)),
       "split failed bounds, offers, grant copy or membership");
   const auto joined = f.call(f.ids.join_plots, PlayerId{1}, {{"plots", {3, 1}}});
   require(joined.changed && f.plots.rows[3].id == 0 && f.plots.rows[1].bounds[2] == 0 &&
               f.objects_state.objects.plot[item.root.slot()] == 1 && !joined.notices.empty() &&
+              !f.objects_state.objects.on_plot.contains(3) &&
               !perm::check_scope(perm::Holder::player(3), perm::Scope::plot(3), 1, f.grants, 20),
           "join failed tombstone, grants, notice or membership");
   const auto abandoned = f.call(f.ids.abandon_plot, PlayerId{1}, {{"plot", 1}});

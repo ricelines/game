@@ -30,7 +30,6 @@ place_existing(amber::ObjectState &objects_state, amber::space::State &space_sta
 
   auto &parts = objects_state.parts;
   auto &declared_parts = objects_state.declared_parts;
-  auto membership = amber::plot_membership(objects_state.objects);
   auto &plots = perm_state.plots;
   auto &players = perm_state.players;
   auto &grants = perm_state.grants;
@@ -152,7 +151,7 @@ place_existing(amber::ObjectState &objects_state, amber::space::State &space_sta
       commerce_detail::result(true, {{"goods", to_string(item.root.object)},
                                      {"plot", plot->id},
                                      {"position", {destination.x, destination.y, destination.z}}});
-  perm::update_plots(identity, transforms, membership, plots, item.closure, true);
+  perm::update_plots(objects_state.objects, plots, item.closure, true);
   for (auto h : item.closure)
     react::reconcile_object_priorities(values, react_state, h, out.effects, call.step, call.hz);
   for (const auto &[key, before] : settings)

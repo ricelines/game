@@ -213,7 +213,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     start::install_relations(plan, symbols, terms, authored_relations, setup);
     start::install_script_state(plan, symbols, states);
     start::install_profiles(plan, symbols, profiles, players, std::filesystem::current_path());
-    perm::update_plots(ids, transforms(objects), plot_membership(objects), plots, initial, true);
+    perm::update_plots(objects, plots, initial, true);
     start::install_money(plan, symbols, ids, auth, players, groups, ledger);
     start::install_grants(plan, symbols, objects_state, perm_state, catalog_state, react_state,
                           clock);
@@ -750,8 +750,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       std::cerr << "navigation: " << error << '\n';
     auto physics = advance_motion(space, objects_state, physical_relations, step_state, perm_state,
                                   clock, settings.goal_tolerance_m, settings.perception.reach_m);
-    const auto crossed_plots =
-        perm::update_plots(ids, poses, plot_membership(objects), plots, physics.moved, true);
+    const auto crossed_plots = perm::update_plots(objects, plots, physics.moved, true);
     for (const auto object : crossed_plots) {
       const auto origin = mechanical_causes.lookup(space::motion_cause(space, ids, object)).origin;
       react::DeferredEffects effects;

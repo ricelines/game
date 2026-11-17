@@ -138,7 +138,6 @@ void rebuild_instances(amber::ObjectState &objects_state, amber::space::State &s
   auto transforms = amber::transforms(objects_state.objects);
   auto parents = amber::parents(objects_state.objects);
 
-  auto membership = amber::plot_membership(objects_state.objects);
   auto authority = amber::authority(std::as_const(objects_state.objects));
   auto attribution = amber::attribution(std::as_const(objects_state.objects));
   auto &models = catalog_state.models;
@@ -191,7 +190,7 @@ void rebuild_instances(amber::ObjectState &objects_state, amber::space::State &s
                                                volumes, attachments);
   if (rebuilt.status != space::Status::Ok)
     throw std::invalid_argument(space::status_text(rebuilt.status));
-  perm::update_plots(identity(objects), transforms, membership, land, after, edit.in_scene);
+  perm::update_plots(objects, land, after, edit.in_scene);
   for (std::size_t i = 0; i < replacements.size(); ++i) {
     const auto &plan = replacements[i]->rows;
     const auto &removed = replacements[i]->removed;

@@ -12,6 +12,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -274,7 +275,6 @@ struct ObjectInit {
   std::uint32_t params = 0;
 };
 
-// Only lifecycle operations and the object snapshot section accept this table.
 struct Objects {
   std::vector<std::uint32_t> generation{0};
   std::vector<Vec3> position{{}};
@@ -287,6 +287,7 @@ struct Objects {
   std::vector<GroupId> group{0};
   std::vector<std::uint32_t> preset{0};
   std::vector<PlotId> plot{0};
+  std::unordered_map<PlotId, std::vector<std::uint32_t>> on_plot;
   std::vector<Handle> parent{{}};
   std::vector<std::uint32_t> flags{0};
   std::vector<std::uint32_t> params{0};
@@ -334,10 +335,6 @@ struct AuthorityWrite {
   operator AuthorityRead() const { return {generation, owner, group, preset, plot}; }
 };
 
-struct PlotWrite {
-  std::vector<PlotId> &plot;
-};
-
 struct AssetBindingWrite {
   std::vector<ModelId> &model;
   std::vector<TermId> &material;
@@ -383,13 +380,14 @@ AuthorityWrite authority(Objects &objects);
 AttributionRead attribution(const Objects &objects);
 ParentRead parents(const Objects &objects);
 ParentWrite parents(Objects &objects);
-PlotWrite plot_membership(Objects &objects);
 AssetBindingWrite asset_bindings(Objects &objects);
 SpaceFlags space_flags(Objects &objects);
 PermissionFlags permission_flags(Objects &objects);
 
 Handle create(Objects &objects, const ObjectInit &init);
 void destroy(Objects &objects, Handle handle);
+void set_plot(Objects &, std::uint32_t slot, PlotId);
+void rebuild_plot_membership(Objects &);
 
 } // namespace amber
 

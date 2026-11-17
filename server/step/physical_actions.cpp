@@ -24,7 +24,7 @@ struct SweepBinding {
   TransformWrite transforms;
   const Relation &declared_parts;
   MechanicalCauses &causes;
-  PlotWrite plot_write;
+  Objects &objects;
   const perm::Plots &plots;
 };
 struct PartPoseBinding {
@@ -33,7 +33,7 @@ struct PartPoseBinding {
   TransformWrite transforms;
   const Relation &declared_parts;
   MechanicalCauses &causes;
-  PlotWrite plot_write;
+  Objects &objects;
   const perm::Plots &plots;
   std::size_t batch_max;
 };
@@ -279,7 +279,6 @@ step::NativeCompletion grasp_action(amber::ObjectState &objects_state,
 
   auto &relations = space_state.physical_relations;
   auto &declared_parts = objects_state.declared_parts;
-  auto plot_write = amber::plot_membership(objects_state.objects);
 
   const auto target = call.request.target, body = actor_body(call);
   const auto local = input_pose(call.arguments.value("local_pose", Json::object()));
@@ -307,7 +306,7 @@ step::NativeCompletion grasp_action(amber::ObjectState &objects_state,
                    std::span(space_state.relation_changes).subspan(changes_begin));
   space_state.relation_changes.resize(changes_begin);
   if (out.changed) {
-    perm::update_plots(identity, transforms, plot_write, plots, objects, true);
+    perm::update_plots(objects_state.objects, plots, objects, true);
     out.changed_objects = objects;
   }
   return out;
@@ -327,7 +326,6 @@ step::NativeCompletion attach_action(amber::ObjectState &objects_state,
   auto &limits = perm_state.owner_limits;
   auto &players = perm_state.players;
   auto &grants = perm_state.grants;
-  auto plot_write = amber::plot_membership(objects_state.objects);
   auto &plots = perm_state.plots;
 
   const auto subject = call.request.target;
@@ -352,7 +350,7 @@ step::NativeCompletion attach_action(amber::ObjectState &objects_state,
   space_state.relation_changes.resize(changes_begin);
   if (out.changed) {
     const auto objects = closure(declared_parts, subject);
-    perm::update_plots(identity, transforms, plot_write, plots, objects, true);
+    perm::update_plots(objects_state.objects, plots, objects, true);
     out.changed_objects = objects;
   }
   return out;
@@ -364,7 +362,6 @@ step::NativeCompletion release_action(amber::ObjectState &objects_state,
                                       MechanicalCauses &causes, const step::NativeCall &call) {
 
   auto identity = amber::identity(std::as_const(objects_state.objects));
-  auto transforms = amber::transforms(objects_state.objects);
   auto parents = amber::parents(objects_state.objects);
 
   auto &declared_parts = objects_state.declared_parts;
@@ -372,7 +369,6 @@ step::NativeCompletion release_action(amber::ObjectState &objects_state,
   auto &limits = perm_state.owner_limits;
   auto &players = perm_state.players;
   auto &grants = perm_state.grants;
-  auto plot_write = amber::plot_membership(objects_state.objects);
   auto &plots = perm_state.plots;
 
   const auto target = call.request.target;
@@ -406,7 +402,7 @@ step::NativeCompletion release_action(amber::ObjectState &objects_state,
   space_state.relation_changes.resize(changes_begin);
   if (out.changed) {
     const auto objects = closure(declared_parts, target);
-    perm::update_plots(identity, transforms, plot_write, plots, objects, true);
+    perm::update_plots(objects_state.objects, plots, objects, true);
     out.changed_objects = objects;
   }
   return out;
@@ -569,10 +565,9 @@ int move_part_binding(lua_State *L) {
       luaL_error(L, "move_part: %s", space::status_text(result.status));
     if (b.declared_parts.out.get(part.slot())) {
       const auto objects = closure(b.declared_parts, part);
-      perm::update_plots(b.identity, b.transforms, b.plot_write, b.plots, objects, true);
+      perm::update_plots(b.objects, b.plots, objects, true);
     } else
-      perm::update_plots(b.identity, b.transforms, b.plot_write, b.plots, std::span(&part, 1),
-                         true);
+      perm::update_plots(b.objects, b.plots, std::span(&part, 1), true);
     ++moved;
   };
   if (lua_istable(L, 2)) {
@@ -619,7 +614,7 @@ int sweep_binding(lua_State *L) {
                                  float(1 / i.hz), token);
   mechanical_result(i, before != b.transforms.position[subject.slot()], std::span(&subject, 1));
   const auto objects = closure(b.declared_parts, subject);
-  perm::update_plots(b.identity, b.transforms, b.plot_write, b.plots, objects, true);
+  perm::update_plots(b.objects, b.plots, objects, true);
   operation(L, {result.status, result.contact ? result.contact->object : Handle{}});
   lua_pushvector(L, result.actual.position.x, result.actual.position.y, result.actual.position.z);
   lua_setfield(L, -2, "position");
@@ -744,7 +739,6 @@ void bind_physical(react::Vm &vm, amber::ObjectState &objects_state, amber::step
   auto transforms = amber::transforms(objects_state.objects);
   auto &declared_parts = objects_state.declared_parts;
   auto &causes = step_state.mechanical_causes;
-  auto plot_write = amber::plot_membership(objects_state.objects);
   auto &plots = perm_state.plots;
   auto &intents = step_state.intents;
   auto &endings = step_state.intent_endings;
@@ -757,10 +751,11 @@ void bind_physical(react::Vm &vm, amber::ObjectState &objects_state, amber::step
 
   const auto navigation = std::make_shared<NavigationBinding>(
       NavigationBinding{intents, endings, identity, players, grants, plots});
-  const auto sweep = std::make_shared<SweepBinding>(
-      SweepBinding{space, identity, transforms, declared_parts, causes, plot_write, plots});
-  const auto parts = std::make_shared<PartPoseBinding>(PartPoseBinding{
-      space, identity, transforms, declared_parts, causes, plot_write, plots, part_batch_max});
+  const auto sweep = std::make_shared<SweepBinding>(SweepBinding{
+      space, identity, transforms, declared_parts, causes, objects_state.objects, plots});
+  const auto parts = std::make_shared<PartPoseBinding>(
+      PartPoseBinding{space, identity, transforms, declared_parts, causes, objects_state.objects,
+                      plots, part_batch_max});
   const auto query = std::make_shared<QueryBinding>(QueryBinding{space, identity, transforms});
   const auto sound = std::make_shared<SoundBinding>(
       SoundBinding{hearing, identity, transforms, listeners, instance_texts, model_texts});

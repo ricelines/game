@@ -179,7 +179,6 @@ NativeCompletion create_instance(amber::ObjectState &objects_state,
   auto &players = perm_state.players;
   auto &grants = perm_state.grants;
   auto &plots = perm_state.plots;
-  auto membership = amber::plot_membership(objects_state.objects);
 
   const auto identity = values.identity;
   step::NativeCompletion out;
@@ -258,7 +257,7 @@ NativeCompletion create_instance(amber::ObjectState &objects_state,
   for (std::size_t i = 0; i < created.objects.size(); ++i)
     install_physics(space, identity, transforms, flags, created.objects[i], definitions[i]);
   install_declared_attachments(objects_state, space_state, created.objects);
-  perm::update_plots(identity, transforms, membership, plots, created.objects, true);
+  perm::update_plots(objects, plots, created.objects, true);
   out.created_objects = created.objects;
   out.visible_objects = created.objects;
   out.changed = true;

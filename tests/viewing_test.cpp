@@ -165,7 +165,7 @@ int main(int argc, char **argv) {
     settings.columns.resize(17);
     settings.columns[6].set(visible.slot(), Value(0.0));
     model_settings.rows[1][7] = Value(7.0);
-    scene.objects.plot[visible.slot()] = 1;
+    set_plot(scene.objects, visible.slot(), 1);
     plot_settings.rows[1][8] = Value(8.0);
     world.values[5] = Value(99.0);
     world.values[9] = Value(9.0);

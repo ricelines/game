@@ -53,9 +53,7 @@ TermId term_arg(lua_State *L, int index, const react::Terms &terms) {
   luaL_error(L, "unknown registered term");
 }
 struct PlotObjectsBinding {
-  IdentityRead identity;
-  const std::vector<PlotId> &plot;
-  const Relation &declared_parts;
+  const ObjectState &objects;
   const perm::Plots &plots;
 };
 struct ObjectBinding {
@@ -232,7 +230,7 @@ int plot_objects_binding(lua_State *L) {
     luaL_error(L, "unknown plot");
   lua_newtable(L);
   int index = 0;
-  const auto things = plot_things(b.identity, b.plot, b.declared_parts, plot, &i.deadline);
+  const auto things = plot_things(b.objects, plot, &i.deadline);
   if (i.deadline.passed())
     luaL_error(L, "handler deadline exceeded");
   for (auto object : things) {
@@ -429,17 +427,19 @@ int plots_binding(lua_State *L) {
   return 1;
 }
 } // namespace
-std::vector<Handle> plot_things(IdentityRead identity, std::span<const PlotId> plot,
-                                const Relation &declared_parts, PlotId id,
-                                const RunDeadline *deadline) {
+std::vector<Handle> plot_things(const ObjectState &state, PlotId id, const RunDeadline *deadline) {
   std::vector<Handle> result;
+  const auto found = state.objects.on_plot.find(id);
+  if (found == state.objects.on_plot.end())
+    return result;
+  const auto identity = amber::identity(state.objects);
   auto budget = deadline ? *deadline : RunDeadline{};
-  for (std::uint32_t slot = 1; slot < identity.model.size(); ++slot) {
+  for (auto slot : found->second) {
     if (deadline && budget.passed())
       break;
-    if (!identity.model[slot] || plot[slot] != id || (identity.flags[slot] & (Body | Held)))
+    if (identity.flags[slot] & (Body | Held))
       continue;
-    const auto *part_of = declared_parts.in.get(slot);
+    const auto *part_of = state.declared_parts.in.get(slot);
     if (!part_of || part_of->empty())
       result.push_back(identity.at(slot));
   }
@@ -494,8 +494,8 @@ void bind_metadata(const amber::ObjectState &objects_state,
   react::register_binding(
       vm, "plots", plots_binding,
       std::make_shared<PlotReadBinding>(PlotReadBinding{permissions, port_spacing_m, authority}));
-  react::register_binding(vm, "plot_objects", plot_objects_binding,
-                          std::make_shared<PlotObjectsBinding>(
-                              PlotObjectsBinding{identity, authority.plot, declared_parts, plots}));
+  react::register_binding(
+      vm, "plot_objects", plot_objects_binding,
+      std::make_shared<PlotObjectsBinding>(PlotObjectsBinding{objects_state, plots}));
 }
 } // namespace amber::step

@@ -83,10 +83,10 @@ struct Fixture {
     f.objects.owner[f.b.slot()] = 2;
     f.objects.owner[f.c.slot()] = 3;
     for (auto object : {f.a, f.b, part}) {
-      f.objects.plot[object.slot()] = 1;
+      set_plot(f.objects, object.slot(), 1);
       f.objects.group[object.slot()] = 1;
     }
-    f.objects.plot[f.c.slot()] = 2;
+    set_plot(f.objects, f.c.slot(), 2);
     f.objects.parent[part.slot()] = f.b;
     parts.set(f.b.slot(), std::vector<lifecycle::NamedPart>{{"piece", part}});
     lifecycle::rebuild_declared_parts(parts, identity(f.objects), declared);

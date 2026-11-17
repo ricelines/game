@@ -153,9 +153,9 @@ void priority_scopes_and_retirement() {
   Fixture x(Combine::SharePriority);
   x.f.objects.model[x.f.b.slot()] = 2;
   x.f.objects.model[x.third.slot()] = 3;
-  x.f.objects.plot[x.f.a.slot()] = 1;
-  x.f.objects.plot[x.f.b.slot()] = 2;
-  x.f.objects.plot[x.third.slot()] = 3;
+  set_plot(x.f.objects, x.f.a.slot(), 1);
+  set_plot(x.f.objects, x.f.b.slot(), 2);
+  set_plot(x.f.objects, x.third.slot(), 3);
   x.baseline(6);
   const auto change = [&](SettingKey key) {
     reconcile_priority(x.f.values(), x.f.react_state, key, x.f.effects, x.now, 20);

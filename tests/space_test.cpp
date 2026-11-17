@@ -191,8 +191,7 @@ void plot_membership_follows_real_motion_and_hidden_custody() {
   plots.rows.push_back({2, 2, 0, 0, {0, -5, 5, 5}, {}});
   const std::array selected{item};
   auto refresh = [&](bool visible) {
-    return perm::update_plots(identity(scene.objects), transforms(scene.objects),
-                              plot_membership(scene.objects), plots, selected, visible);
+    return perm::update_plots(scene.objects, plots, selected, visible);
   };
   require(refresh(true) == std::vector<Handle>{item} && scene.objects.plot[item.slot()] == 1,
           "placed goods plot not initialized");

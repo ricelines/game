@@ -19,12 +19,12 @@ std::optional<NativeCompletion> lot(perm::State &state, PlotId id, const NativeC
 void refresh(ObjectState &objects, const perm::Plots &plots, PlotId first, PlotId second,
              NativeCompletion &out) {
   auto ids = identity(std::as_const(objects.objects));
-  for (std::uint32_t slot = 1; slot < ids.model.size(); ++slot)
-    if (ids.model[slot] &&
-        (objects.objects.plot[slot] == first || objects.objects.plot[slot] == second))
-      out.changed_objects.push_back(ids.at(slot));
-  perm::update_plots(ids, transforms(objects.objects), plot_membership(objects.objects), plots,
-                     out.changed_objects, true);
+  for (auto plot : {first, second})
+    if (const auto found = objects.objects.on_plot.find(plot);
+        found != objects.objects.on_plot.end())
+      for (auto slot : found->second)
+        out.changed_objects.push_back(ids.at(slot));
+  perm::update_plots(objects.objects, plots, out.changed_objects, true);
 }
 } // namespace
 NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
@@ -42,8 +42,7 @@ NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
   const auto bounds = state.plots.rows[id].bounds;
   const auto area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]);
   auto out = commerce_detail::result(true, {{"plot", id}, {"owner", "p:0"}});
-  const auto ids = identity(std::as_const(objects.objects));
-  for (auto object : plot_things(ids, objects.objects.plot, objects.declared_parts, id)) {
+  for (auto object : plot_things(objects, id)) {
     auto returning = call;
     returning.request.target = object;
     const auto returned = return_goods(state, objects, delivery, space, returning, true);

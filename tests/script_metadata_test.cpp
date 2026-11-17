@@ -205,6 +205,31 @@ void retained_handles_grant_no_reads() {
   require(f.run("self:object(self.state.saved)").status == react::RunOutcome::Status::Error,
           "a stored string is not promoted into a typed object reference");
 }
+
+void plot_objects_returns_only_independent_placed_things() {
+  Fixture f;
+  ObjectInit init;
+  init.model = 1;
+  init.plot = 1;
+  init.flags = Body;
+  create(f.objects, init);
+  init.flags = Held;
+  create(f.objects, init);
+  init.flags = Static;
+  init.plot = 2;
+  create(f.objects, init);
+  f.ok(R"(local things=self:plot_objects(1)
+    assert(#things==2)
+    local found_self=false
+    for _,h in things do
+      found_self=found_self or h==self.handle
+      assert(self:object(h).owner=='p:2')
+    end
+    assert(found_self))");
+  destroy(f.objects, f.unrelated);
+  f.ok(R"(local things=self:plot_objects(1)
+    assert(#things==1 and things[1]==self.handle))");
+}
 } // namespace
 int main() {
   try {
@@ -212,6 +237,7 @@ int main() {
     single_solid_measurement_has_no_assembly_metadata();
     installed_script_identity_is_readonly();
     retained_handles_grant_no_reads();
+    plot_objects_returns_only_independent_placed_things();
     std::cout << "Actual readonly Luau metadata and variant mass checks passed.\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

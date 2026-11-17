@@ -49,6 +49,7 @@ struct Fixture {
   }
 };
 
+
 void grant_indexes_follow_every_lifetime_change() {
   Fixture f;
   auto &state = f.perm_state;
@@ -290,10 +291,7 @@ void moved_goods_leave_plot_scoped_authority() {
   plots.rows.push_back({1, 1, 0, 0, {-5, -5, 0, 5}, {}});
   plots.rows.push_back({2, 2, 0, 0, {0, -5, 5, 5}, {}});
   const std::array selected{item, Handle::make(item.slot(), item.generation() + 1)};
-  auto refresh = [&](bool visible) {
-    return update_plots(identity(objects), transforms(objects), plot_membership(objects), plots,
-                        selected, visible);
-  };
+  auto refresh = [&](bool visible) { return update_plots(objects, plots, selected, visible); };
   require(refresh(true) == std::vector<Handle>{item}, "plot refresh accepted stale generation");
   objects.position[item.slot()].x = -2;
   require(refresh(true).empty() && objects.plot[item.slot()] == 1,
@@ -315,10 +313,12 @@ void moved_goods_leave_plot_scoped_authority() {
   require(allowed(), "on-plot grant did not cover initial owned goods");
   objects.position[item.slot()].x = 0;
   require(refresh(true) == std::vector<Handle>{item} && objects.plot[item.slot()] == 2 &&
+              objects.on_plot.at(2) == std::vector{item.slot()} && !objects.on_plot.contains(1) &&
               !allowed(),
           "moved foreign goods retained previous plot authority");
   objects.position[item.slot()].x = 10;
-  require(refresh(true) == std::vector<Handle>{item} && objects.plot[item.slot()] == 0,
+  require(refresh(true) == std::vector<Handle>{item} && objects.plot[item.slot()] == 0 &&
+              objects.on_plot.empty(),
           "out-of-plot goods retained a plot");
   objects.position[item.slot()].x = -1;
   refresh(true);
@@ -640,10 +640,10 @@ void owned_and_all_land_cover_only_their_declared_scopes() {
   require(check(body, Verb::Move, read(first), f.players, f.grants, 2) &&
               !check(body, Verb::Move, read(second), f.players, f.grants, 2),
           "owned scope covers only its owner's objects");
-  objects.plot[first.slot()] = 2;
+  set_plot(objects, first.slot(), 2);
   require(bool(check(body, Verb::Move, read(first), f.players, f.grants, 2)),
           "owned scope follows an owner's object across plots");
-  objects.plot[first.slot()] = 1;
+  set_plot(objects, first.slot(), 1);
   const auto land = Holder::script(8, Handle::make(31, 1));
   const auto root = create_root_grant(
       f.grants, f.players,
@@ -684,7 +684,7 @@ void owned_and_all_land_cover_only_their_declared_scopes() {
       {Scope::object(first), 2, all_rights, 1, true}, {child, 2, true}, 2);
   require(delegated && f.grants.rows[delegated.grant].parent == root.grant,
           "all-land holder can pass one object's authority to another script");
-  objects.plot[first.slot()] = 0;
+  set_plot(objects, first.slot(), 0);
   objects.flags[first.slot()] |= Held;
   require(check(child, Verb::Destroy, read(first), f.players, f.grants, 3) &&
               !check(land, Verb::Destroy, read(first), f.players, f.grants, 3),

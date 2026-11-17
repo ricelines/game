@@ -301,8 +301,7 @@ std::string account_name(Account);
 std::string_view reason_text(Reason);
 
 // Refresh only changed scene objects. Hidden inventory and mailboxes have no plot.
-std::vector<Handle> update_plots(IdentityRead, TransformRead, PlotWrite, const Plots &,
-                                 std::span<const Handle>, bool in_world);
+std::vector<Handle> update_plots(Objects &, const Plots &, std::span<const Handle>, bool in_world);
 
 Decision check_land(Holder, LandVerb, const Plot &, const Players &, const Grants &, Step);
 

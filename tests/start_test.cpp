@@ -114,8 +114,7 @@ int main(int argc, char **argv) {
     settings.land.way_group = plan.at("land").at("way_group").get<GroupId>();
     space::State land_space(settings.space, settings.light_cell_m);
     install_land(plan, perm_state, land_space, settings.land);
-    perm::update_plots(identity(objects), transforms(objects), plot_membership(objects), plots,
-                       created, true);
+    perm::update_plots(objects, plots, created, true);
     require(plan.at("land").at("lots") == Json::array({{{"owner", 2}, {"at", {8, 50}}},
                                                        {{"owner", 2}, {"at", {24, 50}}},
                                                        {{"owner", 3}, {"at", {40, 50}}},

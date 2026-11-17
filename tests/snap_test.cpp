@@ -77,14 +77,18 @@ void object_continuity_and_capture_identity() {
               restored.free_slots == objects.free_slots,
           "OBJS round trip lost columns");
   require(create(restored, init) == create(objects, init), "restore changed slot reuse order");
+  require(restored.on_plot == objects.on_plot, "restore lost plot membership");
   const std::array<Handle, 2> selected{first, child};
   const auto capture = snapshot(objects, 123, selected);
   const auto subset = restore(capture);
   require(identity(subset).valid(first) && identity(subset).valid(child) &&
               !identity(subset).valid(dead) && subset.parent[child.slot()] == first,
           "capture lost identity or included unselected objects");
+  require(subset.on_plot.at(9) == std::vector{first.slot(), child.slot()},
+          "capture plot membership includes unselected or destroyed objects");
   const auto empty = restore(snapshot(objects, 123, std::span<const Handle>{}));
-  require(empty.model.size() == 1 && empty.free_slots.empty(), "empty capture copied full world");
+  require(empty.model.size() == 1 && empty.free_slots.empty() && empty.on_plot.empty(),
+          "empty capture copied full world");
 }
 void framing_and_corruption_are_explicit() {
   const auto bytes = snapshot(Objects{}, 0x0102030405060708ULL);

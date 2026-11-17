@@ -60,7 +60,7 @@ void write_objects(Output &out, const Objects &o,
     subset.created_step[i] = o.created_step[i];
     subset.group[i] = o.group[i];
     subset.preset[i] = o.preset[i];
-    subset.plot[i] = o.plot[i];
+    set_plot(subset, i, o.plot[i]);
     subset.parent[i] = o.parent[i];
     subset.flags[i] = o.flags[i];
     subset.params[i] = o.params[i];
@@ -103,5 +103,6 @@ void read_objects(Input &in, Objects &o) {
   for (std::size_t slot = 1; slot < n; ++slot)
     if (!o.generation[slot] || (o.model[slot] == 0) != free[slot])
       throw std::runtime_error("snapshot object liveness disagrees with free slots");
+  rebuild_plot_membership(o);
 }
 } // namespace amber::snap

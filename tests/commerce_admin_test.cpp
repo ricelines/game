@@ -31,9 +31,9 @@ int main() {
     f.objects.owner[f.a.slot()] = 1;
     f.objects.owner[f.b.slot()] = 2;
     f.objects.owner[f.c.slot()] = 3;
-    f.objects.plot[f.a.slot()] = 1;
-    f.objects.plot[f.b.slot()] = 1;
-    f.objects.plot[f.c.slot()] = 1;
+    set_plot(f.objects, f.a.slot(), 1);
+    set_plot(f.objects, f.b.slot(), 1);
+    set_plot(f.objects, f.c.slot(), 1);
     react::NativeActions native;
     const auto ids = ad::declare_admin(f.terms, native);
     const auto count = f.terms.rows.size();

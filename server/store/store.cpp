@@ -1,5 +1,6 @@
 #include "store.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <time.h>
 
@@ -90,9 +91,6 @@ ParentRead parents(const Objects &o) {
 ParentWrite parents(Objects &o) {
   return {o.parent};
 }
-PlotWrite plot_membership(Objects &o) {
-  return {o.plot};
-}
 SpaceFlags space_flags(Objects &o) {
   return SpaceFlags{o.flags};
 }
@@ -133,7 +131,7 @@ Handle create(Objects &o, const ObjectInit &init) {
   o.created_step[slot] = init.created_step;
   o.group[slot] = init.group;
   o.preset[slot] = init.preset;
-  o.plot[slot] = init.plot;
+  set_plot(o, slot, init.plot);
   o.parent[slot] = init.parent;
   o.flags[slot] = init.flags;
   o.params[slot] = init.params;
@@ -150,13 +148,39 @@ void destroy(Objects &o, Handle handle) {
   o.created_step[slot] = 0;
   o.group[slot] = 0;
   o.preset[slot] = 0;
-  o.plot[slot] = 0;
+  set_plot(o, slot, 0);
   o.parent[slot] = {};
   o.flags[slot] = 0;
   o.params[slot] = 0;
   o.position[slot] = {};
   o.rotation[slot] = {};
   o.free_slots.push_back(slot);
+}
+
+void set_plot(Objects &objects, std::uint32_t slot, PlotId plot) {
+  auto &current = objects.plot[slot];
+  if (current == plot)
+    return;
+  if (current) {
+    auto row = objects.on_plot.find(current);
+    auto &slots = row->second;
+    const auto found = std::ranges::find(slots, slot);
+    assert(found != slots.end());
+    *found = slots.back();
+    slots.pop_back();
+    if (slots.empty())
+      objects.on_plot.erase(row);
+  }
+  current = plot;
+  if (plot)
+    objects.on_plot[plot].push_back(slot);
+}
+
+void rebuild_plot_membership(Objects &objects) {
+  objects.on_plot.clear();
+  for (std::uint32_t slot = 1; slot < objects.model.size(); ++slot)
+    if (objects.model[slot] && objects.plot[slot])
+      objects.on_plot[objects.plot[slot]].push_back(slot);
 }
 
 } // namespace amber

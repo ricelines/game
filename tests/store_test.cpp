@@ -86,6 +86,33 @@ void handle_text_is_unambiguous() {
     require(!amber::parse_handle(text), "malformed handle accepted");
 }
 
+void plots_follow_lifecycle_and_slot_reuse() {
+  amber::Objects objects;
+  amber::ObjectInit init;
+  init.model = 1;
+  init.plot = 3;
+  const auto first = amber::create(objects, init);
+  const auto second = amber::create(objects, init);
+  require(objects.on_plot.at(3) == std::vector{first.slot(), second.slot()},
+          "new objects missing from their plot");
+  amber::set_plot(objects, first.slot(), 5);
+  require(objects.on_plot.at(3) == std::vector{second.slot()} &&
+              objects.on_plot.at(5) == std::vector{first.slot()},
+          "moving an object did not update both plots");
+  amber::set_plot(objects, first.slot(), 5);
+  require(objects.on_plot.at(5).size() == 1, "unchanged membership duplicated an object");
+  amber::destroy(objects, first);
+  require(!objects.on_plot.contains(5), "destroyed object remains on its plot");
+  init.plot = 8;
+  const auto replacement = amber::create(objects, init);
+  require(replacement.slot() == first.slot() &&
+              objects.on_plot.at(8) == std::vector{replacement.slot()},
+          "reused slot retained the destroyed object's plot");
+  amber::set_plot(objects, second.slot(), 0);
+  require(!objects.on_plot.contains(3) && !objects.on_plot.contains(0),
+          "an unplaced object remains in a plot list");
+}
+
 void runtime_flag_writers_preserve_other_owners_bits() {
   amber::Objects objects;
   amber::ObjectInit init;
@@ -115,6 +142,7 @@ int main() {
     sparse_column_matches_reference_after_reuse();
     handles_reject_destroyed_objects_and_views_survive_growth();
     handle_text_is_unambiguous();
+    plots_follow_lifecycle_and_slot_reuse();
     runtime_flag_writers_preserve_other_owners_bits();
     std::cout << "store tests passed\n";
   } catch (const std::exception &error) {

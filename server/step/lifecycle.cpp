@@ -29,10 +29,8 @@ void apply_custody(amber::ObjectState &objects_state, amber::space::State &space
                    std::span<const perm::CustodyChange> custody, NativeCompletion &out) {
 
   auto identity = amber::identity(std::as_const(objects_state.objects));
-  auto transforms = amber::transforms(objects_state.objects);
 
   auto &parts = objects_state.parts;
-  auto membership = amber::plot_membership(objects_state.objects);
 
   const auto changes_begin = space_state.relation_changes.size();
   for (const auto &change : custody) {
@@ -47,7 +45,7 @@ void apply_custody(amber::ObjectState &objects_state, amber::space::State &space
                                          descendants, change.stay_static);
     if (result.status != space::Status::Ok)
       throw std::invalid_argument(space::status_text(result.status));
-    perm::update_plots(identity, transforms, membership, plots, closure, change.in_world);
+    perm::update_plots(objects_state.objects, plots, closure, change.in_world);
     out.changed_objects.insert(out.changed_objects.end(), closure.begin(), closure.end());
     auto &visibility = change.in_world ? out.visible_objects : out.hidden_objects;
     auto &old_visibility = change.in_world ? out.hidden_objects : out.visible_objects;
@@ -198,8 +196,6 @@ void refresh_object_plots(const space::Space &space, amber::ObjectState &objects
                           const perm::Plots &plots, const amber::react::State &react_state,
                           const amber::Origin &origin, NativeCompletion &out) {
   auto identity = amber::identity(std::as_const(objects_state.objects));
-  auto transforms = amber::transforms(std::as_const(objects_state.objects));
-  auto membership = amber::plot_membership(objects_state.objects);
   auto &terms = react_state.terms;
   auto &subscriptions = react_state.subscriptions;
 
@@ -217,7 +213,7 @@ void refresh_object_plots(const space::Space &space, amber::ObjectState &objects
         (space::is_logical_root(space, identity, object) &&
          (!(identity.flags[object.slot()] & Held) || space::bounds(space, identity, object)));
     (visible ? out.visible_objects : out.hidden_objects).push_back(object);
-    perm::update_plots(identity, transforms, membership, plots, std::span(&object, 1), visible);
+    perm::update_plots(objects_state.objects, plots, std::span(&object, 1), visible);
     auto dirty = react::watch_sources(subscriptions, object);
     std::erase_if(dirty, [&](FactKey fact) {
       return terms.rows.at(fact.term).source != react::Source::Setting;

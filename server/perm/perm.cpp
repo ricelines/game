@@ -137,17 +137,17 @@ const Plot *plot_at(const Plots &plots, Vec3 position) {
       return &plot;
   return nullptr;
 }
-std::vector<Handle> update_plots(IdentityRead identity, TransformRead poses, PlotWrite membership,
-                                 const Plots &plots, std::span<const Handle> objects,
-                                 bool in_world) {
+std::vector<Handle> update_plots(Objects &objects, const Plots &plots,
+                                 std::span<const Handle> moved, bool in_world) {
+  const auto identity = amber::identity(objects);
   std::vector<Handle> changed;
-  for (auto object : objects) {
+  for (auto object : moved) {
     if (!identity.valid(object))
       continue;
     PlotId next = 0;
     if (in_world) {
-      const auto point = poses.position[object.slot()];
-      const auto current = membership.plot[object.slot()];
+      const auto point = objects.position[object.slot()];
+      const auto current = objects.plot[object.slot()];
       if (current && current < plots.rows.size()) {
         const auto &plot = plots.rows[current];
         if (plot.id == current && point.x >= plot.bounds[0] && point.y >= plot.bounds[1] &&
@@ -157,8 +157,8 @@ std::vector<Handle> update_plots(IdentityRead identity, TransformRead poses, Plo
       if (const auto *plot = plot_at(plots, point))
         next = plot->id;
     }
-    if (membership.plot[object.slot()] != next) {
-      membership.plot[object.slot()] = next;
+    if (objects.plot[object.slot()] != next) {
+      set_plot(objects, object.slot(), next);
       changed.push_back(object);
     }
   }
