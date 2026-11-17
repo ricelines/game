@@ -435,8 +435,9 @@ std::vector<Handle> plot_things(IdentityRead identity, std::span<const PlotId> p
                                 const Relation &declared_parts, PlotId id,
                                 const RunDeadline *deadline) {
   std::vector<Handle> result;
+  auto budget = deadline ? *deadline : RunDeadline{};
   for (std::uint32_t slot = 1; slot < identity.model.size(); ++slot) {
-    if (deadline && deadline->passed())
+    if (deadline && budget.passed())
       break;
     if (!identity.model[slot] || plot[slot] != id || (identity.flags[slot] & (Body | Held)))
       continue;
