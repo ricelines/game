@@ -147,23 +147,12 @@ def test_root_owned_and_starting_body_grants_have_real_scopes(authored):
                 assert len(owned) == 1 and owned[0]["scope"] == owner_scope
 
 
-def test_power_buyer_has_an_explicit_root_allowance(authored):
+def test_root_architect_allowance_and_balance_holders(authored):
     plan = select(authored, "seeded", True)
-    buyer = {"script": "power_buyer", "on": "public.power_buyer"}
-    grant = next(r for r in plan["grants"] if r["holder"] == buyer)
-    assert grant == {
-        "issuer": 0,
-        "holder": buyer,
-        "scope": {"account": "p:0"},
-        "rights": ["spend"],
-        "cap": 100000,
-        "period_s": 86400,
-        "expires_s": 31536000,
-    }
     allowance = next(r for r in plan["grants"] if r["holder"] == "p:1")
     assert allowance["issuer"] == 0 and allowance["scope"] == {"account": "p:0"}
     assert allowance["cap"] == 1000000 and allowance["period_s"] == 604800
-    plan["balances"].append({"holder": "public.power_buyer", "amount": 100})
+    plan["balances"].append({"holder": "public.circuit", "amount": 100})
     plan["balances"].append({"holder": "group:1", "amount": 25})
     validate_symbols(plan)
     plan["balances"].append({"holder": "group:999", "amount": 25})
@@ -380,72 +369,6 @@ def test_residents_supply_intentions_without_prepared_solutions():
         assert row["key_file"].endswith(".key") and "key" not in row
         assert row["persona"] and row["purpose"] and row["model"]
         assert "route" not in row and "source" not in row and "actions" not in row
-
-
-def test_power_buyer_pays_suppliers_from_root_within_its_cap(tmp_path, baked_plan):
-    plan = json.loads(json.dumps(baked_plan))
-    for profile in plan["profiles"]:
-        profile["key_file"] = str(tmp_path / "keys" / f"{profile['id']}.key")
-    plan["world_settings"].update({"base.settlement_seconds": 0.1, "base.purchase_per_joule": 0.01})
-    grant = next(
-        r
-        for r in plan["grants"]
-        if isinstance(r["holder"], dict) and r["holder"]["script"] == "power_buyer"
-    )
-    grant["cap"] = 5
-    source = next(r for r in plan["scripts"] if r["key"] == "power_buyer")
-    source["source"] = (
-        "local rule=(function()\n"
-        + source["source"]
-        + "\nend)()\n"
-        + """
-local settle=rule.on['base.settle']
-rule.on['base.settle']=function(self,...)
-    settle(self,...)
-    if self:now()>=3 then
-        local balance=self:act('engine.balance',nil,{account='p:3'}).balance
-        assert(balance==1005,'supplier receives the capped root payment')
-        assert(self:act('engine.balance',nil,{account='p:0'}).balance==0,'root holds no money')
-        self:set('base.charge',5)
-    end
-end
-return rule
-"""
-    )
-    path, report = tmp_path / "plan.json", tmp_path / "report.json"
-    path.write_text(json.dumps(plan))
-    result = subprocess.run(
-        [
-            str(ROOT / ".build/release/amb-server"),
-            "--profile",
-            "development",
-            "--plan",
-            str(path),
-            "--config",
-            str(ROOT / "config.toml"),
-            "--assets",
-            str(ROOT / "assets"),
-            "--data",
-            str(tmp_path / "world"),
-            "--no-network",
-            "--unpaced",
-            "--steps",
-            "80",
-            "--report",
-            str(report),
-        ],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    state = json.loads(report.read_text())
-    assert state["script_errors"] == 0
-    position = next(row["at"] for row in plan["objects"] if row["key"] == "public.power_buyer")
-    buyer = next(row for row in state["objects"] if row["position"] == position)
-    assert buyer["values"]["base.charge"] == 5
 
 
 def test_body_pours_into_a_model_without_container_bindings(tmp_path, baked_plan):

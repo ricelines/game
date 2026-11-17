@@ -168,8 +168,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   react::bind_events(vm, terms);
   bind_metadata(objects_state, catalog_state, react_state, perm_state,
                 settings.land.port_spacing_m);
-  bind_physical(vm, objects_state, step_state, perm_state, settings.part_batch_max, space_state,
-                catalog_state);
+  bind_physical(react_state, objects_state, step_state, perm_state, settings.part_batch_max,
+                space_state, catalog_state);
   if (!restored)
     registry = catalog::read_registry(
         registry_directory,
@@ -400,7 +400,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                               play->principal.body, clock.step);
           change_custody(objects_state, space_state, relation_terms, plots, illumination_sources,
                          delivered);
-          refresh_object_plots(space, objects_state, plots, react_state, {}, delivered);
+          refresh_object_plots(space, objects_state, react_state, catalog_state, clock, {},
+                               delivered);
           invalidate_mass(masses, ids, declared_parts, delivered.changed_objects);
           refresh_mass(masses, values, declared_parts, runtime_measurements, clock.step, hz, {},
                        delivered.effects);
@@ -645,11 +646,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
             editing::rebind_scripts(catalog_state, react_state, values, perm_state,
                                     role("events", "start"), clock, action->call.origin, completed);
             invalidate_execution(execution, ids, states);
-            refresh_object_plots(space, objects_state, plots, react_state, action->call.origin,
-                                 completed);
-            for (auto object : completed.changed_objects)
-              react::reconcile_object_priorities(values, react_state, object, completed.effects,
-                                                 clock.step, hz);
+            refresh_object_plots(space, objects_state, react_state, catalog_state, clock,
+                                 action->call.origin, completed);
             invalidate_mass(masses, ids, declared_parts, completed.changed_objects);
             refresh_mass(masses, values, declared_parts, runtime_measurements, clock.step, hz,
                          action->call.origin, completed.effects);
@@ -755,6 +753,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       for (const auto &term : terms.rows)
         if (term.source == react::Source::Setting)
           effects.ordered.emplace_back(react::WatchWork{{object, term.id}, origin});
+      react::reconcile_object_priorities(values, react_state, object, effects, clock.step, hz);
       reconcile_effects(values, react_state, step_state, declared_parts, scripts, clock, effects,
                         origin);
       publish_effects(std::move(effects), origin, clock.step, queues, timers, journal,

@@ -36,7 +36,6 @@ struct Fixture {
   catalog::ModelTexts &model_texts = catalog_state.model_text;
   catalog::ParameterBlocks &parameters = catalog_state.parameters;
   catalog::Assets &assets = catalog_state.assets;
-  react::MeterRows &meters = react_state.meters;
   react::NativeActions &declarations = react_state.native_declarations;
   step::Clock &clock = step_state.clock;
   record::Journal journal{8, {}};
@@ -78,7 +77,7 @@ struct Fixture {
     }
     f.relation_view.columns[22] = &physical.attached_to;
     step::declare_physical_actions(f.terms, declarations);
-    step::bind_physical(f.vm, f.objects_state, step_state, perm_state, 1024, space_state,
+    step::bind_physical(f.react_state, f.objects_state, step_state, perm_state, 1024, space_state,
                         catalog_state);
     step::bind_metadata(f.objects_state, f.catalog_state, f.react_state, perm_state, 1000);
     add_body(f.a, {.6f, .6f, 1.8f}, space::Motion::Character);

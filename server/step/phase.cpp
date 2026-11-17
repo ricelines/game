@@ -141,12 +141,17 @@ nlohmann::json state_report(const ObjectState &objects, const catalog::State &ca
                              {"state", std::move(state)},
                              {"state_bytes", bytes}});
   }
+  std::size_t allocation_count = 0;
+  for (const auto &[subject, shares] : react_state.allocations.values) {
+    (void)subject;
+    allocation_count += shares.size();
+  }
   return Json{{"step", now},
               {"objects", std::move(rows)},
               {"world_scripts", std::move(world_scripts)},
               {"script_errors", script_errors},
               {"timers", step::timers(pending_timers).size()},
-              {"allocations", react_state.allocations.values.size()}};
+              {"allocations", allocation_count}};
 }
 void record_frame(record::Journal &journal, record::Writer &writer, net::RecordFeed &feed,
                   IdentityRead ids, TransformRead poses, std::size_t &script_errors) {

@@ -42,7 +42,6 @@ struct Fixture {
   perm::Trades &trades = perm_state.trades;
   perm::OwnerLimits &limits = perm_state.owner_limits;
   perm::Plots &plots = perm_state.plots;
-  react::MeterRows &meters = react_state.meters;
   catalog::Assets &assets = catalog_state.assets;
   catalog::ParameterBlocks &parameters = catalog_state.parameters;
   step::GeometryAssets &geometry = step_state.geometry;
@@ -192,23 +191,24 @@ struct Fixture {
                               {{actor, action, target, {}}, std::move(args), {}, 20, 20, {}}, 29);
     const auto custody = std::move(out.custody);
     step::apply_custody(f.objects_state, space_state, {0, 0, 3, 0}, plots, custody, out);
+    step::refresh_object_plots(world, objects_state, react_state, catalog_state, {20, 20}, {}, out);
     return out;
   }
   step::NativeCompletion place(Caller actor, nlohmann::json args, Handle target) {
-    return step::place_existing(
+    auto out = step::place_existing(
         f.objects_state, space_state, {0, 0, 3, 0}, perm_state, geometry, f.catalog_state, {10, 11},
         {.6f, 0}, f.react_state,
         {{actor, ids.place_existing, target, {}}, std::move(args), {}, 20, 20, {}});
+    step::refresh_object_plots(world, objects_state, react_state, catalog_state, {20, 20}, {}, out);
+    return out;
   }
 
   bool visible(Handle h) { return space::bounds(world, identity(f.objects), h).has_value(); }
   void store(Handle h, PlayerId owner) {
-    auto closure = lifecycle::collect(parts, identity(f.objects), h);
-
-    require(space::custody(f.objects_state, h, bodies[owner - 1], space_state,
-                           std::span{closure}.subspan(1))
-                    .status == space::Status::Ok,
-            "fixture inventory custody");
+    step::NativeCompletion out;
+    const std::array custody{perm::CustodyChange{h, bodies[owner - 1], false}};
+    step::apply_custody(objects_state, space_state, {0, 0, 3, 0}, plots, custody, out);
+    step::refresh_object_plots(world, objects_state, react_state, catalog_state, {20, 20}, {}, out);
     players.rows[owner].inventory.push_back(h);
   }
 };
@@ -463,7 +463,7 @@ void cancelling_a_visible_held_trade_keeps_its_escrow_pose() {
           "trade cancellation must leave the completed detach applied without teleporting goods");
 }
 
-void moving_between_equal_priority_plots_rebinds_future_dependencies() {
+void placement_and_custody_use_current_priority_fallback() {
   Fixture f;
   const auto item = f.item(1, {-4, 0, 0}, false);
   f.store(item.root, 1);
@@ -483,22 +483,33 @@ void moving_between_equal_priority_plots_rebinds_future_dependencies() {
   const auto demand = term("novel.demand", react::Source::State, react::Combine::SharePriority);
   f.f.terms.rows[demand].priority = priority;
   f.f.terms.rows[demand].paired = supply;
-  f.f.plots.rows[1][priority] = Value(5.);
-  f.f.plots.rows[2][priority] = Value(5.);
-  set_plot(f.f.objects, f.f.b.slot(), 3);
+  f.f.world.values[priority] = Value(5.);
+  f.f.plots.rows[2][priority] = Value(3.);
   f.f.instance_settings.columns.resize(f.f.terms.rows.size());
   f.f.instance_settings.columns[priority].set(f.f.b.slot(), Value(4.));
-  react::GivesTo gives;
   react::DeferredEffects effects;
-  react::set_contribution(f.f.shared, gives, f.f.terms.rows[supply], f.f.c, f.f.a, 1, effects);
-  react::set_contribution(f.f.shared, gives, f.f.terms.rows[demand], item.root, f.f.a, 1, effects);
-  react::set_contribution(f.f.shared, gives, f.f.terms.rows[demand], f.f.b, f.f.a, 1, effects);
+  react::set_contribution(f.f.shared, f.f.gives_to, f.f.terms.rows[supply], f.f.c, f.f.a, 1,
+                          effects);
+  react::set_contribution(f.f.shared, f.f.gives_to, f.f.terms.rows[demand], item.root, f.f.a, 1,
+                          effects);
+  react::set_contribution(f.f.shared, f.f.gives_to, f.f.terms.rows[demand], f.f.b, f.f.a, 1,
+                          effects);
   react::reconcile_allocations(*f.f.projection, f.f.react_state, effects, 20, 20);
   require(react::get_share(f.f.allocations, f.f.a, demand, item.root) == 1,
           "initial priority allocation");
   f.plots.rows[2].preset = 1;
-  require(f.place(PlayerId{1}, {{"position", {4, 5, 0}}}, item.root).changed,
-          "authorized equal-priority placement");
+  require(f.place(PlayerId{1}, {{"position", {4, 5, 0}}}, item.root).changed &&
+              react::get_share(f.f.allocations, f.f.a, demand, item.root) == 0 &&
+              react::get_share(f.f.allocations, f.f.a, demand, f.f.b) == 1,
+          "placement immediately uses the destination plot's lower priority");
+  f.store(item.root, 1);
+  require(react::get_share(f.f.allocations, f.f.a, demand, item.root) == 1 &&
+              react::get_share(f.f.allocations, f.f.a, demand, f.f.b) == 0,
+          "inventory custody immediately restores the world priority fallback");
+  f.f.plots.rows[2][priority] = Value(5.);
+  require(f.place(PlayerId{1}, {{"position", {4, 5, 0}}}, item.root).changed &&
+              react::get_share(f.f.allocations, f.f.a, demand, item.root) == 1,
+          "equal-priority placement preserves the current allocation");
   f.f.plots.rows[2][priority] = Value(3.);
   effects = {};
   react::reconcile_priority(*f.f.projection, f.f.react_state,
@@ -1164,7 +1175,7 @@ int main() {
     trade_changes_cancel_and_complete_one_swap();
     gifts_bounce_and_keep_unrelated_seated_bodies_alive();
     cancelling_a_visible_held_trade_keeps_its_escrow_pose();
-    moving_between_equal_priority_plots_rebinds_future_dependencies();
+    placement_and_custody_use_current_priority_fallback();
     logical_inventory_root_reveals_its_actual_declared_part();
     script_inventory_placement_uses_its_own_grants();
     retirement_keeps_the_surviving_trade_side_before_free();

@@ -34,6 +34,10 @@ struct ContributionBinding {
   const Terms &terms;
   const RelationsRead &relations;
 };
+struct ShareBinding {
+  ValueRead values;
+  State &state;
+};
 int get_binding(lua_State *);
 int setting_binding(lua_State *);
 int set_binding(lua_State *);
@@ -750,7 +754,8 @@ void bind_values(Vm &vm, const ValueRead &values, State &react_state) {
       ContributionBinding{values.identity, shared, gives_to, values.terms, values.relations});
   register_binding(vm, "get", get_binding, read);
   register_binding(vm, "setting", setting_binding, read);
-  register_binding(vm, "get_share", share_binding, read);
+  register_binding(vm, "get_share", share_binding,
+                   std::make_shared<ShareBinding>(ShareBinding{values, react_state}));
   register_binding(vm, "set", set_binding, state);
   register_binding(vm, "rate", rate_binding, state);
   register_binding(vm, "related", related_binding, relations);
@@ -1473,7 +1478,8 @@ int contribute_binding(lua_State *L) {
   return 0;
 }
 int share_binding(lua_State *L) {
-  const auto &values = *static_cast<const ValueRead *>(binding_data(L));
+  const auto &binding = *static_cast<const ShareBinding *>(binding_data(L));
+  const auto &values = binding.values;
   auto &inv = invocation(L);
   if (!values.identity.valid(inv.self.object))
     luaL_error(L, "get_share needs a live object");
@@ -1482,7 +1488,8 @@ int share_binding(lua_State *L) {
   const auto &term = values.terms.rows[id];
   if (term.combine != Combine::ShareEqual && term.combine != Combine::SharePriority)
     luaL_error(L, "get_share needs a shared-demand term");
-  lua_pushnumber(L, live_share(values, subject, id, inv.self.object, inv.step, inv.hz));
+  lua_pushnumber(L, read_share(values, binding.state, *inv.effects, {subject, id}, inv.self.object,
+                               inv.step, inv.hz));
   return 1;
 }
 } // namespace

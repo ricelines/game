@@ -62,12 +62,6 @@
       "world_rule": false
     },
     {
-      "key": "power_buyer",
-      "file": "scripts/power_buyer.luau",
-      "author": 1,
-      "world_rule": false
-    },
-    {
       "key": "stakes",
       "file": "scripts/stakes.luau",
       "author": 1,
@@ -321,18 +315,6 @@
         "description": "A finite buffer charged by actually delivered public power."
       },
       "script": "socket",
-      "author": 1,
-      "group": 1
-    },
-    {
-      "key": "power_buyer",
-      "file": "models/equipment.py",
-      "material": "base.steel",
-      "text": {
-        "name": "Public power buyer",
-        "description": "Pays suppliers for power delivered to the public circuit under a capped root allowance."
-      },
-      "script": "power_buyer",
       "author": 1,
       "group": 1
     },
@@ -1003,7 +985,6 @@
     "base.hand_efficiency": 0.25,
     "base.buffer_capacity": 1000000,
     "base.buffer_rate": 800,
-    "base.purchase_per_joule": 0.0001,
     "base.settlement_seconds": 10,
     "base.day_seconds": 600,
     "base.impact_resistance": 20000,
@@ -1162,43 +1143,6 @@
       "settings": {
         "base.rated_power": 40
       },
-      "preset": [
-        "use",
-        "copy"
-      ],
-      "seed": true,
-      "maker": 1,
-      "group": 1,
-      "group_rights": [
-        "use",
-        "take",
-        "move",
-        "edit",
-        "copy",
-        "transfer",
-        "destroy"
-      ]
-    },
-    {
-      "key": "public.power_buyer",
-      "model": "power_buyer",
-      "owner": 1,
-      "at": [
-        14,
-        49,
-        0
-      ],
-      "rotation": [
-        0,
-        0,
-        0.0,
-        1.0
-      ],
-      "flags": [
-        "static"
-      ],
-      "state": {},
-      "settings": {},
       "preset": [
         "use",
         "copy"
@@ -2854,16 +2798,6 @@
       "to": "public.circuit"
     },
     {
-      "term": "base.sells_to",
-      "from": "public.collector",
-      "to": "public.power_buyer"
-    },
-    {
-      "term": "base.procures",
-      "from": "public.power_buyer",
-      "to": "public.circuit"
-    },
-    {
       "term": "base.powered_by",
       "from": "cafe.breaker",
       "to": "public.circuit",
@@ -3152,22 +3086,6 @@
       "period_s": 0,
       "expires_s": 31536000,
       "stakes": false
-    },
-    {
-      "issuer": 0,
-      "holder": {
-        "script": "power_buyer",
-        "on": "public.power_buyer"
-      },
-      "scope": {
-        "account": "p:0"
-      },
-      "rights": [
-        "spend"
-      ],
-      "cap": 100000,
-      "period_s": 86400,
-      "expires_s": 31536000
     },
     {
       "issuer": 0,
@@ -3760,11 +3678,6 @@
     },
     {
       "target": "public.lamp",
-      "event": "base.start",
-      "payload": null
-    },
-    {
-      "target": "public.power_buyer",
       "event": "base.start",
       "payload": null
     },

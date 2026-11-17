@@ -1,6 +1,7 @@
 #include "catalog/catalog.hpp"
 #include "react/react.hpp"
 #include "runtime_fixture.hpp"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -239,37 +240,34 @@ void subscription_removal_and_relations() {
 }
 void allocation_rows_track_current_nonzero_shares_only() {
   Fixture f;
-  amber::react::State react_state{{4096, 50, 5, 64}};
-  AllocationRows &allocations = react_state.allocations;
-  MeterRows &meters = react_state.meters;
+  AllocationRows allocations;
   const Shared supply{2, {{f.a, 2}}};
   const Shared empty;
   PriorityValues priority;
+  Handle previous;
   for (unsigned i = 0; i < 256; ++i) {
     ObjectInit init;
     init.model = 1;
     const auto consumer = create(f.objects, init);
     const Shared demand{1, {{consumer, 1}}};
-    allocate(supply, demand, Combine::ShareEqual, priority, f.b, 1, 2, react_state, i * 2, 20);
-    require(allocations.values.size() == 2,
+    allocate(supply, demand, Combine::ShareEqual, priority, {f.b, 2}, allocations);
+    require(allocations.values.size() == 1 && allocations.values.at({f.b, 2}).size() == 1,
             "current allocation rows grew with withdrawn contributors");
+    near(get_share(allocations, f.b, 2, consumer), 1, "current demander receives its share");
+    near(get_share(allocations, f.b, 2, previous), 0, "withdrawn demander has no live share");
+    previous = consumer;
   }
-  allocate(empty, empty, Combine::ShareEqual, priority, f.b, 1, 2, react_state, 512, 20);
-  require(allocations.values.empty() && !meters.empty(),
-          "zero shares retained current-state rows or discarded earned integrals");
-  retire_allocations(allocations, meters, f.b);
-  require(meters.empty(), "retiring a fully withdrawn subject retained historical meters");
+  allocate(empty, empty, Combine::ShareEqual, priority, {f.b, 2}, allocations);
+  require(allocations.values.empty(), "zero shares retained current-state rows");
   const Shared demand{1, {{f.c, 1}}};
-  allocate(empty, demand, Combine::ShareEqual, priority, f.b, 1, 2, react_state, 513, 20);
-  require(allocations.values.empty() && meters.empty(),
-          "never-served zero demand allocated redundant rows and meters");
+  require(!allocate(empty, demand, Combine::ShareEqual, priority, {f.b, 2}, allocations) &&
+              allocations.values.empty(),
+          "never-served zero demand allocated redundant rows");
 }
-
-void contribution_and_metering() {
+void contribution_and_allocation() {
   Fixture f;
   DeferredEffects effects;
-  amber::react::State react_state{{4096, 50, 5, 64}};
-  GivesTo &reverse = react_state.gives_to;
+  GivesTo reverse;
   auto &t = f.terms.rows[1];
   t.combine = Combine::Sum;
   set_contribution(f.shared, reverse, t, f.b, f.a, 5, effects);
@@ -285,23 +283,44 @@ void contribution_and_metering() {
   f.relations.columns[2] = &relation;
   t.along = 2;
   near(read_shared(f.shared, f.relations, f.b, t).value.numeric(), 7, "along relation fallback");
-  AllocationRows &allocations = react_state.allocations;
-  MeterRows &meters = react_state.meters;
+  AllocationRows allocations;
   PriorityValues priorities;
   Shared supply{100, {{f.a, 100}}}, demand{30, {{f.b, 10}, {f.c, 20}}};
-  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, react_state, 0, 20);
+  allocate(supply, demand, Combine::ShareEqual, priorities, {f.a, 2}, allocations);
   near(get_share(allocations, f.a, 2, f.b), 10, "satisfied small demand");
   near(get_share(allocations, f.a, 2, f.c), 20, "satisfied larger demand");
-  near(metered(meters.at({f.a, f.a, 1, true}), 20, 20), 30,
-       "supplier meters actual served rather than offered");
   demand = {0, {}};
-  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, react_state, 20, 20);
-  near(metered(meters.at({f.a, f.a, 1, true}), 40, 20), 30, "unused supply not metered");
+  allocate(supply, demand, Combine::ShareEqual, priorities, {f.a, 2}, allocations);
+  near(get_share(allocations, f.a, 2, f.b), 0, "withdrawal clears the previous demand");
   supply = {12, {{f.a, 12}}};
   demand = {25, {{f.b, 5}, {f.c, 20}}};
-  allocate(supply, demand, Combine::ShareEqual, priorities, f.a, 1, 2, react_state, 40, 20);
+  allocate(supply, demand, Combine::ShareEqual, priorities, {f.a, 2}, allocations);
   near(get_share(allocations, f.a, 2, f.b), 5, "waterfill caps small demand");
   near(get_share(allocations, f.a, 2, f.c), 7, "waterfill redistributes surplus");
+}
+void equal_sharing_caps_demands_and_preserves_other_subjects() {
+  Fixture f;
+  AllocationRows allocations;
+  PriorityValues priority;
+  ObjectInit init;
+  init.model = 1;
+  const auto d = create(f.objects, init), e = create(f.objects, init);
+  Shared demand{16.5, {{f.a, .5}, {f.b, 1}, {f.c, 2}, {d, 3}, {e, 10}}};
+  const Shared supply{9, {{f.a, 9}}};
+  allocate(supply, demand, Combine::ShareEqual, priority, {f.a, 2}, allocations);
+  for (const auto [who, expected] :
+       {std::pair{f.a, .5}, {f.b, 1.0}, {f.c, 2.0}, {d, 2.75}, {e, 2.75}})
+    near(get_share(allocations, f.a, 2, who), expected,
+         "each capped demand leaves the common remaining share");
+  std::reverse(demand.parts.begin(), demand.parts.end());
+  require(!allocate(supply, demand, Combine::ShareEqual, priority, {f.a, 2}, allocations),
+          "reordering equal-share demanders does not change their allocations");
+  allocate(supply, demand, Combine::ShareEqual, priority, {f.b, 2}, allocations);
+  allocate(supply, demand, Combine::ShareEqual, priority, {f.a, 3}, allocations);
+  allocate(Shared{}, demand, Combine::ShareEqual, priority, {f.a, 2}, allocations);
+  near(get_share(allocations, f.a, 2, e), 0, "withdrawn subject supply clears its shares");
+  near(get_share(allocations, f.b, 2, e), 2.75, "other subject keeps its allocation");
+  near(get_share(allocations, f.a, 3, e), 2.75, "other term keeps its allocation");
 }
 void dispatch_order() {
   Fixture f;
@@ -949,7 +968,8 @@ int main() {
   process_thresholds_and_transfer();
   subscription_removal_and_relations();
   allocation_rows_track_current_nonzero_shares_only();
-  contribution_and_metering();
+  contribution_and_allocation();
+  equal_sharing_caps_demands_and_preserves_other_subjects();
   dispatch_order();
   action_handlers_receive_the_actual_caller();
   luau_state_and_limits();

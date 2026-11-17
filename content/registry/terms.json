@@ -373,38 +373,6 @@
     "description": "feeds"
   },
   {
-    "name": "base.sells_to",
-    "kind": "relation",
-    "source": "state",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "sells to"
-  },
-  {
-    "name": "base.procures",
-    "kind": "relation",
-    "source": "state",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "procures"
-  },
-  {
     "name": "base.charging",
     "kind": "relation",
     "source": "state",
@@ -1029,22 +997,6 @@
     "description": "buffer rate"
   },
   {
-    "name": "base.purchase_per_joule",
-    "kind": "quantity",
-    "source": "setting",
-    "dimensions": [
-      -2,
-      -1,
-      2,
-      0,
-      0,
-      0,
-      0,
-      1
-    ],
-    "description": "purchase per joule"
-  },
-  {
     "name": "base.settlement_seconds",
     "kind": "quantity",
     "source": "setting",
@@ -1331,22 +1283,6 @@
       0
     ],
     "description": "door tick"
-  },
-  {
-    "name": "base.settle",
-    "kind": "event",
-    "source": "state",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "settle"
   },
   {
     "name": "aq.swim",

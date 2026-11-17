@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
             "start file loads root grants without storing a root balance");
     const auto script_grant =
         *std::find_if(plan.at("grants").begin(), plan.at("grants").end(), [](const auto &row) {
-          return row.at("holder").is_object() && row.at("holder").at("script") == "power_buyer";
+          return row.at("holder").is_object() && row.at("holder").at("on") == "resident.mira";
         });
     auto wrong_owner = plan;
     wrong_owner["grants"] = Json::array({script_grant});
@@ -198,7 +198,7 @@ int main(int argc, char **argv) {
         "plan cannot forge current goods control");
     auto wrong_installation = plan;
     wrong_installation["grants"] = Json::array({script_grant});
-    wrong_installation["grants"][0]["holder"]["script"] = "body";
+    wrong_installation["grants"][0]["holder"]["script"] = "lamp";
     rejects(
         [&] {
           install_grants(wrong_installation, symbols, objects_state, rejected_permissions,

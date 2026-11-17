@@ -276,28 +276,9 @@ struct WatchDelivery {
   Handle source;
 };
 
-struct Meter {
-  double amount0 = 0;
-  Step step0 = 0;
-  double rate = 0;
-};
-
-struct AllocationKey {
-  Handle subject, contributor;
-  TermId term = 0;
-  bool supplier = false;
-  bool operator==(const AllocationKey &) const = default;
-};
-
-struct AllocationKeyHash {
-  std::size_t operator()(const AllocationKey &) const;
-};
-
 struct AllocationRows {
-  std::unordered_map<AllocationKey, double, AllocationKeyHash> values;
+  std::unordered_map<FactKey, std::unordered_map<std::uint64_t, double>, FactKeyHash> values;
 };
-
-using MeterRows = std::unordered_map<AllocationKey, Meter, AllocationKeyHash>;
 
 struct PriorityValues {
   std::unordered_map<std::uint64_t, double> values;
@@ -631,19 +612,15 @@ std::vector<react::Timer> threshold_timers(const Subscriptions &, const Processe
 
 void validate_shared_terms(const Terms &);
 std::vector<FactKey> allocation_inputs(const Terms &, FactKey);
-std::vector<FactKey> priority_inputs(const ValueRead &, SettingKey);
+std::vector<FactKey> priority_inputs(const ValueRead &, const GivesTo &, SettingKey);
 bool reconcile_allocation(const ValueRead &, amber::react::State &react_state, FactKey demand, Step,
                           double hz);
 
-double metered(const Meter &, Step now, double hz);
-std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, Combine,
-                                    const PriorityValues &, Handle subject, TermId supply_term,
-                                    TermId demand_term, amber::react::State &react_state, Step now,
-                                    double hz);
+bool allocate(const Shared &supply, const Shared &demand, Combine, const PriorityValues &, FactKey,
+              AllocationRows &);
 double get_share(const AllocationRows &, Handle subject, TermId demand_term, Handle contributor);
-double live_share(const ValueRead &, Handle subject, TermId demand_term, Handle contributor,
+double read_share(const ValueRead &, State &, DeferredEffects &, FactKey pair, Handle contributor,
                   Step now, double hz);
-void retire_allocations(AllocationRows &, MeterRows &, Handle);
 
 bool set_state(Properties &, Processes &, const Term &, Handle, Value, Step, double hz,
                DeferredEffects &);
@@ -796,9 +773,8 @@ void read_properties(snap::Input &, Properties &, Processes &, std::size_t slots
 void write_relations(snap::Output &, const AuthoredRelations &, const SnapshotSelection & = {});
 void read_relations(snap::Input &, AuthoredRelations &, std::size_t slots);
 void write_shared(snap::Output &, const SharedColumns &, const GivesTo &, const AllocationRows &,
-                  const MeterRows &, const SnapshotSelection & = {});
-void read_shared(snap::Input &, SharedColumns &, GivesTo &, AllocationRows &, MeterRows &,
-                 std::size_t slots);
+                  const SnapshotSelection & = {});
+void read_shared(snap::Input &, SharedColumns &, GivesTo &, AllocationRows &, std::size_t slots);
 void write_script_states(snap::Output &, const ScriptStates &, const Subscriptions &,
                          const SnapshotSelection & = {});
 void read_script_states(snap::Input &, ScriptStates &, Subscriptions &);
@@ -835,7 +811,6 @@ struct State {
   SharedColumns shared;
   GivesTo gives_to;
   AllocationRows allocations;
-  MeterRows meters;
   AuthoredRelations authored_relations;
   RelationsRead relations;
   RuntimeMeasurements runtime_measurements;

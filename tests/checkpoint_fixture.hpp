@@ -29,7 +29,6 @@ struct Fixture {
   catalog::AuthoredTexts &authored_text = catalog_state.authored_text;
   react::GivesTo &gives = react_state.gives_to;
   react::AllocationRows &allocations = react_state.allocations;
-  react::MeterRows &meters = react_state.meters;
   perm::Players &players = perm_state.players;
   perm::Ledger &ledger = perm_state.ledger;
   perm::Plots &plots = perm_state.plots;
@@ -109,8 +108,7 @@ struct Fixture {
     f.shared[4].set(f.a.slot(), Shared{9, {{f.b, 4}, {f.c, 5}}});
     gives.set(f.b.slot(), std::vector<SubjectTerm>{{f.a, 4}});
     gives.set(f.c.slot(), std::vector<SubjectTerm>{{f.a, 4}});
-    allocations.values[{f.a, f.b, 4, 0}] = 4;
-    meters[{f.a, f.b, 4, 0}] = {1, 0, 2};
+    allocations.values[{f.a, 4}][f.b.bits] = 4;
     f.instance_settings.columns.resize(2);
     f.instance_settings.columns[1].set(f.a.slot(), Value(2.0));
     f.model_settings.rows[1][1] = Value(3.0);

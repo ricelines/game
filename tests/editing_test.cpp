@@ -1,6 +1,7 @@
 #include "catalog/catalog.hpp"
 #include "runtime_fixture.hpp"
 #include "space_fixture.hpp"
+#include "step/action_private.hpp"
 #include "step/step.hpp"
 
 #include <csignal>
@@ -24,9 +25,70 @@ bool dirty(const step::NativeCompletion &out, Handle object, TermId term) {
     return work && work->source == FactKey{object, term};
   });
 }
+void priority_setting_actions_update_shares_immediately() {
+  test_runtime::Fixture f;
+  f.terms.rows.resize(13);
+  for (TermId id : {10u, 11u, 12u}) {
+    auto &term = f.terms.rows[id];
+    term.id = id;
+    term.name = id == 10 ? "novel.available" : id == 11 ? "novel.wanted" : "novel.priority";
+    f.terms.by_name[term.name] = id;
+  }
+  f.terms.rows[10].combine = react::Combine::Sum;
+  f.terms.rows[11].combine = react::Combine::SharePriority;
+  f.terms.rows[11].paired = 10;
+  f.terms.rows[11].priority = 12;
+  f.terms.rows[12].source = react::Source::Setting;
+  react::validate_shared_terms(f.terms);
+  f.models.rows.resize(3);
+  for (ModelId id : {1u, 2u}) {
+    f.models.rows[id].id = id;
+    f.models.rows[id].author = 1;
+  }
+  f.objects.model[f.b.slot()] = 2;
+  const perm::Players players;
+  const std::array<std::string, 1> roles{"architect"};
+  const auto edit = [&](react::ValueAction operation, Handle target, Json arguments) {
+    return step::native_values(players, f.models, f.values(), f.react_state, {}, roles, operation,
+                               call(1, target, std::move(arguments)));
+  };
+  require(edit(react::ValueAction::ModelSetting, {},
+               {{"model", "m:1"}, {"values", {{"novel.priority", 1}}}})
+              .changed,
+          "initial model priority is an ordinary native setting action");
+  react::set_contribution(f.shared, f.gives_to, f.terms.rows[10], f.c, f.c, 4, f.effects);
+  for (auto demander : {f.a, f.b})
+    react::set_contribution(f.shared, f.gives_to, f.terms.rows[11], demander, f.c, 4, f.effects);
+  react::reconcile_allocations(f.values(), f.react_state, f.effects, 10, 20);
+  const auto share = [&](Handle object) {
+    return react::get_share(f.allocations, f.c, 11, object);
+  };
+  require(share(f.a) == 4 && share(f.b) == 0, "the initial model priority receives the supply");
+  const auto override =
+      edit(react::ValueAction::SetSetting, f.b, {{"values", {{"novel.priority", 3}}}});
+  require(override.changed && share(f.b) == 4 && share(f.a) == 0 && dirty(override, f.c, 11),
+          "instance priority reallocates before the action returns and notifies demand watchers");
+  const auto remove =
+      edit(react::ValueAction::SetSetting, f.b, {{"values", {{"novel.priority", nullptr}}}});
+  require(remove.changed && share(f.a) == 4 && share(f.b) == 0,
+          "removing an instance priority immediately restores the inherited allocation");
+  const auto model = edit(react::ValueAction::ModelSetting, {},
+                          {{"model", "m:1"}, {"values", {{"novel.priority", -1}}}});
+  require(model.changed && share(f.b) == 4 && share(f.a) == 0,
+          "model priority edits immediately change their contributors' shares");
+  const auto world =
+      edit(react::ValueAction::WorldSetting, {}, {{"values", {{"novel.priority", -2}}}});
+  require(world.changed && share(f.a) == 4 && share(f.b) == 0 &&
+              react::read(f.values(), f.a, 12, 10, 20).value.numeric() == -1,
+          "world priority edits reallocate inheriting contributors and preserve model overrides");
+  require(
+      !edit(react::ValueAction::WorldSetting, {}, {{"values", {{"novel.priority", -2}}}}).changed,
+      "an unchanged world priority has no action effect");
+}
 } // namespace
 int main() {
   try {
+    priority_setting_actions_update_shares_immediately();
     test_runtime::Fixture f;
     auto add = [&](std::string name, react::Source source,
                    react::Kind kind = react::Kind::Quantity) {
@@ -175,21 +237,21 @@ int main() {
     (void)default_script(sid);
     const auto setting =
         ed::model_setting(call(1, {}, {{"model", "m:1"}, {"values", {{"novel.gain", 2}}}}),
-                          f.model_settings, values, f.models, players);
+                          f.react_state, values, f.models, players);
     require(setting.changed && dirty(setting, f.a, gain) && dirty(setting, f.b, gain) &&
                 !dirty(setting, f.c, gain),
             "model setting did not update the effective settings of its actual instances");
     f.run(f.changed({f.a, gain}, 10), 10);
     require(react::read(values, f.a, 2, 10, 20).value.numeric() == 2,
             "direct setting did not drive the actual installed Luau watch");
-    const auto override = ed::set_setting(call(1, f.a, {{"values", {{"novel.gain", 3}}}}),
-                                          f.instance_settings, values);
+    const auto override =
+        ed::set_setting(call(1, f.a, {{"values", {{"novel.gain", 3}}}}), f.react_state, values);
     require(override.changed && dirty(override, f.a, gain), "instance setting did not dirty fact");
     f.run(f.changed({f.a, gain}, 10), 10);
     require(react::read(values, f.a, 2, 10, 20).value.numeric() == 3,
             "instance setting did not reach the installed Luau watch");
     const auto clear = ed::set_setting(call(1, f.a, {{"values", {{"novel.gain", nullptr}}}}),
-                                       f.instance_settings, values);
+                                       f.react_state, values);
     require(clear.changed && react::read(values, f.a, gain, 10, 20).value.numeric() == 2,
             "removing override failed to expose model default");
     f.run(f.changed({f.a, gain}, 10), 10);
@@ -197,29 +259,29 @@ int main() {
             "removing an override did not notify the watch of its inherited value");
     const std::array<std::string, 1> architect{"architect"};
     auto world_change = call(1, {}, {{"values", {{"novel.gain", 4}}}});
-    require(!ed::world_setting(world_change, f.world, values, {}).reply.at("ok") &&
+    require(!ed::world_setting(world_change, f.react_state, values, {}).reply.at("ok") &&
                 !f.world.values.contains(gain),
             "ordinary player changed world settings");
     world_change.request.caller = ScriptHolder{script, f.a};
-    require(!ed::world_setting(world_change, f.world, values, architect).reply.at("ok") &&
+    require(!ed::world_setting(world_change, f.react_state, values, architect).reply.at("ok") &&
                 !f.world.values.contains(gain),
             "script inherited its author's architect authority");
     world_change.request.caller = PlayerId{1};
-    const auto world_default = ed::world_setting(world_change, f.world, values, architect);
+    const auto world_default = ed::world_setting(world_change, f.react_state, values, architect);
     require(world_default.changed && dirty(world_default, f.c, gain) &&
                 !dirty(world_default, f.a, gain) && !dirty(world_default, f.b, gain) &&
                 react::read(values, f.c, gain, 10, 20).value.numeric() == 4 &&
                 react::read(values, f.a, gain, 10, 20).value.numeric() == 2,
             "world setting did not change inheriting objects while preserving overrides");
-    require(!ed::world_setting(world_change, f.world, values, architect).changed,
+    require(!ed::world_setting(world_change, f.react_state, values, architect).changed,
             "repeating the same world default reported a change");
     const auto invalid_world =
         ed::world_setting(call(1, {}, {{"values", {{"novel.gain", 5}, {"novel.result", 6}}}}),
-                          f.world, values, architect);
+                          f.react_state, values, architect);
     require(!invalid_world.reply.at("ok") && f.world.values.at(gain).numeric() == 4,
             "invalid world settings partly applied or wrote a state quantity");
     const auto removed_world = ed::world_setting(
-        call(1, {}, {{"values", {{"novel.gain", nullptr}}}}), f.world, values, architect);
+        call(1, {}, {{"values", {{"novel.gain", nullptr}}}}), f.react_state, values, architect);
     require(removed_world.changed && !react::read(values, f.c, gain, 10, 20).present &&
                 react::read(values, f.a, gain, 10, 20).value.numeric() == 2,
             "removing a world default damaged a model override");

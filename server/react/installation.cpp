@@ -85,8 +85,6 @@ void retire_reactions(const catalog::Models &models, const ValueRead &values,
   auto &shared = react_state.shared;
   auto &gives_to = react_state.gives_to;
   auto &relations = react_state.authored_relations;
-  auto &allocations = react_state.allocations;
-  auto &meters = react_state.meters;
 
   for (auto h : objects) {
     const auto consumers = watch_consumers(subscriptions, h);
@@ -117,7 +115,6 @@ void retire_reactions(const catalog::Models &models, const ValueRead &values,
   for (auto h : objects) {
     auto installed = react::installed_scripts(models, instances, values.identity, h);
     react::retire_subscriptions(subscriptions, h);
-    react::retire_allocations(allocations, meters, h);
     react::retire_object(properties, processes, states, random, h, installed);
     std::erase_if(states, [&](const auto &row) { return row.first.object == h; });
     for (auto &column : settings.columns)

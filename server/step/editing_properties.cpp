@@ -24,9 +24,9 @@ void dirty(step::NativeCompletion &out, Handle object, TermId term) {
   out.effects.ordered.emplace_back(react::WatchWork{{object, term}, {}});
 }
 } // namespace
-step::NativeCompletion set_setting(const step::NativeCall &call,
-                                   react::InstanceSettings &instance_settings,
+step::NativeCompletion set_setting(const step::NativeCall &call, react::State &react_state,
                                    const react::ValueRead &values) {
+  auto &instance_settings = react_state.instance_settings;
   try {
     const auto changes = settings(values.terms, call.arguments.at("values"));
     const auto object = call.request.target;
@@ -45,8 +45,12 @@ step::NativeCompletion set_setting(const step::NativeCall &call,
         instance_settings.columns[term].set(object.slot(), *value);
       } else
         instance_settings.columns[term].erase(object.slot());
-      if (!(before == react::read(values, object, term, call.step, call.hz)))
+      if (!(before == react::read(values, object, term, call.step, call.hz))) {
         dirty(out, object, term);
+        react::reconcile_priority(values, react_state,
+                                  {react::SettingKey::Scope::Instance, object.bits, term},
+                                  out.effects, call.step, call.hz);
+      }
     }
     out.effects.changed = out.changed;
     out.result = out.changed ? record::Result::Applied : record::Result::NoEffect;
@@ -56,10 +60,10 @@ step::NativeCompletion set_setting(const step::NativeCall &call,
     return detail::failed(error);
   }
 }
-step::NativeCompletion model_setting(const step::NativeCall &call,
-                                     react::ModelSettings &model_settings,
+step::NativeCompletion model_setting(const step::NativeCall &call, react::State &react_state,
                                      const react::ValueRead &values, const catalog::Models &models,
                                      const perm::Players &players) {
+  auto &model_settings = react_state.model_settings;
   try {
     const auto model = detail::model(models, players, call);
     const auto changes = settings(values.terms, call.arguments.at("values"));
@@ -85,6 +89,8 @@ step::NativeCompletion model_setting(const step::NativeCall &call,
       for (std::size_t index = 0; index < instances.size(); ++index)
         if (!(before[index] == react::read(values, instances[index], term, call.step, call.hz)))
           dirty(out, instances[index], term);
+      react::reconcile_priority(values, react_state, {react::SettingKey::Scope::Model, model, term},
+                                out.effects, call.step, call.hz);
     }
     out.effects.changed = out.changed;
     out.result = out.changed ? record::Result::Applied : record::Result::NoEffect;
@@ -94,9 +100,10 @@ step::NativeCompletion model_setting(const step::NativeCall &call,
     return detail::failed(error);
   }
 }
-step::NativeCompletion world_setting(const step::NativeCall &call, react::WorldSettings &world,
+step::NativeCompletion world_setting(const step::NativeCall &call, react::State &react_state,
                                      const react::ValueRead &values,
                                      std::span<const std::string> roles) {
+  auto &world = react_state.world_settings;
   try {
     detail::player(call);
     if (!detail::role(roles, "architect"))
@@ -122,6 +129,8 @@ step::NativeCompletion world_setting(const step::NativeCall &call, react::WorldS
       for (const auto &[object, answer] : before)
         if (!(answer == react::read(values, object, term, call.step, call.hz)))
           dirty(out, object, term);
+      react::reconcile_priority(values, react_state, {react::SettingKey::Scope::World, 0, term},
+                                out.effects, call.step, call.hz);
       out.effects.ordered.emplace_back(react::EventWork{{}, {}, term, value.value_or(Value{}), {}});
       out.changed = true;
     }

@@ -35,16 +35,16 @@ void reaction_roundtrip_and_capture() {
   GivesTo gives;
   gives.set(b.slot(), std::vector<SubjectTerm>{{a, 2}});
   AllocationRows allocations;
-  MeterRows meters;
-  allocations.values[{a, b, 2, false}] = 10;
-  meters[{a, b, 2, false}] = {4, 20, 10};
+  allocations.values[{a, 2}][b.bits] = 10;
+  allocations.values[{outside, 2}][outside.bits] = 20;
+  allocations.values[{outside, 2}][b.bits] = 3;
   const std::array<Handle, 2> selected{a, b};
   SnapshotSelection selection(selected);
   snap::Buffer bytes;
   snap::Output out{bytes};
   write_properties(out, props, processes, selection);
   write_relations(out, relations, selection);
-  write_shared(out, shared, gives, allocations, meters, selection);
+  write_shared(out, shared, gives, allocations, selection);
   write_script_states(out, states, subscriptions, selection);
   write_random(out, random, selection);
   out.adapter().flush();
@@ -59,11 +59,10 @@ void reaction_roundtrip_and_capture() {
   SharedColumns loaded_shared;
   GivesTo loaded_gives;
   AllocationRows loaded_allocations;
-  MeterRows loaded_meters;
   snap::Input in{bytes.data(), bytes.size()};
   read_properties(in, loaded_props, loaded_processes, 4);
   read_relations(in, loaded_relations, 4);
-  read_shared(in, loaded_shared, loaded_gives, loaded_allocations, loaded_meters, 4);
+  read_shared(in, loaded_shared, loaded_gives, loaded_allocations, 4);
   read_script_states(in, loaded_states, loaded_subscriptions);
   read_random(in, loaded_random);
   snap::check_complete(in);
@@ -91,8 +90,10 @@ void reaction_roundtrip_and_capture() {
           "consumer lookup finds the restored primary row");
   require(loaded_relations.at(2).in.get(b.slot())->front() == a, "bidirectional relation restored");
   require(loaded_gives.get(b.slot())->front().subject == a, "contribution reverse restored");
-  require(metered(loaded_meters.at({a, b, 2, false}), 40, 20) == 14,
-          "allocation integral restored without double metering");
+  require(get_share(loaded_allocations, a, 2, b) == 10 &&
+              get_share(loaded_allocations, outside, 2, b) == 3 &&
+              get_share(loaded_allocations, outside, 2, outside) == 0,
+          "capture restores allocations touching selected objects and omits unrelated shares");
   snap::Buffer empty;
   snap::Output empty_out{empty};
   SnapshotSelection none(std::span<const Handle>{});

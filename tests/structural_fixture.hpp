@@ -35,7 +35,6 @@ struct Fixture {
   perm::Ledger &ledger = perm_state.ledger;
   perm::Offers &offers = perm_state.offers;
   perm::Trades &trades = perm_state.trades;
-  react::MeterRows &meters = react_state.meters;
   react::NativeActions &declarations = react_state.native_declarations;
   ScriptId script = 0;
   space::GeometryId solid = 0;

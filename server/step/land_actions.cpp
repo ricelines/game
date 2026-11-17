@@ -24,7 +24,7 @@ void refresh(ObjectState &objects, const perm::Plots &plots, PlotId first, PlotI
         found != objects.objects.on_plot.end())
       for (auto slot : found->second)
         out.changed_objects.push_back(ids.at(slot));
-  perm::update_plots(objects.objects, plots, out.changed_objects, true);
+  out.crossed_plots = perm::update_plots(objects.objects, plots, out.changed_objects, true);
 }
 } // namespace
 NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,

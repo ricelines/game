@@ -25,7 +25,6 @@ struct Fixture {
   react::Materials &materials = react_state.materials;
   react::Properties &properties = react_state.properties;
   react::Processes &processes = react_state.processes;
-  react::MeterRows &meters = react_state.meters;
   Relation &parts = objects_state.declared_parts;
   SparseColumn<std::vector<ScriptId>> &instances = react_state.installations;
   perm::Plots &plots = perm_state.plots;
@@ -104,7 +103,6 @@ struct Fixture {
     processes.resize(6);
     properties[2].set(root.slot(), Value(10.0));
     state.insert(std::int64_t{3}, 5.0);
-    meters[{root, part, 2, false}] = {2, 0, 3};
     players.rows.resize(4);
     plots.rows.push_back({1, 2, 0, 7, {-5, -4, 30, 40}, {}});
     perm::rebuild_plot_owners(plots);
@@ -163,7 +161,6 @@ void effective_metadata_and_mass() {
     assert(live.mass_kg==100 and live.bounds.min.X==9 and live.bounds.max.X==22)
     assert(live.volume_m3==7 and live.capacity_m3==0.25)
     assert(not pcall(function()live.volume_m3=99 end))
-    assert(self:meter(self.handle,'custom.2',from)==5)
     assert(#self:plots()==1 and self:plots()[1]==1)
     assert(#self:plots('p:2')==1 and self:plots('p:2')[1]==1)
     assert(#self:plots('p:0')==0 and #self:plots('p:3')==0)

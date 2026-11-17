@@ -38,8 +38,24 @@ std::vector<FactKey> allocation_inputs(const Terms &terms, FactKey source) {
       pairs.push_back({source.subject, term.id});
   return pairs;
 }
-std::vector<FactKey> priority_inputs(const ValueRead &values, SettingKey key) {
+std::vector<FactKey> priority_inputs(const ValueRead &values, const GivesTo &gives,
+                                     SettingKey key) {
   std::vector<FactKey> pairs;
+  if (values.terms.rows[key.term].source != Source::Setting)
+    return pairs;
+  if (key.scope == SettingKey::Scope::Instance) {
+    const Handle contributor{key.subject};
+    if (!values.identity.valid(contributor))
+      return pairs;
+    if (const auto *contributions = gives.get(contributor.slot()))
+      for (const auto &source : *contributions) {
+        const auto &term = values.terms.rows[source.term];
+        if (term.combine == Combine::SharePriority && term.priority == key.term &&
+            values.identity.valid(source.subject))
+          pairs.push_back({source.subject, source.term});
+      }
+    return pairs;
+  }
   for (const auto &term : values.terms.rows) {
     if (term.combine != Combine::SharePriority || term.priority != key.term ||
         term.id >= values.shared.size())
@@ -51,17 +67,11 @@ std::vector<FactKey> priority_inputs(const ValueRead &values, SettingKey key) {
           std::any_of(demand.parts.begin(), demand.parts.end(), [&](const Contribution &part) {
             if (!values.identity.valid(part.from))
               return false;
-            switch (key.scope) {
-            case SettingKey::Scope::Instance:
-              return part.from.bits == key.subject;
-            case SettingKey::Scope::Model:
-              return values.identity.model[part.from.slot()] == key.subject;
-            case SettingKey::Scope::Plot:
-              return values.plots[part.from.slot()] == key.subject;
-            case SettingKey::Scope::World:
-              return true;
-            }
-            return false;
+            return key.scope == SettingKey::Scope::Model
+                       ? values.identity.model[part.from.slot()] == key.subject
+                   : key.scope == SettingKey::Scope::Plot
+                       ? values.plots[part.from.slot()] == key.subject
+                       : true;
           });
       if (affected) {
         const auto slot = column.slot_of[row];
@@ -93,9 +103,21 @@ bool reconcile_allocation(const ValueRead &values, amber::react::State &react_st
       if (value.present && value.value.is_numeric())
         priority.values.emplace(part.from.bits, value.value.numeric());
     }
-  const auto changed = allocate(row(term.paired), demand, term.combine, priority, pair.subject,
-                                term.paired, term.id, react_state, now, hz);
-  return std::any_of(changed.begin(), changed.end(), [](const auto &key) { return !key.supplier; });
+  return allocate(row(term.paired), demand, term.combine, priority, pair, react_state.allocations);
+}
+double read_share(const ValueRead &values, State &state, DeferredEffects &effects, FactKey pair,
+                  Handle contributor, Step now, double hz) {
+  if (!values.identity.valid(pair.subject))
+    return 0;
+  const auto supply = values.terms.rows[pair.term].paired;
+  const auto pending = std::erase_if(effects.ordered, [&](const Effect &effect) {
+    const auto *change = std::get_if<ContributionChange>(&effect);
+    return change && change->source.subject == pair.subject &&
+           (change->source.term == pair.term || change->source.term == supply);
+  });
+  if (pending && reconcile_allocation(values, state, pair, now, hz))
+    effects.ordered.emplace_back(WatchWork{pair, {}});
+  return get_share(state.allocations, pair.subject, pair.term, contributor);
 }
 } // namespace amber::react
 
@@ -120,9 +142,6 @@ void reconcile_allocations(const ValueRead &values, amber::react::State &react_s
   for (const auto &effect : effects.ordered)
     if (const auto *changed = std::get_if<react::ContributionChange>(&effect))
       add(pairs, react::allocation_inputs(values.terms, changed->source));
-    else if (const auto *dirty = std::get_if<react::WatchWork>(&effect))
-      add(pairs, react::priority_inputs(values, {react::SettingKey::Scope::Instance,
-                                                 dirty->source.subject.bits, dirty->source.term}));
   std::erase_if(effects.ordered, [](const auto &effect) {
     return std::holds_alternative<react::ContributionChange>(effect);
   });
@@ -133,18 +152,21 @@ void reconcile_priority(const ValueRead &values, amber::react::State &react_stat
                         double hz) {
 
   Pairs pairs;
-  add(pairs, react::priority_inputs(values, scope));
+  add(pairs, react::priority_inputs(values, react_state.gives_to, scope));
   reconcile(values, react_state, pairs, effects, now, hz);
 }
 void reconcile_object_priorities(const ValueRead &values, amber::react::State &react_state,
                                  Handle object, react::DeferredEffects &effects, Step now,
                                  double hz) {
-
-  Pairs pairs;
-  for (const auto &term : values.terms.rows)
-    if (term.combine == react::Combine::SharePriority && term.priority)
-      add(pairs, react::priority_inputs(
-                     values, {react::SettingKey::Scope::Instance, object.bits, term.priority}));
-  reconcile(values, react_state, pairs, effects, now, hz);
+  const auto *contributions = react_state.gives_to.get(object.slot());
+  if (!contributions)
+    return;
+  for (const auto &source : *contributions) {
+    const auto &term = values.terms.rows[source.term];
+    const FactKey pair{source.subject, source.term};
+    if (term.combine == Combine::SharePriority && term.priority &&
+        reconcile_allocation(values, react_state, pair, now, hz))
+      effects.ordered.emplace_back(WatchWork{pair, {}});
+  }
 }
 } // namespace amber::react

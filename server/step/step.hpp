@@ -180,6 +180,7 @@ struct NativeCompletion {
   std::vector<std::pair<PlayerId, nlohmann::json>> notices;
   bool deferred = false;
   std::vector<Handle> changed_objects;
+  std::vector<Handle> crossed_plots;
   std::vector<ModelId> changed_models;
   std::vector<ScriptId> changed_scripts;
   std::vector<TermId> changed_terms, changed_materials;
@@ -443,9 +444,10 @@ step::NativeCompletion transfer_action(amber::react::State &react_state,
                                        const amber::ObjectState &objects_state,
                                        const amber::perm::State &perm_state,
                                        const step::NativeCall &call);
-void bind_physical(react::Vm &, amber::ObjectState &objects_state, amber::step::State &step_state,
-                   const amber::perm::State &perm_state, std::size_t part_batch_max,
-                   amber::space::State &space_state, const amber::catalog::State &catalog_state);
+void bind_physical(react::State &, amber::ObjectState &objects_state,
+                   amber::step::State &step_state, const amber::perm::State &perm_state,
+                   std::size_t part_batch_max, amber::space::State &space_state,
+                   const amber::catalog::State &catalog_state);
 void declare_physical_actions(react::Terms &, react::NativeActions &);
 
 std::vector<Handle> plot_things(const ObjectState &, PlotId, const RunDeadline *deadline = nullptr);
@@ -535,7 +537,7 @@ step::NativeCompletion
 place_existing(amber::ObjectState &objects_state, amber::space::State &space_state,
                std::array<TermId, 4> relation_terms, amber::perm::State &perm_state,
                const GeometryAssets &geometry, const amber::catalog::State &catalog_state,
-               PhysicsRoles roles, PhysicsDefaults defaults, amber::react::State &react_state,
+               PhysicsRoles roles, PhysicsDefaults defaults, const amber::react::State &react_state,
                const step::NativeCall &call);
 
 using Json = nlohmann::json;
@@ -672,14 +674,12 @@ step::NativeCompletion model_text(const step::NativeCall &call, catalog::ModelTe
                                   const catalog::Models &models, IdentityRead identity,
                                   const perm::Players &players);
 step::NativeCompletion edit_detail(const step::NativeCall &call, catalog::AuthoredTexts &details);
-step::NativeCompletion set_setting(const step::NativeCall &call,
-                                   react::InstanceSettings &instance_settings,
+step::NativeCompletion set_setting(const step::NativeCall &call, react::State &react_state,
                                    const react::ValueRead &values);
-step::NativeCompletion model_setting(const step::NativeCall &call,
-                                     react::ModelSettings &model_settings,
+step::NativeCompletion model_setting(const step::NativeCall &call, react::State &react_state,
                                      const react::ValueRead &values, const catalog::Models &models,
                                      const perm::Players &players);
-step::NativeCompletion world_setting(const step::NativeCall &, react::WorldSettings &,
+step::NativeCompletion world_setting(const step::NativeCall &, react::State &,
                                      const react::ValueRead &, std::span<const std::string> roles);
 step::NativeCompletion patch_state(const step::NativeCall &call, react::Properties &properties,
                                    react::Processes &processes, const react::ValueRead &values,
@@ -886,9 +886,10 @@ void retire_physics(space::Space &, amber::ObjectState &objects_state, space::Ph
                     NativeCompletion &);
 void retire_publication(net::ReplicationIndex &, net::SessionViews &, catalog::InstanceTexts &,
                         std::span<const Handle> removed);
-void refresh_object_plots(const space::Space &, amber::ObjectState &objects_state,
-                          const perm::Plots &, const amber::react::State &react_state,
-                          const amber::Origin &, NativeCompletion &);
+void refresh_object_plots(const space::Space &, const ObjectState &, react::State &,
+                          const catalog::State &, const Clock &, const amber::Origin &,
+                          NativeCompletion &);
+
 double outdoor_lux(const react::State &);
 void publish_catalog_changes(net::Sessions &, net::SessionViews &, const catalog::Models &,
                              const catalog::ModelTexts &, const react::Terms &,

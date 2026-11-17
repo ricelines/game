@@ -248,7 +248,6 @@ void encode_checkpoint(
   auto &shared = react_state.shared;
   auto &gives = react_state.gives_to;
   auto &allocations = react_state.allocations;
-  auto &meters = react_state.meters;
 
   auto &players = perm_state.players;
   auto &ledger = perm_state.ledger;
@@ -297,7 +296,7 @@ void encode_checkpoint(
   }
   {
     const auto marker = snap::begin_section(out, snap::tags[3]);
-    react::write_shared(out, shared, gives, allocations, meters, selected);
+    react::write_shared(out, shared, gives, allocations, selected);
     snap::end_section(out, marker);
   }
   {
@@ -367,7 +366,6 @@ Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_st
   auto &shared = react_state.shared;
   auto &gives = react_state.gives_to;
   auto &allocations = react_state.allocations;
-  auto &meters = react_state.meters;
   auto &models = catalog_state.models;
   auto &parameters = catalog_state.parameters;
   auto &scripts = catalog_state.scripts;
@@ -411,7 +409,7 @@ Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_st
   }
   {
     auto in = snap::section_input(view, snap::tags[3]);
-    react::read_shared(in, shared, gives, allocations, meters, objects.generation.size());
+    react::read_shared(in, shared, gives, allocations, objects.generation.size());
     snap::check_complete(in);
   }
   {

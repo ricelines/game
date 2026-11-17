@@ -190,7 +190,8 @@ void rebuild_instances(amber::ObjectState &objects_state, amber::space::State &s
                                                volumes, attachments);
   if (rebuilt.status != space::Status::Ok)
     throw std::invalid_argument(space::status_text(rebuilt.status));
-  perm::update_plots(objects, land, after, edit.in_scene);
+  const auto crossed = perm::update_plots(objects, land, after, edit.in_scene);
+  out.crossed_plots.insert(out.crossed_plots.end(), crossed.begin(), crossed.end());
   for (std::size_t i = 0; i < replacements.size(); ++i) {
     const auto &plan = replacements[i]->rows;
     const auto &removed = replacements[i]->removed;

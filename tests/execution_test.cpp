@@ -363,6 +363,60 @@ void withdrawing_from_retired_subject_is_idempotent() {
   require(result.status == react::RunOutcome::Status::Ok && f.gives_to.get(f.a.slot()) == nullptr,
           "withdrawing an already retired contribution failed or changed a reused subject");
 }
+void model_replacement_updates_allocation_priority() {
+  test_runtime::Fixture f;
+  f.terms.rows.resize(13);
+  for (TermId id : {10u, 11u, 12u}) {
+    auto &term = f.terms.rows[id];
+    term.id = id;
+    term.name = id == 10 ? "novel.supply" : id == 11 ? "novel.demand" : "novel.priority";
+    f.terms.by_name[term.name] = id;
+  }
+  f.terms.rows[10].combine = react::Combine::Sum;
+  f.terms.rows[11].combine = react::Combine::SharePriority;
+  f.terms.rows[11].paired = 10;
+  f.terms.rows[11].priority = 12;
+  f.terms.rows[12].source = react::Source::Setting;
+  const auto consumer = f.add(R"(return {kind='instance', contributes={'novel.demand'},
+    on={['novel.cue']=function(self)end}})");
+  for (auto object : {f.a, f.b}) {
+    react::set_instances(f.installed, object, std::span(&consumer, 1), f.scripts);
+    react::project_instance(f.triggers, f.installed, f.scripts, f.terms, object);
+  }
+  f.models.rows.resize(3);
+  f.models.rows[2].id = 2;
+  f.model_settings.rows[1][12] = Value(1.);
+  f.model_settings.rows[2][12] = Value(5.);
+  f.instance_settings.columns.resize(13);
+  f.instance_settings.columns[12].set(f.b.slot(), Value(3.));
+  react::set_contribution(f.shared, f.gives_to, f.terms.rows[10], f.c, f.c, 1, f.effects);
+  for (auto object : {f.a, f.b})
+    react::set_contribution(f.shared, f.gives_to, f.terms.rows[11], object, f.c, 1, f.effects);
+  react::reconcile_allocations(f.values(), f.react_state, f.effects, 12, 20);
+  require(react::get_share(f.allocations, f.c, 11, f.b) == 1,
+          "the instance override initially outranks the first model default");
+  perm::State permissions;
+  lifecycle::Parts parts;
+  Relation declared;
+  const auto replace = [&](ModelId model) {
+    const auto plan =
+        lifecycle::plan_replace(f.models, parts, identity(f.objects), transforms(f.objects),
+                                f.objects.params, f.a, {model, 0, 8, {}});
+    lifecycle::apply_replacement(f.objects, parts, declared, plan, 1, 12);
+    step::NativeCompletion completed;
+    completed.rebound_objects = plan.retained;
+    step::editing::rebind_scripts(f.catalog_state, f.react_state, f.values(), permissions, 6,
+                                  {12, 20}, {}, completed);
+  };
+  replace(2);
+  require(react::get_share(f.allocations, f.c, 11, f.a) == 1 &&
+              react::get_share(f.allocations, f.c, 11, f.b) == 0,
+          "replacing the model immediately uses its higher default priority");
+  replace(1);
+  require(react::get_share(f.allocations, f.c, 11, f.a) == 0 &&
+              react::get_share(f.allocations, f.c, 11, f.b) == 1,
+          "replacing back restores the original allocation without another setting write");
+}
 void model_rebind_retires_only_removed_installations() {
   test_runtime::Fixture f(1000);
   f.terms.rows[2].combine = react::Combine::Sum;
@@ -501,6 +555,7 @@ int main() {
     world_declarations_reject_object_requirements();
     world_installations_share_the_runtime_without_host_objects();
     withdrawing_from_retired_subject_is_idempotent();
+    model_replacement_updates_allocation_priority();
     model_rebind_retires_only_removed_installations();
     std::cout << "Actual VM execution, live effects and causal finalization tests passed.\n";
   } catch (const std::exception &error) {

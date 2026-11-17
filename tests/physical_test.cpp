@@ -1,6 +1,8 @@
 #include "catalog/catalog.hpp"
 #include "physical_fixture.hpp"
 
+#include <tuple>
+
 using namespace amber;
 using test_runtime::require;
 namespace {
@@ -208,6 +210,73 @@ void own_motion_queries_and_speech() {
               std::get<bool>(f.f.states.at({f.f.a, script}).values.at(std::string("said"))),
           "speech preserves an independent earlier state write");
 }
+void immediate_part_motion_reallocates_plot_priority() {
+  test_physical::Fixture f(testspace::settings(), space::Motion::Kinematic);
+  for (const auto &[id, name] :
+       {std::pair{10u, "novel.available"}, {11u, "novel.wanted"}, {12u, "novel.priority"}}) {
+    f.f.terms.rows[id].id = id;
+    f.f.terms.rows[id].name = name;
+    f.f.terms.by_name[name] = id;
+  }
+  f.f.terms.rows[10].combine = react::Combine::Sum;
+  f.f.terms.rows[11].combine = react::Combine::SharePriority;
+  f.f.terms.rows[11].paired = 10;
+  f.f.terms.rows[11].priority = 12;
+  f.f.terms.rows[11].along = 3;
+  f.f.terms.rows[12].source = react::Source::Setting;
+  react::validate_shared_terms(f.f.terms);
+  f.plots.rows.push_back({1, 1, 0, 0, {-5, -5, 0, 10}, {}});
+  f.plots.rows.push_back({2, 1, 0, 0, {0, -5, 5, 10}, {}});
+  f.f.plots.rows[1][12] = Value(0.);
+  f.f.plots.rows[2][12] = Value(10.);
+  f.f.instance_settings.columns.resize(13);
+  f.f.instance_settings.columns[12].set(f.f.a.slot(), Value(5.));
+  require(space::set_pose(f.space, identity(f.f.objects), transforms(f.f.objects), f.f.b,
+                          {{-1, 5, 0}, {0, 0, 1, 0}})
+                  .status == space::Status::Ok,
+          "place the independent part on the lower-priority plot");
+  f.parts.out.set(f.f.a.slot(), std::vector{f.f.b});
+  f.parts.in.set(f.f.b.slot(), std::vector{f.f.a});
+  const std::array objects{f.f.a, f.f.b, f.f.c};
+  perm::update_plots(f.f.objects, f.plots, objects, true);
+  react::set_relation(f.f.relations.at(3), 3, f.f.a, f.f.c, true, f.f.effects);
+  for (const auto &[from, term] : {std::pair{f.f.c, 10u}, {f.f.a, 11u}, {f.f.b, 11u}})
+    react::set_contribution(f.f.shared, f.f.gives_to, f.f.terms.rows[term], from, f.f.c, 6,
+                            f.f.effects);
+  react::reconcile_allocations(f.f.values(), f.react_state, f.f.effects, 0, 20);
+  f.f.effects = {};
+  const auto watcher = f.f.add(R"(return {kind='instance',watches={'novel.priority'},on={
+    ['novel.priority']=function(self,_,value) self.state.observed=value end}})");
+  react::set_instances(f.f.installed, f.f.b, std::span(&watcher, 1), f.f.scripts);
+  react::project_instance(f.f.triggers, f.f.installed, f.f.scripts, f.f.terms, f.f.b);
+  f.f.bind(watcher, f.f.b);
+  const auto script = f.load(R"(return {kind='model',actions={['novel.touch']={right='use'}},on={
+    ['novel.touch']=function(self,_,args)
+      local circuit=self:related('novel.link','out')[1]
+      self.state.before=self:get_share(circuit,'novel.wanted')
+      local part=self:parts()[1]
+      if args.mode=='part' then self:move_part(part,vector.create(1,5,0))
+      else assert(self:sweep(part,vector.create(-2,0,0)).effect=='done') end
+      self.state.after=self:get_share(circuit,'novel.wanted')
+    end}})");
+  for (const auto &[mode, before, after, priority] :
+       {std::tuple{"part", 6., 0., 10.}, std::tuple{"sweep", 0., 6., 0.}}) {
+    const auto result = f.invoke(std::vector<EventField>{{"mode", std::string(mode)}});
+    require(result.outcome.status == react::RunOutcome::Status::Ok, result.outcome.error.c_str());
+    const auto &state = f.f.states.at({f.f.a, script}).values;
+    require(std::get<double>(state.at(std::string("before"))) == before &&
+                std::get<double>(state.at(std::string("after"))) == after,
+            "immediate part movement updates allocation before the next Lua read");
+    require(f.f.objects.rotation[f.f.b.slot()] == Quat{0, 0, 1, 0},
+            "moving a part without a rotation preserves its orientation");
+    while (auto work = step::pop_foreground(f.queues))
+      if (const auto *watch = std::get_if<react::WatchWork>(&work->work))
+        f.f.run(f.f.changed(watch->source));
+    require(std::get<double>(f.f.states.at({f.f.b, watcher}).values.at(std::string("observed"))) ==
+                priority,
+            "crossing plots delivers the inherited-setting change to the part's watcher");
+  }
+}
 void declared_part_batch_and_foreign_rejection(bool benchmark = false) {
   test_physical::Fixture f;
   std::vector<Handle> parts;
@@ -346,6 +415,7 @@ int main(int argc, char **argv) {
     ordinary_transfer_and_live_processes();
     ordinary_grasp_release_seat_and_flight();
     own_motion_queries_and_speech();
+    immediate_part_motion_reallocates_plot_priority();
     declared_part_batch_and_foreign_rejection();
     exact_queries_do_not_grant_event_authority();
     native_query_deadline_keeps_effects_and_step_continues();

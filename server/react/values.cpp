@@ -356,15 +356,6 @@ void retire_object(Properties &props, Processes &processes, ScriptStates &states
     states.erase({object, script});
   random.erase(object.bits);
 }
-std::size_t AllocationKeyHash::operator()(const AllocationKey &key) const {
-  return FactKeyHash{}({key.subject, key.term}) ^
-         std::hash<std::uint64_t>{}(key.contributor.bits +
-                                    (key.supplier ? 0x9e3779b97f4a7c15ULL : 0));
-}
-double metered(const Meter &meter, Step now, double hz) {
-  return meter.amount0 +
-         meter.rate * (static_cast<double>(now) - static_cast<double>(meter.step0)) / hz;
-}
 namespace {
 struct Demand {
   Handle from;
@@ -382,7 +373,7 @@ std::vector<Demand> divide(const Shared &supply, const Shared &demand, Combine c
       auto it = priority.values.find(h.bits);
       return it == priority.values.end() ? 0 : it->second;
     };
-    std::stable_sort(rows.begin(), rows.end(), [&](auto &a, auto &b) {
+    std::sort(rows.begin(), rows.end(), [&](const auto &a, const auto &b) {
       const auto x = rank(a.from), y = rank(b.from);
       return x == y ? a.from < b.from : x > y;
     });
@@ -391,120 +382,50 @@ std::vector<Demand> divide(const Shared &supply, const Shared &demand, Combine c
       remaining -= row.allocated;
     }
   } else {
-    std::vector<std::size_t> active(rows.size());
-    std::iota(active.begin(), active.end(), 0);
-    while (!active.empty() && remaining > 0) {
-      const double share = remaining / static_cast<double>(active.size());
-      std::vector<std::size_t> next;
-      for (auto i : active) {
-        auto &row = rows[i];
-        const double amount = std::min(row.wanted - row.allocated, share);
-        row.allocated += amount;
-        remaining -= amount;
-        if (row.allocated < row.wanted)
-          next.push_back(i);
-      }
-      if (next.size() == active.size())
+    std::sort(rows.begin(), rows.end(),
+              [](const auto &a, const auto &b) { return a.wanted < b.wanted; });
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+      const double share = remaining / static_cast<double>(rows.size() - i);
+      if (rows[i].wanted >= share) {
+        for (; i < rows.size(); ++i)
+          rows[i].allocated = share;
         break;
-      active = std::move(next);
+      }
+      rows[i].allocated = rows[i].wanted;
+      remaining -= rows[i].wanted;
     }
   }
   return rows;
 }
 } // namespace
-std::vector<AllocationKey> allocate(const Shared &supply, const Shared &demand, Combine combine,
-                                    const PriorityValues &priority, Handle subject,
-                                    TermId supply_term, TermId demand_term,
-                                    amber::react::State &react_state, Step now, double hz) {
-
-  auto &allocations = react_state.allocations;
-  auto &meters = react_state.meters;
-
-  std::vector<AllocationKey> changed;
-  auto rows = divide(supply, demand, combine, priority);
-  std::unordered_map<AllocationKey, double, AllocationKeyHash> next;
-  double served = 0;
-  for (auto &row : rows) {
-    next[{subject, row.from, demand_term, false}] = row.allocated;
-    served += row.allocated;
+bool allocate(const Shared &supply, const Shared &demand, Combine combine,
+              const PriorityValues &priority, FactKey subject, AllocationRows &allocations) {
+  const auto divided = divide(supply, demand, combine, priority);
+  std::unordered_map<std::uint64_t, double> next;
+  next.reserve(divided.size());
+  for (const auto &row : divided)
+    if (row.allocated > 0)
+      next.emplace(row.from.bits, row.allocated);
+  const auto current = allocations.values.find(subject);
+  if (current == allocations.values.end()) {
+    if (next.empty())
+      return false;
+    allocations.values.emplace(subject, std::move(next));
+  } else {
+    if (current->second == next)
+      return false;
+    if (next.empty())
+      allocations.values.erase(current);
+    else
+      current->second = std::move(next);
   }
-  double offered = 0;
-  for (auto &part : supply.parts)
-    offered += std::max(0.0, part.amount);
-  for (auto &part : supply.parts)
-    next[{subject, part.from, supply_term, true}] =
-        offered > 0 ? served * std::max(0.0, part.amount) / offered : 0;
-  auto update = [&](AllocationKey key, double rate) {
-    auto found = allocations.values.find(key);
-    if (found != allocations.values.end() && found->second == rate)
-      return;
-    if (found == allocations.values.end() && rate == 0)
-      return;
-    auto [meter, fresh] = meters.try_emplace(key, Meter{0, now, rate});
-    if (!fresh) {
-      meter->second.amount0 = metered(meter->second, now, hz);
-      meter->second.step0 = now;
-      meter->second.rate = rate;
-    }
-    if (rate == 0) {
-      allocations.values.erase(key);
-    } else if (found == allocations.values.end()) {
-      allocations.values.emplace(key, rate);
-    } else {
-      found->second = rate;
-    }
-    changed.push_back(key);
-  };
-  auto zero_missing = [&](TermId term, bool supplier) {
-    std::vector<AllocationKey> keys;
-    for (const auto &[key, value] : allocations.values) {
-      (void)value;
-      if (key.subject == subject && key.term == term && key.supplier == supplier &&
-          !next.contains(key))
-        keys.push_back(key);
-    }
-    for (auto key : keys)
-      update(key, 0);
-  };
-  zero_missing(supply_term, true);
-  zero_missing(demand_term, false);
-  for (const auto &[key, rate] : next)
-    update(key, rate);
-  return changed;
+  return true;
 }
 double get_share(const AllocationRows &rows, Handle subject, TermId term, Handle contributor) {
-  auto it = rows.values.find({subject, contributor, term, false});
-  return it == rows.values.end() ? 0 : it->second;
-}
-double live_share(const ValueRead &values, Handle subject, TermId demand_term, Handle contributor,
-                  Step now, double hz) {
-  if (!values.identity.valid(subject))
+  const auto pair = rows.values.find({subject, term});
+  if (pair == rows.values.end())
     return 0;
-  const auto &term = values.terms.rows.at(demand_term);
-  const auto *supply = column(values.shared, term.paired, subject);
-  const auto *demand = column(values.shared, demand_term, subject);
-  if (!supply || !demand)
-    return 0;
-  PriorityValues priorities;
-  if (term.combine == Combine::SharePriority && term.priority)
-    for (const auto &part : demand->parts) {
-      const auto answer = read(values, part.from, term.priority, now, hz);
-      if (answer.present && answer.value.is_numeric())
-        priorities.values.emplace(part.from.bits, answer.value.numeric());
-    }
-  for (const auto &row : divide(*supply, *demand, term.combine, priorities))
-    if (row.from == contributor)
-      return row.allocated;
-  return 0;
+  const auto share = pair->second.find(contributor.bits);
+  return share == pair->second.end() ? 0 : share->second;
 }
-void retire_allocations(AllocationRows &rows, MeterRows &meters, Handle object) {
-  std::erase_if(rows.values, [&](const auto &row) {
-    return row.first.subject == object || row.first.contributor == object;
-  });
-  // Earned integrals outlive withdrawal, but never either endpoint's lifetime.
-  std::erase_if(meters, [&](const auto &row) {
-    return row.first.subject == object || row.first.contributor == object;
-  });
-}
-
 } // namespace amber::react

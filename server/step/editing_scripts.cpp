@@ -411,6 +411,10 @@ void rebind_scripts(const amber::catalog::State &catalog_state, amber::react::St
     }
     react::rebind_reactions(catalog_state, react_state, values, rebound, now, hz, origin,
                             out.effects);
+    for (const auto &binding : out.rebound_objects)
+      if (binding.before.model != binding.after.model)
+        react::reconcile_object_priorities(values, react_state, binding.object, out.effects, now,
+                                           hz);
   }
   if (!out.created_objects.empty())
     react::install_reactions(catalog_state, react_state, values, out.created_objects, now, hz,

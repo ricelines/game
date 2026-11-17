@@ -97,11 +97,6 @@ struct InstanceMeasureBinding {
   const catalog::Assets &assets;
   TermId density;
 };
-struct MeterReadBinding {
-  const react::MeterRows &meters;
-  const react::Terms &terms;
-  IdentityRead identity;
-};
 struct PlotReadBinding {
   const perm::State &permissions;
   float port_spacing_m;
@@ -391,17 +386,6 @@ int measure_instance_binding(lua_State *L) {
   }
   return 1;
 }
-int meter_binding(lua_State *L) {
-  const auto &b = *static_cast<MeterReadBinding *>(react::binding_data(L));
-  const auto subject = object_arg(L, 2, b.identity);
-  const auto term = term_arg(L, 3, b.terms);
-  const auto contributor = object_arg(L, 4, b.identity);
-  const bool supplier = lua_toboolean(L, 5);
-  const auto found = b.meters.find({subject, contributor, term, supplier});
-  const auto &inv = react::invocation(L);
-  lua_pushnumber(L, found == b.meters.end() ? 0 : react::metered(found->second, inv.step, inv.hz));
-  return 1;
-}
 void plot_rights(lua_State *L, const std::vector<perm::PlotHolder> &holders) {
   lua_createtable(L, static_cast<int>(holders.size()), 0);
   int index = 0;
@@ -556,7 +540,6 @@ void bind_metadata(const amber::ObjectState &objects_state,
   auto &parameters = catalog_state.parameters;
   auto &assets = catalog_state.assets;
   auto &declared_parts = objects_state.declared_parts;
-  auto &meters = react_state.meters;
 
   const auto identity = values.identity;
   const auto &params = values.params;
@@ -580,9 +563,6 @@ void bind_metadata(const amber::ObjectState &objects_state,
                           std::make_shared<InstanceMeasureBinding>(InstanceMeasureBinding{
                               values, identity, transforms, params, declared_parts, terms,
                               materials, models, parameters, assets, density}));
-  react::register_binding(
-      vm, "meter", meter_binding,
-      std::make_shared<MeterReadBinding>(MeterReadBinding{meters, terms, identity}));
   react::register_binding(
       vm, "plot", plot_binding,
       std::make_shared<PlotReadBinding>(PlotReadBinding{permissions, port_spacing_m, authority}));

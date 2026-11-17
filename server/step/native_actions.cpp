@@ -346,8 +346,6 @@ NativeCompletion native_values(const perm::Players &players, const catalog::Mode
                                const NativeCall &call) {
   auto &properties = react_state.properties;
   auto &processes = react_state.processes;
-  auto &instance_settings = react_state.instance_settings;
-  auto &model_settings = react_state.model_settings;
   auto &authored_relations = react_state.authored_relations;
   auto &relations = react_state.relations;
 
@@ -356,20 +354,20 @@ NativeCompletion native_values(const perm::Players &players, const catalog::Mode
   case react::ValueAction::SetSetting: {
     if (const auto error = editing::validate_set_setting(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = editing::set_setting(call, instance_settings, values);
+    out = editing::set_setting(call, react_state, values);
     break;
   }
   case react::ValueAction::ModelSetting: {
     if (const auto error = editing::validate_model_setting(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = editing::model_setting(call, model_settings, values, models, players);
+    out = editing::model_setting(call, react_state, values, models, players);
     break;
   }
   case react::ValueAction::WorldSetting: {
     if (const auto error = editing::validate_set_setting(call.arguments); !error.empty())
       throw std::invalid_argument(error);
     const auto before = outdoor_lux(react_state);
-    out = editing::world_setting(call, react_state.world_settings, values, roles);
+    out = editing::world_setting(call, react_state, values, roles);
     out.world_ambient_changed = outdoor_lux(react_state) != before;
     break;
   }

@@ -22,17 +22,6 @@ template <class S> void serialize(S &s, SubjectTerm &v) {
   snap::field(s, v.subject);
   snap::field(s, v.term);
 }
-template <class S> void serialize(S &s, AllocationKey &v) {
-  snap::field(s, v.subject);
-  snap::field(s, v.contributor);
-  snap::field(s, v.term);
-  snap::field(s, v.supplier);
-}
-template <class S> void serialize(S &s, Meter &v) {
-  snap::field(s, v.amount0);
-  snap::field(s, v.step0);
-  snap::field(s, v.rate);
-}
 template <class S> void serialize(S &s, WorldScript &v) {
   snap::field(s, v.script);
   snap::field(s, v.space);
@@ -169,22 +158,32 @@ void read_relations(snap::Input &in, AuthoredRelations &relations, std::size_t s
   });
 }
 void write_shared(snap::Output &out, const SharedColumns &shared, const GivesTo &gives,
-                  const AllocationRows &allocations, const MeterRows &meters,
-                  const SnapshotSelection &selected) {
+                  const AllocationRows &allocations, const SnapshotSelection &selected) {
   write_columns(out, shared, selected);
   write_sparse(out, gives, selected);
-  auto include = [&](const AllocationKey &key) {
-    return selected.contains(key.subject) || selected.contains(key.contributor);
-  };
-  write_map(out, allocations.values, include);
-  write_map(out, meters, include);
+  std::vector<FactKey> pairs;
+  for (const auto &[key, shares] : allocations.values)
+    if (selected.contains(key.subject) ||
+        std::any_of(shares.begin(), shares.end(),
+                    [&](const auto &share) { return selected.contains(Handle{share.first}); }))
+      pairs.push_back(key);
+  out.container(pairs, snap::max_collection(), [&](snap::Output &s, FactKey &key) {
+    snap::field(s, key);
+    write_map(s, allocations.values.at(key), [&](std::uint64_t contributor) {
+      return selected.contains(key.subject) || selected.contains(Handle{contributor});
+    });
+  });
 }
 void read_shared(snap::Input &in, SharedColumns &shared, GivesTo &gives,
-                 AllocationRows &allocations, MeterRows &meters, std::size_t slots) {
+                 AllocationRows &allocations, std::size_t slots) {
   read_columns(in, shared, slots);
   read_sparse(in, gives, slots);
-  read_map(in, allocations.values);
-  read_map(in, meters);
+  allocations.values.clear();
+  std::vector<FactKey> pairs;
+  in.container(pairs, snap::max_collection(), [&](snap::Input &s, FactKey &key) {
+    snap::field(s, key);
+    read_map(s, allocations.values[key]);
+  });
 }
 void write_script_states(snap::Output &out, const ScriptStates &states,
                          const Subscriptions &subscriptions, const SnapshotSelection &selected) {

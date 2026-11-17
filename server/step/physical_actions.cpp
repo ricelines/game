@@ -25,6 +25,8 @@ struct SweepBinding {
   const Relation &declared_parts;
   Objects &objects;
   const perm::Plots &plots;
+  react::State &react_state;
+  react::ValueRead values;
 };
 struct PartPoseBinding {
   space::Space &space;
@@ -33,6 +35,8 @@ struct PartPoseBinding {
   const Relation &declared_parts;
   Objects &objects;
   const perm::Plots &plots;
+  react::State &react_state;
+  react::ValueRead values;
   std::size_t batch_max;
 };
 struct QueryBinding {
@@ -117,6 +121,25 @@ double number(lua_State *L, int index) {
     luaL_error(L, "expected finite number");
   return v;
 }
+Quat rotation(lua_State *L, int index) {
+  index = lua_absindex(L, index);
+  luaL_checktype(L, index, LUA_TTABLE);
+  Quat result;
+  float *elements[]{&result.x, &result.y, &result.z, &result.w};
+  const char *keys[]{"x", "y", "z", "w"};
+  for (int j = 0; j < 4; ++j) {
+    lua_getfield(L, index, keys[j]);
+    *elements[j] = float(number(L, -1));
+    lua_pop(L, 1);
+  }
+  const float length = std::sqrt(result.x * result.x + result.y * result.y + result.z * result.z +
+                                 result.w * result.w);
+  if (length == 0)
+    luaL_error(L, "rotation quaternion has zero length");
+  for (auto element : elements)
+    *element /= length;
+  return result;
+}
 space::Pose pose(lua_State *L, int index) {
   space::Pose p{};
   if (lua_isnoneornil(L, index))
@@ -127,22 +150,8 @@ space::Pose pose(lua_State *L, int index) {
     p.position = vec(L, -1);
   lua_pop(L, 1);
   lua_getfield(L, index, "rotation");
-  if (!lua_isnil(L, -1)) {
-    luaL_checktype(L, -1, LUA_TTABLE);
-    float *elements[]{&p.rotation.x, &p.rotation.y, &p.rotation.z, &p.rotation.w};
-    const char *keys[]{"x", "y", "z", "w"};
-    for (int j = 0; j < 4; ++j) {
-      lua_getfield(L, -1, keys[j]);
-      *elements[j] = float(number(L, -1));
-      lua_pop(L, 1);
-    }
-    float length = std::sqrt(p.rotation.x * p.rotation.x + p.rotation.y * p.rotation.y +
-                             p.rotation.z * p.rotation.z + p.rotation.w * p.rotation.w);
-    if (length == 0)
-      luaL_error(L, "rotation quaternion has zero length");
-    for (auto element : elements)
-      *element /= length;
-  }
+  if (!lua_isnil(L, -1))
+    p.rotation = rotation(L, -1);
   lua_pop(L, 1);
   return p;
 }
@@ -301,7 +310,7 @@ step::NativeCompletion grasp_action(amber::ObjectState &objects_state,
                    std::span(space_state.relation_changes).subspan(changes_begin));
   space_state.relation_changes.resize(changes_begin);
   if (out.changed) {
-    perm::update_plots(objects_state.objects, plots, objects, true);
+    out.crossed_plots = perm::update_plots(objects_state.objects, plots, objects, true);
     out.changed_objects = objects;
   }
   return out;
@@ -343,7 +352,7 @@ step::NativeCompletion attach_action(amber::ObjectState &objects_state,
   space_state.relation_changes.resize(changes_begin);
   if (out.changed) {
     const auto objects = closure(declared_parts, subject);
-    perm::update_plots(objects_state.objects, plots, objects, true);
+    out.crossed_plots = perm::update_plots(objects_state.objects, plots, objects, true);
     out.changed_objects = objects;
   }
   return out;
@@ -394,7 +403,7 @@ step::NativeCompletion release_action(amber::ObjectState &objects_state,
   space_state.relation_changes.resize(changes_begin);
   if (out.changed) {
     const auto objects = closure(declared_parts, target);
-    perm::update_plots(objects_state.objects, plots, objects, true);
+    out.crossed_plots = perm::update_plots(objects_state.objects, plots, objects, true);
     out.changed_objects = objects;
   }
   return out;
@@ -531,6 +540,16 @@ int cancel_motion_binding(lua_State *L) {
   lua_pushboolean(L, true);
   return 1;
 }
+void changed_plot_settings(react::State &react_state, const react::ValueRead &values,
+                           std::span<const Handle> crossed, Invocation &invocation) {
+  for (const auto object : crossed) {
+    for (const auto &term : values.terms.rows)
+      if (term.source == react::Source::Setting)
+        invocation.effects->ordered.emplace_back(react::WatchWork{{object, term.id}, {}});
+    react::reconcile_object_priorities(values, react_state, object, *invocation.effects,
+                                       invocation.step, invocation.hz);
+  }
+}
 int move_part_binding(lua_State *L) {
   auto &b = *static_cast<PartPoseBinding *>(react::binding_data(L));
   auto &i = react::invocation(L);
@@ -553,9 +572,11 @@ int move_part_binding(lua_State *L) {
       luaL_error(L, "move_part: %s", space::status_text(result.status));
     if (b.declared_parts.out.get(part.slot())) {
       const auto objects = closure(b.declared_parts, part);
-      perm::update_plots(b.objects, b.plots, objects, true);
+      changed_plot_settings(b.react_state, b.values,
+                            perm::update_plots(b.objects, b.plots, objects, true), i);
     } else
-      perm::update_plots(b.objects, b.plots, std::span(&part, 1), true);
+      changed_plot_settings(b.react_state, b.values,
+                            perm::update_plots(b.objects, b.plots, std::span(&part, 1), true), i);
     ++moved;
   };
   if (lua_istable(L, 2)) {
@@ -578,13 +599,8 @@ int move_part_binding(lua_State *L) {
     }
   } else {
     const auto part = handle(L, 2, b.identity);
-    lua_newtable(L);
-    lua_pushvalue(L, 3);
-    lua_setfield(L, -2, "position");
-    lua_pushvalue(L, 4);
-    lua_setfield(L, -2, "rotation");
-    move(part, pose(L, -1));
-    lua_pop(L, 1);
+    move(part,
+         {vec(L, 3), lua_isnoneornil(L, 4) ? b.transforms.rotation[part.slot()] : rotation(L, 4)});
   }
   lua_pushinteger(L, int(moved));
   return 1;
@@ -601,7 +617,8 @@ int sweep_binding(lua_State *L) {
       space::translate(b.space, b.identity, b.transforms, subject, translation, float(1 / i.hz));
   mechanical_result(i, before != b.transforms.position[subject.slot()], std::span(&subject, 1));
   const auto objects = closure(b.declared_parts, subject);
-  perm::update_plots(b.objects, b.plots, objects, true);
+  changed_plot_settings(b.react_state, b.values,
+                        perm::update_plots(b.objects, b.plots, objects, true), i);
   operation(L, {result.status, result.contact ? result.contact->object : Handle{}});
   lua_pushvector(L, result.actual.position.x, result.actual.position.y, result.actual.position.z);
   lua_setfield(L, -2, "position");
@@ -717,10 +734,13 @@ int sound_binding(lua_State *L) {
   return 1;
 }
 } // namespace
-void bind_physical(react::Vm &vm, amber::ObjectState &objects_state, amber::step::State &step_state,
-                   const amber::perm::State &perm_state, std::size_t part_batch_max,
-                   amber::space::State &space_state, const amber::catalog::State &catalog_state) {
+void bind_physical(react::State &react_state, amber::ObjectState &objects_state,
+                   amber::step::State &step_state, const amber::perm::State &perm_state,
+                   std::size_t part_batch_max, amber::space::State &space_state,
+                   const amber::catalog::State &catalog_state) {
   auto &space = space_state.space;
+  auto &vm = react_state.vm;
+  const auto values = react::value_read(objects_state, catalog_state, react_state);
 
   auto identity = amber::identity(std::as_const(objects_state.objects));
   auto transforms = amber::transforms(objects_state.objects);
@@ -738,9 +758,11 @@ void bind_physical(react::Vm &vm, amber::ObjectState &objects_state, amber::step
   const auto navigation = std::make_shared<NavigationBinding>(
       NavigationBinding{intents, endings, identity, players, grants, plots});
   const auto sweep = std::make_shared<SweepBinding>(
-      SweepBinding{space, identity, transforms, declared_parts, objects_state.objects, plots});
-  const auto parts = std::make_shared<PartPoseBinding>(PartPoseBinding{
-      space, identity, transforms, declared_parts, objects_state.objects, plots, part_batch_max});
+      SweepBinding{space, identity, transforms, declared_parts, objects_state.objects, plots,
+                   react_state, values});
+  const auto parts = std::make_shared<PartPoseBinding>(
+      PartPoseBinding{space, identity, transforms, declared_parts, objects_state.objects, plots,
+                      react_state, values, part_batch_max});
   const auto query = std::make_shared<QueryBinding>(QueryBinding{space, identity, transforms});
   const auto sound = std::make_shared<SoundBinding>(
       SoundBinding{hearing, identity, transforms, listeners, instance_texts, model_texts});

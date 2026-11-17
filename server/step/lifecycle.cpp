@@ -45,7 +45,8 @@ void apply_custody(amber::ObjectState &objects_state, amber::space::State &space
                                          descendants, change.stay_static);
     if (result.status != space::Status::Ok)
       throw std::invalid_argument(space::status_text(result.status));
-    perm::update_plots(objects_state.objects, plots, closure, change.in_world);
+    const auto crossed = perm::update_plots(objects_state.objects, plots, closure, change.in_world);
+    out.crossed_plots.insert(out.crossed_plots.end(), crossed.begin(), crossed.end());
     out.changed_objects.insert(out.changed_objects.end(), closure.begin(), closure.end());
     auto &visibility = change.in_world ? out.visible_objects : out.hidden_objects;
     auto &old_visibility = change.in_world ? out.hidden_objects : out.visible_objects;
@@ -192,12 +193,12 @@ void retire_publication(net::ReplicationIndex &replication, net::SessionViews &v
   net::invalidate(views, removed);
 }
 
-void refresh_object_plots(const space::Space &space, amber::ObjectState &objects_state,
-                          const perm::Plots &plots, const amber::react::State &react_state,
-                          const amber::Origin &origin, NativeCompletion &out) {
-  auto identity = amber::identity(std::as_const(objects_state.objects));
-  auto &terms = react_state.terms;
-  auto &subscriptions = react_state.subscriptions;
+void refresh_object_plots(const space::Space &space, const ObjectState &objects_state,
+                          react::State &react_state, const catalog::State &catalog_state,
+                          const Clock &clock, const amber::Origin &origin, NativeCompletion &out) {
+  const auto values = react::value_read(objects_state, catalog_state, react_state);
+  const auto identity = values.identity;
+  const auto &terms = react_state.terms;
 
   out.changed_objects.insert(out.changed_objects.end(), out.visible_objects.begin(),
                              out.visible_objects.end());
@@ -213,21 +214,18 @@ void refresh_object_plots(const space::Space &space, amber::ObjectState &objects
         (space::is_logical_root(space, identity, object) &&
          (!(identity.flags[object.slot()] & Held) || space::bounds(space, identity, object)));
     (visible ? out.visible_objects : out.hidden_objects).push_back(object);
-    perm::update_plots(objects_state.objects, plots, std::span(&object, 1), visible);
-    auto dirty = react::watch_sources(subscriptions, object);
+  }
+  unique(out.crossed_plots);
+  std::erase_if(out.crossed_plots, [&](Handle object) { return !identity.valid(object); });
+  for (auto object : out.crossed_plots) {
+    auto dirty = react::watch_sources(react_state.subscriptions, object);
     std::erase_if(dirty, [&](FactKey fact) {
       return terms.rows.at(fact.term).source != react::Source::Setting;
     });
-    // Priority depends on the contributor's current plot even without a setting watch.
-    for (const auto &term : terms.rows)
-      if (term.combine == react::Combine::SharePriority && term.priority)
-        dirty.push_back({object, term.priority});
-    std::sort(dirty.begin(), dirty.end(), [](FactKey a, FactKey b) {
-      return std::pair{a.subject, a.term} < std::pair{b.subject, b.term};
-    });
-    dirty.erase(std::unique(dirty.begin(), dirty.end()), dirty.end());
     for (auto source : dirty)
       out.effects.ordered.emplace_back(react::WatchWork{source, origin});
+    react::reconcile_object_priorities(values, react_state, object, out.effects, clock.step,
+                                       clock.hz);
   }
 }
 

@@ -257,7 +257,7 @@ NativeCompletion create_instance(amber::ObjectState &objects_state,
   for (std::size_t i = 0; i < created.objects.size(); ++i)
     install_physics(space, identity, transforms, flags, created.objects[i], definitions[i]);
   install_declared_attachments(objects_state, space_state, created.objects);
-  perm::update_plots(objects, plots, created.objects, true);
+  out.crossed_plots = perm::update_plots(objects, plots, created.objects, true);
   out.created_objects = created.objects;
   out.visible_objects = created.objects;
   out.changed = true;

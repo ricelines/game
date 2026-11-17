@@ -18,7 +18,7 @@ step::NativeCompletion
 place_existing(amber::ObjectState &objects_state, amber::space::State &space_state,
                std::array<TermId, 4> relation_terms, amber::perm::State &perm_state,
                const GeometryAssets &geometry, const amber::catalog::State &catalog_state,
-               PhysicsRoles roles, PhysicsDefaults defaults, amber::react::State &react_state,
+               PhysicsRoles roles, PhysicsDefaults defaults, const amber::react::State &react_state,
                const step::NativeCall &call) {
   const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
@@ -92,7 +92,6 @@ place_existing(amber::ObjectState &objects_state, amber::space::State &space_sta
   std::vector<space::VolumeSpec> volumes;
   std::vector<space::EditedMotion> motion;
   std::vector<space::Attachment> internal;
-  std::vector<std::pair<FactKey, react::Answer>> settings;
   space::Motion root_mode = space::Motion::Static;
   for (auto h : item.closure) {
     poses.emplace(h.bits, space::Pose{destination + rotate(delta, transforms.position[h.slot()] -
@@ -114,9 +113,6 @@ place_existing(amber::ObjectState &objects_state, amber::space::State &space_sta
     motion.push_back({h, physics.body.motion, {}, {}, true});
     for (const auto &volume : *physics.volumes)
       volumes.push_back({h, volume.geometry, volume.local, volume.kind});
-    for (const auto &term : values.terms.rows)
-      if (term.id && term.source == react::Source::Setting)
-        settings.push_back({{h, term.id}, react::read(values, h, term.id, call.step, call.hz)});
   }
   for (auto h : std::span{item.closure}.subspan(1)) {
     const auto parent = parents.parent[h.slot()];
@@ -151,12 +147,7 @@ place_existing(amber::ObjectState &objects_state, amber::space::State &space_sta
       commerce_detail::result(true, {{"goods", to_string(item.root.object)},
                                      {"plot", plot->id},
                                      {"position", {destination.x, destination.y, destination.z}}});
-  perm::update_plots(objects_state.objects, plots, item.closure, true);
-  for (auto h : item.closure)
-    react::reconcile_object_priorities(values, react_state, h, out.effects, call.step, call.hz);
-  for (const auto &[key, before] : settings)
-    if (before != react::read(values, key.subject, key.term, call.step, call.hz))
-      out.effects.ordered.emplace_back(react::WatchWork{key, {}});
+  out.crossed_plots = perm::update_plots(objects_state.objects, plots, item.closure, true);
   for (const auto &row : std::span(space_state.relation_changes).subspan(changes_begin)) {
     const auto term = relation_terms.at(static_cast<std::size_t>(row.kind));
     if (term) {
