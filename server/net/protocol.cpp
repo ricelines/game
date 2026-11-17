@@ -176,8 +176,12 @@ std::string validate_look(const Json &row) {
                 number(row, "events_limit", 1)});
 }
 std::string validate_inspect(const Json &row) {
-  return first({fields(row, {"target"}, {"events_limit"}), string(row, "target"),
-                number(row, "events_limit", 1)});
+  return first({fields(row, {"target"}, {"owner", "for_sale", "cursor", "limit", "events_limit"}),
+                string(row, "target"), string(row, "owner"), number(row, "cursor", 0),
+                number(row, "limit", 1), number(row, "events_limit", 1),
+                row.contains("for_sale") && !row["for_sale"].is_boolean()
+                    ? "for_sale must be a boolean"
+                    : ""});
 }
 std::string validate_actions(const Json &row) {
   return first({fields(row, {}, {"target", "name", "page", "events_limit"}), string(row, "target"),

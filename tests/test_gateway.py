@@ -11,11 +11,11 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from websockets.asyncio.server import serve
 
-from gateway import mcp
+from gateway import cli, mcp
 from gateway.authoring import Authoring
 from gateway.credentials import read_key_file
 from gateway.http import create_app
-from gateway.schema import TOOLS
+from gateway.schema import TOOLS, validate
 from gateway.session import Session, Sessions
 from harness.resident import Resident, Residents
 
@@ -51,6 +51,34 @@ def rpc(name="tools/list", arguments=None):
         params.update({"name": "look", "arguments": arguments or {}})
         headers["Mcp-Name"] = "look"
     return {"jsonrpc": "2.0", "id": 7, "method": name, "params": params}, headers
+
+
+def test_land_filters_use_the_existing_inspection_tool_and_cli():
+    fields = {"target": "land", "owner": "self", "for_sale": False, "cursor": 17, "limit": 5}
+    validate("inspect", fields)
+    options = cli.parser().parse_args(
+        ["inspect", "land", "--owner", "self", "--no-for-sale", "--cursor", "17", "--limit", "5"]
+    )
+    assert {name: getattr(options, name) for name in fields} == fields
+    for name, value in (("for_sale", 1), ("cursor", -1), ("limit", 0)):
+        with pytest.raises(ValueError, match=name):
+            validate("inspect", {**fields, name: value})
+
+    async def run():
+        session = Session("ws://unused", "fixture", "fixture")
+        forwarded = []
+
+        async def request(kind, **arguments):
+            forwarded.append((kind, arguments))
+            return {"land": [], "more": False, "next_cursor": None}
+
+        session.request = request
+        result = await session.tool("inspect", fields)
+        assert result["land"] == [] and result["next_cursor"] is None
+        assert forwarded == [("inspect", {**fields, "events_limit": 40})]
+        session._welcomed.cancel()
+
+    asyncio.run(run())
 
 
 def test_current_mcp_revision_and_header_body_validation():
@@ -158,6 +186,7 @@ def test_gateway_cache_tracks_descriptions_across_motion_visibility_and_reconnec
             "far": [],
             "body_actions": ["move_to(point: vector)"],
             "player_actions": [],
+            "action_spaces": [{"target": "land", "description": "Land and its tax"}],
         }
         first = session.compact_observation(deepcopy(observation))
         assert first["things"][0]["says"]["name"] == "Cup"
@@ -165,6 +194,7 @@ def test_gateway_cache_tracks_descriptions_across_motion_visibility_and_reconnec
         moved = session.compact_observation(deepcopy(observation))
         assert moved["things"] == [{"h": "o:2.1", "dist_m": 3, "bearing": 90}]
         assert "body_actions" not in moved and "player_actions" not in moved
+        assert "action_spaces" not in moved
         away = deepcopy(observation)
         away["things"] = []
         session.compact_observation(away)
@@ -182,6 +212,7 @@ def test_gateway_cache_tracks_descriptions_across_motion_visibility_and_reconnec
         fresh = session.compact_observation(deepcopy(observation))
         assert fresh["things"][0]["says"]["name"] == "Renamed cup"
         assert "body_actions" in fresh and "player_actions" in fresh
+        assert fresh["action_spaces"] == observation["action_spaces"]
         session._welcomed.cancel()
 
     asyncio.run(run())

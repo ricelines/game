@@ -76,24 +76,26 @@ Json scope_record(perm::Scope scope) {
   }
   return nullptr;
 }
+Json holder_record(perm::Holder holder) {
+  if (holder.kind == perm::HolderKind::Player)
+    return "p:" + std::to_string(holder.id);
+  return {{"script", "s:" + std::to_string(holder.id)},
+          {"on", holder.installed_on ? to_string(holder.installed_on) : "world"}};
+}
 Json grant_record(const perm::Grants &grants, const perm::Grant &grant, Step now, double hz) {
-  Json holder;
-  if (grant.holder.kind == perm::HolderKind::Player)
-    holder = "p:" + std::to_string(grant.holder.id);
-  else
-    holder = {{"script", "s:" + std::to_string(grant.holder.id)},
-              {"on", to_string(grant.holder.installed_on)}};
-  return {{"id", "g:" + std::to_string(grant.id)},
-          {"issuer", "p:" + std::to_string(grant.issuer)},
-          {"holder", holder},
-          {"scope", scope_record(grant.scope)},
-          {"rights", grant.verbs},
-          {"parent", grant.parent ? Json("g:" + std::to_string(grant.parent)) : Json(nullptr)},
-          {"cap", grant.cap},
-          {"remaining", perm::allowance(grants, grant.id, now)},
-          {"period_s", grant.period_steps / hz},
-          {"expires_s", grant.expires_step / hz},
-          {"live", grant.live}};
+  return {
+      {"id", "g:" + std::to_string(grant.id)},
+      {"issuer", holder_record(!grant.issuer && grant.parent ? grants.rows[grant.parent].holder
+                                                             : perm::Holder::player(grant.issuer))},
+      {"holder", holder_record(grant.holder)},
+      {"scope", scope_record(grant.scope)},
+      {"rights", grant.verbs},
+      {"parent", grant.parent ? Json("g:" + std::to_string(grant.parent)) : Json(nullptr)},
+      {"cap", grant.cap},
+      {"remaining", perm::allowance(grants, grant.id, now)},
+      {"period_s", grant.period_steps / hz},
+      {"expires_s", grant.expires_step / hz},
+      {"live", grant.live}};
 }
 Json state_record(const react::ScriptState &state) {
   std::vector<react::StateKey> keys;
@@ -234,11 +236,8 @@ net::Reply read_inspect(const amber::catalog::State &catalog_state,
   auto &scripts = catalog_state.scripts;
   auto &model_text = catalog_state.model_text;
 
-  auto transforms = amber::transforms(std::as_const(objects_state.objects));
-
   auto &players = perm_state.players;
   auto &grants = perm_state.grants;
-  auto &plots = perm_state.plots;
   auto &ledger = perm_state.ledger;
 
   try {
@@ -271,45 +270,8 @@ net::Reply read_inspect(const amber::catalog::State &catalog_state,
         if (grants.rows.at(id).live)
           result["given"].push_back(grant_record(grants, grants.rows[id], now, hz));
     } else if (name == "land" || name == "plot" || name.starts_with("plot:")) {
-      if (!values.identity.valid(call.principal.body))
-        return view_detail::error("Player has no live body");
-      const auto position = transforms.position[call.principal.body.slot()];
-      const auto forward = rotate(transforms.rotation[call.principal.body.slot()], {0, 1, 0});
-      const auto record = [&](const perm::Plot &plot) {
-        auto row = perm::plot_record(plots, grants, plot.id, settings.land.port_spacing_m, now,
-                                     perm_state.offers, call.principal.player);
-        const Vec3 delta{std::clamp(position.x, plot.bounds[0], plot.bounds[2]) - position.x,
-                         std::clamp(position.y, plot.bounds[1], plot.bounds[3]) - position.y, 0};
-        row["dist_m"] = delta.length();
-        row["bearing"] = delta.length() == 0
-                             ? 0
-                             : std::atan2(forward.y * delta.x - forward.x * delta.y,
-                                          forward.x * delta.x + forward.y * delta.y) *
-                                   180 / std::numbers::pi_v<float>;
-        return row;
-      };
-      if (name == "land") {
-        Json land = Json::array();
-        for (const auto &plot : plots.rows)
-          if (plot.id) {
-            const Vec3 delta{std::clamp(position.x, plot.bounds[0], plot.bounds[2]) - position.x,
-                             std::clamp(position.y, plot.bounds[1], plot.bounds[3]) - position.y,
-                             0};
-            if (delta.length() <= settings.perception.sight_m)
-              land.push_back(record(plot));
-          }
-        std::stable_sort(land.begin(), land.end(),
-                         [](const Json &a, const Json &b) { return a["dist_m"] < b["dist_m"]; });
-        result = {{"land", std::move(land)}};
-      } else if (name.starts_with("plot:")) {
-        const auto id = identifier(std::string_view(name).substr(5));
-        if (id >= plots.rows.size() || plots.rows[id].id != id)
-          throw std::invalid_argument("Unknown plot");
-        result = record(plots.rows[id]);
-      } else {
-        const auto id = objects_state.objects.plot[call.principal.body.slot()];
-        result = id ? record(plots.rows.at(id)) : Json{{"plot", nullptr}};
-      }
+      result = view_detail::inspect_land(catalog_state, react_state, objects_state, perm_state,
+                                         clock, settings, call);
     } else {
       const auto object = view_detail::target(values.identity, call);
       result = object_record(catalog_state, react_state, sessions, objects_state, perm_state, clock,

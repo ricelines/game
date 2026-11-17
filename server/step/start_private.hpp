@@ -8,11 +8,21 @@
 #include <stdexcept>
 
 namespace amber::step::start {
+void install_catalog(const Json &, amber::react::State &react_state, const catalog::Hash &,
+                     const catalog::RuntimePins &, react::VmSettings,
+                     const std::filesystem::path &asset_root,
+                     const std::filesystem::path &script_root, amber::catalog::State &catalog_state,
+                     Symbols &);
+void bind_relation_reads(react::RelationsRead &, react::AuthoredRelations &, const react::Terms &,
+                         const space::PhysicalRelations &, std::array<TermId, 4> physical_terms);
+void record_seed(record::Journal &journal, const react::Terms &terms, const catalog::Models &models,
+                 const catalog::Scripts &scripts, std::span<const Handle> initial, IdentityRead ids,
+                 AuthorityRead auth, AttributionRead makers);
 void provision_body_grants(const Json &, const Symbols &,
                            const amber::catalog::State &catalog_state,
                            const amber::ObjectState &objects_state, amber::perm::State &perm_state,
                            const net::Profiles &, Step, double);
-}
+} // namespace amber::step::start
 
 namespace amber::step::start::detail {
 inline TermId term(const react::Terms &terms, const Json &value) {

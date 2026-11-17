@@ -324,6 +324,25 @@ void coherent_catalog_publication() {
                                                 f.values(), inspected, {}, 0, 20);
   require(description.measured["values"]["p9.live_fact"] == 123,
           "live inspection did not consume the newly appended quantity");
+
+  outputs.clear();
+  views.rows[101].pending.ready = true;
+  step::NativeCompletion ambient;
+  ambient.world_ambient_changed = true;
+  step::publish_catalog_changes(sessions, views, f.models, f.texts, f.terms, f.materials,
+                                {4, 0, 0, 0, 0, 0}, 7, ambient);
+  sessions.drain(requests, notices, outputs);
+  require(
+      !views.rows[101].pending.ready && outputs.size() == 2,
+      "world ambient edit must refresh pending observations and notify authenticated renderers");
+  for (const auto id : {101u, 102u})
+    require(rows(id, "world")["ambient_lux"] == 7,
+            "renderer did not receive the new world ambient without a model edit");
+  for (const auto &output : outputs) {
+    const auto &message = std::get<net::Send>(output).message;
+    require(message == Json{{"t", "catalog"}, {"world", {{"ambient_lux", 7}}}},
+            "world ambient edit republished unrelated catalog data");
+  }
 }
 void benchmark() {
   Fixture f;

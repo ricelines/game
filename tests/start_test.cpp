@@ -59,26 +59,21 @@ int main(int argc, char **argv) {
           require(!script.declaration.approved && !script.declaration.active,
                   "source cannot approve an initial rule");
     }
-    std::vector<SeedRuleApproval> fixture_approvals;
-    for (const auto &row : plan.at("scripts"))
-      if (row.at("world_rule").get<bool>())
-        fixture_approvals.push_back(
-            {row.at("key"), "isolated importer test authority; not a gameplay approval"});
-    auto &vm = react_state.vm;
     catalog::Scripts &scripts = catalog_state.scripts;
     Symbols symbols;
-    install_scripts(std::move(prepared), scripts, vm, symbols, fixture_approvals);
+    install_catalog(plan, react_state, registry.hash, pins, vm_settings, argv[2],
+                    directory / "scripts", catalog_state, symbols);
     catalog::Assets &assets = catalog_state.assets;
-    import_assets(prepare_assets(plan, argv[2], pins, terms), assets);
     auto malformed = plan;
     malformed["models"][0]["canonical_params"] =
         malformed["models"][0]["canonical_params"].get<std::string>() + " ";
     rejects([&] { (void)prepare_assets(malformed, argv[2], pins, terms); },
             "asset canonical byte mismatch must fail");
     catalog::Models &models = catalog_state.models;
-    catalog::ModelTexts &model_text = catalog_state.model_text;
-    react::ModelSettings &model_settings = react_state.model_settings;
-    install_models(plan, assets, scripts, terms, models, model_text, model_settings, symbols);
+    const auto land_script = symbols.scripts.at("land");
+    const auto *world_land = react::world_script(react_state.world_scripts, land_script);
+    require(world_land && world_land->space == "land",
+            "startup installs land on the world with a discoverable action space");
 
     amber::ObjectState objects_state;
     Objects &objects = objects_state.objects;

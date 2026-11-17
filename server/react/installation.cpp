@@ -156,6 +156,7 @@ void initialize_reactions(const amber::catalog::State &catalog_state,
     if (model.id)
       react::project_model(triggers, models, scripts, values.terms, model.id);
   react::project_rules(triggers, rules);
+  react::project_world(react_state, scripts);
   if (restored)
     react::restore_reactions(catalog_state, react_state, values, initial, now, hz, {}, effects);
   else

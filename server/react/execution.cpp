@@ -57,6 +57,10 @@ bool start_invocation(amber::react::State &react_state, const amber::ObjectState
   result.trigger = input.trigger;
   result.step = input.step;
   const auto identity = values.identity;
+  if (!input.receiver &&
+      (!world_script(react_state.world_scripts, handler.script) ||
+       scripts.rows.at(handler.script).declaration.kind != ScriptDeclaration::Kind::World))
+    return false;
   // A prior handler may have changed this object's installation while this
   // candidate waited. Eligibility itself must not recreate retired state.
   const auto current = find_handler(triggers, values, {input.receiver, handler.script},

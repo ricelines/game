@@ -11,6 +11,7 @@ add_library(amber_net STATIC
   read_actions.cpp
   read_events.cpp
   read_inspect.cpp
+  read_land.cpp
   read_look.cpp
 )
 target_include_directories(amber_net PUBLIC ${PROJECT_SOURCE_DIR}/server)

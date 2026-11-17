@@ -83,17 +83,18 @@ void read_players(snap::Input &in, perm::Players &players, perm::Ledger &ledger,
   perm::read_players(in, players, ledger, plots, groups);
   net::read_profiles(in, profiles);
 }
-void write_scst(snap::Output &out, const react::ScriptStates &states,
-                const react::Subscriptions &subscriptions, const react::InstanceScripts &installed,
-                IdentityRead identity, std::optional<std::span<const Handle>> selected) {
-  react::write_script_states(out, states, subscriptions,
+void write_scst(snap::Output &out, const react::State &react_state, IdentityRead identity,
+                std::optional<std::span<const Handle>> selected) {
+  react::write_script_states(out, react_state.states, react_state.subscriptions,
                              selected ? snap::ObjectSelection(*selected) : snap::ObjectSelection{});
-  react::write_instances(out, installed, identity, selected);
+  react::write_instances(out, react_state.installations, identity, selected);
+  const std::vector<react::WorldScript> empty;
+  react::write_world_scripts(out, selected ? empty : react_state.world_scripts);
 }
-void read_scst(snap::Input &in, react::ScriptStates &states, react::Subscriptions &subscriptions,
-               react::InstanceScripts &installed, std::size_t slots) {
-  react::read_script_states(in, states, subscriptions);
-  react::read_instances(in, installed, slots);
+void read_scst(snap::Input &in, react::State &react_state, std::size_t slots) {
+  react::read_script_states(in, react_state.states, react_state.subscriptions);
+  react::read_instances(in, react_state.installations, slots);
+  react::read_world_scripts(in, react_state.world_scripts);
 }
 void write_queues_section(snap::Output &out, const step::WorkQueues &queues,
                           const step::Intents &intents, std::uint64_t next_record,
@@ -287,9 +288,6 @@ void encode_checkpoint(
   auto &offers = perm_state.offers;
   auto &trades = perm_state.trades;
   auto &limits = perm_state.owner_limits;
-  auto &states = react_state.states;
-  auto &subscriptions = react_state.subscriptions;
-  auto &installations = react_state.installations;
   auto &timers = step_state.timers;
   auto &queues = step_state.queues;
   auto &intents = step_state.intents;
@@ -350,7 +348,7 @@ void encode_checkpoint(
   }
   {
     const auto marker = snap::begin_section(out, snap::tags[7]);
-    write_scst(out, states, subscriptions, installations, identity(objects), handles);
+    write_scst(out, react_state, identity(objects), handles);
     snap::end_section(out, marker);
   }
   {
@@ -416,9 +414,6 @@ Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_st
   auto &offers = perm_state.offers;
   auto &trades = perm_state.trades;
   auto &limits = perm_state.owner_limits;
-  auto &states = react_state.states;
-  auto &subscriptions = react_state.subscriptions;
-  auto &installations = react_state.installations;
   auto &timers = step_state.timers;
   auto &queues = step_state.queues;
   auto &intents = step_state.intents;
@@ -469,7 +464,7 @@ Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_st
   }
   {
     auto in = snap::section_input(view, snap::tags[7]);
-    read_scst(in, states, subscriptions, installations, objects.generation.size());
+    read_scst(in, react_state, objects.generation.size());
     snap::check_complete(in);
   }
   {

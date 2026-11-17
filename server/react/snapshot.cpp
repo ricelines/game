@@ -33,6 +33,12 @@ template <class S> void serialize(S &s, Meter &v) {
   snap::field(s, v.step0);
   snap::field(s, v.rate);
 }
+template <class S> void serialize(S &s, WorldScript &v) {
+  snap::field(s, v.script);
+  snap::field(s, v.space);
+  snap::field(s, v.description);
+  snap::field(s, v.writing);
+}
 template <class S> void serialize(S &s, Answer &v) {
   snap::field(s, v.present);
   snap::field(s, v.value);
@@ -186,7 +192,7 @@ void write_script_states(snap::Output &out, const ScriptStates &states,
   std::vector<ScriptKey> keys;
   for (const auto &[key, state] : states) {
     (void)state;
-    if (selected.contains(key.object))
+    if (selected.all || (key.object && selected.contains(key.object)))
       keys.push_back(key);
   }
   out.container(keys, snap::max_collection(), [&](snap::Output &s, ScriptKey &key) {
@@ -217,6 +223,13 @@ void read_script_states(snap::Input &in, ScriptStates &states, Subscriptions &su
     states[key].restore(std::move(entries));
   });
   read_map(in, subscriptions.rows);
+}
+void write_world_scripts(snap::Output &out, const std::vector<WorldScript> &world) {
+  auto rows = world;
+  snap::field(out, rows);
+}
+void read_world_scripts(snap::Input &in, std::vector<WorldScript> &world) {
+  snap::field(in, world);
 }
 void write_random(snap::Output &out, const RandomStates &random,
                   const SnapshotSelection &selected) {

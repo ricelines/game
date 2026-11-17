@@ -32,8 +32,8 @@ void holder(const Json &value) {
   fields(value, {"script", "on"});
   step::identifier(value.at("script"), "s:");
   string(value.at("on"));
-  if (!parse_handle(value.at("on").get<std::string>()))
-    throw std::invalid_argument("script holder needs a full object handle");
+  if (value.at("on") != "world" && !parse_handle(value.at("on").get<std::string>()))
+    throw std::invalid_argument("script holder needs world or a full object handle");
 }
 void scope(const Json &scope) {
   fields(scope, {}, {"object", "owned_on_plot", "owned", "all_land", "account", "avatar", "plot"});
@@ -177,7 +177,7 @@ AdminDeclarations declare_admin(react::Terms &terms, react::NativeActions &nativ
       {"oneOf",
        Json::array({str, schema({{"script", str}, {"on", str}}, {"script", "on"},
                                 {{"script", "s:SCRIPT_ID"}, {"on", "o:SLOT.GENERATION"}})})},
-      {"description", "p:N or an actually installed {script:'s:N',on:'o:SLOT.GENERATION'}"}};
+      {"description", "p:N or an installed script with on:'world' or on:'o:SLOT.GENERATION'"}};
   auto add = [&](react::NativeOperation operation, const char *name, const char *description,
                  Json inputs) {
     return catalog::declare_native(native, terms, name, description, "", false, std::move(inputs),
@@ -239,6 +239,7 @@ AdminDeclarations declare_admin(react::Terms &terms, react::NativeActions &nativ
                   {"group", group},
                   {"banned", {{"type", "array"}, {"items", str}, {"uniqueItems", true}}}},
                  {"plot"}, {{"plot", 1}, {"everyone", {"enter"}}}));
+  native.rows.at(ids.plot_permissions).space = "land";
   return ids;
 }
 } // namespace amber::step

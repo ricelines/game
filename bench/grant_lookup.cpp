@@ -45,7 +45,8 @@ int main() {
       if (removed.size() != 3)
         throw std::runtime_error("benchmark did not revoke both children");
       const auto read_start = Clock::now();
-      const auto record = plot_record(state.plots, state.grants, 1, 1000, 2, state.offers, 1);
+      const auto record =
+          plot_record(state.plots, state.grants, 1, 1000, 2, plot_offer(state.offers, 1, 2, 1));
       record_ns.push_back(
           std::chrono::duration<double, std::nano>(Clock::now() - read_start).count());
       checksum += record.at("rights").size();

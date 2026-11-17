@@ -127,6 +127,7 @@ nlohmann::json declaration_json(const react::ScriptDeclaration &declaration) {
       {"version", declaration.version},
       {"kind", declaration.kind == react::ScriptDeclaration::Kind::Model      ? "model"
                : declaration.kind == react::ScriptDeclaration::Kind::Instance ? "instance"
+               : declaration.kind == react::ScriptDeclaration::Kind::World    ? "world"
                                                                               : "rule"},
       {"approved", declaration.approved},
       {"active", declaration.active},
@@ -162,6 +163,8 @@ react::ScriptDeclaration declaration_from_json(const nlohmann::json &data) {
     d.kind = react::ScriptDeclaration::Kind::Instance;
   else if (kind == "rule")
     d.kind = react::ScriptDeclaration::Kind::Rule;
+  else if (kind == "world")
+    d.kind = react::ScriptDeclaration::Kind::World;
   else
     throw std::runtime_error("unknown script kind");
   d.id = data.value("id", ScriptId{});

@@ -1,5 +1,6 @@
 #include "runtime_fixture.hpp"
 #include "space_fixture.hpp"
+#include "step/action_private.hpp"
 #include "step/step.hpp"
 
 #include <cmath>
@@ -10,6 +11,70 @@ namespace bi = step;
 namespace ob = observe;
 namespace re = react;
 using testspace::require;
+void world_ambient_edits_refresh_lighting() {
+  test_runtime::Fixture f;
+  space::State space_state(testspace::settings(), 8);
+  f.terms.rows[2].source = re::Source::Measured;
+  f.terms.rows[2].measurement = re::MeasurementRole::Runtime;
+  re::Term ambient;
+  ambient.id = static_cast<TermId>(f.terms.rows.size());
+  ambient.name = "base.outdoor_lux";
+  ambient.source = re::Source::Setting;
+  f.terms.rows.push_back(ambient);
+  f.terms.by_name[ambient.name] = ambient.id;
+  f.world.values[ambient.id] = Value(1.0);
+  f.objects.position[f.b.slot()] = {0, 5, 0};
+  testspace::Box box({1, 1, 2});
+  const auto geometry = space::import_geometry(space_state.space, box.source());
+  require(space::add(space_state.space, identity(f.objects), transforms(f.objects),
+                     {f.b, geometry.geometry, space::Motion::Static, {}, 10, false, false, {}})
+                  .status == space::Status::Ok,
+          "world ambient test uses actual visible geometry");
+  const auto watcher = f.add(R"(return {kind='model',watches={'novel.result'},
+    on={['novel.result']=function(self)end}})");
+  f.bind(watcher, f.b);
+  auto &points = space_state.light_subscriptions;
+  auto &views = space_state.active_views;
+  bi::sync_illuminance_reads(points, f.subscriptions, identity(f.objects), transforms(f.objects), 2,
+                             std::span(&f.b, 1));
+  ob::track_view(views, 1, {0, 0, 1}, 30);
+  ob::track_view(views, 2, {100, 0, 1}, 30);
+  const auto sample = [&] {
+    f.effects = {};
+    bi::sample_illuminance(points, space_state.space, identity(f.objects), space_state.lights,
+                           space_state.zones, f.runtime, bi::outdoor_lux(f.react_state), f.effects);
+    return re::read(f.values(), f.b, 2, 10, 20).value.numeric();
+  };
+  const auto visible = [&] {
+    const ob::Settings settings{30, 1.5f, 256, 1, .1f, .1, 40, 8, 40};
+    const auto scan = ob::scan(f.objects_state, {f.a, {0, 0, 1}, {0, 1, 0}, 10}, {}, settings,
+                               space_state, bi::outdoor_lux(f.react_state), 0);
+    const auto found = std::ranges::find(scan.things, f.b, &ob::Seen::object);
+    require(found != scan.things.end(), "the stationary object remains observable");
+    return found->lit;
+  };
+  require(sample() == 1 && !visible(), "initial ambient reaches runtime sampling and observation");
+  ob::take_dirty_views(views);
+  const auto edit = [&](double lux) {
+    const std::array<std::string, 1> roles{"architect"};
+    const perm::Players players;
+    const bi::NativeCall call{
+        {PlayerId{1}, 0, {}, {}}, {{"values", {{"base.outdoor_lux", lux}}}}, {}, 10, 20, {}};
+    return bi::native_values(players, f.models, f.values(), f.react_state, {}, roles,
+                             re::ValueAction::WorldSetting, call);
+  };
+  require(!edit(1).world_ambient_changed && ob::take_dirty(points).empty(),
+          "repeating ambient must not invalidate settled illumination");
+  const auto changed = edit(120);
+  require(changed.reply.at("ok") && changed.world_ambient_changed,
+          "actual architect edit did not identify the changed ambient");
+  bi::invalidate_world_illumination(space_state);
+  require(ob::take_dirty_views(views) == std::vector<std::uint64_t>{1, 2},
+          "global ambient changes affect observers in every cell");
+  require(sample() == 120 && !f.effects.ordered.empty() && visible(),
+          "stationary runtime samples and light-dependent observation retained the old ambient");
+  require(!edit(120).world_ambient_changed, "unchanged ambient requested another global refresh");
+}
 void actual_lighting_watch_sampling() {
   test_runtime::Fixture f;
   space::State space_state(testspace::settings(), 8);
@@ -159,6 +224,7 @@ void actual_lighting_watch_sampling() {
 } // namespace
 int main() {
   try {
+    world_ambient_edits_refresh_lighting();
     actual_lighting_watch_sampling();
     std::cout
         << "Actual geometry, light/ambient processes and runtime watch sampling checks passed.\n";

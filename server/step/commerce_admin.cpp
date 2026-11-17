@@ -22,10 +22,13 @@ PlayerId recipient(const Json &value, const perm::Players &players) {
 perm::Holder holder(const Json &row, const perm::Players &players) {
   if (row.is_string())
     return perm::Holder::player(recipient(row, players));
+  const auto script = step::identifier(row.at("script"), "s:");
+  if (row.at("on") == "world")
+    return perm::Holder::script(script, {});
   const auto parsed = parse_handle(row.at("on").get<std::string>());
   if (!parsed)
-    throw std::invalid_argument("script holder needs a full object handle");
-  return perm::Holder::script(step::identifier(row.at("script"), "s:"), *parsed);
+    throw std::invalid_argument("script holder needs an object handle or world");
+  return perm::Holder::script(script, *parsed);
 }
 perm::Holder actor(const step::NativeCall &call) {
   if (const auto *player = std::get_if<PlayerId>(&call.request.caller))
@@ -53,8 +56,12 @@ perm::HolderControl installed_holder(perm::Holder selected, const perm::Players 
     return {selected, selected.id, true};
   }
   const auto object = selected.installed_on;
-  if (!identity.valid(object) || selected.id >= scripts.rows.size() ||
+  if (!selected.id || selected.id >= scripts.rows.size() ||
       scripts.rows[selected.id].id != selected.id)
+    throw std::invalid_argument("unknown current script holder");
+  if (!object)
+    return {selected, 0, react::world_script(react_state.world_scripts, selected.id) != nullptr};
+  if (!identity.valid(object))
     throw std::invalid_argument("unknown current script holder");
   auto installed = react::installed_scripts(models, instances, identity, object);
   const auto applicable_rules = react::rule_scripts(rules, values, object, call.step, call.hz);
@@ -87,7 +94,7 @@ std::string_view grant_fix(perm::Reason reason) {
   case perm::Reason::Duplicate:
     return "revoke the existing grant for this holder and scope before issuing another";
   case perm::Reason::UnknownHolder:
-    return "choose a current player or a script installed on the specified object";
+    return "choose a current player or an installed object or world script";
   case perm::Reason::InvalidDelegation:
     return "delegate once from a root grant, narrowing its scope, rights, cap and expiry";
   default:
@@ -97,7 +104,8 @@ std::string_view grant_fix(perm::Reason reason) {
 Json holder_json(perm::Holder holder) {
   if (holder.kind == perm::HolderKind::Player)
     return "p:" + std::to_string(holder.id);
-  return {{"script", "s:" + std::to_string(holder.id)}, {"on", to_string(holder.installed_on)}};
+  return {{"script", "s:" + std::to_string(holder.id)},
+          {"on", holder.installed_on ? to_string(holder.installed_on) : "world"}};
 }
 Json scope_json(perm::Scope scope) {
   switch (scope.kind) {
@@ -158,7 +166,8 @@ Json grant_json(const perm::Grants &grants, const perm::Grant &grant, Step step,
   const bool monetary = grant.scope.kind == perm::ScopeKind::Account;
   return {
       {"id", "g:" + std::to_string(grant.id)},
-      {"issuer", "p:" + std::to_string(grant.issuer)},
+      {"issuer", holder_json(!grant.issuer && grant.parent ? grants.rows[grant.parent].holder
+                                                           : perm::Holder::player(grant.issuer))},
       {"holder", holder_json(grant.holder)},
       {"scope", scope_json(grant.scope)},
       {"rights", rights_json(grant.verbs, grant.scope.kind)},
@@ -306,13 +315,16 @@ step::NativeCompletion revoke(amber::perm::State &perm_state,
     if (issuer.kind == perm::HolderKind::Player)
       who = player(call, players);
     else {
-      if (!issuer.id || !identity.valid(issuer.installed_on))
+      if (!issuer.id || (issuer.installed_on && !identity.valid(issuer.installed_on)))
         throw std::invalid_argument("stale script caller");
-      who = authority.owner[issuer.installed_on.slot()];
+      if (issuer.installed_on)
+        who = authority.owner[issuer.installed_on.slot()];
     }
     const auto allowed = [&](const perm::Grant &grant) {
+      if (!grant.issuer && !grant.parent)
+        return false;
       if (issuer.kind == perm::HolderKind::Player)
-        return grant.issuer != 0 && (grant.issuer == who || architect);
+        return grant.issuer == who || architect;
       return grant.holder == issuer || (grant.parent && grants.rows[grant.parent].holder == issuer);
     };
     std::vector<GrantId> ids;
@@ -497,8 +509,8 @@ step::NativeCompletion group_member(const perm::Groups &groups, perm::Players &p
     return bad_input(error.what());
   }
 }
-step::NativeCompletion plot_permissions(perm::State &state, const step::NativeCall &call,
-                                        TermId plot_changed) {
+step::NativeCompletion plot_permissions(perm::State &state, const LandSettings &settings,
+                                        const step::NativeCall &call, TermId plot_changed) {
   auto &plots = state.plots;
   const auto &players = state.players;
   const auto &groups = state.groups;
@@ -550,8 +562,9 @@ step::NativeCompletion plot_permissions(perm::State &state, const step::NativeCa
       const auto holders = perm::plot_holders(plot, state.grants, call.step);
       const auto &bounds = plot.bounds;
       const auto area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]);
-      commerce_detail::plot_changed(out, holders, plot_changed, call,
-                                    {"permissions", id, 0, plot.owner, plot.owner, area, 0});
+      commerce_detail::plot_changed(
+          out, holders, plot_changed, call,
+          {"permissions", perm::plot_facts(plots, id, settings.port_spacing_m), plot.owner, area});
     }
     return out;
   } catch (const std::exception &error) {

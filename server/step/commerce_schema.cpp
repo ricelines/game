@@ -324,6 +324,8 @@ CommerceDeclarations declare_commerce(react::Terms &terms, react::NativeActions 
           "fabricate again.",
           "move",
           schema({{"position", pos}, {"rotation", rot}}, {"position"}, {{"position", {0, 0, 0}}}));
+  for (const auto id : {ids.offer_plot, ids.split_plot, ids.join_plots, ids.abandon_plot})
+    native.rows.at(id).space = "land";
   return ids;
 }
 } // namespace amber::step

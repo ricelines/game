@@ -49,6 +49,7 @@ struct Fixture {
   step::DeliveryTargets &delivery = step_state.delivery;
   react::NativeActions &declarations = react_state.native_declarations;
   cm::CommerceDeclarations ids;
+  step::LandSettings land_settings{};
   std::size_t mailbox_max = 1;
   std::array<Handle, 2> bodies;
   explicit Fixture(std::uint32_t capacity = 64)
@@ -61,6 +62,9 @@ struct Fixture {
             float(toml::parse_file(AMBER_CONFIG_PATH)["perception"]["LIGHT_CELL_M"]
                       .value<double>()
                       .value())) {
+    const auto config = toml::parse_file(AMBER_CONFIG_PATH);
+    land_settings.lot_min_m = float(config["land"]["LOT_MIN_M"].value<double>().value());
+    land_settings.port_spacing_m = float(config["land"]["PORT_SPACING_M"].value<double>().value());
     players.rows.resize(4);
     ledger.balance = {{perm::Account::player(1), 100}, {perm::Account::player(2), 100}};
     plots.rows.resize(3);
@@ -182,8 +186,7 @@ struct Fixture {
     const auto operation = std::get<react::ExchangeAction>(declarations.rows.at(action).operation);
     amber::Settings settings{};
     settings.mailbox_max = mailbox_max;
-    settings.land.lot_min_m =
-        float(toml::parse_file(AMBER_CONFIG_PATH)["land"]["LOT_MIN_M"].value<double>().value());
+    settings.land = land_settings;
     auto out =
         step::native_exchange(objects_state, perm_state, space_state, delivery, settings, operation,
                               {{actor, action, target, {}}, std::move(args), {}, 20, 20, {}}, 29);
@@ -966,10 +969,13 @@ void land_refusals_have_fixes_and_denial_records() {
 }
 void plot_changes_dispatch_before_authority_is_removed() {
   Fixture f;
+  f.plots.rows[1].bounds = {990, -20, 1010, 20};
+  f.plots.rows[2].bounds = {990, -25, 1010, -20};
+  f.plots.rows[2].kind = perm::PlotKind::Street;
   const auto admin = step::declare_admin(f.f.terms, f.declarations);
   const auto permissions = [&](nlohmann::json arguments) {
     return step::native_permissions(
-        f.catalog_state, f.react_state, f.perm_state, f.objects_state, false,
+        f.catalog_state, f.react_state, f.perm_state, f.objects_state, f.land_settings, false,
         std::get<react::PermissionAction>(f.declarations.rows.at(admin.plot_permissions).operation),
         {{PlayerId{1}, admin.plot_permissions, {}, {}}, std::move(arguments), {}, 20, 20, {}});
   };
@@ -978,6 +984,16 @@ void plot_changes_dispatch_before_authority_is_removed() {
     self.state.op=event.op;self.state.plot=event.plot;self.state.other=event.other
     self.state.owner=event.owner;self.state.old_owner=event.old_owner
     self.state.area=event.area;self.state.other_area=event.other_area
+    for _,prefix in ipairs({'','other_','old_'}) do
+      local min,max=event[prefix..'min'],event[prefix..'max']
+      self.state[prefix..'min_x']=if min then min.x else nil
+      self.state[prefix..'min_y']=if min then min.y else nil
+      self.state[prefix..'max_x']=if max then max.x else nil
+      self.state[prefix..'max_y']=if max then max.y else nil
+      for _,field in ipairs({'fronts','port','port_x','open','build_open'}) do
+        self.state[prefix..field]=event[prefix..field]
+      end
+    end
   end}})";
   const auto land = f.f.add(observer), lease = f.f.add(observer), builder = f.f.add(observer);
   for (const auto &[script, object, rights] :
@@ -1004,8 +1020,8 @@ void plot_changes_dispatch_before_authority_is_removed() {
   const auto initial_grant = grant_lease(1);
   unsigned count = 0;
   const auto deliver = [&](step::NativeCompletion out, std::string op, PlotId other,
-                           std::string owner, std::string old_owner, double area,
-                           double other_area) {
+                           std::string owner, std::string old_owner, double area, double other_area,
+                           const nlohmann::json &facts) {
     require(out.changed, "plot mutation failed");
     step::WorkQueues queues;
     step::TimerWheel timers;
@@ -1036,11 +1052,32 @@ void plot_changes_dispatch_before_authority_is_removed() {
                   std::get<std::string>(state.values.at(std::string("owner"))) == owner &&
                   std::get<std::string>(state.values.at(std::string("old_owner"))) == old_owner,
               "dispatched plot change has the wrong fields or was duplicated");
+      for (const auto &[key, value] : facts.items()) {
+        const auto &actual = state.values.at(key);
+        require(value.is_boolean()  ? std::get<bool>(actual) == value.get<bool>()
+                : value.is_string() ? std::get<std::string>(actual) == value.get<std::string>()
+                                    : std::get<double>(actual) == value.get<double>(),
+                "dispatched plot facts changed after the native action completed");
+      }
+      require(state.values.contains(std::string("other_min_x")) ==
+                      (op == "split" || op == "join") &&
+                  state.values.contains(std::string("old_min_x")) == (op == "join"),
+              "plot change retained facts for an unrelated operation");
     }
     require(!f.f.states.contains({f.f.c, builder}), "build-only observer received a plot event");
   };
-  deliver(permissions({{"plot", 1}, {"everyone", {"enter"}}}), "permissions", 0, "p:1", "p:1", 800,
-          0);
+  const auto facts = [](double min_x, double max_x, bool open, bool build_open) {
+    return nlohmann::json{{"min_x", min_x}, {"min_y", -20},       {"max_x", max_x},
+                          {"max_y", 20},    {"fronts", "street"}, {"port", 1},
+                          {"port_x", 1000}, {"open", open},       {"build_open", build_open}};
+  };
+  const auto with = [](nlohmann::json result, std::string_view prefix,
+                       const nlohmann::json &other) {
+    for (const auto &[key, value] : other.items())
+      result[std::string(prefix) + key] = value;
+    return result;
+  };
+  auto opened = permissions({{"plot", 1}, {"everyone", {"enter"}}});
   auto unchanged = permissions({{"plot", 1}, {"everyone", {"enter"}}});
   require(unchanged.reply.at("ok") && !unchanged.changed && unchanged.effects.ordered.empty(),
           "unchanged public entry emitted a plot event");
@@ -1051,21 +1088,34 @@ void plot_changes_dispatch_before_authority_is_removed() {
     require(unrelated.changed && unrelated.effects.ordered.empty(),
             "administrative edits without a public-entry change emitted a plot event");
   }
-  deliver(permissions({{"plot", 1}, {"everyone", {"build"}}}), "permissions", 0, "p:1", "p:1", 800,
-          0);
+  deliver(std::move(opened), "permissions", 0, "p:1", "p:1", 800, 0, facts(990, 1010, true, false));
+  auto closed = permissions({{"plot", 1}, {"everyone", {"build"}}});
   unchanged = permissions({{"plot", 1}, {"everyone", {"build"}}});
   require(unchanged.reply.at("ok") && !unchanged.changed && unchanged.effects.ordered.empty(),
           "unchanged closed entry emitted a plot event");
-  deliver(f.call(f.ids.split_plot, PlayerId{1}, {{"plot", 1}, {"x", -15}}), "split", 3, "p:1",
-          "p:1", 200, 600);
-  deliver(f.call(f.ids.join_plots, PlayerId{1}, {{"plots", {1, 3}}}), "join", 3, "p:1", "p:1", 200,
-          600);
+  auto split = f.call(f.ids.split_plot, PlayerId{1}, {{"plot", 1}, {"x", 995}});
+  auto joined = f.call(f.ids.join_plots, PlayerId{1}, {{"plots", {1, 3}}});
   const auto offer = f.call(f.ids.offer_plot, PlayerId{1}, {{"plot", 1}, {"price", 0}});
-  deliver(f.call(f.ids.accept, PlayerId{2}, {{"offer", offer.reply.at("offer")}, {"max_price", 0}}),
-          "owner", 0, "p:2", "p:1", 800, 0);
+  auto sold =
+      f.call(f.ids.accept, PlayerId{2}, {{"offer", offer.reply.at("offer")}, {"max_price", 0}});
   require(!f.grants.rows[initial_grant].live, "sale retained the previous lease grant");
   grant_lease(2);
-  deliver(f.call(f.ids.abandon_plot, PlayerId{2}, {{"plot", 1}}), "owner", 0, "p:0", "p:2", 800, 0);
+  auto abandoned = f.call(f.ids.abandon_plot, PlayerId{2}, {{"plot", 1}});
+  require(!f.plots.rows[3].id && !f.plots.rows[1].owner,
+          "plot changes were not completed before their notifications were dispatched");
+  const auto full = facts(990, 1010, false, true);
+  const auto lower = facts(990, 995, false, true), upper = facts(995, 1010, false, true);
+  deliver(std::move(closed), "permissions", 0, "p:1", "p:1", 800, 0, full);
+  deliver(std::move(split), "split", 3, "p:1", "p:1", 200, 600, with(lower, "other_", upper));
+  deliver(std::move(joined), "join", 3, "p:1", "p:1", 200, 600,
+          with(with(full, "other_", upper), "old_", lower));
+  deliver(std::move(sold), "owner", 0, "p:2", "p:1", 800, 0, full);
+  deliver(std::move(abandoned), "owner", 0, "p:0", "p:2", 800, 0, full);
+  const auto record = perm::plot_record(f.plots, f.grants, 1, f.land_settings.port_spacing_m, 20);
+  require(record.at("build_open") == true && record.at("open") == false &&
+              record.at("fronts") == "street" && record.at("port") == 1 &&
+              record.at("port_x") == 1000,
+          "plot inspection omitted public build or disagreed with the captured plot facts");
 }
 
 void land_editing_preserves_grants_and_refreshes_objects() {

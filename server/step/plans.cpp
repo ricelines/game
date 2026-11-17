@@ -15,7 +15,7 @@ bool valid_event(const EventTurn &turn, IdentityRead identity, const react::Proc
                  const react::Subscriptions &subscriptions, Step now, double hz) {
   if (turn.threshold)
     return react::valid_threshold(*turn.threshold, identity, processes, subscriptions, now, hz);
-  return identity.valid(turn.event.receiver);
+  return !turn.event.receiver || identity.valid(turn.event.receiver);
 }
 EventPayload normalize_arguments(const react::Terms &terms, TermId action, EventPayload args) {
   auto *fields = std::get_if<std::vector<EventField>>(&args);

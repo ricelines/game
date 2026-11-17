@@ -1,8 +1,11 @@
 #include "runtime_fixture.hpp"
+#include "settings.hpp"
+#include "space_fixture.hpp"
 #include "step/action_private.hpp"
 
 #include <chrono>
 #include <iostream>
+#include <toml++/toml.hpp>
 
 using namespace amber;
 using test_runtime::require;
@@ -16,10 +19,163 @@ GrantId grant_id(const step::NativeCompletion &result) {
   require(result.reply.value("ok", false), result.reply.dump().c_str());
   return step::identifier(result.reply.at("grant"), "g:");
 }
+void world_scripts_spend_and_delegate_only_explicit_grants() {
+  test_runtime::Fixture f;
+  perm::State permissions;
+  permissions.players.rows.resize(5);
+  permissions.ledger.balance[perm::Account::player(1)] = 100;
+  f.objects.owner[f.a.slot()] = 1;
+  const auto script = f.add("return {kind='world',on={}}", 1);
+  const auto other = f.add("return {kind='world',on={['novel.cue']=function(self)end}}", 1);
+  f.react_state.world_scripts = {{script, "civic", "Public services", {}},
+                                 {other, "market", "Market services", {}}};
+  const Caller world = ScriptHolder{script, {}};
+  const Caller other_world = ScriptHolder{other, {}};
+  const Json holder = {{"script", "s:" + std::to_string(script)}, {"on", "world"}};
+  const Json other_holder = {{"script", "s:" + std::to_string(other)}, {"on", "world"}};
+  const auto admin = step::declare_admin(f.terms, f.react_state.native_declarations);
+  const auto commerce = step::declare_commerce(f.terms, f.react_state.native_declarations);
+  space::State space_state{testspace::settings(), 8};
+  const Settings settings{};
+  const step::DeliveryTargets delivery;
+  auto invoke = [&](Caller caller, TermId action, Json arguments) {
+    auto input = call(1, action, {}, std::move(arguments));
+    input.request.caller = caller;
+    const auto *player = std::get_if<PlayerId>(&caller);
+    const bool architect = player && *player == 4;
+    const auto &operation = f.react_state.native_declarations.rows.at(action).operation;
+    if (const auto *permission = std::get_if<react::PermissionAction>(&operation))
+      return step::native_permissions(f.catalog_state, f.react_state, permissions, f.objects_state,
+                                      settings.land, architect, *permission, input);
+    return step::native_exchange(f.objects_state, permissions, space_state, delivery, settings,
+                                 std::get<react::ExchangeAction>(operation), input, 0);
+  };
+  auto pay = [&](Caller caller, std::string_view from, std::int64_t amount) {
+    return invoke(caller, commerce.pay, {{"from", from}, {"to", "p:3"}, {"amount", amount}});
+  };
+  require(!pay(world, "p:1", 1).reply.at("ok") && !pay(world, "p:0", 1).reply.at("ok") &&
+              permissions.ledger.balance.at(perm::Account::player(1)) == 100 &&
+              perm::balance(permissions.ledger, perm::Account::player(3)) == 0,
+          "world script inherited spending authority from its author or its absent host object");
+  require(!invoke(world, admin.grant,
+                  {{"holder", "p:2"},
+                   {"scope", {{"account", "p:0"}}},
+                   {"rights", {"spend"}},
+                   {"cap", 1},
+                   {"period_s", 60},
+                   {"expires_s", 30}})
+               .reply.at("ok"),
+          "world script created root spending authority without an explicit parent grant");
+
+  const auto parent = grant_id(invoke(PlayerId{1}, admin.grant,
+                                      {{"holder", holder},
+                                       {"scope", {{"account", "p:1"}}},
+                                       {"rights", {"spend"}},
+                                       {"cap", 30},
+                                       {"period_s", 60},
+                                       {"expires_s", 120}}));
+  require(pay(world, "p:1", 10).changed && !pay(other_world, "p:1", 1).reply.at("ok"),
+          "world spending grant must authorize exactly its installed script");
+  const auto child = grant_id(invoke(world, admin.grant,
+                                     {{"holder", other_holder},
+                                      {"scope", {{"account", "p:1"}}},
+                                      {"rights", {"spend"}},
+                                      {"cap", 25},
+                                      {"period_s", 60},
+                                      {"expires_s", 60}}));
+  require(permissions.grants.rows[child].parent == parent && pay(other_world, "p:1", 15).changed &&
+              !pay(world, "p:1", 6).reply.at("ok") && !pay(other_world, "p:1", 6).reply.at("ok") &&
+              pay(world, "p:1", 5).changed &&
+              permissions.ledger.balance.at(perm::Account::player(1)) == 70 &&
+              permissions.ledger.balance.at(perm::Account::player(3)) == 30,
+          "world parent and child spend from one bounded allowance and the named wallet");
+  require(!invoke(other_world, admin.grant,
+                  {{"holder", "p:2"},
+                   {"scope", {{"account", "p:1"}}},
+                   {"rights", {"spend"}},
+                   {"cap", 1},
+                   {"period_s", 60},
+                   {"expires_s", 30}})
+               .reply.at("ok"),
+          "world script delegated a grant beyond the permitted single child level");
+  require(invoke(PlayerId{1}, admin.revoke, {{"grant", "g:" + std::to_string(parent)}}).changed &&
+              !permissions.grants.rows[child].live && !pay(world, "p:1", 1).reply.at("ok") &&
+              !pay(other_world, "p:1", 1).reply.at("ok"),
+          "revocation must remove world spending authority and its delegated child");
+
+  const auto root_holder = perm::Holder::script(script, {});
+  const auto root = perm::create_root_grant(
+      permissions.grants, permissions.players,
+      {0, root_holder, perm::Scope::account(perm::Account::player(0)), 1, 20, 1200, 2410},
+      {root_holder, 0, true}, 10);
+  require(bool(root), "startup installs an explicit bounded root allowance for a world script");
+  const auto root_child = grant_id(invoke(world, admin.grant,
+                                          {{"holder", "p:2"},
+                                           {"scope", {{"account", "p:0"}}},
+                                           {"rights", {"spend"}},
+                                           {"cap", 15},
+                                           {"period_s", 60},
+                                           {"expires_s", 60}}));
+  require(permissions.grants.rows[root_child].parent == root.grant &&
+              pay(PlayerId{2}, "p:0", 5).changed && !pay(world, "p:0", 16).reply.at("ok"),
+          "world delegation of a startup root allowance shares its parent's cap");
+  const auto listed = invoke(world, admin.list_grants, Json::object()).reply;
+  require(listed.at("given").size() == 1 && listed.at("given")[0].at("issuer") == holder &&
+              listed.at("held")[0].at("issuer") == "p:0",
+          "grant listing distinguishes a world delegator from its actual root issuer");
+  require(
+      !invoke(world, admin.revoke, {{"grant", "g:" + std::to_string(root.grant)}}).reply.at("ok") &&
+          !invoke(PlayerId{4}, admin.revoke, {{"grant", "g:" + std::to_string(root.grant)}})
+               .reply.at("ok") &&
+          !invoke(world, admin.revoke, {{"holder", holder}}).changed &&
+          permissions.grants.rows[root.grant].live,
+      "neither the world holder nor an architect may revoke a grant issued directly by root");
+  require(!invoke(PlayerId{1}, admin.revoke, {{"grant", "g:" + std::to_string(root_child)}})
+                  .reply.at("ok") &&
+              !invoke(PlayerId{4}, admin.revoke, {{"holder", "p:2"}}).changed &&
+              permissions.grants.rows[root_child].live,
+          "authorship grants no revocation power and holder-only revocation stays issuer-scoped");
+  require(
+      invoke(PlayerId{4}, admin.revoke, {{"grant", "g:" + std::to_string(root_child)}}).changed &&
+          !pay(PlayerId{2}, "p:0", 1).reply.at("ok") && permissions.grants.rows[root.grant].live &&
+          pay(world, "p:0", 15).changed &&
+          !permissions.ledger.balance.contains(perm::Account::player(0)),
+      "architect revocation removes a world child while preserving the capped root allowance");
+
+  require(!invoke(world, admin.grant,
+                  {{"holder", "p:2"},
+                   {"scope", {{"owned", "p:1"}}},
+                   {"rights", {"use"}},
+                   {"expires_s", 60}})
+               .reply.at("ok"),
+          "world script delegated its author's goods without a covering parent grant");
+  const auto owned_parent = grant_id(invoke(PlayerId{1}, admin.grant,
+                                            {{"holder", holder},
+                                             {"scope", {{"owned", "p:1"}}},
+                                             {"rights", {"use", "edit"}},
+                                             {"expires_s", 120}}));
+  const auto owned_child = grant_id(invoke(
+      world, admin.grant,
+      {{"holder", "p:2"}, {"scope", {{"owned", "p:1"}}}, {"rights", {"use"}}, {"expires_s", 60}}));
+  const auto target = perm::target(identity(f.objects), authority(f.objects),
+                                   permissions.owner_limits, permissions.plots, f.a);
+  require(permissions.grants.rows[owned_child].parent == owned_parent &&
+              perm::check(perm::Holder::player(2), perm::Verb::Use, target, permissions.players,
+                          permissions.grants, 10) &&
+              !perm::check(perm::Holder::player(2), perm::Verb::Edit, target, permissions.players,
+                           permissions.grants, 10) &&
+              !perm::check(perm::Holder::player(2), perm::Verb::Use, target, permissions.players,
+                           permissions.grants, permissions.grants.rows[owned_child].expires_step),
+          "world script delegates its explicit owned scope with narrowed rights and lifetime");
+}
 } // namespace
 int main() {
   try {
+    world_scripts_spend_and_delegate_only_explicit_grants();
     test_runtime::Fixture f;
+    step::LandSettings land_settings{};
+    land_settings.port_spacing_m = float(
+        toml::parse_file(AMBER_CONFIG_PATH)["land"]["PORT_SPACING_M"].value<double>().value());
     amber::perm::State perm_state;
     perm::Players &players = perm_state.players;
     players.rows.resize(5);
@@ -50,7 +206,7 @@ int main() {
       const auto *player = std::get_if<PlayerId>(&input.request.caller);
       const bool architect = player && *player == 4;
       return step::native_permissions(
-          f.catalog_state, f.react_state, perm_state, f.objects_state, architect,
+          f.catalog_state, f.react_state, perm_state, f.objects_state, land_settings, architect,
           std::get<react::PermissionAction>(native.rows.at(input.request.action).operation), input);
     };
     auto run = [&](PlayerId player, TermId action, Handle object, Json input) {

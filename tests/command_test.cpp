@@ -19,7 +19,7 @@ struct Fixture {
   react::Terms &terms = react_state.terms;
   catalog::Models &models = catalog_state.models;
   catalog::Scripts &scripts = catalog_state.scripts;
-  react::InstalledScripts installed;
+  react::InstalledScripts &installed = react_state.installations;
   react::NativeActions &native = react_state.native_declarations;
   Handle body, target;
   Fixture() {
@@ -50,7 +50,7 @@ struct Fixture {
     target = create(objects, init);
   }
   react::Resolution resolve(Caller caller, TermId action, Handle selected) {
-    return react::resolve(native, terms, models, scripts, installed, identity(objects),
+    return react::resolve(react_state, catalog_state, identity(objects),
                           {caller, action, selected, Value{}}, body);
   }
 };
@@ -139,6 +139,36 @@ void typed_inputs_preserve_symbolic_terms_and_reject_ambiguous_payloads() {
   require(!validate(Value{}).empty() && !validate(Value(1.0)).empty(),
           "missing arguments or scalar record accepted");
 }
+void world_actions_need_an_installation_but_no_object_permission() {
+  Fixture f;
+  f.scripts.rows.resize(5);
+  auto &world = f.scripts.rows[4];
+  world.id = 4;
+  world.declaration.kind = react::ScriptDeclaration::Kind::World;
+  world.declaration.actions.push_back({2, {}, "invented.unanswered", false});
+  const auto caller = ScriptHolder{4, {}};
+  require(f.resolve(caller, 2, {}).failure == react::Failure::MissingTarget,
+          "an uploaded world script became installed implicitly");
+  f.react_state.world_scripts.push_back({4, "civic", "Public services", {}});
+  const auto resolved = f.resolve(PlayerId{1}, 2, {});
+  require(resolved && resolved.route == react::Route::World && !resolved.receiver &&
+              !resolved.permission_target && resolved.right.empty() && !resolved.reach &&
+              resolved.declaration_script == 4,
+          "world action required a proxy object or inherited an object permission gate");
+  require(f.resolve(caller, 2, {}).route == react::Route::World &&
+              f.resolve(PlayerId{1}, 2, f.target).route == react::Route::Fallback,
+          "world action routing changed explicitly targeted object actions");
+  f.native.rows[1] = {1, "edit", false, nlohmann::json::object(), react::WritingAction::EditText};
+  require(f.resolve(caller, 1, {}) && f.resolve(caller, 1, {}).right.empty(),
+          "world installation could not publish its own writing");
+  require(f.resolve(PlayerId{1}, 1, {}).failure == react::Failure::MissingTarget &&
+              f.resolve(ScriptHolder{1, f.body}, 1, {}).failure == react::Failure::MissingTarget &&
+              f.resolve(caller, 1, f.target).right == "edit",
+          "world writing exception widened ordinary editing authority");
+  f.react_state.world_scripts.clear();
+  require(f.resolve(caller, 1, {}).failure == react::Failure::MissingTarget,
+          "uninstalled world script retained the writing exception");
+}
 void signatures_follow_authored_units_and_native_schemas() {
   Fixture f;
   f.terms.rows[3].dimensions[1] = 1;
@@ -170,6 +200,7 @@ int main() {
     body_receiver_never_becomes_the_foreign_permission_target();
     script_callers_fallbacks_and_reserved_native_actions_are_distinct();
     typed_inputs_preserve_symbolic_terms_and_reject_ambiguous_payloads();
+    world_actions_need_an_installation_but_no_object_permission();
     signatures_follow_authored_units_and_native_schemas();
     std::cout << "command resolution tests passed\n";
   } catch (const std::exception &e) {

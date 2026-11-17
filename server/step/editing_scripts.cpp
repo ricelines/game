@@ -10,7 +10,8 @@ namespace {
 const catalog::Script &script(const catalog::Scripts &scripts, const Json &value) {
   const auto id = detail::identifier(value, "s:");
   if (id >= scripts.rows.size() || scripts.rows[id].id != id ||
-      scripts.rows[id].declaration.kind == react::ScriptDeclaration::Kind::Rule)
+      scripts.rows[id].declaration.kind == react::ScriptDeclaration::Kind::Rule ||
+      scripts.rows[id].declaration.kind == react::ScriptDeclaration::Kind::World)
     throw std::invalid_argument("installation needs an uploaded ordinary script");
   return scripts.rows[id];
 }

@@ -14,6 +14,7 @@ SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Han
   auto &trades = perm_state.trades;
 
   SnapshotSelection selected;
+  std::set<ScriptId> world_makers;
   selected.objects = snap::ObjectSelection(objects);
   selected.players.insert(actors.begin(), actors.end());
   for (auto object : objects) {
@@ -29,16 +30,19 @@ SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Han
                     [&](Handle part) { return selected.objects.contains(part); })) {
       if (offer.maker.kind == HolderKind::Script) {
         const auto maker = offer.maker.installed_on;
-        // Live instances have non-root owners; retirement clears the owner before slot reuse.
-        if (maker.slot() >= authority.generation.size() || !authority.owner[maker.slot()] ||
-            authority.generation[maker.slot()] != maker.generation())
-          continue;
-        selected.objects.slots.insert(offer.maker.installed_on.slot());
-        selected.objects.objects.insert(offer.maker.installed_on.bits);
-        const auto slot = offer.maker.installed_on.slot();
-        selected.players.insert(authority.owner[slot]);
-        selected.groups.insert(authority.group[slot]);
-        selected.plots.insert(authority.plot[slot]);
+        if (!maker)
+          world_makers.insert(offer.maker.id);
+        else {
+          // Live instances have non-root owners; retirement clears the owner before slot reuse.
+          if (maker.slot() >= authority.generation.size() || !authority.owner[maker.slot()] ||
+              authority.generation[maker.slot()] != maker.generation())
+            continue;
+          selected.objects.slots.insert(maker.slot());
+          selected.objects.objects.insert(maker.bits);
+          selected.players.insert(authority.owner[maker.slot()]);
+          selected.groups.insert(authority.group[maker.slot()]);
+          selected.plots.insert(authority.plot[maker.slot()]);
+        }
       } else
         selected.players.insert(offer.maker.id);
       selected.offers.insert(offer.id);
@@ -96,6 +100,10 @@ SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Han
     if (const auto found = grants.script_held.find(object); found != grants.script_held.end())
       for (const auto &[script, held] : found->second)
         append(held);
+  if (const auto found = grants.script_held.find(0); found != grants.script_held.end())
+    for (auto script : world_makers)
+      if (const auto held = found->second.find(script); held != found->second.end())
+        append(held->second);
   while (!pending.empty()) {
     auto id = pending.back();
     pending.pop_back();

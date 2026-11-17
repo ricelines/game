@@ -109,6 +109,7 @@ def validate_symbols(plan: dict) -> None:
     objects = {row["key"] for row in plan["objects"]}
     models = {row["key"] for row in plan["models"]}
     scripts = {row["key"] for row in plan["scripts"]}
+    world_scripts = {row["script"] for row in plan.get("world_scripts", [])}
     players = {row["id"] for row in plan["profiles"]}
     groups = {row["id"] for row in plan["groups"]}
 
@@ -135,6 +136,10 @@ def validate_symbols(plan: dict) -> None:
     for field, keys in (("objects", objects), ("models", models), ("scripts", scripts)):
         if len(keys) != len(plan[field]):
             raise ValueError(f"Duplicate {field} key")
+    if len(world_scripts) != len(plan.get("world_scripts", [])):
+        raise ValueError("Duplicate world script")
+    if not world_scripts <= scripts:
+        raise ValueError("Missing world script")
     for row in plan["objects"]:
         if row["owner"] not in players:
             raise ValueError("An object needs a registered non-root owner")
@@ -164,12 +169,18 @@ def validate_symbols(plan: dict) -> None:
         if row["from"] not in objects or row["to"] not in objects:
             raise ValueError(f"Missing relation endpoint: {row}")
     for row in plan["bootstrap"] + plan.get("script_state", []):
-        if row["target"] not in objects:
+        if row["target"] == "world":
+            if row.get("script") not in world_scripts:
+                raise ValueError("Missing installed world script")
+        elif row["target"] not in objects:
             raise ValueError(f"Missing target {row['target']}")
 
     def holder(reference):
         if isinstance(reference, str):
             wallet(reference)
+        elif reference["on"] == "world":
+            if reference["script"] not in world_scripts:
+                raise ValueError(f"Missing installed world grant holder: {reference}")
         elif reference["script"] not in scripts or reference["on"] not in objects:
             raise ValueError(f"Missing installed grant holder: {reference}")
 

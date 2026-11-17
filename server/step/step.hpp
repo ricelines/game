@@ -184,6 +184,7 @@ struct NativeCompletion {
   std::vector<ScriptId> changed_scripts;
   std::vector<TermId> changed_terms, changed_materials;
   bool permissions_changed = false;
+  bool world_ambient_changed = false;
   std::vector<perm::CustodyChange> custody;
   std::vector<Handle> created_objects, removed_objects, visible_objects, hidden_objects;
   std::vector<lifecycle::Rebinding> rebound_objects;
@@ -281,7 +282,7 @@ Json failure(std::string);
 } // namespace amber::step::authoring
 
 namespace amber::step {
-inline constexpr char runtime_version[] = "ambergris-0.6";
+inline constexpr char runtime_version[] = "ambergris-0.7";
 
 struct NavigationRequests {
   struct Request {
@@ -626,8 +627,8 @@ step::NativeCompletion group_create(perm::Groups &groups, perm::Players &players
                                     const step::NativeCall &call);
 step::NativeCompletion group_member(const perm::Groups &groups, perm::Players &players,
                                     const step::NativeCall &call);
-step::NativeCompletion plot_permissions(perm::State &, const step::NativeCall &,
-                                        TermId plot_changed);
+step::NativeCompletion plot_permissions(perm::State &, const LandSettings &,
+                                        const step::NativeCall &, TermId plot_changed);
 
 using Json = nlohmann::json;
 struct ElaborationDeclarations {
@@ -697,8 +698,8 @@ namespace amber::step::editing {
 using Json = nlohmann::json;
 struct Declarations {
   TermId install = 0, uninstall = 0, model_script = 0, edit_text = 0, model_text = 0,
-         set_setting = 0, model_setting = 0, patch_state = 0, relate = 0, define_term = 0,
-         define_material = 0, edit_detail = 0;
+         set_setting = 0, model_setting = 0, world_setting = 0, patch_state = 0, relate = 0,
+         define_term = 0, define_material = 0, edit_detail = 0;
 };
 Declarations declare_editing(react::Terms &, react::NativeActions &);
 std::string validate_install(const Json &);
@@ -716,6 +717,7 @@ std::string validate_define_material(const Json &);
 step::NativeCompletion edit_text(const step::NativeCall &call,
                                  catalog::InstanceTexts &instance_texts,
                                  const catalog::ModelTexts &model_texts, IdentityRead identity);
+step::NativeCompletion world_text(const step::NativeCall &, std::vector<react::WorldScript> &);
 step::NativeCompletion model_text(const step::NativeCall &call, catalog::ModelTexts &model_texts,
                                   const catalog::Models &models, IdentityRead identity,
                                   const perm::Players &players);
@@ -727,6 +729,8 @@ step::NativeCompletion model_setting(const step::NativeCall &call,
                                      react::ModelSettings &model_settings,
                                      const react::ValueRead &values, const catalog::Models &models,
                                      const perm::Players &players);
+step::NativeCompletion world_setting(const step::NativeCall &, react::WorldSettings &,
+                                     const react::ValueRead &, std::span<const std::string> roles);
 step::NativeCompletion patch_state(const step::NativeCall &call, react::Properties &properties,
                                    react::Processes &processes, const react::ValueRead &values,
                                    std::span<const std::string> roles);
@@ -855,6 +859,7 @@ void retire_illumination(IlluminationSources &, observe::Lights &, observe::Zone
 void illumination_values_changed(IlluminationSources &, amber::space::State &space_state,
                                  const react::ValueRead &, std::span<const FactKey>, Step,
                                  double hz);
+void invalidate_world_illumination(space::State &);
 void advance_illumination(IlluminationSources &, amber::space::State &space_state,
                           const react::ValueRead &, Step, double hz);
 void sync_illuminance_reads(observe::LightSubscriptions &, const react::Subscriptions &,
@@ -1078,10 +1083,12 @@ std::string validate_abandon_plot(const Json &);
 std::string validate_split_plot(const Json &);
 std::string validate_join_plots(const Json &);
 NativeCompletion abandon_plot(perm::State &, ObjectState &, const DeliveryTargets &,
-                              const space::Space &, const NativeCall &, TermId plot_changed);
+                              const space::Space &, const LandSettings &, const NativeCall &,
+                              TermId plot_changed);
 NativeCompletion split_plot(perm::State &, ObjectState &, const LandSettings &, const NativeCall &,
                             TermId plot_changed);
-NativeCompletion join_plots(perm::State &, ObjectState &, const NativeCall &, TermId plot_changed);
+NativeCompletion join_plots(perm::State &, ObjectState &, const LandSettings &, const NativeCall &,
+                            TermId plot_changed);
 step::NativeCompletion return_goods(perm::State &, ObjectState &, const DeliveryTargets &,
                                     const space::Space &, const NativeCall &, bool forced = false);
 

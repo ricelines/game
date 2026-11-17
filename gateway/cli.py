@@ -26,6 +26,10 @@ def parser():
     look.add_argument("--limit", type=int)
     inspect = commands.add_parser("inspect")
     inspect.add_argument("target")
+    inspect.add_argument("--owner")
+    inspect.add_argument("--for-sale", action=argparse.BooleanOptionalAction, default=None)
+    inspect.add_argument("--cursor", type=int)
+    inspect.add_argument("--limit", type=int)
     actions = commands.add_parser("actions")
     actions.add_argument("--target")
     actions.add_argument("--name")
@@ -120,7 +124,18 @@ async def run(options):
                     return {"error": "http_error", "status": response.status, "problem": raw}
 
         if options.command in ("look", "inspect", "actions", "do", "cancel"):
-            fields = ("limit", "target", "name", "page", "action", "args", "events_limit")
+            fields = (
+                "limit",
+                "target",
+                "owner",
+                "for_sale",
+                "cursor",
+                "name",
+                "page",
+                "action",
+                "args",
+                "events_limit",
+            )
             arguments = {
                 field: getattr(options, field)
                 for field in fields

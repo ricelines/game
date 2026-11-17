@@ -63,9 +63,14 @@ std::vector<PlotHolder> plot_holders(const Plot &plot, const Grants &grants, Ste
     append(id);
   return result;
 }
-nlohmann::json plot_record(const Plots &plots, const Grants &grants, PlotId id,
-                           float port_spacing_m, Step now, const Offers &offers, PlayerId caller) {
-  using Json = nlohmann::json;
+const Offer *plot_offer(const Offers &offers, PlotId plot, Step now, PlayerId caller) {
+  for (const auto &offer : offers.rows)
+    if (offer.live && offer.plot == plot && (!offer.expires_step || offer.expires_step > now) &&
+        (!offer.buyer || offer.buyer == caller))
+      return &offer;
+  return nullptr;
+}
+PlotFacts plot_facts(const Plots &plots, PlotId id, float port_spacing_m) {
   const auto &plot = plots.rows.at(id);
   const auto &b = plot.bounds;
   const char *fronts = "none";
@@ -90,11 +95,27 @@ nlohmann::json plot_record(const Plots &plots, const Grants &grants, PlotId id,
     }
   }
   const auto port = std::int64_t(std::round((b[0] + b[2]) / (2 * port_spacing_m)));
+  return {plot.id,
+          plot.owner,
+          b,
+          fronts,
+          port,
+          port * port_spacing_m,
+          bool(plot.preset & (Rights{1} << unsigned(LandVerb::Enter))),
+          bool(plot.preset & (Rights{1} << unsigned(LandVerb::Build)))};
+}
+nlohmann::json plot_record(const Plots &plots, const Grants &grants, PlotId id,
+                           float port_spacing_m, Step now, const Offer *offer) {
+  using Json = nlohmann::json;
+  const auto &plot = plots.rows.at(id);
+  const auto facts = plot_facts(plots, id, port_spacing_m);
+  const auto &b = facts.bounds;
   Json rights = Json::array();
   for (const auto &[held, verbs] : plot_holders(plot, grants, now)) {
-    Json holder = held.kind == HolderKind::Player ? Json("p:" + std::to_string(held.id))
-                                                  : Json{{"script", "s:" + std::to_string(held.id)},
-                                                         {"on", to_string(held.installed_on)}};
+    Json holder = held.kind == HolderKind::Player
+                      ? Json("p:" + std::to_string(held.id))
+                      : Json{{"script", "s:" + std::to_string(held.id)},
+                             {"on", held.installed_on ? to_string(held.installed_on) : "world"}};
     Json names = Json::array();
     constexpr const char *land_verbs[]{"build", "enter", "run_scripts", "transfer", "return"};
     for (unsigned bit = 0; bit < 5; ++bit)
@@ -107,21 +128,18 @@ nlohmann::json plot_record(const Plots &plots, const Grants &grants, PlotId id,
                  {"kind", kinds[static_cast<unsigned>(plot.kind)]},
                  {"owner", "p:" + std::to_string(plot.owner)},
                  {"bounds", b},
-                 {"open", bool(plot.preset & (Rights{1} << unsigned(LandVerb::Enter)))},
+                 {"open", facts.open},
+                 {"build_open", facts.build_open},
                  {"area_m2", (b[2] - b[0]) * (b[3] - b[1])},
-                 {"fronts", fronts},
-                 {"port", port},
-                 {"port_x", port * port_spacing_m},
+                 {"fronts", facts.fronts},
+                 {"port", facts.port},
+                 {"port_x", facts.port_x},
                  {"rights", std::move(rights)}};
-  for (const auto &offer : offers.rows)
-    if (offer.live && offer.plot == id && (!offer.expires_step || offer.expires_step > now) &&
-        (!offer.buyer || offer.buyer == caller)) {
-      result["for_sale"] = {
-          {"offer", "offer:" + std::to_string(offer.id)},
-          {"price", offer.price},
-          {"buyer", offer.buyer ? Json("p:" + std::to_string(offer.buyer)) : Json(nullptr)}};
-      break;
-    }
+  if (offer)
+    result["for_sale"] = {
+        {"offer", "offer:" + std::to_string(offer->id)},
+        {"price", offer->price},
+        {"buyer", offer->buyer ? Json("p:" + std::to_string(offer->buyer)) : Json(nullptr)}};
   return result;
 }
 std::string_view required_right(std::string_view right, Caller caller, const perm::Target &target) {
@@ -551,7 +569,7 @@ Reason validate_grant(const Grants &grants, const Players &players, const GrantR
   if (grants.by_key.contains({request.holder, request.scope}))
     return Reason::Duplicate;
   if (request.holder.kind == HolderKind::Script &&
-      (holder.holder != request.holder || !holder.installed || !request.holder.installed_on))
+      (holder.holder != request.holder || !holder.installed))
     return Reason::InvalidScope;
   if (needs_expiry && request.expires_step == 0)
     return Reason::ExpiryRequired;
@@ -608,13 +626,14 @@ GrantResult add_grant(Grants &grants, Players &players, const GrantRequest &requ
 GrantResult create_grant(Grants &grants, Players &players, Holder issuer,
                          const GrantRequest &request, const ScopeControl &control,
                          const HolderControl &holder, Step now) {
-  if (request.issuer == 0 || request.issuer >= players.rows.size() || request.holder.id == 0 ||
-      !issuer.id || (issuer.kind == HolderKind::Player && issuer.id != request.issuer) ||
-      (issuer.kind == HolderKind::Script && !issuer.installed_on) ||
+  if ((request.issuer == 0 && issuer.kind == HolderKind::Player) ||
+      request.issuer >= players.rows.size() || request.holder.id == 0 || !issuer.id ||
+      (issuer.kind == HolderKind::Player && issuer.id != request.issuer) ||
       (request.holder.kind == HolderKind::Player && request.holder.id >= players.rows.size()))
     return {Reason::UnknownHolder};
   if (request.scope.kind == ScopeKind::AllLand ||
-      (request.scope.kind == ScopeKind::Owned && request.scope.owner != request.issuer) ||
+      (request.scope.kind == ScopeKind::Owned && issuer.kind == HolderKind::Player &&
+       request.scope.owner != request.issuer) ||
       control.scope != request.scope || request.verbs == 0 ||
       (request.scope.kind == ScopeKind::Account &&
        (((request.scope.subject == 0 || !control.controller) &&

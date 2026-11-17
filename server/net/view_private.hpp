@@ -10,6 +10,15 @@
 #include <stdexcept>
 
 namespace amber::net::view_detail {
+bool has_action_space(const react::State &, std::string_view);
+Json action_spaces(const react::State &);
+std::vector<TermId> space_action_ids(const catalog::State &, const react::State &,
+                                     std::string_view);
+PlotId plot_id(std::string_view, const perm::Plots &);
+Json inspect_land(const catalog::State &, const react::State &, const ObjectState &,
+                  const perm::State &, const step::Clock &, const amber::Settings &,
+                  const Invocation &);
+
 inline Json vector(Vec3 p) {
   return {p.x, p.y, p.z};
 }

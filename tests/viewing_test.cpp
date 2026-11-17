@@ -11,6 +11,206 @@ namespace vi = amber::net;
 using Json = vi::Json;
 using testspace::require;
 namespace {
+void land_browse_and_actions() {
+  catalog::State catalog_state;
+  react::State react_state{{4096, 50, 5, 64}};
+  ObjectState objects;
+  perm::State permissions;
+  permissions.players.rows.resize(4);
+  const auto native = step::declare_commerce(react_state.terms, react_state.native_declarations);
+  const auto admin = step::declare_admin(react_state.terms, react_state.native_declarations);
+  react::Term quote;
+  quote.id = TermId(react_state.terms.rows.size());
+  quote.name = "base.land_quote";
+  quote.kind = react::Kind::Action;
+  quote.inputs = {{"plot", react::InputType::Integer}};
+  react_state.terms.rows.push_back(quote);
+  react_state.terms.by_name[quote.name] = quote.id;
+  catalog::Script world;
+  world.id = 1;
+  world.declaration.id = 1;
+  world.declaration.kind = react::ScriptDeclaration::Kind::World;
+  world.declaration.actions = {{quote.id, "", quote.name, false}};
+  world.declaration.handlers = {quote.id};
+  world.source = "public land rule source";
+  catalog_state.scripts.rows.push_back(world);
+  react_state.world_scripts.push_back({1, "land", "Land and its tax", "Current tax rules"});
+  react::project_world(react_state, catalog_state.scripts);
+  auto &plots = permissions.plots.rows;
+  plots.push_back({1, 0, 0, 0, {0, -50, 72, 50}, {}, perm::PlotKind::Street});
+  plots.push_back({2, 2, 0, 0, {8, 50, 24, 82}, {}});
+  plots.push_back({3, 3, 0, 0, {100008, 50, 100024, 82}, {}});
+  plots.push_back({}); // A joined-away ID must not appear in a later page.
+  plots.push_back({5, 2, 0, 0, {24, 50, 40, 82}, {}});
+  plots.push_back({6, 2, 0, 0, {40, 50, 56, 82}, {}});
+  perm::rebuild_plot_owners(permissions.plots);
+  const auto offer = [&](PlotId plot, PlayerId buyer, Step expiry) {
+    perm::Offer row;
+    row.id = perm::OfferId(permissions.offers.rows.size());
+    row.plot = plot;
+    row.seller = plots[plot].owner;
+    row.buyer = buyer;
+    row.price = 19;
+    row.expires_step = expiry;
+    row.live = true;
+    permissions.offers.rows.push_back(row);
+  };
+  offer(3, 0, 0);
+  offer(5, 3, 0);
+  offer(6, 0, 5);
+  Settings settings{};
+  settings.perception.things_max = 1;
+  settings.perception.events_per_response = 40;
+  settings.actions_page = 50;
+  settings.land.port_spacing_m = 1000;
+  net::SessionViews sessions;
+  observe::Hearing hearing;
+  net::Invocation call;
+  call.session = 1;
+  call.principal.player = 2;
+  const step::Clock clock{.step = 10, .hz = 20};
+  const auto inspect = [&] {
+    return net::read_inspect(catalog_state, react_state, sessions, hearing, objects, permissions,
+                             clock, settings, call)
+        .fields;
+  };
+  const auto actions = [&] {
+    return net::read_actions(catalog_state, react_state, objects, sessions, hearing, settings,
+                             permissions, clock.step, call)
+        .fields;
+  };
+  call.request.fields = {{"target", "land"}, {"owner", "self"}};
+  auto page = inspect();
+  require(page["ok"] == true && page["land"].size() == 1 && page["land"][0]["plot"] == 2 &&
+              page["next_cursor"] == 2 && page["more"] == true &&
+              page["rules"][0]["writing"] == "Current tax rules" &&
+              page["rules"][0]["holder"] == Json{{"script", "s:1"}, {"on", "world"}} &&
+              !page["land"][0].contains("dist_m"),
+          "remote land browsing uses default page size, owner filter and published world rules");
+  call.request.fields["cursor"] = page["next_cursor"];
+  page = inspect();
+  require(page["land"][0]["plot"] == 5 && page["next_cursor"] == 5,
+          "owner filtering runs before pagination and ignores retired plot IDs");
+  call.request.fields["cursor"] = page["next_cursor"];
+  page = inspect();
+  require(page["land"][0]["plot"] == 6 && page["next_cursor"].is_null() && page["more"] == false,
+          "final land page has no continuation cursor");
+  call.request.fields = {
+      {"target", "land"}, {"owner", "p:2"}, {"cursor", 4}, {"for_sale", false}, {"limit", 10}};
+  page = inspect();
+  require(page["land"].size() == 2 && page["land"][0]["plot"] == 5 &&
+              page["land"][1]["plot"] == 6 && page["next_cursor"].is_null(),
+          "owner and sale filters resume after a cursor that is not a live plot");
+  call.request.fields["owner"] = "p:3";
+  call.request.fields["cursor"] = 0;
+  call.request.fields["for_sale"] = true;
+  page = inspect();
+  require(page["land"].size() == 1 && page["land"][0]["plot"] == 3 && !page["more"].get<bool>(),
+          "explicit owner filtering includes that owner's visible sale offers");
+  call.request.fields = {{"target", "land"}, {"for_sale", true}, {"limit", 10}};
+  page = inspect();
+  require(page["land"].size() == 1 && page["land"][0]["plot"] == 3 &&
+              page["land"][0]["for_sale"]["price"] == 19,
+          "sale browsing includes remote visible offers, excluding private and expired offers");
+  call.request.fields["for_sale"] = false;
+  require(inspect()["land"].size() == 3, "for_sale false excludes only offers visible to caller");
+  call.request.fields.erase("for_sale");
+  page = inspect();
+  require(page["land"].size() == 4, "unfiltered browsing omitted a live lot");
+  for (const auto &plot : page["land"])
+    require(plot.contains("for_sale") == (plot["plot"] == 3),
+            "unfiltered browsing retains visible offers while hiding private and expired ones");
+  call.request.fields = {{"target", "plot:3"}};
+  const auto remote = inspect();
+  require(remote["plot"] == 3 && remote["actions"]["target"] == "plot:3" &&
+              !remote["action_signatures"].empty(),
+          "remote plot inspection retains full facts and contextual action discovery");
+  call.request.fields["name"] = "engine.accept";
+  auto action = actions().at("action");
+  require(action["example"]["args"]["offer"] == "offer:1" &&
+              action["example"]["args"]["max_price"] == 19 && !action["example"].contains("target"),
+          "plot acceptance example carries the current offer and asking price");
+  call.request.fields["name"] = "base.land_quote";
+  action = actions().at("action");
+  require(action["example"]["args"]["plot"] == 3 && !action["example"].contains("target"),
+          "world land action example carries the plot argument without an object target");
+  call.request.fields["name"] = "engine.grant";
+  action = actions().at("action");
+  require(action["example"]["args"]["scope"] == Json{{"plot", 3}} &&
+              action["example"]["args"]["rights"] == Json::array({"enter"}),
+          "contextual grants use the plot scope and land rights");
+  call.request.fields["name"] = "engine.revoke";
+  action = actions().at("action");
+  require(action["example"]["args"]["scope"] == Json{{"plot", 3}} &&
+              action["example"]["args"].contains("holder") &&
+              !action["example"]["args"].contains("grant"),
+          "contextual revocation uses the holder/scope form rather than mixing selectors");
+  call.request.fields = {{"target", "land"}};
+  auto listed = actions();
+  std::set<std::string> land_actions;
+  for (const auto &action : listed["actions"])
+    land_actions.insert(action["name"].get<std::string>());
+  require(listed["ok"] == true &&
+              land_actions == std::set<std::string>{"base.land_quote", "engine.abandon_plot",
+                                                    "engine.accept", "engine.cancel_offer",
+                                                    "engine.grant", "engine.join_plots",
+                                                    "engine.offer_plot", "engine.plot_permissions",
+                                                    "engine.return", "engine.revoke",
+                                                    "engine.set_offer_price", "engine.split_plot"},
+          "land action space includes land verbs, shared commerce/grants and the world rule");
+  const auto ordinary = net::player_action_ids(
+      react_state.native_declarations, react::value_read(objects, catalog_state, react_state));
+  for (auto id : {native.offer_plot, native.split_plot, native.join_plots, native.abandon_plot,
+                  admin.plot_permissions})
+    require(std::ranges::find(ordinary, id) == ordinary.end(),
+            "ordinary player discovery does not repeat the land-only commands");
+  require(std::ranges::find(ordinary, native.accept) != ordinary.end(),
+          "shared commerce actions remain available outside the land space");
+  call.request.fields = Json::object();
+  require(actions()["action_spaces"][0]["target"] == "land",
+          "ordinary discovery links to the available action spaces");
+  const auto holder = perm::Holder::script(world.id, {});
+  const auto scope = perm::Scope::account(perm::Account::player(2));
+  const auto grant = perm::create_grant(permissions.grants, permissions.players,
+                                        perm::Holder::player(2), {2, holder, scope, 1, 50, 20, 100},
+                                        {scope, 2, perm::all_rights}, {holder, 0, true}, 10);
+  require(bool(grant), "land grant inspection uses a real capped world-script grant");
+  call.request.fields = {{"target", "grants"}};
+  require(inspect()["given"][0]["holder"] == Json{{"script", "s:1"}, {"on", "world"}},
+          "grant inspection identifies world scripts without a fictitious object handle");
+  const auto child = perm::create_grant(permissions.grants, permissions.players, holder,
+                                        {0, perm::Holder::player(2), scope, 1, 20, 20, 80},
+                                        {scope, 2, perm::all_rights}, {}, 10);
+  require(child && inspect()["held"][0]["issuer"] == Json{{"script", "s:1"}, {"on", "world"}} &&
+              inspect()["held"][0]["parent"] == "g:" + std::to_string(grant.grant),
+          "grant inspection attributes a delegated world grant to its script rather than root");
+  require(step::validate_grant({{"holder", {{"script", "s:1"}, {"on", "world"}}},
+                                {"scope", {{"account", "p:2"}}},
+                                {"rights", {"spend"}},
+                                {"cap", 50},
+                                {"period_s", 1},
+                                {"expires_s", 5}})
+              .empty(),
+          "world-script grant syntax accepts its published holder identifier");
+  require(
+      net::validate_inspect(
+          {{"target", "land"}, {"owner", "self"}, {"for_sale", true}, {"cursor", 0}, {"limit", 2}})
+              .empty() &&
+          !net::validate_inspect({{"target", "land"}, {"for_sale", 1}}).empty(),
+      "land browse wire inputs preserve typed filters and paging");
+  permissions.offers.rows[1].expires_step = clock.step;
+  offer(3, 0, 0);
+  permissions.offers.rows.back().price = 23;
+  call.request.fields = {{"target", "land"}, {"for_sale", true}, {"limit", 10}};
+  page = inspect();
+  require(page["land"].size() == 1 && page["land"][0]["for_sale"]["offer"] == "offer:4" &&
+              page["land"][0]["for_sale"]["price"] == 23,
+          "browsing selects the current offer after an earlier offer expires");
+  call.request.fields = {{"target", "plot:3"}};
+  require(inspect()["for_sale"] == page["land"][0]["for_sale"],
+          "individual inspection and browsing disagree about the current visible offer");
+}
+
 void events_projection(bool benchmark) {
   vi::SessionViews views;
   views.rows[1].eye = {};
@@ -109,6 +309,7 @@ void events_projection(bool benchmark) {
 } // namespace
 int main(int argc, char **argv) {
   try {
+    land_browse_and_actions();
     events_projection(argc == 2 && std::string_view(argv[1]) == "--events-bench");
     testspace::Scene scene;
     const auto body = scene.character({0, 0, 0});
@@ -259,6 +460,9 @@ int main(int argc, char **argv) {
          {"required", {"amount"}},
          {"properties", {{"amount", {{"type", "integer"}}}, {"note", {{"type", "string"}}}}}},
         react::WritingAction::EditText);
+    const auto targeted =
+        catalog::declare_native(native, terms, "engine.targeted", "Edit a selected object", "edit",
+                                false, {{"type", "object"}}, react::WritingAction::EditText);
     react_state.inspection_terms = {1, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
     catalog::AuthoredTexts &authored_texts = catalog_state.authored_text;
     const auto detail_id = catalog::append_authored_text(
@@ -293,7 +497,8 @@ int main(int argc, char **argv) {
     const std::string signature = "test.t3(amount: number [kg], note?: string)";
     require(first["body_actions"] == Json::array({signature}) &&
                 first["player_actions"] ==
-                    Json::array({"engine.example(amount: integer, note?: string)"}),
+                    Json::array(
+                        {"engine.example(amount: integer, note?: string)", "engine.targeted()"}),
             "full observation omitted one-line authored/native input signatures");
     amber::perm::State perm_state;
     perm::Players &players = perm_state.players;
@@ -317,6 +522,12 @@ int main(int argc, char **argv) {
     require(offered_action["name"] == "test.t3" && offered_action["signature"] == signature &&
                 offered_action["inputs"][0]["quantity"]["unit"] == "kg",
             "rich action discovery lost callable name, canonical signature or units");
+    action_call.request.fields = {{"name", "engine.targeted"}};
+    const auto example = offered(action_call).fields.at("action").at("example");
+    require(example.at("target") == to_string(body) &&
+                bool(react::resolve(react_state, catalog_state, values.identity,
+                                    {PlayerId{2}, targeted, body, {}}, body)),
+            "named native help omitted the target needed to resolve its example");
     auto &declared_action = scripts.rows[1].declaration.actions[0];
     const auto body_model = scene.objects.model[body.slot()];
     models.rows[body_model].script = 0;
@@ -363,9 +574,10 @@ int main(int argc, char **argv) {
     now = 0;
     action_call.request.fields = Json::object();
     available = offered(action_call).fields;
-    require(available["total"] == 2 && available["actions"][0]["name"] == "engine.example" &&
-                available["actions"][1]["name"] == "test.t3",
-            "self discovery lost owned body actions or native actions with no declared right");
+    require(available["total"] == 3 && available["actions"][0]["name"] == "engine.example" &&
+                available["actions"][1]["name"] == "engine.targeted" &&
+                available["actions"][2]["name"] == "test.t3",
+            "self discovery lost owned body actions or available native actions");
     auto find = [](const Json &rows, Handle h) -> const Json * {
       for (const auto &row : rows)
         if (row["h"] == to_string(h))
@@ -578,15 +790,10 @@ int main(int argc, char **argv) {
             "inspection exposed a no-longer-applicable rule state as an installed script");
     call.principal.player = 2;
     call.request.fields = {{"target", "land"}};
-    const auto nearby_land = inspect(call).fields;
-    require(nearby_land["land"].is_array(), "land inspection returns plots in sight");
-    for (std::size_t i = 0; i < nearby_land["land"].size(); ++i) {
-      require(nearby_land["land"][i]["dist_m"].get<float>() <= perception.sight_m,
-              "land inspection includes a plot beyond sight");
-      if (i)
-        require(nearby_land["land"][i - 1]["dist_m"] <= nearby_land["land"][i]["dist_m"],
-                "land inspection orders plots by nearest point");
-    }
+    const auto all_land = inspect(call).fields;
+    require(all_land["land"].size() == 3 && all_land["land"][0]["plot"] == 1 &&
+                all_land["land"][1]["plot"] == 2 && all_land["land"][2]["plot"] == 3,
+            "land browsing includes remote lots in plot ID order");
     call.request.fields = {{"target", "plot:2"}};
     const auto land = inspect(call).fields;
     require(land["owner"] == "p:3" && land["plot"] == 2 &&

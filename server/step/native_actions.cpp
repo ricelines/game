@@ -133,7 +133,8 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
   case react::ExchangeAction::AbandonPlot: {
     if (const auto error = validate_abandon_plot(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = abandon_plot(perm_state, objects_state, delivery, space, call, plot_changed);
+    out =
+        abandon_plot(perm_state, objects_state, delivery, space, settings.land, call, plot_changed);
     break;
   }
   case react::ExchangeAction::SplitPlot: {
@@ -145,7 +146,7 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
   case react::ExchangeAction::JoinPlots: {
     if (const auto error = validate_join_plots(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = join_plots(perm_state, objects_state, call, plot_changed);
+    out = join_plots(perm_state, objects_state, settings.land, call, plot_changed);
     break;
   }
   case react::ExchangeAction::ReturnGoods: {
@@ -251,8 +252,9 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
 NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
                                     const amber::react::State &react_state,
                                     amber::perm::State &perm_state,
-                                    amber::ObjectState &objects_state, bool architect,
-                                    react::PermissionAction operation, const NativeCall &call) {
+                                    amber::ObjectState &objects_state, const LandSettings &settings,
+                                    bool architect, react::PermissionAction operation,
+                                    const NativeCall &call) {
 
   auto &players = perm_state.players;
   auto &groups = perm_state.groups;
@@ -301,7 +303,8 @@ NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
   case react::PermissionAction::PlotPermissions: {
     if (const auto error = validate_plot_permissions(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = plot_permissions(perm_state, call, react_state.terms.by_name.at("base.plot_changed"));
+    out = plot_permissions(perm_state, settings, call,
+                           react_state.terms.by_name.at("base.plot_changed"));
     break;
   }
   }
@@ -364,6 +367,14 @@ NativeCompletion native_values(const perm::Players &players, const catalog::Mode
     out = editing::model_setting(call, model_settings, values, models, players);
     break;
   }
+  case react::ValueAction::WorldSetting: {
+    if (const auto error = editing::validate_set_setting(call.arguments); !error.empty())
+      throw std::invalid_argument(error);
+    const auto before = outdoor_lux(react_state);
+    out = editing::world_setting(call, react_state.world_settings, values, roles);
+    out.world_ambient_changed = outdoor_lux(react_state) != before;
+    break;
+  }
   case react::ValueAction::PatchState: {
     if (const auto error = editing::validate_patch_state(call.arguments); !error.empty())
       throw std::invalid_argument(error);
@@ -379,29 +390,30 @@ NativeCompletion native_values(const perm::Players &players, const catalog::Mode
   }
   return out;
 }
-NativeCompletion native_writing(const perm::Players &players, const catalog::Models &models,
-                                catalog::ModelTexts &model_text,
-                                catalog::InstanceTexts &instance_text,
-                                catalog::AuthoredTexts &authored_text, IdentityRead identity,
+NativeCompletion native_writing(catalog::State &catalog_state, react::State &react_state,
+                                const perm::Players &players, IdentityRead identity,
                                 react::WritingAction operation, const NativeCall &call) {
   NativeCompletion out;
   switch (operation) {
   case react::WritingAction::EditText: {
     if (const auto error = editing::validate_edit_text(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = editing::edit_text(call, instance_text, model_text, identity);
+    out = call.request.target ? editing::edit_text(call, catalog_state.instance_text,
+                                                   catalog_state.model_text, identity)
+                              : editing::world_text(call, react_state.world_scripts);
     break;
   }
   case react::WritingAction::ModelText: {
     if (const auto error = editing::validate_model_text(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = editing::model_text(call, model_text, models, identity, players);
+    out = editing::model_text(call, catalog_state.model_text, catalog_state.models, identity,
+                              players);
     break;
   }
   case react::WritingAction::EditDetail: {
     if (const auto error = editing::validate_edit_detail(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = editing::edit_detail(call, authored_text);
+    out = editing::edit_detail(call, catalog_state.authored_text);
     break;
   }
   }

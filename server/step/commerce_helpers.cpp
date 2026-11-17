@@ -6,13 +6,30 @@
 namespace amber::step::commerce_detail {
 void plot_changed(NativeCompletion &out, std::span<const perm::PlotHolder> holders, TermId event,
                   const NativeCall &call, const PlotChange &change) {
-  const std::vector<EventField> value{{"op", std::string(change.op)},
-                                      {"plot", Value(std::int64_t(change.plot))},
-                                      {"other", Value(std::int64_t(change.other))},
-                                      {"owner", "p:" + std::to_string(change.owner)},
-                                      {"old_owner", "p:" + std::to_string(change.old_owner)},
-                                      {"area", Value(double(change.area))},
-                                      {"other_area", Value(double(change.other_area))}};
+  std::vector<EventField> value{{"op", std::string(change.op)},
+                                {"plot", Value(std::int64_t(change.plot.id))},
+                                {"other", Value(std::int64_t(change.other ? change.other->id : 0))},
+                                {"owner", "p:" + std::to_string(change.plot.owner)},
+                                {"old_owner", "p:" + std::to_string(change.old_owner)},
+                                {"area", Value(double(change.area))},
+                                {"other_area", Value(double(change.other_area))}};
+  value.reserve(14 + 7 * (change.other.has_value() + change.old.has_value()));
+  const auto append = [&](std::string_view prefix, const perm::PlotFacts &plot) {
+    const auto key = [&](std::string_view name) { return std::string(prefix) + std::string(name); };
+    const auto &b = plot.bounds;
+    value.push_back({key("min"), Vec3{b[0], b[1], 0}});
+    value.push_back({key("max"), Vec3{b[2], b[3], 0}});
+    value.push_back({key("fronts"), std::string(plot.fronts)});
+    value.push_back({key("port"), Value(plot.port)});
+    value.push_back({key("port_x"), Value(double(plot.port_x))});
+    value.push_back({key("open"), Value(plot.open)});
+    value.push_back({key("build_open"), Value(plot.build_open)});
+  };
+  append({}, change.plot);
+  if (change.other)
+    append("other_", *change.other);
+  if (change.old)
+    append("old_", *change.old);
   std::set<std::pair<ScriptId, std::uint64_t>> sent;
   for (const auto &[holder, verbs] : holders)
     if (holder.kind == perm::HolderKind::Script &&
@@ -37,22 +54,14 @@ PlayerId player_id(const Json &input, const perm::Players &players) {
     throw std::invalid_argument("unknown player wallet");
   return id;
 }
-PlayerId controller(const step::NativeCall &call, IdentityRead identity, AuthorityRead authority,
-                    const perm::Players &players) {
-  const auto holder = actor(call);
-  if (holder.kind == perm::HolderKind::Player)
-    return player_id("p:" + std::to_string(holder.id), players);
-  if (!identity.valid(holder.installed_on))
-    throw std::invalid_argument("script installation is no longer alive");
-  const auto owner = authority.owner[holder.installed_on.slot()];
-  return player_id("p:" + std::to_string(owner), players);
-}
 perm::AccountTarget default_account(const step::NativeCall &call, IdentityRead identity,
                                     AuthorityRead authority, const perm::Players &players,
                                     const perm::Groups &groups) {
   const auto holder = actor(call);
   if (holder.kind == perm::HolderKind::Player)
     return step::account("p:" + std::to_string(holder.id), identity, authority, players, groups);
+  if (!holder.installed_on)
+    throw std::invalid_argument("a world script must name the account to use");
   return step::account(to_string(holder.installed_on), identity, authority, players, groups);
 }
 Handle present(const DeliveryTargets &delivery, IdentityRead identity, PlayerId player) {

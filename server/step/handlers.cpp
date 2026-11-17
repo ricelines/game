@@ -92,7 +92,8 @@ void invalidate_execution(std::deque<ExecutionFrame> &execution, IdentityRead id
     if (auto *handler = std::get_if<HandlerRun>(&frame); handler && handler->started) {
       auto &invocation = handler->invocation;
       if (invocation.state &&
-          (!identity.valid(invocation.self.object) || !states.contains(invocation.self))) {
+          ((invocation.self.object && !identity.valid(invocation.self.object)) ||
+           !states.contains(invocation.self))) {
         invocation.state = nullptr;
         invocation.random = nullptr;
       }

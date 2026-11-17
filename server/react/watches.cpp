@@ -8,7 +8,7 @@ namespace amber::react {
 std::vector<HandlerRef> dispatch(const Triggers &triggers, IdentityRead identity,
                                  std::span<const TermId> flags, Handle receiver, TermId trigger) {
   std::vector<HandlerRef> out;
-  if (!identity.valid(receiver))
+  if (receiver && !identity.valid(receiver))
     return out;
   auto it = triggers.find(trigger);
   if (it == triggers.end())
@@ -20,6 +20,12 @@ std::vector<HandlerRef> dispatch(const Triggers &triggers, IdentityRead identity
         }))
       out.push_back(handler);
   };
+  if (!receiver) {
+    for (const auto &handler : row.by_world)
+      if (handler.enabled)
+        out.push_back(handler);
+    return out;
+  }
   if (auto found = row.by_material.find(identity.material[receiver.slot()]);
       found != row.by_material.end())
     add(found->second);
@@ -36,6 +42,8 @@ std::vector<HandlerRef> dispatch(const Triggers &triggers, IdentityRead identity
 std::vector<HandlerRef> dispatch(const Triggers &triggers, const ValueRead &values, Handle receiver,
                                  TermId trigger, Step now, double hz) {
   std::vector<TermId> flags;
+  if (!receiver)
+    return dispatch(triggers, values.identity, flags, receiver, trigger);
   if (auto row = triggers.find(trigger); row != triggers.end())
     for (const auto &[term, handler] : row->second.by_flag) {
       (void)handler;
@@ -159,11 +167,6 @@ std::optional<std::pair<HandlerRef, std::size_t>> find_handler(const Triggers &t
                                                                const ValueRead &values,
                                                                ScriptKey consumer, TermId trigger,
                                                                Step now, double hz) {
-  if (!values.identity.valid(consumer.object))
-    return {};
-  if ((values.identity.flags[consumer.object.slot()] & Held) &&
-      !values.plots[consumer.object.slot()])
-    return {};
   const auto found = triggers.find(trigger);
   if (found == triggers.end())
     return {};
@@ -171,6 +174,16 @@ std::optional<std::pair<HandlerRef, std::size_t>> find_handler(const Triggers &t
   const auto matches = [&](const HandlerRef &handler) {
     return handler.enabled && handler.script == consumer.script;
   };
+  if (!consumer.object) {
+    for (std::size_t i = 0; i < row.by_world.size(); ++i)
+      if (matches(row.by_world[i]))
+        return std::pair{row.by_world[i], i};
+    return {};
+  }
+  if (!values.identity.valid(consumer.object) ||
+      ((values.identity.flags[consumer.object.slot()] & Held) &&
+       !values.plots[consumer.object.slot()]))
+    return {};
   if (const auto material = row.by_material.find(values.identity.material[consumer.object.slot()]);
       material != row.by_material.end() && matches(material->second))
     return std::pair{material->second, std::size_t{0}};

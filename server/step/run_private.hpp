@@ -47,11 +47,9 @@ void sample_motion(std::vector<observe::MotionSample> &motion,
                    std::span<const Handle> moved, const space::Space &space, IdentityRead ids,
                    TransformRead poses, double hz);
 
-nlohmann::json state_report(const react::ValueRead &values,
-                            std::span<const TermId> inspection_terms, TransformRead poses,
+nlohmann::json state_report(const ObjectState &, const catalog::State &, const react::State &,
                             const amber::step::Clock &clock, std::size_t script_errors,
-                            const TimerWheel &pending_timers,
-                            const react::AllocationRows &allocations);
+                            const TimerWheel &pending_timers);
 void publish_value_changes(net::ReplicationIndex &, net::SessionViews &, const react::Processes &,
                            std::span<const FactKey>);
 void record_frame(record::Journal &journal, record::Writer &writer, net::RecordFeed &feed,
@@ -96,19 +94,6 @@ void refresh_connections(amber::net::State &net_state, amber::space::State &spac
                          const amber::ObjectState &objects_state, observe::Settings settings,
                          const amber::step::Clock &clock);
 } // namespace amber::step
-
-namespace amber::step::start {
-void install_catalog(const Json &, amber::react::State &react_state, const catalog::Hash &,
-                     const catalog::RuntimePins &, react::VmSettings,
-                     const std::filesystem::path &asset_root,
-                     const std::filesystem::path &script_root, amber::catalog::State &catalog_state,
-                     Symbols &);
-void bind_relation_reads(react::RelationsRead &, react::AuthoredRelations &, const react::Terms &,
-                         const space::PhysicalRelations &, std::array<TermId, 4> physical_terms);
-void record_seed(record::Journal &journal, const react::Terms &terms, const catalog::Models &models,
-                 const catalog::Scripts &scripts, std::span<const Handle> initial, IdentityRead ids,
-                 AuthorityRead auth, AttributionRead makers);
-} // namespace amber::step::start
 
 namespace amber::step {
 std::vector<Handle>

@@ -98,7 +98,8 @@ void install_relations(const Json &plan, const Symbols &symbols, const react::Te
 }
 void install_script_state(const Json &plan, const Symbols &symbols, react::ScriptStates &states) {
   for (const auto &row : plan.at("script_state")) {
-    const ScriptKey key{symbols.objects.at(row.at("target").get<std::string>()),
+    const auto target = row.at("target").get<std::string>();
+    const ScriptKey key{target == "world" ? Handle{} : symbols.objects.at(target),
                         symbols.scripts.at(row.at("script").get<std::string>())};
     auto &state = states[key];
     for (const auto &entry : row.at("entries")) {
@@ -150,10 +151,19 @@ void queue_bootstrap(const Json &plan, const Symbols &symbols, const react::Term
       payload = detail::vector(value);
     else if (!value.is_null())
       payload = detail::scalar(value, symbols);
-    const auto queued = step::enqueue_event(
-        queues,
-        {symbols.objects.at(row.at("target").get<std::string>()), {}, id, std::move(payload), {}},
-        event_limit);
+    const auto target = row.at("target").get<std::string>();
+    const auto script = row.contains("script")
+                            ? symbols.scripts.at(row.at("script").get<std::string>())
+                            : ScriptId{};
+    const auto queued =
+        step::enqueue_event(queues,
+                            {target == "world" ? Handle{} : symbols.objects.at(target),
+                             {},
+                             id,
+                             std::move(payload),
+                             {},
+                             script},
+                            event_limit);
     if (queued != step::PushResult::Queued)
       throw std::invalid_argument("initial event queue exceeds configured capacity");
   }

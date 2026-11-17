@@ -146,6 +146,14 @@ void install_catalog(const Json &plan, amber::react::State &react_state,
     if (script.requested_rule)
       approvals.push_back({script.key, "trusted local initial-world content selected at launch"});
   install_scripts(std::move(prepared_scripts), scripts, vm, symbols, approvals);
+  for (const auto &row : plan.value("world_scripts", Json::array())) {
+    const auto id = symbols.scripts.at(row.at("script").get<std::string>());
+    if (scripts.rows[id].declaration.kind != react::ScriptDeclaration::Kind::World ||
+        react::world_script(react_state.world_scripts, id))
+      throw std::invalid_argument("world installation requires a distinct world script");
+    react_state.world_scripts.push_back(
+        {id, row.at("space").get<std::string>(), row.value("description", std::string{}), {}});
+  }
   auto prepared_assets = prepare_assets(plan, asset_root, pins, terms);
   import_assets(std::move(prepared_assets), assets);
   install_models(plan, assets, scripts, terms, models, texts, settings, symbols);

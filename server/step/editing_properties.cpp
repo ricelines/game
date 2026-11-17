@@ -51,8 +51,6 @@ step::NativeCompletion set_setting(const step::NativeCall &call,
     out.effects.changed = out.changed;
     out.result = out.changed ? record::Result::Applied : record::Result::NoEffect;
     out.reply["effect"] = out.changed ? "applied" : "none";
-    if (out.changed)
-      out.changed_objects.push_back(object);
     return out;
   } catch (const std::exception &error) {
     return detail::failed(error);
@@ -91,10 +89,45 @@ step::NativeCompletion model_setting(const step::NativeCall &call,
     out.effects.changed = out.changed;
     out.result = out.changed ? record::Result::Applied : record::Result::NoEffect;
     out.reply["effect"] = out.changed ? "applied" : "none";
-    if (out.changed)
-      out.changed_objects = instances;
-    if (out.changed)
-      out.changed_models.push_back(model);
+    return out;
+  } catch (const std::exception &error) {
+    return detail::failed(error);
+  }
+}
+step::NativeCompletion world_setting(const step::NativeCall &call, react::WorldSettings &world,
+                                     const react::ValueRead &values,
+                                     std::span<const std::string> roles) {
+  try {
+    detail::player(call);
+    if (!detail::role(roles, "architect"))
+      throw detail::PolicyDenied("architect", "world", "world settings require an architect",
+                                 "ask an architect to change the world setting");
+    const auto changes = settings(values.terms, call.arguments.at("values"));
+    auto out = detail::result(false);
+    for (const auto &[term, value] : changes) {
+      const auto existing = world.values.find(term);
+      if ((!value && existing == world.values.end()) ||
+          (value && existing != world.values.end() && *value == existing->second))
+        continue;
+      std::vector<std::pair<Handle, react::Answer>> before;
+      for (std::uint32_t slot = 1; slot < values.identity.model.size(); ++slot)
+        if (values.identity.model[slot]) {
+          const auto object = values.identity.at(slot);
+          before.emplace_back(object, react::read(values, object, term, call.step, call.hz));
+        }
+      if (value)
+        world.values[term] = *value;
+      else
+        world.values.erase(existing);
+      for (const auto &[object, answer] : before)
+        if (!(answer == react::read(values, object, term, call.step, call.hz)))
+          dirty(out, object, term);
+      out.effects.ordered.emplace_back(react::EventWork{{}, {}, term, value.value_or(Value{}), {}});
+      out.changed = true;
+    }
+    out.effects.changed = out.changed;
+    out.result = out.changed ? record::Result::Applied : record::Result::NoEffect;
+    out.reply["effect"] = out.changed ? "applied" : "none";
     return out;
   } catch (const std::exception &error) {
     return detail::failed(error);

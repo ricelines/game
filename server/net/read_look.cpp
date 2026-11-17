@@ -100,7 +100,7 @@ std::vector<TermId> player_action_ids(const react::NativeActions &native,
                                       const react::ValueRead &values) {
   std::vector<TermId> result;
   for (const auto &[id, decl] : native.rows) {
-    if (!std::holds_alternative<react::MechanicAction>(decl.operation))
+    if (decl.space.empty() && !std::holds_alternative<react::MechanicAction>(decl.operation))
       result.push_back(id);
   }
   std::sort(result.begin(), result.end(), [&](TermId a, TermId b) {
@@ -301,6 +301,7 @@ net::Reply read_look(const amber::catalog::State &catalog_state,
         call.request.fields.value("events_limit", settings.events_per_response);
     auto result = net::observation(pending.step, hz, pending.self, things, pending.far,
                                    pending.body_actions, pending.player_actions);
+    result["action_spaces"] = view_detail::action_spaces(react_state);
     row.last_observation.clear();
     row.last_observation.push_back(call.principal.body);
     row.acquired.insert(call.principal.body.bits);

@@ -481,6 +481,8 @@ int after_method(lua_State *L) {
   react::Timer timer;
   timer.due = inv.step + std::max<Step>(1, static_cast<Step>(std::ceil(seconds * inv.hz)));
   timer.event = {inv.self.object, inv.self.object, event, check_payload(L, 4), {}};
+  if (!inv.self.object)
+    timer.event.recipient_script = inv.self.script;
   inv.effects->ordered.push_back(std::move(timer));
   return 0;
 }
@@ -537,7 +539,10 @@ int handler_entry(lua_State *L) {
     return 0;
   }
   lua_createtable(L, 0, static_cast<int>(run.bindings->size() + 2));
-  push_handle(L, inv.self.object);
+  if (inv.self.object)
+    push_handle(L, inv.self.object);
+  else
+    lua_pushnil(L);
   lua_setfield(L, -2, "handle");
   lua_pushunsigned(L, inv.self.script);
   lua_setfield(L, -2, "script");
@@ -567,7 +572,10 @@ int handler_entry(lua_State *L) {
     const auto name = "s:" + std::to_string(script.script);
     lua_pushlstring(L, name.data(), name.size());
     lua_setfield(L, -2, "script");
-    push_handle(L, script.object);
+    if (script.object)
+      push_handle(L, script.object);
+    else
+      lua_pushnil(L);
     lua_setfield(L, -2, "on");
     lua_setreadonly(L, -1, 1);
   }
@@ -783,6 +791,9 @@ ScriptValidation validate_script(std::string_view source, const Terms &terms,
     }
     return &terms.rows[id];
   };
+  if (declaration.kind == ScriptDeclaration::Kind::World && !declaration.watches.empty())
+    result.errors.push_back(
+        "world scripts receive setting-change events and cannot declare object watches");
   for (const auto &watch : declaration.watches)
     if (auto *t = term(watch.term);
         t && t->kind != Kind::Quantity && t->kind != Kind::Flag && t->kind != Kind::Relation)
@@ -808,7 +819,11 @@ ScriptValidation validate_script(std::string_view source, const Terms &terms,
   for (auto &action : declaration.actions) {
     if (auto *t = term(action.action); t && t->kind != Kind::Action)
       result.errors.push_back("invalid action kind");
-    if (std::find(rights.names.begin(), rights.names.end(), action.right) == rights.names.end())
+    if (declaration.kind == ScriptDeclaration::Kind::World) {
+      if (!action.right.empty() || action.reach)
+        result.errors.push_back("world actions cannot require an object right or reach");
+    } else if (std::find(rights.names.begin(), rights.names.end(), action.right) ==
+               rights.names.end())
       result.errors.push_back("unknown action right");
   }
   if (declaration.kind == ScriptDeclaration::Kind::Rule &&
@@ -1154,8 +1169,10 @@ ScriptAnalysis analyze_script(std::string_view source, const Terms &terms,
       d.kind = ScriptDeclaration::Kind::Instance;
     else if (kind == "rule")
       d.kind = ScriptDeclaration::Kind::Rule;
+    else if (kind == "world")
+      d.kind = ScriptDeclaration::Kind::World;
     else
-      throw std::runtime_error("script kind must be model, instance or rule");
+      throw std::runtime_error("script kind must be model, instance, rule or world");
     d.active = d.kind != ScriptDeclaration::Kind::Rule;
     d.approved = false;
     if (data.contains("applies_to")) {
@@ -1213,9 +1230,15 @@ ScriptAnalysis analyze_script(std::string_view source, const Terms &terms,
         d.watches.push_back(std::move(declaration));
       }
     if (data.contains("actions"))
-      for (const auto &[name, value] : data["actions"].items())
-        d.actions.push_back({named_term(terms, name), value.at("right").get<std::string>(), name,
-                             value.value("reach", false)});
+      for (auto &[name, value] : data["actions"].items()) {
+        if (value.is_array() && value.empty())
+          value = nlohmann::json::object();
+        d.actions.push_back({named_term(terms, name),
+                             d.kind == ScriptDeclaration::Kind::World
+                                 ? value.value("right", std::string{})
+                                 : value.at("right").get<std::string>(),
+                             name, value.value("reach", false)});
+      }
     d.tests = data.contains("tests") ? data["tests"].size() : 0;
     lua_getfield(L, -1, "on");
     if (!lua_istable(L, -1))
@@ -1281,6 +1304,8 @@ int get_binding(lua_State *L) {
   if (!lua_isnoneornil(L, 3))
     luaL_error(L, "get reads this object only");
   const auto target = inv.self.object;
+  if (!target)
+    luaL_error(L, "get needs an object");
   consult_object(inv, target);
   auto value = read(values, target, id, inv.step, inv.hz);
   if (value.present)
@@ -1294,6 +1319,16 @@ int setting_binding(lua_State *L) {
   const auto id = term_arg(L, 2, values.terms);
   if (values.terms.rows[id].source != Source::Setting)
     luaL_error(L, "term is not a setting");
+  if (!invocation(L).self.object) {
+    if (!lua_isnoneornil(L, 3))
+      luaL_error(L, "setting reads this installation only");
+    const auto found = values.world_settings.values.find(id);
+    if (found == values.world_settings.values.end())
+      lua_pushnil(L);
+    else
+      push_value(L, found->second);
+    return 1;
+  }
   return get_binding(L);
 }
 int set_binding(lua_State *L) {
@@ -1347,6 +1382,8 @@ int rate_binding(lua_State *L) {
 int related_binding(lua_State *L) {
   auto &binding = *static_cast<RelationBinding *>(binding_data(L));
   auto &inv = invocation(L);
+  if (!inv.self.object)
+    luaL_error(L, "related needs an object");
   const auto id = term_arg(L, 2, binding.terms);
   const auto *direction = luaL_checkstring(L, 3);
   if (std::strcmp(direction, "out") && std::strcmp(direction, "in"))
@@ -1374,6 +1411,8 @@ int related_binding(lua_State *L) {
 int contribute_binding(lua_State *L) {
   auto &binding = *static_cast<ContributionBinding *>(binding_data(L));
   auto &inv = invocation(L);
+  if (!binding.identity.valid(inv.self.object))
+    luaL_error(L, "contribution needs a live object");
   const auto subject = check_handle(L, 2);
   const auto id = term_arg(L, 3, binding.terms);
   const double amount = luaL_checknumber(L, 4);
@@ -1411,6 +1450,8 @@ int contribute_binding(lua_State *L) {
 int share_binding(lua_State *L) {
   const auto &values = *static_cast<const ValueRead *>(binding_data(L));
   auto &inv = invocation(L);
+  if (!values.identity.valid(inv.self.object))
+    luaL_error(L, "get_share needs a live object");
   const auto subject = check_handle(L, 2);
   const auto id = term_arg(L, 3, values.terms);
   const auto &term = values.terms.rows[id];

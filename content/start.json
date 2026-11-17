@@ -458,18 +458,6 @@
         "description": "Physical sloping rails and posts beside every stair tread."
       },
       "author": 1
-    },
-    {
-      "key": "land_post",
-      "file": "models/equipment.py",
-      "material": "base.steel",
-      "text": {
-        "name": "Land post",
-        "description": "Posted land rents and current plot offers. Read the land script before buying."
-      },
-      "script": "land",
-      "author": 1,
-      "group": 1
     }
   ],
   "profiles": [
@@ -1017,8 +1005,6 @@
     "base.buffer_rate": 800,
     "base.purchase_per_joule": 0.0001,
     "base.settlement_seconds": 10,
-    "base.rent_grace_days": 3,
-    "base.rent_hold_days": 7,
     "base.day_seconds": 600,
     "base.impact_resistance": 20000,
     "aq.rated_flow": 0.0008,
@@ -1034,13 +1020,16 @@
     "base.land_along": 250,
     "base.land_depth": 16,
     "base.land_port_falloff": 0.01,
-    "base.land_rent_rate": 0.01,
-    "base.land_tier_value": 5000,
-    "base.land_tier_multiplier": 2,
     "base.land_scarcity": 1,
     "base.land_on_offer": 2,
     "base.land_start_multiple": 3,
-    "base.land_halving_days": 1
+    "base.land_halving_days": 1,
+    "base.land_street_rate": 0.01,
+    "base.land_back_rate": 0.01,
+    "base.land_exempt_value": 0,
+    "base.land_open_discount": 0,
+    "base.land_notice_days": 7,
+    "base.land_period_days": 30
   },
   "objects": [
     {
@@ -2846,43 +2835,6 @@
         "seeded"
       ],
       "maker": 1
-    },
-    {
-      "key": "public.land_post",
-      "model": "land_post",
-      "owner": 1,
-      "at": [
-        12,
-        49,
-        0
-      ],
-      "rotation": [
-        0,
-        0,
-        0.0,
-        1.0
-      ],
-      "flags": [
-        "static"
-      ],
-      "state": {},
-      "settings": {},
-      "preset": [
-        "use",
-        "copy"
-      ],
-      "seed": true,
-      "maker": 1,
-      "group": 1,
-      "group_rights": [
-        "use",
-        "take",
-        "move",
-        "edit",
-        "copy",
-        "transfer",
-        "destroy"
-      ]
     }
   ],
   "relations": [
@@ -3668,14 +3620,12 @@
       "issuer": 0,
       "holder": {
         "script": "land",
-        "on": "public.land_post"
+        "on": "world"
       },
       "scope": {
         "all_land": true
       },
       "rights": [
-        "transfer",
-        "destroy",
         "land_transfer"
       ],
       "cap": 0,
@@ -3686,7 +3636,7 @@
       "issuer": 2,
       "holder": {
         "script": "land",
-        "on": "public.land_post"
+        "on": "world"
       },
       "scope": {
         "account": "p:2"
@@ -3705,7 +3655,7 @@
       "issuer": 3,
       "holder": {
         "script": "land",
-        "on": "public.land_post"
+        "on": "world"
       },
       "scope": {
         "account": "p:3"
@@ -3724,7 +3674,7 @@
       "issuer": 4,
       "holder": {
         "script": "land",
-        "on": "public.land_post"
+        "on": "world"
       },
       "scope": {
         "account": "p:4"
@@ -3743,7 +3693,7 @@
       "issuer": 5,
       "holder": {
         "script": "land",
-        "on": "public.land_post"
+        "on": "world"
       },
       "scope": {
         "account": "p:5"
@@ -3762,7 +3712,7 @@
       "issuer": 6,
       "holder": {
         "script": "land",
-        "on": "public.land_post"
+        "on": "world"
       },
       "scope": {
         "account": "p:6"
@@ -3781,7 +3731,7 @@
       "issuer": 7,
       "holder": {
         "script": "land",
-        "on": "public.land_post"
+        "on": "world"
       },
       "scope": {
         "account": "p:7"
@@ -3913,9 +3863,10 @@
       "payload": null
     },
     {
-      "target": "public.land_post",
+      "target": "world",
       "event": "base.start",
-      "payload": null
+      "payload": null,
+      "script": "land"
     }
   ],
   "script_state": [
@@ -4174,5 +4125,12 @@
         ]
       }
     ]
-  }
+  },
+  "world_scripts": [
+    {
+      "script": "land",
+      "space": "land",
+      "description": "Browse and manage plots."
+    }
+  ]
 }

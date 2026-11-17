@@ -160,6 +160,179 @@ void local_capture_filters_authority_and_runtime_rows() {
   require(captured.f.model_settings.rows.size() == 1 && captured.f.plots.rows.size() == 1,
           "only referenced model/plot settings remain while world settings stay available");
 }
+void world_runtime_survives_checkpoint_but_not_local_capture() {
+  Fixture original;
+  original.populate();
+  const auto script = original.f.add(R"(return {kind='world',on={
+    ['novel.cue']=function(self)
+      assert(self.handle==nil)
+      self.state.calls=(self.state.calls or 0)+1
+      self.state.draw=self:random()
+      self:after(0.5,'novel.cue')
+    end}})");
+  original.react_state.world_scripts.push_back(
+      {script, "civic", "Public services", "The current service notice."});
+  react::project_world(original.react_state, original.f.scripts);
+  record::Journal journal{8, {}};
+  auto run = [&](Fixture &fixture, const react::EventWork &event, Step now) {
+    auto plans = step::plan_event(fixture.f.triggers, fixture.f.values(), event, now, 20);
+    require(plans.size() == 1 && plans.front().handler.script == script,
+            "world timer dispatch selects its installed script");
+    react::Invocation invocation;
+    react::CompletedInvocation completed;
+    require(react::start_invocation(fixture.react_state, fixture.objects_state, 23,
+                                    fixture.catalog_state, journal, plans.front().handler,
+                                    std::move(plans.front().input), invocation, completed) &&
+                completed.outcome.status == react::RunOutcome::Status::Ok,
+            "checkpoint world handler executes in the ordinary VM");
+    step::publish_invocation(journal, fixture.queues, fixture.timers, std::move(completed), {},
+                             1000);
+  };
+  run(original, {{}, {}, 6, {}, {}, script}, 12);
+  const auto saved_state = original.f.states.at({{}, script});
+  const auto saved_random = original.f.random.at(0);
+  snap::Buffer bytes;
+  original.write(bytes);
+  const std::array<std::string_view, 1> versions{"checkpoint-fixture"};
+  Fixture loaded;
+  loaded.read(snap::parse(bytes, versions));
+  require(
+      loaded.react_state.world_scripts.size() == 1 &&
+          loaded.react_state.world_scripts.front().script == script &&
+          loaded.react_state.world_scripts.front().space == "civic" &&
+          loaded.react_state.world_scripts.front().description == "Public services" &&
+          loaded.react_state.world_scripts.front().writing == "The current service notice." &&
+          loaded.f.scripts.rows[script].declaration.kind == react::ScriptDeclaration::Kind::World &&
+          loaded.f.states.at({{}, script}) == saved_state && loaded.f.random.at(0) == saved_random,
+      "complete checkpoint retains world installation, declaration, writing, state and RNG");
+  const auto timers = step::timers(loaded.timers);
+  const auto timer = std::ranges::find_if(timers, [&](const auto &row) {
+    return !row.event.receiver && row.event.recipient_script == script;
+  });
+  require(timer != timers.end() && timer->due == 22,
+          "complete checkpoint retains the world timer's due time and script recipient");
+  require(react::load_script(loaded.f.vm, original.f.code.at(script),
+                             loaded.f.scripts.rows[script].declaration)
+                  .status == react::RunOutcome::Status::Ok,
+          "restored world declaration loads its original immutable script");
+  react::project_world(loaded.react_state, loaded.f.scripts);
+  run(loaded, timer->event, timer->due);
+  require(std::get<double>(loaded.f.states.at({{}, script}).values.at(std::string("calls"))) == 2,
+          "restored world timer continues the saved persistent state");
+
+  const std::array<Handle, 1> selected{original.f.a};
+  const auto catalog = cp::catalog_selection(original.f.models, original.parameters,
+                                             original.f.installed, identity(original.f.objects),
+                                             original.f.objects.params, original.f.rules, selected);
+  const std::array<PlayerId, 1> actors{1};
+  const auto permission =
+      perm::capture_authority(authority(original.f.objects), selected, actors, original.perm_state);
+  bytes.clear();
+  original.write(bytes, std::span<const Handle>(selected), &catalog, &permission);
+  Fixture captured;
+  captured.read(snap::parse(bytes, versions));
+  require(identity(captured.f.objects).valid(original.f.a) &&
+              captured.react_state.world_scripts.empty() &&
+              captured.f.scripts.rows[script].id == 0 &&
+              !captured.f.states.contains({{}, script}) && !captured.f.random.contains(0),
+          "local capture retains its selected object without world installation or runtime state");
+  for (const auto &row : step::timers(captured.timers))
+    require(row.event.receiver && row.event.recipient_script != script,
+            "local capture must not restart a world service timer");
+}
+void local_capture_keeps_world_made_offers_and_their_authority() {
+  Fixture original;
+  original.populate();
+  const auto maker_script = original.f.add("return {kind='world',on={}}");
+  const auto parent_script =
+      original.f.add("return {kind='world',on={['novel.cue']=function(self)end}}");
+  const auto other_script = original.f.add(
+      "return {kind='world',on={['novel.cue']=function(self)self.state.other=true end}}");
+  const auto maker = perm::Holder::script(maker_script, {});
+  const auto parent_holder = perm::Holder::script(parent_script, {});
+  const auto other_holder = perm::Holder::script(other_script, {});
+  original.react_state.world_scripts = {{maker_script, "market", "Local offers", {}},
+                                        {parent_script, "land", "Land authority", {}},
+                                        {other_script, "other", "Unrelated service", {}}};
+  original.f.states[{{}, maker_script}].insert(std::string("offers"), 2.0);
+  step::schedule(original.timers, {30, {{}, {}, 6, {}, {}, maker_script}, {}});
+  const auto grant_to = [&](perm::Holder holder, PlayerId owner, perm::Scope scope,
+                            perm::Rights rights) {
+    const auto result =
+        perm::create_grant(original.grants, original.players, perm::Holder::player(owner),
+                           {owner, holder, scope, rights, 0, 0, 500},
+                           {scope, owner, perm::all_rights}, {holder, 0, true}, 1);
+    require(bool(result), "capture fixture creates an explicit world grant");
+    return result.grant;
+  };
+  const auto parent =
+      perm::create_root_grant(original.grants, original.players,
+                              {0, parent_holder, perm::Scope::all_land(), 8u << 8, 0, 0, 1000},
+                              {parent_holder, 0, true}, 1);
+  require(bool(parent), "capture fixture has a root land delegation parent");
+  const auto child =
+      perm::create_grant(original.grants, original.players, parent_holder,
+                         {0, maker, perm::Scope::plot(1), 8, 0, 0, 500},
+                         {perm::Scope::plot(1), 1, 31, 1, true}, {maker, 0, true}, 2);
+  require(bool(child), "world offer maker receives bounded plot transfer authority");
+  const auto goods_grant =
+      grant_to(maker, 1, perm::Scope::object(original.f.a), perm::bit(perm::Verb::Transfer));
+  const auto remote_grant =
+      grant_to(maker, 3, perm::Scope::object(original.f.c), perm::bit(perm::Verb::Use));
+  const auto unrelated_grant = grant_to(other_holder, 1, perm::Scope::plot(1), 8);
+  grant_to(other_holder, 3, perm::Scope::plot(2), 8);
+  const auto target = [&](Fixture &fixture) {
+    return perm::target(identity(fixture.f.objects), authority(fixture.f.objects), fixture.limits,
+                        fixture.plots, original.f.a);
+  };
+  const auto goods = perm::offer(original.perm_state, permission_flags(original.f.objects), maker,
+                                 target(original), 0, 2, 400, true, 3);
+  const auto plot = perm::offer_plot(original.perm_state, maker, 1, 0, 2, 400, 3);
+  const auto remote = perm::offer_plot(original.perm_state, other_holder, 2, 0, 2, 400, 3);
+  require(goods && plot && remote && (original.f.objects.flags[original.f.a.slot()] & Escrow),
+          "world makers create actual goods and plot offers before capture");
+
+  const std::array selected{original.f.a};
+  const std::array<PlayerId, 1> actors{2};
+  const auto permission =
+      perm::capture_authority(authority(original.f.objects), selected, actors, original.perm_state);
+  const auto catalog = cp::catalog_selection(original.f.models, original.parameters,
+                                             original.f.installed, identity(original.f.objects),
+                                             original.f.objects.params, original.f.rules, selected);
+  snap::Buffer bytes;
+  original.write(bytes, std::span<const Handle>(selected), &catalog, &permission);
+  const std::array<std::string_view, 1> versions{"checkpoint-fixture"};
+  Fixture captured;
+  captured.read(snap::parse(bytes, versions));
+  require(captured.offers.rows[goods.offer].live && captured.offers.rows[plot.offer].live &&
+              captured.offers.rows[goods.offer].maker == maker &&
+              captured.offers.rows[plot.offer].maker == maker &&
+              (captured.f.objects.flags[original.f.a.slot()] & Escrow) &&
+              captured.grants.rows[goods_grant].live && captured.grants.rows[child.grant].live &&
+              captured.grants.rows[child.grant].parent == parent.grant &&
+              captured.grants.rows[parent.grant].live,
+          "local capture retains world-made offers and the explicit grant chain for their land");
+  require(!captured.offers.rows[remote.offer].id && !captured.grants.rows[remote_grant].id &&
+              !captured.grants.rows[unrelated_grant].id &&
+              captured.react_state.world_scripts.empty() &&
+              !captured.f.scripts.rows[maker_script].id &&
+              !captured.f.states.contains({{}, maker_script}) && captured.ledger.balance.empty(),
+          "selected offers do not pull unrelated world grants, service runtime or balances into "
+          "a local capture");
+  for (const auto &timer : step::timers(captured.timers))
+    require(bool(timer.event.receiver), "local offer capture restarted a world service timer");
+  const perm::Buyer buyer{perm::Holder::player(2), 2, perm::AccountTarget::player(2), {}, false};
+  require(perm::accept_plot(captured.perm_state, buyer, plot.offer, 0, 12) &&
+              captured.plots.rows[1].owner == 2 &&
+              perm::accept(captured.perm_state, captured.objects_state, buyer, target(captured),
+                           goods.offer, 0, 10, 12) &&
+              captured.f.objects.owner[original.f.a.slot()] == 2 &&
+              !(captured.f.objects.flags[original.f.a.slot()] & Escrow) &&
+              !captured.offers.rows[plot.offer].live && !captured.offers.rows[goods.offer].live &&
+              captured.ledger.balance.empty(),
+          "captured free offers can complete locally without restoring the world service or "
+          "account balances");
+}
 void priority_capture_keeps_only_the_required_mechanical_edge() {
   Fixture original;
   original.populate();
@@ -203,6 +376,8 @@ int main() {
   try {
     round_trip_and_real_vm_continuation();
     local_capture_filters_authority_and_runtime_rows();
+    world_runtime_survives_checkpoint_but_not_local_capture();
+    local_capture_keeps_world_made_offers_and_their_authority();
     priority_capture_keeps_only_the_required_mechanical_edge();
     std::cout
         << "Thirteen-section assembly, local capture and real VM continuation checks passed.\n";

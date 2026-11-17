@@ -213,11 +213,11 @@ void plot_sales_recheck_price_authority_and_burn_pool_payments() {
   require(accept_plot(state, buyer, offered.offer, 20, 3).reason == Reason::PriceChanged &&
               balance(f.ledger, buyer.payer.account) == 100 && state.plots.rows[1].owner == 1,
           "price ceiling did not protect buyer before mutation");
-  require(
-      !plot_record(state.plots, state.grants, 1, 1000, 3, state.offers, 3).contains("for_sale") &&
-          plot_record(state.plots, state.grants, 1, 1000, 3, state.offers,
-                      2)["for_sale"]["price"] == 30,
-      "private plot offer visibility");
+  require(!plot_record(state.plots, state.grants, 1, 1000, 3, plot_offer(state.offers, 1, 3, 3))
+                  .contains("for_sale") &&
+              plot_record(state.plots, state.grants, 1, 1000, 3,
+                          plot_offer(state.offers, 1, 3, 2))["for_sale"]["price"] == 30,
+          "private plot offer visibility");
   revoke(state.grants, state.players, grant);
   require(accept_plot(state, buyer, offered.offer, 30, 3).reason == Reason::MissingRight &&
               balance(f.ledger, buyer.payer.account) == 100,

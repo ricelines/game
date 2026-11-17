@@ -170,6 +170,16 @@ struct Plots {
   std::vector<Plot> rows{Plot{}};
   std::unordered_map<PlayerId, std::vector<PlotId>> by_owner;
 };
+struct PlotFacts {
+  PlotId id;
+  PlayerId owner;
+  std::array<float, 4> bounds;
+  std::string_view fronts;
+  std::int64_t port;
+  float port_x;
+  bool open, build_open;
+};
+PlotFacts plot_facts(const Plots &, PlotId, float port_spacing_m);
 void set_plot_owner(Plots &, PlotId, PlayerId);
 void rebuild_plot_owners(Plots &);
 const Plot *plot_at(const Plots &, Vec3);
@@ -426,6 +436,7 @@ struct PlotHolder {
   Rights verbs;
 };
 std::vector<PlotHolder> plot_holders(const Plot &, const Grants &, Step);
+const Offer *plot_offer(const Offers &, PlotId, Step, PlayerId caller);
 nlohmann::json plot_record(const Plots &, const Grants &, PlotId, float port_spacing_m, Step,
-                           const Offers & = {}, PlayerId caller = 0);
+                           const Offer * = nullptr);
 } // namespace amber::perm

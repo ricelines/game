@@ -65,8 +65,9 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
 NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
                                     const amber::react::State &react_state,
                                     amber::perm::State &perm_state,
-                                    amber::ObjectState &objects_state, bool architect,
-                                    react::PermissionAction operation, const NativeCall &call);
+                                    amber::ObjectState &objects_state, const LandSettings &,
+                                    bool architect, react::PermissionAction operation,
+                                    const NativeCall &call);
 NativeCompletion native_scripts(amber::catalog::State &catalog_state,
                                 amber::react::State &react_state, amber::perm::State &perm_state,
                                 const amber::ObjectState &objects_state, TermId start_event,
@@ -76,10 +77,8 @@ NativeCompletion native_values(const perm::Players &players, const catalog::Mode
                                std::array<TermId, 4> relation_terms,
                                std::span<const std::string> roles, react::ValueAction operation,
                                const NativeCall &call);
-NativeCompletion native_writing(const perm::Players &players, const catalog::Models &models,
-                                catalog::ModelTexts &model_text,
-                                catalog::InstanceTexts &instance_text,
-                                catalog::AuthoredTexts &authored_text, IdentityRead identity,
+NativeCompletion native_writing(catalog::State &catalog_state, react::State &react_state,
+                                const perm::Players &players, IdentityRead identity,
                                 react::WritingAction operation, const NativeCall &call);
 NativeCompletion native_registry(amber::catalog::State &catalog_state,
                                  amber::react::State &react_state,

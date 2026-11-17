@@ -1061,38 +1061,6 @@
     "description": "settlement seconds"
   },
   {
-    "name": "base.rent_grace_days",
-    "kind": "quantity",
-    "source": "setting",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "rent grace days"
-  },
-  {
-    "name": "base.rent_hold_days",
-    "kind": "quantity",
-    "source": "setting",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "rent hold days"
-  },
-  {
     "name": "base.day_seconds",
     "kind": "quantity",
     "source": "setting",
@@ -2145,54 +2113,6 @@
     "description": "land port falloff"
   },
   {
-    "name": "base.land_rent_rate",
-    "kind": "quantity",
-    "source": "setting",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "land rent rate"
-  },
-  {
-    "name": "base.land_tier_value",
-    "kind": "quantity",
-    "source": "setting",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "land tier value"
-  },
-  {
-    "name": "base.land_tier_multiplier",
-    "kind": "quantity",
-    "source": "setting",
-    "dimensions": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "description": "land tier multiplier"
-  },
-  {
     "name": "base.land_scarcity",
     "kind": "quantity",
     "source": "setting",
@@ -2259,7 +2179,7 @@
   {
     "name": "base.land_tick",
     "kind": "event",
-    "description": "Settle land rent and update pool offers."
+    "description": "Update land legislation and pool sale offers."
   },
   {
     "name": "base.lease_tick",
@@ -2292,8 +2212,152 @@
     "inputs": []
   },
   {
+    "name": "base.land_street_rate",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land street rate"
+  },
+  {
+    "name": "base.land_back_rate",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land back rate"
+  },
+  {
+    "name": "base.land_exempt_value",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land exempt value"
+  },
+  {
+    "name": "base.land_open_discount",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land open discount"
+  },
+  {
+    "name": "base.land_notice_days",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "land notice days"
+  },
+  {
+    "name": "base.land_period_days",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "Days covered by each full land tax payment."
+  },
+  {
+    "name": "base.land_pay",
+    "kind": "action",
+    "description": "Pay the exact full bill from anywhere for one owned lot, or all owned lots in their payment window.",
+    "inputs": [
+      {
+        "name": "plot",
+        "type": "integer",
+        "optional": true
+      },
+      {
+        "name": "amount",
+        "type": "integer"
+      }
+    ]
+  },
+  {
+    "name": "base.land_auto",
+    "kind": "action",
+    "description": "Enable or disable automatic full land tax payment at each deadline.",
+    "inputs": [
+      {
+        "name": "on",
+        "type": "boolean"
+      }
+    ]
+  },
+  {
+    "name": "base.land_due",
+    "kind": "event",
+    "description": "Check one lot at its courtesy notice or tax payment deadline."
+  },
+  {
     "name": "base.plot_changed",
     "kind": "event",
-    "description": "A plot split, join, owner change or newly surveyed pool lot."
+    "description": "A plot split, join, owner change, public entry permission change or newly surveyed pool lot."
+  },
+  {
+    "name": "base.land_boot",
+    "kind": "event",
+    "description": "Continue the first bounded pass over surveyed lots."
+  },
+  {
+    "name": "base.land_quote",
+    "kind": "action",
+    "description": "Ask from anywhere for the current full bill and payment deadline of an owned lot.",
+    "inputs": [
+      {
+        "name": "plot",
+        "type": "integer"
+      }
+    ]
   }
 ]

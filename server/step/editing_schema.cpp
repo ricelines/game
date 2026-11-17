@@ -250,6 +250,11 @@ Declarations declare_editing(react::Terms &terms, react::NativeActions &native) 
                           "",
                           schema({{"model", str}, {"values", scalar_values}}, {"model", "values"},
                                  {{"model", "m:MODEL_ID"}, {"values", Json::object()}}));
+  ids.world_setting =
+      add(react::ValueAction::WorldSetting, "engine.world_setting",
+          "As an architect, change world settings by registered term; null removes a default. "
+          "Object, model and plot overrides retain precedence.",
+          "", schema({{"values", scalar_values}}, {"values"}, {{"values", Json::object()}}));
   const Json state_values = {{"type", "object"},
                              {"additionalProperties", {{"type", {"number", "boolean"}}}}};
   ids.patch_state =

@@ -34,8 +34,9 @@ bool matches(const react::RuleVersion &rule, const react::ValueRead &values, Han
 void set_instances(InstanceScripts &instances, Handle object, std::span<const ScriptId> ids,
                    const catalog::Scripts &scripts) {
   for (std::size_t i = 0; i < ids.size(); ++i) {
-    if (script(scripts, ids[i]).declaration.kind == react::ScriptDeclaration::Kind::Rule)
-      throw std::invalid_argument("world rules cannot be installed as ordinary scripts");
+    const auto kind = script(scripts, ids[i]).declaration.kind;
+    if (kind == ScriptDeclaration::Kind::Rule || kind == ScriptDeclaration::Kind::World)
+      throw std::invalid_argument("only model and instance scripts can be installed on objects");
     if (std::find(ids.begin(), ids.begin() + static_cast<std::ptrdiff_t>(i), ids[i]) !=
         ids.begin() + static_cast<std::ptrdiff_t>(i))
       throw std::invalid_argument("duplicate instance script");
@@ -70,6 +71,9 @@ void project_model(react::Triggers &triggers, const catalog::Models &models,
   if (!model.script)
     return;
   const auto &source = script(scripts, model.script);
+  if (source.declaration.kind == ScriptDeclaration::Kind::Rule ||
+      source.declaration.kind == ScriptDeclaration::Kind::World)
+    throw std::invalid_argument("only model and instance scripts can be installed on models");
   for (auto term : source.declaration.handlers)
     triggers[term].by_model[id] = handler(source, terms, term);
 }
@@ -85,6 +89,27 @@ void project_instance(react::Triggers &triggers, const InstanceScripts &instance
       for (auto term : source.declaration.handlers)
         triggers[term].by_instance[object.bits].push_back(handler(source, terms, term));
     }
+}
+WorldScript *world_script(std::vector<WorldScript> &world, ScriptId id) {
+  const auto found = std::ranges::find(world, id, &WorldScript::script);
+  return found == world.end() ? nullptr : &*found;
+}
+const WorldScript *world_script(const std::vector<WorldScript> &world, ScriptId id) {
+  const auto found = std::ranges::find(world, id, &WorldScript::script);
+  return found == world.end() ? nullptr : &*found;
+}
+void project_world(State &state, const catalog::Scripts &scripts) {
+  for (auto &[term, trigger] : state.triggers) {
+    (void)term;
+    trigger.by_world.clear();
+  }
+  for (const auto &installation : state.world_scripts) {
+    const auto &source = script(scripts, installation.script);
+    if (source.declaration.kind != ScriptDeclaration::Kind::World)
+      throw std::invalid_argument("world installation requires a world script");
+    for (auto term : source.declaration.handlers)
+      state.triggers[term].by_world.push_back(handler(source, state.terms, term));
+  }
 }
 std::vector<react::RuleVersion> latest_rules(const react::RuleVersions &versions) {
   std::map<RuleKey, react::RuleVersion> current;

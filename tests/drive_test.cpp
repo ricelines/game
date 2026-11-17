@@ -246,8 +246,7 @@ void action_plans_keep_authority_separate() {
   set_instances(f.installed, f.b, ids, f.scripts);
   project_instance(f.triggers, f.installed, f.scripts, f.terms, f.b);
   ActionRequest request{PlayerId{1}, 7, f.a, {}};
-  auto resolution =
-      resolve({}, f.terms, f.models, f.scripts, f.installed, identity(f.objects), request, f.b);
+  auto resolution = resolve(f.react_state, f.catalog_state, identity(f.objects), request, f.b);
   auto plans = step::plan_action(f.triggers, f.values(), resolution, request, f.b, {}, 1, 20);
   require(plans.size() == 2 && plans[0].input.receiver == f.b && plans[1].input.receiver == f.b &&
               plans[0].input.sender == f.a && plans[0].input.action_body == f.b &&
@@ -262,8 +261,7 @@ void action_plans_keep_authority_separate() {
               perm::check(perm::Holder::player(1), perm::Verb::Transfer, selected, players, {}, 1),
           "planned script identity inherited the player's Transfer authority");
   request.caller = ScriptHolder{sibling, f.c};
-  resolution =
-      resolve({}, f.terms, f.models, f.scripts, f.installed, identity(f.objects), request, f.b);
+  resolution = resolve(f.react_state, f.catalog_state, identity(f.objects), request, f.b);
   plans = step::plan_action(f.triggers, f.values(), resolution, request, f.b, {}, 1, 20);
   require(plans.size() == 1 && !plans[0].input.action_body && plans[0].input.sender == f.c &&
               plans[0].input.action_caller == request.caller,

@@ -13,6 +13,18 @@ catalog::Text patch(catalog::Text value, const Json &text) {
   return value;
 }
 } // namespace
+step::NativeCompletion world_text(const step::NativeCall &call,
+                                  std::vector<react::WorldScript> &installed) {
+  auto &world = *react::world_script(installed, std::get<ScriptHolder>(call.request.caller).script);
+  const auto &text = call.arguments.at("text");
+  if (text.contains("name"))
+    throw std::invalid_argument("world writing supports description and writing");
+  const auto after = patch({{}, world.description, world.writing}, text);
+  const auto changed = world.description != after.description || world.writing != after.writing;
+  world.description = after.description;
+  world.writing = after.writing;
+  return detail::result(changed);
+}
 step::NativeCompletion edit_text(const step::NativeCall &call,
                                  catalog::InstanceTexts &instance_texts,
                                  const catalog::ModelTexts &model_texts, IdentityRead identity) {

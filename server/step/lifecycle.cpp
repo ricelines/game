@@ -240,6 +240,8 @@ void publish_catalog_changes(net::Sessions &sessions, net::SessionViews &views,
   unique(out.changed_scripts);
   unique(out.changed_terms);
   unique(out.changed_materials);
+  if (out.world_ambient_changed)
+    sessions.broadcast({{"t", "catalog"}, {"world", {{"ambient_lux", world_ambient_lux}}}});
   if (!out.changed_models.empty())
     sessions.broadcast({{"t", "catalog"},
                         {"world", {{"ambient_lux", world_ambient_lux}}},
@@ -253,8 +255,8 @@ void publish_catalog_changes(net::Sessions &sessions, net::SessionViews &views,
                         {"world", {{"ambient_lux", world_ambient_lux}}},
                         {"materials", net::material_metadata(terms, materials, appearance,
                                                              out.changed_materials)}});
-  if (out.permissions_changed || !out.changed_models.empty() || !out.changed_scripts.empty() ||
-      !out.changed_terms.empty() || !out.changed_materials.empty())
+  if (out.permissions_changed || out.world_ambient_changed || !out.changed_models.empty() ||
+      !out.changed_scripts.empty() || !out.changed_terms.empty() || !out.changed_materials.empty())
     for (auto &[session, view] : views.rows) {
       (void)session;
       view.pending.ready = false;

@@ -30,16 +30,25 @@ TOOLS = [
         "inspect",
         (
             "Read one thing's full measured record, maker's claims, rights and state; or "
-            "self/inventory/grants/plot."
+            "self/inventory/grants/plot. Land lists lots anywhere, in plot-ID order, with "
+            "optional owner (self or p:N), for_sale, cursor and limit filters. Use the returned "
+            "next_cursor to continue; inspect plot:N for one lot."
         ),
-        {"target": {"type": "string"}},
+        {
+            "target": {"type": "string"},
+            "owner": {"type": "string"},
+            "for_sale": {"type": "boolean"},
+            "cursor": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1},
+        },
         ["target"],
     ),
     _tool(
         "actions",
         (
             "Optional help: list available actions or read one action's description, inputs, "
-            "right and example. Listed one-line signatures can be called directly with do."
+            "right and example. Target land or plot:N for land commands. Listed one-line "
+            "signatures can be called directly with do without opening an action space."
         ),
         {
             "target": {"type": "string"},

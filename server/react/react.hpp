@@ -213,6 +213,7 @@ struct Trigger {
   std::vector<std::pair<TermId, HandlerRef>> by_flag;
   std::unordered_map<ModelId, HandlerRef> by_model;
   std::unordered_map<std::uint64_t, std::vector<HandlerRef>> by_instance;
+  std::vector<HandlerRef> by_world;
 };
 
 using Triggers = std::unordered_map<TermId, Trigger>;
@@ -380,7 +381,7 @@ struct ActionDeclaration {
 };
 
 struct ScriptDeclaration {
-  enum class Kind { Model, Instance, Rule } kind = Kind::Model;
+  enum class Kind { Model, Instance, Rule, World } kind = Kind::Model;
   ScriptId id = 0;
   PlayerId author = 0;
   std::uint32_t version = 1;
@@ -486,6 +487,11 @@ struct ScriptAnalysis {
 
 using InstanceScripts = SparseColumn<std::vector<ScriptId>>;
 
+struct WorldScript {
+  ScriptId script = 0;
+  std::string space, description, writing;
+};
+
 struct RuleKey {
   TermId trigger = 0, selector = 0;
   bool flag = false;
@@ -556,7 +562,7 @@ enum class PermissionAction {
 };
 enum class ScriptAction { Install, Uninstall, ModelScript };
 enum class WritingAction { EditText, ModelText, EditDetail };
-enum class ValueAction { SetSetting, ModelSetting, PatchState, Relate };
+enum class ValueAction { SetSetting, ModelSetting, WorldSetting, PatchState, Relate };
 enum class RegistryAction { DefineTerm, DefineMaterial };
 enum class ElaborationAction { RequestModel, Requests, Claim, Answer, Refuse, RuleActivation };
 using NativeOperation =
@@ -568,12 +574,13 @@ struct NativeDeclaration {
   bool reach = false;
   nlohmann::json inputs_schema = nlohmann::json::object();
   NativeOperation operation;
+  std::string space{};
 };
 struct NativeActions {
   std::unordered_map<TermId, NativeDeclaration> rows;
 };
 using InstalledScripts = SparseColumn<std::vector<ScriptId>>;
-enum class Route { Native, Body, Selected, Fallback };
+enum class Route { Native, Body, Selected, Fallback, World };
 enum class Failure { None, UnknownAction, StaleTarget, MissingTarget };
 struct Resolution {
   Failure failure = Failure::None;
@@ -719,6 +726,9 @@ void project_model(Triggers &, const catalog::Models &, const catalog::Scripts &
                    ModelId);
 void project_instance(Triggers &, const InstanceScripts &, const catalog::Scripts &, const Terms &,
                       Handle);
+WorldScript *world_script(std::vector<WorldScript> &, ScriptId);
+const WorldScript *world_script(const std::vector<WorldScript> &, ScriptId);
+void project_world(State &, const catalog::Scripts &);
 RuleChange add_rule(RuleVersions &, const catalog::Scripts &, const Terms &, ScriptId);
 RuleChange set_rule_enabled(RuleVersions &, RuleKey, bool);
 std::vector<RuleVersion> latest_rules(const RuleVersions &);
@@ -799,6 +809,8 @@ void read_shared(snap::Input &, SharedColumns &, GivesTo &, AllocationRows &, Me
 void write_script_states(snap::Output &, const ScriptStates &, const Subscriptions &,
                          const SnapshotSelection & = {});
 void read_script_states(snap::Input &, ScriptStates &, Subscriptions &);
+void write_world_scripts(snap::Output &, const std::vector<WorldScript> &);
+void read_world_scripts(snap::Input &, std::vector<WorldScript> &);
 void write_random(snap::Output &, const RandomStates &, const SnapshotSelection & = {});
 void read_random(snap::Input &, RandomStates &);
 void write_settings(snap::Output &, const InstanceSettings &, const ModelSettings &,
@@ -808,9 +820,8 @@ void write_settings(snap::Output &, const InstanceSettings &, const ModelSetting
 void read_settings(snap::Input &, InstanceSettings &, ModelSettings &, PlotSettings &,
                    WorldSettings &, std::size_t slots);
 
-Resolution resolve(const NativeActions &, const react::Terms &, const catalog::Models &,
-                   const catalog::Scripts &, const InstalledScripts &, IdentityRead,
-                   const ActionRequest &, Handle authenticated_body);
+Resolution resolve(const State &, const catalog::State &, IdentityRead, const ActionRequest &,
+                   Handle authenticated_body);
 bool collides(const NativeActions &, const react::ScriptDeclaration &);
 
 std::vector<ArgumentError> validate_arguments(const react::Terms &, const react::Term &,
@@ -841,6 +852,7 @@ struct State {
   RuleVersions rules;
   Subscriptions subscriptions;
   InstanceScripts installations;
+  std::vector<WorldScript> world_scripts;
   NativeActions native_declarations;
   std::vector<TermId> inspection_terms;
   Vm vm;

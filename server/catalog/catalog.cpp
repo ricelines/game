@@ -166,8 +166,9 @@ ModelRegistration submit_model(Models &models, ModelTexts &texts, react::ModelSe
       script = script_default(scripts, asset.manifest);
     if (script >= scripts.rows.size() || (script && scripts.rows[script].id != script))
       throw std::runtime_error("unknown model script");
-    if (script && scripts.rows[script].declaration.kind == react::ScriptDeclaration::Kind::Rule)
-      throw std::runtime_error("a world rule is not a model script");
+    if (script && (scripts.rows[script].declaration.kind == react::ScriptDeclaration::Kind::Rule ||
+                   scripts.rows[script].declaration.kind == react::ScriptDeclaration::Kind::World))
+      throw std::runtime_error("a world script or rule is not a model script");
     pending.push_back({&asset, material, script, std::move(text), std::move(name)});
   };
   defaults(root, submission.material, submission.script, submission.text, {});

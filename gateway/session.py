@@ -115,7 +115,9 @@ class Session:
                 if self.known.get(handle) == description:
                     result[field][index] = {key: row[key] for key in ("h", "dist_m", "bearing")}
                 self.known[handle] = description
-        for field in ("body_actions", "player_actions"):
+        for field in ("body_actions", "player_actions", "action_spaces"):
+            if field not in result:
+                continue
             actions = result[field]
             if self.action_lists.get(field) == actions:
                 del result[field]

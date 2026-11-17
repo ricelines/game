@@ -187,9 +187,59 @@ void catalog_roundtrip_and_capture() {
               loaded_instances.rows.at(object.bits).writing == "writing",
           "separate selected model/instance text restored");
 }
+void world_installations_and_state_survive_only_full_snapshots() {
+  using namespace react;
+  const std::vector<WorldScript> world{{7, "civic", "Public services", "Current notice"}};
+  const auto object = Handle::make(1, 3);
+  ScriptStates states;
+  states[{{}, 7}].insert(std::string("due"), 123.0);
+  states[{object, 2}].insert(std::string("count"), 4.0);
+  snap::Buffer bytes;
+  snap::Output out{bytes};
+  write_world_scripts(out, world);
+  write_script_states(out, states, {});
+  out.adapter().flush();
+  bytes.resize(out.adapter().writtenBytesCount());
+  std::vector<WorldScript> restored;
+  ScriptStates restored_states;
+  Subscriptions restored_subscriptions;
+  snap::Input in{bytes.data(), bytes.size()};
+  read_world_scripts(in, restored);
+  read_script_states(in, restored_states, restored_subscriptions);
+  snap::check_complete(in);
+  const auto *installation = world_script(restored, 7);
+  require(restored.size() == 1 && installation && installation->space == "civic" &&
+              installation->description == "Public services" &&
+              installation->writing == "Current notice" && restored_states == states,
+          "world installation metadata or ordinary script state was lost on restore");
+
+  snap::Buffer capture;
+  snap::Output capture_out{capture};
+  write_world_scripts(capture_out, {});
+  const std::array selected{object};
+  write_script_states(capture_out, states, {}, SnapshotSelection(selected));
+  capture_out.adapter().flush();
+  capture.resize(capture_out.adapter().writtenBytesCount());
+  snap::Input capture_in{capture.data(), capture.size()};
+  read_world_scripts(capture_in, restored);
+  read_script_states(capture_in, restored_states, restored_subscriptions);
+  snap::check_complete(capture_in);
+  require(restored.empty() && restored_states.size() == 1 && restored_states.contains({object, 2}),
+          "local object capture retained world installation state");
+
+  ScriptDeclaration declaration;
+  declaration.kind = ScriptDeclaration::Kind::World;
+  declaration.id = 7;
+  declaration.actions.push_back({4, {}, "world.action", false});
+  const auto decoded = catalog::declaration_from_json(catalog::declaration_json(declaration));
+  require(decoded.kind == ScriptDeclaration::Kind::World && decoded.id == 7 &&
+              decoded.actions.size() == 1 && decoded.actions[0].right.empty(),
+          "world declaration changed kind or permission metadata during serialization");
+}
 } // namespace
 int main() {
   reaction_roundtrip_and_capture();
   catalog_roundtrip_and_capture();
+  world_installations_and_state_survive_only_full_snapshots();
   std::cout << "reaction/catalog snapshot and selective capture checks passed\n";
 }

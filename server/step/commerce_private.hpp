@@ -4,17 +4,16 @@
 namespace amber::step::commerce_detail {
 struct PlotChange {
   std::string_view op;
-  PlotId plot, other;
-  PlayerId owner, old_owner;
-  float area, other_area;
+  perm::PlotFacts plot;
+  PlayerId old_owner;
+  float area, other_area = 0;
+  std::optional<perm::PlotFacts> other{}, old{};
 };
 void plot_changed(NativeCompletion &, std::span<const perm::PlotHolder>, TermId, const NativeCall &,
                   const PlotChange &);
 perm::Holder actor(const step::NativeCall &call);
 PlayerId player(const step::NativeCall &call);
 PlayerId player_id(const Json &input, const perm::Players &players);
-PlayerId controller(const step::NativeCall &call, IdentityRead identity, AuthorityRead authority,
-                    const perm::Players &players);
 perm::AccountTarget default_account(const step::NativeCall &call, IdentityRead identity,
                                     AuthorityRead authority, const perm::Players &players,
                                     const perm::Groups &groups);

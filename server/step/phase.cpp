@@ -88,11 +88,11 @@ next_work(WorkQueues &queues, Frame &frame, std::deque<elaborate::FixtureResult>
   }
   return {};
 }
-nlohmann::json state_report(const react::ValueRead &values,
-                            std::span<const TermId> inspection_terms, TransformRead poses,
-                            const amber::step::Clock &clock, std::size_t script_errors,
-                            const TimerWheel &pending_timers,
-                            const react::AllocationRows &allocations) {
+nlohmann::json state_report(const ObjectState &objects, const catalog::State &catalog,
+                            const react::State &react_state, const amber::step::Clock &clock,
+                            std::size_t script_errors, const TimerWheel &pending_timers) {
+  const auto values = react::value_read(objects, catalog, react_state);
+  const auto poses = transforms(objects.objects);
   const auto now = clock.step;
   const auto hz = clock.hz;
 
@@ -103,7 +103,7 @@ nlohmann::json state_report(const react::ValueRead &values,
     if (!values.identity.valid(h))
       continue;
     Json quantities = Json::object();
-    for (const auto term : inspection_terms) {
+    for (const auto term : react_state.inspection_terms) {
       const auto answer = react::read(values, h, term, now, hz);
       if (answer.present && answer.value.is_numeric())
         quantities[values.terms.rows[term].name] = answer.value.numeric();
@@ -114,11 +114,39 @@ nlohmann::json state_report(const react::ValueRead &values,
          {"position", {poses.position[slot].x, poses.position[slot].y, poses.position[slot].z}},
          {"values", std::move(quantities)}});
   }
+  Json world_scripts = Json::array();
+  for (const auto &world : react_state.world_scripts) {
+    Json state = Json::object();
+    std::size_t bytes = 0;
+    if (const auto found = react_state.states.find({{}, world.script});
+        found != react_state.states.end()) {
+      bytes = found->second.bytes;
+      for (const auto &[key, atom] : found->second.values) {
+        const auto name = std::holds_alternative<std::string>(key)
+                              ? std::get<std::string>(key)
+                              : std::to_string(std::get<std::int64_t>(key));
+        std::visit(
+            [&](const auto &value) {
+              if constexpr (std::is_same_v<std::decay_t<decltype(value)>, Handle>)
+                state[name] = to_string(value);
+              else
+                state[name] = value;
+            },
+            atom);
+      }
+    }
+    world_scripts.push_back({{"space", world.space},
+                             {"script", world.script},
+                             {"writing", world.writing},
+                             {"state", std::move(state)},
+                             {"state_bytes", bytes}});
+  }
   return Json{{"step", now},
               {"objects", std::move(rows)},
+              {"world_scripts", std::move(world_scripts)},
               {"script_errors", script_errors},
               {"timers", step::timers(pending_timers).size()},
-              {"allocations", allocations.values.size()}};
+              {"allocations", react_state.allocations.values.size()}};
 }
 void record_frame(record::Journal &journal, record::Writer &writer, net::RecordFeed &feed,
                   IdentityRead ids, TransformRead poses, std::size_t &script_errors) {

@@ -116,8 +116,11 @@ void install_grants(const Json &plan, const Symbols &symbols,
         throw std::invalid_argument("unknown initial player grant holder");
       return {perm::Holder::player(id), id, true};
     }
-    const auto object = symbols.objects.at(row.at("on").get<std::string>());
     const auto script = symbols.scripts.at(row.at("script").get<std::string>());
+    if (row.at("on") == "world")
+      return {perm::Holder::script(script, {}), 0,
+              react::world_script(react_state.world_scripts, script) != nullptr};
+    const auto object = symbols.objects.at(row.at("on").get<std::string>());
     if (!values.identity.valid(object) || !script || script >= scripts.rows.size())
       throw std::invalid_argument("unknown initial script grant holder");
     auto installed = react::installed_scripts(models, instances, values.identity, object);

@@ -28,16 +28,22 @@ record::Event action_record(const NativeCall &call, const react::Terms &terms,
                   {"agent", std::holds_alternative<PlayerId>(call.request.caller)}};
   return event;
 }
-bool installed_caller(const catalog::Models &models, const catalog::Scripts &scripts,
-                      const react::InstanceScripts &installations, const react::RuleVersions &rules,
-                      const react::ValueRead &values, Step now, double hz, ScriptHolder caller) {
-  if (!values.identity.valid(caller.object) || !caller.script ||
-      caller.script >= scripts.rows.size() || !scripts.rows[caller.script].declaration.active)
+bool installed_caller(const catalog::State &catalog_state, const react::State &react_state,
+                      const ObjectState &objects_state, Step now, double hz, ScriptHolder caller) {
+  const auto values = react::value_read(objects_state, catalog_state, react_state);
+  const auto &scripts = catalog_state.scripts;
+  if (!caller.script || caller.script >= scripts.rows.size() ||
+      !scripts.rows[caller.script].declaration.active)
     return false;
-  auto installed = react::installed_scripts(models, installations, values.identity, caller.object);
+  if (!caller.object)
+    return react::world_script(react_state.world_scripts, caller.script) != nullptr;
+  if (!values.identity.valid(caller.object))
+    return false;
+  auto installed = react::installed_scripts(catalog_state.models, react_state.installations,
+                                            values.identity, caller.object);
   if (std::ranges::find(installed, caller.script) != installed.end())
     return true;
-  installed = react::rule_scripts(rules, values, caller.object, now, hz);
+  installed = react::rule_scripts(react_state.rules, values, caller.object, now, hz);
   return std::ranges::find(installed, caller.script) != installed.end();
 }
 } // namespace
@@ -56,8 +62,6 @@ ActionRun begin_action(const amber::catalog::State &catalog_state,
 
   auto &models = catalog_state.models;
   auto &scripts = catalog_state.scripts;
-  auto &installations = react_state.installations;
-  auto &rules = react_state.rules;
   auto &triggers = react_state.triggers;
   auto &native = react_state.native_declarations;
   auto &players = perm_state.players;
@@ -91,14 +95,14 @@ ActionRun begin_action(const amber::catalog::State &catalog_state,
   } else {
     run.call.body = {};
     run.call.order.reset();
-    if (!installed_caller(models, scripts, installations, rules, values, run.call.step, run.call.hz,
+    if (!installed_caller(catalog_state, react_state, objects_state, run.call.step, run.call.hz,
                           std::get<ScriptHolder>(request.caller))) {
       deny({{"ok", false}, {"error", "inactive_script_holder"}});
       return run;
     }
   }
-  run.resolution = react::resolve(native, values.terms, models, scripts, installations,
-                                  values.identity, request, run.call.body);
+  run.resolution =
+      react::resolve(react_state, catalog_state, values.identity, request, run.call.body);
   if (!run.resolution) {
     constexpr const char *failures[]{"none", "unknown_action", "stale_target", "missing_target"};
     deny({{"ok", false},

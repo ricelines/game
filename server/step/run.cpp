@@ -111,13 +111,10 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &parameters = catalog_state.parameters;
   auto &model_text = catalog_state.model_text;
   auto &instance_text = catalog_state.instance_text;
-  auto &authored_text = catalog_state.authored_text;
   auto &baked_measurements = catalog_state.baked_measurements;
   auto &runtime_measurements = react_state.runtime_measurements;
 
   auto &processes = react_state.processes;
-
-  auto &allocations = react_state.allocations;
 
   auto &authored_relations = react_state.authored_relations;
   auto &relations = react_state.relations;
@@ -590,7 +587,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                              react_state.terms.by_name.at("base.plot_changed"));
                     } else if constexpr (std::is_same_v<Operation, react::PermissionAction>) {
                       return native_permissions(catalog_state, react_state, perm_state,
-                                                objects_state, architect, operation, action->call);
+                                                objects_state, settings.land, architect, operation,
+                                                action->call);
                     } else if constexpr (std::is_same_v<Operation, react::ScriptAction>) {
                       return native_scripts(catalog_state, react_state, perm_state, objects_state,
                                             role("events", "start"), operation, action->call);
@@ -598,8 +596,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                       return native_values(players, models, values, react_state, relation_terms,
                                            roles, operation, action->call);
                     } else if constexpr (std::is_same_v<Operation, react::WritingAction>) {
-                      return native_writing(players, models, model_text, instance_text,
-                                            authored_text, ids, operation, action->call);
+                      return native_writing(catalog_state, react_state, players, ids, operation,
+                                            action->call);
                     } else if constexpr (std::is_same_v<Operation, react::RegistryAction>) {
                       return native_registry(catalog_state, react_state, registry_directory, values,
                                              geometry, space_state, physics_defaults, roles,
@@ -663,6 +661,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                                    completed.changed_objects);
             project_visibility(illumination_sources, space_state, replication, poses, catalog_state,
                                values, completed, settings.light_source_radius_m, clock);
+            if (completed.world_ambient_changed)
+              invalidate_world_illumination(space_state);
             publish_catalog_changes(sessions, session_views, models, model_text, terms, materials,
                                     appearance, outdoor_lux(react_state), completed);
             publish_object_changes(sessions, session_views, ids, auth, parent, model_text,
@@ -849,7 +849,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     fixture::write_report(launch.report, values, *fixture_case, clock.step, hz, script_errors);
   else if (!launch.report.empty()) {
     auto report =
-        state_report(values, inspection_terms, poses, clock, script_errors, timers, allocations);
+        state_report(objects_state, catalog_state, react_state, clock, script_errors, timers);
     report["configuration"] = {{"profile", launch.profile},
                                {"handler_ms", settings.scripts.handler_ms}};
     std::ofstream output(launch.report);

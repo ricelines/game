@@ -28,11 +28,14 @@ NativeCompletion script_notice(const perm::State &state, const NativeCall &call)
   }
   text.resize(end);
   auto out = commerce_detail::result(true);
-  out.notices.emplace_back(recipient, Json{{"kind", "notice"},
-                                           {"from", "s:" + std::to_string(caller.id)},
-                                           {"on", to_string(caller.installed_on)},
-                                           {"text", text}});
-  commerce_detail::record(out, call, "notify", {caller.installed_on},
+  out.notices.emplace_back(
+      recipient, Json{{"kind", "notice"},
+                      {"from", "s:" + std::to_string(caller.id)},
+                      {"on", caller.installed_on ? to_string(caller.installed_on) : "world"},
+                      {"text", text}});
+  commerce_detail::record(out, call, "notify",
+                          caller.installed_on ? std::vector<Handle>{caller.installed_on}
+                                              : std::vector<Handle>{},
                           {{"player", recipient}, {"text", text}});
   return out;
 }

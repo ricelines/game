@@ -18,7 +18,8 @@ Declaration declared(const catalog::Models &models, const catalog::Scripts &scri
     if (!id || id >= scripts.rows.size())
       return {};
     const auto &declaration = scripts.rows[id].declaration;
-    if (!declaration.active || declaration.kind == react::ScriptDeclaration::Kind::Rule)
+    if (!declaration.active || declaration.kind == ScriptDeclaration::Kind::Rule ||
+        declaration.kind == ScriptDeclaration::Kind::World)
       return {};
     for (const auto &entry : declaration.actions)
       if (entry.action == action)
@@ -77,10 +78,13 @@ bool matches(const react::Terms &terms, const react::Input &input, const EventAt
   return false;
 }
 } // namespace
-Resolution resolve(const NativeActions &native, const react::Terms &terms,
-                   const catalog::Models &models, const catalog::Scripts &scripts,
-                   const InstalledScripts &installed, IdentityRead identity,
+Resolution resolve(const State &state, const catalog::State &catalog, IdentityRead identity,
                    const ActionRequest &request, Handle body) {
+  const auto &native = state.native_declarations;
+  const auto &terms = state.terms;
+  const auto &models = catalog.models;
+  const auto &scripts = catalog.scripts;
+  const auto &installed = state.installations;
   Resolution result;
   if (!request.action || request.action >= terms.rows.size() ||
       terms.rows[request.action].kind != react::Kind::Action) {
@@ -98,10 +102,30 @@ Resolution resolve(const NativeActions &native, const react::Terms &terms,
     result.permission_target = request.target;
     result.right = found->second.right;
     result.reach = found->second.reach;
+    if (const auto *writing = std::get_if<WritingAction>(&result.native_operation);
+        !request.target && writing && *writing == WritingAction::EditText)
+      if (const auto *caller = std::get_if<ScriptHolder>(&request.caller);
+          caller && !caller->object && world_script(state.world_scripts, caller->script) &&
+          scripts.rows.at(caller->script).declaration.kind == ScriptDeclaration::Kind::World) {
+        result.right.clear();
+        result.reach = false;
+      }
     if (!request.target && (!result.right.empty() || result.reach))
       result.failure = Failure::MissingTarget;
     return result;
   }
+  if (!request.target)
+    for (const auto &world : state.world_scripts) {
+      const auto &declaration = scripts.rows.at(world.script).declaration;
+      if (!declaration.active || declaration.kind != ScriptDeclaration::Kind::World)
+        continue;
+      if (std::ranges::any_of(declaration.actions,
+                              [&](const auto &entry) { return entry.action == request.action; })) {
+        result.route = Route::World;
+        result.declaration_script = world.script;
+        return result;
+      }
+    }
   if (std::holds_alternative<PlayerId>(request.caller) && identity.valid(body)) {
     if (const auto found = declared(models, scripts, installed, identity, body, request.action);
         found.action)

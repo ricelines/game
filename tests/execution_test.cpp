@@ -211,6 +211,143 @@ void persistence_and_activation() {
               std::get<double>(f.states.at({f.object, 2}).values.at(std::string("count"))) == 2,
           "inactive cached script cannot execute even with an old handler reference");
 }
+void world_declarations_reject_object_requirements() {
+  react::Terms terms;
+  terms.rows.resize(3);
+  terms.rows[1].id = 1;
+  terms.rows[1].name = "unforeseen.action";
+  terms.rows[1].kind = react::Kind::Action;
+  terms.by_name[terms.rows[1].name] = 1;
+  terms.rows[2].id = 2;
+  terms.rows[2].name = "unforeseen.setting";
+  terms.rows[2].kind = react::Kind::Quantity;
+  terms.rows[2].source = react::Source::Setting;
+  terms.by_name[terms.rows[2].name] = 2;
+  const auto analyze = [&](std::string_view kind, std::string_view action) {
+    const auto source = "return {kind='" + std::string(kind) +
+                        "',actions={['unforeseen.action']={" + std::string(action) +
+                        "}},on={['unforeseen.action']=function(self)end}}";
+    return react::analyze_script(source, terms, {{"edit"}}, {4096, 50, 5, 64});
+  };
+  require(analyze("world", "").errors.empty() &&
+              analyze("world", "right='',reach=false").errors.empty(),
+          "world actions accept declarations without object permission or reach requirements");
+  require(!analyze("world", "right='edit'").errors.empty() &&
+              !analyze("world", "reach=true").errors.empty(),
+          "world declarations must reject object requirements that execution cannot enforce");
+  require(analyze("model", "right='edit',reach=true").errors.empty(),
+          "object action declarations retain their ordinary permission and reach requirements");
+  const auto setting_handler = [&](std::string_view kind, std::string_view watches) {
+    const auto source = "return {kind='" + std::string(kind) + "'," + std::string(watches) +
+                        "on={['unforeseen.setting']=function(self)end}}";
+    return catalog::prepare_script(source, terms, {}, catalog::sha256("world setting fixture"), {},
+                                   {4096, 50, 5, 64});
+  };
+  require(setting_handler("world", "").declaration.handlers == std::vector<TermId>{2},
+          "world scripts receive setting-change events through ordinary handlers");
+  for (const auto watches :
+       {"watches={'unforeseen.setting'},",
+        "watches={{term='unforeseen.setting',thresholds={{predicate='below',value=2}}}},"}) {
+    bool rejected = false;
+    try {
+      setting_handler("world", watches);
+    } catch (const std::runtime_error &error) {
+      rejected = std::string_view(error.what()).find("cannot declare object watches") !=
+                 std::string_view::npos;
+    }
+    require(rejected, "world declarations must reject both ordinary and threshold object watches");
+    require(setting_handler("model", watches).declaration.watches.size() == 1,
+            "ordinary scripts retain their setting watch and threshold declarations");
+  }
+}
+void world_installations_share_the_runtime_without_host_objects() {
+  Fixture f;
+  react::Term setting;
+  setting.id = 5;
+  setting.name = "unforeseen.5";
+  setting.source = react::Source::Setting;
+  f.terms.rows.push_back(setting);
+  f.terms.by_name[setting.name] = setting.id;
+  f.world.values[5] = Value(42.0);
+  constexpr auto source = R"(return {kind='world', sets={'unforeseen.3'},
+    actions={['unforeseen.1']={}},on={
+    ['unforeseen.2']=function(self)
+      assert(self.handle==nil and self:setting('unforeseen.5')==42)
+      assert(not pcall(function()self:get('unforeseen.3')end))
+      assert(not pcall(function()self:set('unforeseen.3',99)end))
+      self.state.count=(self.state.count or 0)+1
+      self.state.draw=self:random()
+      self:after(0.5,'unforeseen.2')
+    end,
+    ['unforeseen.1']=function(self)
+      local result=self:act('unforeseen.1',nil,{})
+      self.state.done=result.ok
+    end}})";
+  f.load(4, source);
+  f.load(5, source);
+  react::Invocation uninstalled;
+  react::CompletedInvocation ignored;
+  react::InvocationInput uninstalled_input;
+  uninstalled_input.trigger = 2;
+  require(!react::start_invocation(f.react_state, f.objects_state, 971, f.catalog_state, f.journal,
+                                   {4, "unforeseen.2", 14, 1, true}, uninstalled_input, uninstalled,
+                                   ignored) &&
+              !f.states.contains({{}, 4}),
+          "uninstalled world script created persistent state");
+  const auto objects_before = f.objects.model.size();
+  f.react_state.world_scripts = {{4, "civic", "Public services", {}},
+                                 {5, "market", "Market services", {}}};
+  react::project_world(f.react_state, f.scripts);
+  const auto start = react::EventWork{{}, {}, 2, {}, {}, 4};
+  auto planned = step::plan_event(f.triggers, f.values, start, 12, 20);
+  require(planned.size() == 1 && planned[0].handler.script == 4,
+          "targeted world event reached another installation");
+  react::Invocation invocation;
+  react::CompletedInvocation completed;
+  require(react::start_invocation(f.react_state, f.objects_state, 971, f.catalog_state, f.journal,
+                                  planned[0].handler, std::move(planned[0].input), invocation,
+                                  completed) &&
+              completed.outcome.status == react::RunOutcome::Status::Ok,
+          "world handler could not run in the ordinary VM");
+  const auto &timer = std::get<react::Timer>(completed.effects.ordered.at(0));
+  require(timer.due == 22 && !timer.event.receiver && timer.event.recipient_script == 4,
+          "world timer lost its installation identity");
+  auto next = step::plan_event(f.triggers, f.values, timer.event, 22, 20);
+  require(next.size() == 1 && next[0].handler.script == 4 && !f.states.contains({{}, 5}) &&
+              f.objects.model.size() == objects_before,
+          "world execution created a host object or another script's state");
+  react::CompletedInvocation second;
+  require(react::start_invocation(f.react_state, f.objects_state, 971, f.catalog_state, f.journal,
+                                  next[0].handler, std::move(next[0].input), invocation, second) &&
+              std::get<double>(f.states.at({{}, 4}).values.at(std::string("count"))) == 2,
+          "world timer did not continue the existing installation state");
+  require(react::dispatch(f.triggers, f.values, f.object, 2, 22, 20).empty(),
+          "world handlers leaked into object dispatch");
+  auto action = step::plan_event(f.triggers, f.values, {{}, {}, 1, {}, {}, 4}, 22, 20);
+  react::CompletedInvocation yielded;
+  require(react::start_invocation(f.react_state, f.objects_state, 971, f.catalog_state, f.journal,
+                                  action[0].handler, std::move(action[0].input), invocation,
+                                  yielded) &&
+              yielded.outcome.status == react::RunOutcome::Status::Action &&
+              std::get<ScriptHolder>(yielded.outcome.action->request.caller) == ScriptHolder{4, {}},
+          "world action did not carry its actual script principal");
+  require(react::resume_handler(f.vm, invocation, {{"ok", true}}).status ==
+                  react::RunOutcome::Status::Ok &&
+              std::get<bool>(f.states.at({{}, 4}).values.at(std::string("done"))),
+          "world handler did not resume after its ordinary action");
+  bool rejected = false;
+  try {
+    const std::array world_script{ScriptId{4}};
+    react::set_instances(f.installations, f.object, world_script, f.scripts);
+  } catch (const std::invalid_argument &) {
+    rejected = true;
+  }
+  require(rejected, "world script was installed on an object");
+  f.react_state.world_scripts.clear();
+  react::project_world(f.react_state, f.scripts);
+  require(react::dispatch(f.triggers, f.values, {}, 2, 22, 20).empty(),
+          "removed world installation retained a dispatch entry");
+}
 void withdrawing_from_retired_subject_is_idempotent() {
   test_runtime::Fixture f(1000);
   const auto script = f.add(R"(return {kind='model',contributes={'novel.signal'},on={
@@ -361,6 +498,8 @@ int main() {
     stored_scripts_keep_data_and_restart_without_a_saved_execution();
     live_effects_and_causal_finalization();
     persistence_and_activation();
+    world_declarations_reject_object_requirements();
+    world_installations_share_the_runtime_without_host_objects();
     withdrawing_from_retired_subject_is_idempotent();
     model_rebind_retires_only_removed_installations();
     std::cout << "Actual VM execution, live effects and causal finalization tests passed.\n";

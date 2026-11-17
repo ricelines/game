@@ -411,7 +411,7 @@ int plot_binding(lua_State *L) {
   if (!id || id >= plots.rows.size() || plots.rows[id].id != id)
     luaL_error(L, "unknown plot");
   json_value(L, perm::plot_record(plots, b.permissions.grants, id, b.port_spacing_m, inv.step,
-                                  b.permissions.offers, 0));
+                                  perm::plot_offer(b.permissions.offers, id, inv.step, 0)));
   return 1;
 }
 int plots_binding(lua_State *L) {

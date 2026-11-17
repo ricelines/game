@@ -177,18 +177,52 @@ int main() {
         ed::model_setting(call(1, {}, {{"model", "m:1"}, {"values", {{"novel.gain", 2}}}}),
                           f.model_settings, values, f.models, players);
     require(setting.changed && dirty(setting, f.a, gain) && dirty(setting, f.b, gain) &&
-                !dirty(setting, f.c, gain) && setting.changed_models == std::vector<ModelId>{1},
-            "model setting did not report exact current facts and model delta");
+                !dirty(setting, f.c, gain),
+            "model setting did not update the effective settings of its actual instances");
     f.run(f.changed({f.a, gain}, 10), 10);
     require(react::read(values, f.a, 2, 10, 20).value.numeric() == 2,
             "direct setting did not drive the actual installed Luau watch");
     const auto override = ed::set_setting(call(1, f.a, {{"values", {{"novel.gain", 3}}}}),
                                           f.instance_settings, values);
     require(override.changed && dirty(override, f.a, gain), "instance setting did not dirty fact");
+    f.run(f.changed({f.a, gain}, 10), 10);
+    require(react::read(values, f.a, 2, 10, 20).value.numeric() == 3,
+            "instance setting did not reach the installed Luau watch");
     const auto clear = ed::set_setting(call(1, f.a, {{"values", {{"novel.gain", nullptr}}}}),
                                        f.instance_settings, values);
     require(clear.changed && react::read(values, f.a, gain, 10, 20).value.numeric() == 2,
             "removing override failed to expose model default");
+    f.run(f.changed({f.a, gain}, 10), 10);
+    require(react::read(values, f.a, 2, 10, 20).value.numeric() == 2,
+            "removing an override did not notify the watch of its inherited value");
+    const std::array<std::string, 1> architect{"architect"};
+    auto world_change = call(1, {}, {{"values", {{"novel.gain", 4}}}});
+    require(!ed::world_setting(world_change, f.world, values, {}).reply.at("ok") &&
+                !f.world.values.contains(gain),
+            "ordinary player changed world settings");
+    world_change.request.caller = ScriptHolder{script, f.a};
+    require(!ed::world_setting(world_change, f.world, values, architect).reply.at("ok") &&
+                !f.world.values.contains(gain),
+            "script inherited its author's architect authority");
+    world_change.request.caller = PlayerId{1};
+    const auto world_default = ed::world_setting(world_change, f.world, values, architect);
+    require(world_default.changed && dirty(world_default, f.c, gain) &&
+                !dirty(world_default, f.a, gain) && !dirty(world_default, f.b, gain) &&
+                react::read(values, f.c, gain, 10, 20).value.numeric() == 4 &&
+                react::read(values, f.a, gain, 10, 20).value.numeric() == 2,
+            "world setting did not change inheriting objects while preserving overrides");
+    require(!ed::world_setting(world_change, f.world, values, architect).changed,
+            "repeating the same world default reported a change");
+    const auto invalid_world =
+        ed::world_setting(call(1, {}, {{"values", {{"novel.gain", 5}, {"novel.result", 6}}}}),
+                          f.world, values, architect);
+    require(!invalid_world.reply.at("ok") && f.world.values.at(gain).numeric() == 4,
+            "invalid world settings partly applied or wrote a state quantity");
+    const auto removed_world = ed::world_setting(
+        call(1, {}, {{"values", {{"novel.gain", nullptr}}}}), f.world, values, architect);
+    require(removed_world.changed && !react::read(values, f.c, gain, 10, 20).present &&
+                react::read(values, f.a, gain, 10, 20).value.numeric() == 2,
+            "removing a world default damaged a model override");
     catalog::ModelTexts model_text;
     catalog::InstanceTexts text;
     catalog::AuthoredTexts details;

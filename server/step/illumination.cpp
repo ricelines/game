@@ -11,6 +11,16 @@ double outdoor_lux(const react::State &state) {
   const auto value = state.world_settings.values.find(term->second);
   return value == state.world_settings.values.end() ? 0 : value->second.numeric();
 }
+void invalidate_world_illumination(space::State &state) {
+  for (const auto &[key, point] : state.light_subscriptions.rows) {
+    (void)point;
+    state.light_subscriptions.dirty.insert(key);
+  }
+  for (const auto &[session, view] : state.active_views.rows) {
+    (void)view;
+    state.active_views.dirty.insert(session);
+  }
+}
 
 namespace {
 void dirty_light(observe::LightSubscriptions &points, observe::ActiveViews &views,
