@@ -44,7 +44,7 @@ Bounds instance_bounds(const NavInstance &entry) {
   return result;
 }
 Path route(const Space::Native &n, Vec3 from, Vec3 to) {
-  Path result{PathStatus::NoSurface, {}, 0, n.revision};
+  Path result{PathStatus::NoSurface, {}, 0};
   auto a = nav(from), b = nav(to);
   const auto &s = n.settings.navigation;
   float extents[]{s.radius_m + s.cell_m, s.height_m, s.radius_m + s.cell_m};
@@ -308,6 +308,14 @@ NavigationInstall install_ready_navigation(Space &space) {
     n.dirty_tiles.erase(current);
     output.installed.push_back(result.tile);
     ++n.revision;
+    const float width = n.settings.navigation.tile_cells * n.settings.navigation.cell_m;
+    const Bounds region{{result.tile.x * width, -(result.tile.y + 1) * width, 0},
+                        {(result.tile.x + 1) * width, -result.tile.y * width, 0}};
+    for (auto bits : n.character_handles) {
+      auto &body = n.bodies.at(bits);
+      if (body.intent && overlaps_xy(body.route_bounds, region))
+        body.route_dirty = true;
+    }
   }
   for (const auto &[tile, revision] : n.dirty_tiles) {
     output.pending.push_back(tile);
@@ -381,12 +389,35 @@ bool needs_plan(const Space &space, IdentityRead identity, const MoveRequest &re
   if (body.character->GetGroundState() != JPH::CharacterBase::EGroundState::OnGround)
     return false;
   const auto position = body.pose.position;
-  return body.route_dirty || body.path_revision != n.revision ||
+  return body.route_dirty ||
          (body.last_goal - goal_position(space, identity, request.goal)).length() >
              n.settings.crowd_correction_m ||
          position.x < body.route_bounds.min.x || position.x > body.route_bounds.max.x ||
          position.y < body.route_bounds.min.y || position.y > body.route_bounds.max.y ||
          (body.path_status == PathStatus::PendingTiles && n.dirty_tiles.empty());
+}
+void request_corner(Space::Native &n, Mirror &body) {
+  if (body.agent < 0)
+    return;
+  if (body.waypoint + 1 < body.route.size()) {
+    // Intermediate corners are through points. Target mode slows down as if
+    // each were the destination, allowing crowd separation to stall the walk.
+    auto velocity = nav(body.route[body.waypoint] - body.pose.position);
+    velocity.y = 0;
+    const float distance = velocity.length();
+    if (distance > 0)
+      velocity = velocity * (n.crowd->getAgent(body.agent)->params.maxSpeed / distance);
+    n.crowd->requestMoveVelocity(body.agent, &velocity.x);
+    return;
+  }
+  auto target = nav(body.route[body.waypoint]);
+  dtPolyRef ref = 0;
+  float nearest[3], extents[]{n.settings.navigation.radius_m, n.settings.navigation.height_m,
+                              n.settings.navigation.radius_m};
+  dtQueryFilter filter;
+  n.query->findNearestPoly(&target.x, extents, &filter, &ref, nearest);
+  if (ref)
+    n.crowd->requestMoveTarget(body.agent, ref, nearest);
 }
 void plan_move(Space &space, IdentityRead identity, const MoveRequest &request,
                std::span<const TravelBoundary> forbidden) {
@@ -399,7 +430,6 @@ void plan_move(Space &space, IdentityRead identity, const MoveRequest &request,
   body.waypoint = 0;
   body.path_status = result.status;
   body.intent = request.intent;
-  body.path_revision = n.revision;
   body.route_dirty = false;
   body.last_goal = goal_position(space, identity, request.goal);
   body.membership.due = 0;
@@ -446,16 +476,7 @@ void plan_move(Space &space, IdentityRead identity, const MoveRequest &request,
   while (body.waypoint + 1 < body.route.size() &&
          (body.route[body.waypoint] - body.pose.position).length() < c.radius_m)
     ++body.waypoint;
-  if (body.agent < 0)
-    return;
-  auto target = nav(body.route[body.waypoint]);
-  dtPolyRef ref = 0;
-  float nearest[3], extents[]{n.settings.navigation.radius_m, n.settings.navigation.height_m,
-                              n.settings.navigation.radius_m};
-  dtQueryFilter filter;
-  n.query->findNearestPoly(&target.x, extents, &filter, &ref, nearest);
-  if (ref)
-    n.crowd->requestMoveTarget(body.agent, ref, nearest);
+  request_corner(n, body);
 }
 
 bool travel_blocked(Vec3 a, Vec3 b, std::span<const TravelBoundary> regions) {
@@ -493,7 +514,7 @@ bool travel_blocked(Vec3 a, Vec3 b, std::span<const TravelBoundary> regions) {
 Path path(const Space &space, IdentityRead identity, Handle body, const Goal &goal,
           std::span<const TravelBoundary> forbidden) {
   const auto &n = *space.native;
-  Path result{PathStatus::NoSurface, {}, 0, n.revision};
+  Path result{PathStatus::NoSurface, {}, 0};
   auto found = n.bodies.find(body.bits);
   if (!identity.valid(body) || found == n.bodies.end())
     return result;

@@ -64,7 +64,7 @@ struct Mirror {
   struct MembershipPrediction {
     Step sampled = 0, due = 0;
     Vec3 center, velocity;
-    std::uint64_t volumes = 0, path = 0;
+    std::uint64_t volumes = 0;
     bool reconcile_zones = true, containers_dirty = true;
   } membership;
   BodySpec spec;
@@ -72,7 +72,7 @@ struct Mirror {
   JPH::BodyID body;
   std::unique_ptr<JPH::CharacterVirtual> character;
   int agent = -1;
-  std::uint64_t intent = 0, path_revision = 0;
+  std::uint64_t intent = 0;
   std::vector<Vec3> route;
   std::vector<TravelBoundary> forbidden;
   Bounds route_bounds;
@@ -221,6 +221,7 @@ NavResult build_tile(const NavJob &, const NavSettings &);
 void start_navigation_workers(Space::Native &);
 void stop_navigation_workers(Space::Native &);
 bool travel_blocked(Vec3 from, Vec3 to, std::span<const TravelBoundary>);
+void request_corner(Space::Native &, Mirror &);
 void edge(Edges &, RelationKind, Handle, Handle, bool, std::vector<RelationChange> &);
 void erase_edges(Edges &, RelationKind, Handle, std::vector<RelationChange> &);
 OperationResult update_motion(Space::Native &, Mirror &, Motion);

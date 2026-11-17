@@ -620,6 +620,51 @@ void object_goal_uses_reachable_side() {
               scene.objects.position[walker.slot()].x < 1,
           "the walker reaches the supported side within reach of the object");
 }
+void one_plan_follows_multiple_corners() {
+  Scene scene;
+  scene.box({24, 20, .2f}, {0, 0, -.2f});
+  scene.box({.4f, 14, 3}, {-2, -3, 0});
+  scene.box({.4f, 14, 3}, {2, 3, 0});
+  const auto walker = scene.character({-8, 0, 0});
+  scene.wait_navigation();
+  for (int i = 0; i < 4; ++i)
+    scene.tick();
+  const sp::MoveRequest move{walker, 1, sp::PointGoal{{8, 0, 0}, .15f}};
+  const auto route = sp::path(scene.space, identity(scene.objects), walker, move.goal, {});
+  require(route.status == sp::PathStatus::Ready && route.corners.size() >= 4,
+          "alternating walls require a route with at least three corners");
+  bool arrived = false;
+  for (int i = 0; i < 650 && !arrived; ++i) {
+    scene.tick({&move, 1});
+    arrived = scene.result.intents[0].state == sp::IntentState::Arrived;
+  }
+  require(arrived && scene.objects.position[walker.slot()].x > 7.7f,
+          "one-corner crowd targets carry the walker through the entire winding route");
+  require(scene.planned_moves == 1, "advancing route corners does not repeat path planning");
+}
+void tile_rebuilds_invalidate_only_overlapping_routes() {
+  Scene scene;
+  scene.box({30, 14, .2f}, {0, 0, -.2f});
+  const auto walker = scene.character({-8, 0, 0});
+  scene.wait_navigation();
+  for (int i = 0; i < 4; ++i)
+    scene.tick();
+  const sp::MoveRequest move{walker, 1, sp::PointGoal{{8, 0, 0}, .15f}};
+  scene.tick({&move, 1});
+  require(scene.planned_moves == 1, "initial walking intent plans once");
+  const auto revision = sp::navigation_revision(scene.space);
+  scene.box({1, 1, .2f}, {50, 50, 0});
+  scene.wait_navigation();
+  require(sp::navigation_revision(scene.space) > revision,
+          "the distant construction really installs new navigation tiles");
+  scene.tick({&move, 1});
+  require(scene.planned_moves == 1, "a rebuilt tile outside the route leaves its plan intact");
+  scene.box({.6f, .6f, 2}, {0, 0, 0});
+  scene.wait_navigation();
+  scene.tick({&move, 1});
+  require(scene.planned_moves == 2 && scene.result.intents[0].path_status == sp::PathStatus::Ready,
+          "a rebuilt tile on the route plans a new path around the construction");
+}
 template <class Function> void benchmark(const char *label, int count, Function function) {
   std::vector<double> times;
   times.reserve(count);
@@ -1314,6 +1359,8 @@ int main(int argc, char **argv) {
     displaced_walk_replans_with_fresh_boundaries();
     waiting_navigation_finishes_after_unrelated_tiles();
     object_goal_uses_reachable_side();
+    one_plan_follows_multiple_corners();
+    tile_rebuilds_invalidate_only_overlapping_routes();
     snapshot_continuation_and_fixed_parts();
     crowd_doorway_and_stale_tiles();
     predicted_sensor_crossings_and_containment();

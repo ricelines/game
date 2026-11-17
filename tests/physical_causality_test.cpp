@@ -233,7 +233,7 @@ void arrival_keeps_origin_until_publication() {
   bi::start_move(state.intents, body, Vec3{1, 0, 0}, origin);
   sp::StepResult physical;
   physical.relations = {{sp::RelationKind::InZone, body, zone, true}};
-  physical.intents = {{body, 1, sp::IntentState::Arrived, 0, sp::PathStatus::Ready}};
+  physical.intents = {{body, 1, sp::IntentState::Arrived, sp::PathStatus::Ready}};
   bi::publish_physical(state, journal, {14, {10, 11, 12, 13}}, 100, physical,
                        {.step = 7, .hz = 20});
   bi::finish_motion(state, physical.intents);

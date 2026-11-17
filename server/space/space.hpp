@@ -250,7 +250,6 @@ struct Path {
   PathStatus status;
   std::vector<Vec3> corners;
   float length_m;
-  std::uint64_t navigation_revision;
 };
 Path path(const Space &, IdentityRead, Handle, const Goal &, std::span<const TravelBoundary>);
 enum class IntentState { Moving, WaitingNavigation, Arrived, Blocked, TargetGone };
@@ -258,7 +257,6 @@ struct IntentProgress {
   Handle body;
   std::uint64_t intent;
   IntentState state;
-  float remaining_m;
   PathStatus path_status;
 };
 struct Contact {

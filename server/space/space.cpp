@@ -386,8 +386,7 @@ void membership(Space &space, IdentityRead identity, ParentWrite parents,
     }
     const bool following = body.character && body.intent && body.waypoint < body.route.size() &&
                            !n.attachments.contains(bits);
-    if (!reconcile && following && predicted.volumes == n.volume_revision &&
-        predicted.path == body.path_revision && now < predicted.due) {
+    if (!reconcile && following && predicted.volumes == n.volume_revision && now < predicted.due) {
       const auto expected =
           predicted.center + predicted.velocity * (float(now - predicted.sampled) * seconds);
       if ((expected - center).length_squared() <=
@@ -420,7 +419,7 @@ void membership(Space &space, IdentityRead identity, ParentWrite parents,
       edge(relations.contains, RelationKind::Contains, container, object, true, changes);
     if (!n.attachments.contains(bits))
       parents.parent[object.slot()] = immediate;
-    predicted = {now, 0, center, {}, n.volume_revision, body.path_revision, false, false};
+    predicted = {now, 0, center, {}, n.volume_revision, false, false};
     if (following) {
       const auto velocity = av(body.character->GetLinearVelocity());
       const float speed = velocity.length();
@@ -1648,19 +1647,21 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
       continue;
     auto input = active.find(bits);
     if (input == active.end()) {
-      if (body.agent >= 0)
-        n.crowd->resetMoveTarget(body.agent);
-      body.intent = 0;
-      body.route.clear();
-      body.forbidden.clear();
-      body.membership.due = 0;
+      if (body.intent) {
+        if (body.agent >= 0)
+          n.crowd->resetMoveTarget(body.agent);
+        body.intent = 0;
+        body.route.clear();
+        body.forbidden.clear();
+        body.membership.due = 0;
+      }
       continue;
     }
     const auto &request = *input->second;
     if (const auto *target = std::get_if<ObjectGoal>(&request.goal);
         target && !identity.valid(target->target)) {
       out.intents.push_back(
-          {request.body, request.intent, IntentState::TargetGone, 0, PathStatus::Unreachable});
+          {request.body, request.intent, IntentState::TargetGone, PathStatus::Unreachable});
       target_gone.insert(bits);
       body.route.clear();
       body.path_status = PathStatus::Unreachable;
@@ -1677,8 +1678,6 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
         parameters.maxSpeed = requested;
         n.crowd->updateAgentParameters(body.agent, &parameters);
       }
-    }
-    if (body.agent >= 0) {
       auto *agent = n.crowd->getEditableAgent(body.agent);
       auto actual = nav(body.pose.position);
       agent->corridor.movePosition(&actual.x, n.query, n.crowd->getFilter(0));
@@ -1687,6 +1686,8 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
       agent->vel[0] = velocity.x;
       agent->vel[1] = 0;
       agent->vel[2] = velocity.z;
+      if (body.path_status == PathStatus::Ready && body.waypoint + 1 < body.route.size())
+        request_corner(n, body);
     }
   }
   if (!n.character_handles.empty())
@@ -1732,18 +1733,12 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
     }
     if (input != active.end() && !target_gone.contains(bits)) {
       const auto &request = *input->second;
-      float remaining = 0;
-      Vec3 previous = body.pose.position;
-      for (std::size_t i = body.waypoint; i < body.route.size(); ++i) {
-        remaining += (body.route[i] - previous).length();
-        previous = body.route[i];
-      }
       float tolerance = c.radius_m;
       if (const auto *point = std::get_if<PointGoal>(&request.goal))
         tolerance = point->tolerance_m;
-      if (body.route.size() && remaining <= tolerance) {
-        out.intents.push_back(
-            {{bits}, request.intent, IntentState::Arrived, remaining, body.path_status});
+      if (!body.route.empty() && body.waypoint + 1 == body.route.size() &&
+          (body.route.back() - body.pose.position).length() <= tolerance) {
+        out.intents.push_back({{bits}, request.intent, IntentState::Arrived, body.path_status});
         n.crowd->resetMoveTarget(body.agent);
         body.route.clear();
         body.membership.due = 0;
@@ -1757,11 +1752,12 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
                              (body.stuck_s >= n.settings.blocked_after_s && n.dirty_tiles.empty())
                          ? IntentState::Blocked
                          : IntentState::Moving;
-        out.intents.push_back({{bits}, request.intent, state, remaining, body.path_status});
+        out.intents.push_back({{bits}, request.intent, state, body.path_status});
         if (body.route.size() && body.waypoint + 1 < body.route.size() &&
             (body.route[body.waypoint] - body.pose.position).length() < c.radius_m) {
           ++body.waypoint;
-          body.path_revision = 0;
+          body.membership.due = 0;
+          request_corner(n, body);
         }
       }
     }
