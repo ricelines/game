@@ -9,7 +9,7 @@ end
 
 local function parent(self, rows, plot)
     for _, grant in rows.held do
-        if grant.scope.plot==plot and has(grant,'build') and has(grant,'enter') and has(grant,'run_scripts') then return grant end
+        if grant.scope.plot==plot and has(grant,'build') and has(grant,'enter') and has(grant,'run_scripts') and has(grant,'return') then return grant end
     end
 end
 
@@ -18,6 +18,7 @@ local function end_lease(self, rows)
         if grant.scope.plot==self.state.plot then self:act('engine.revoke',nil,{grant=grant.id}) end
     end
     self.state.signed,self.state.debt,self.state.unpaid,self.state.last_time = false,0,nil,nil
+    self.state.tenant,self.state.rent,self.state.grace,self.state.plot,self.state.owner = nil,nil,nil,nil,nil
 end
 
 local function tick(self)
@@ -52,9 +53,14 @@ local function tick(self)
         self.state.unpaid = self.state.unpaid or now
         if now-self.state.unpaid>=self.state.grace*self:setting('base.day_seconds') then
             end_lease(self,grants(self))
+            local failed = {}
             for _, object in self:plot_objects(plot.plot) do
-                if self:object(object).owner==tenant then self:act('engine.return',object,{}) end
+                if self:object(object).owner==tenant and not self:act('engine.return',object,{}).ok then
+                    table.insert(failed,tostring(object))
+                end
             end
+            self:act('engine.edit_text',self.handle,{text={writing=if #failed>0 then
+                'Eviction could not return: '..table.concat(failed,', ') else ''}})
         end
     else self.state.unpaid = nil end
 end
