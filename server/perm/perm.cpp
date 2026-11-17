@@ -1128,38 +1128,6 @@ SwapResult return_goods(State &state, const ReturnRequest &request, Step now) {
           std::move(closed)};
 }
 
-SwapResult store_goods(amber::perm::State &perm_state, Holder actor, const Target &goods,
-                       std::span<const Target> parts, PlayerId recipient, Handle body, bool present,
-                       std::size_t mailbox_max, Step now) {
-  auto &players = perm_state.players;
-  auto &grants = perm_state.grants;
-
-  if (goods.flags & Body)
-    return {Reason::NotGoods, {}, {}};
-  if (goods.flags & Escrow)
-    return {Reason::InEscrow, {}, {}};
-  if (!recipient || recipient >= players.rows.size())
-    return {Reason::UnknownHolder, {}, {}};
-  if (recipient != goods.owner)
-    return {Reason::NotController, {}, {}};
-  const auto permission = check(actor, Verb::Transfer, goods, players, grants, now);
-  if (!permission)
-    return {permission.reason, {}, {}};
-  const auto components = check_parts(goods, parts);
-  if (!components)
-    return {components.reason, {}, {}};
-  auto &player = players.rows[recipient];
-  if (!present && player.mailbox.size() >= mailbox_max &&
-      std::find(player.mailbox.begin(), player.mailbox.end(), goods.object) == player.mailbox.end())
-    return {Reason::MailboxFull, {}, {}};
-  auto &stored = present ? player.inventory : player.mailbox;
-  auto &other = present ? player.mailbox : player.inventory;
-  std::erase(other, goods.object);
-  if (std::find(stored.begin(), stored.end(), goods.object) == stored.end())
-    stored.push_back(goods.object);
-  return {Reason::Allowed, {{goods.object, present ? body : Handle{}, false}}, {}};
-}
-
 std::vector<CustodyChange> deliver_mailbox(Players &players, PlayerId id, Handle body) {
   auto &player = players.rows[id];
   std::vector<CustodyChange> changes;

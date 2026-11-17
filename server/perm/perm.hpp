@@ -369,9 +369,7 @@ struct ReturnRequest {
   bool present = false, forced = false;
 };
 SwapResult return_goods(State &, const ReturnRequest &, Step);
-SwapResult store_goods(amber::perm::State &perm_state, Holder, const Target &,
-                       std::span<const Target> parts, PlayerId recipient, Handle recipient_body,
-                       bool present, std::size_t mailbox_max, Step);
+
 std::vector<CustodyChange> deliver_mailbox(Players &, PlayerId, Handle body);
 
 TradeResult open_trade(Trades &, const Players &, PlayerId, PlayerId);

@@ -1171,34 +1171,6 @@ void assembly_offers_preflight_and_transfer_every_declared_part() {
           "assembly gift separated component ownership or delivery");
 }
 
-void storing_existing_goods_checks_then_changes_custody_directly() {
-  GoodsFixture f;
-  const auto script = Holder::script(50, Handle::make(50, 1));
-  const auto store = [&](PlayerId recipient, Handle body, bool present, std::size_t maximum) {
-    return store_goods(f.perm_state, script, f.current(), {}, recipient, body, present, maximum, 2);
-  };
-  require(store(1, {}, false, 1).reason == Reason::MissingRight &&
-              f.players.rows[1].mailbox.empty(),
-          "holding goods inherited script owner authority");
-  f.grant(1, script, Scope::object(f.goods), 1, bit(Verb::Transfer));
-  require(store(2, {}, false, 1).reason == Reason::NotController && f.current().owner == 1 &&
-              f.players.rows[2].mailbox.empty(),
-          "hold redirected goods to an arbitrary recipient");
-  require(store(1, {}, false, 0).reason == Reason::MailboxFull && f.players.rows[1].mailbox.empty(),
-          "failed holding changed the owner's custody lists");
-  auto held = store(1, {}, false, 1);
-  require(held && held.custody.front().goods == f.goods && !held.custody.front().in_world &&
-              f.players.rows[1].mailbox == std::vector<Handle>{f.goods},
-          "direct store did not publish the actual owner custody delta");
-  const auto body = Handle::make(80, 1);
-  held = store(1, body, true, 0);
-  require(held && held.custody.front().parent == body && f.players.rows[1].mailbox.empty() &&
-              f.players.rows[1].inventory == std::vector<Handle>{f.goods} &&
-              store(1, body, true, 0) && f.players.rows[1].inventory.size() == 1 &&
-              f.current().owner == 1,
-          "direct holding duplicated goods or altered existing ownership");
-}
-
 void typed_accounts_preserve_custody_identity_and_bound_refunds() {
   GoodsFixture f;
   ObjectInit init;
@@ -1366,7 +1338,6 @@ int main() {
     direct_trade_rechecks_both_sides_resets_confirmation_and_cannot_be_bought_piecemeal();
     retired_trade_goods_cannot_change_a_reused_slot();
     assembly_offers_preflight_and_transfer_every_declared_part();
-    storing_existing_goods_checks_then_changes_custody_directly();
     typed_accounts_preserve_custody_identity_and_bound_refunds();
     snapshot_keeps_shared_allowances_escrow_and_pending_confirmation();
     std::cout << "permission tests passed\n";

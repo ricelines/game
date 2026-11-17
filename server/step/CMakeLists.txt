@@ -19,7 +19,6 @@ add_library(amber_step STATIC
   construction.cpp
   replacement.cpp
   model_definition.cpp
-  goods.cpp
   returns.cpp
   authority.cpp
   authoring_failures.cpp

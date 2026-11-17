@@ -504,7 +504,6 @@ enum class ExchangeAction {
   ReturnGoods,
   OfferPlot,
   SetOfferPrice,
-  HoldGoods,
   Notify,
   Pay,
   Balance,

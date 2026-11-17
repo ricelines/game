@@ -87,7 +87,6 @@ The starting native operations include:
 | `engine.release` | Attached object plus `{linear?, angular?}`; relinquish a current held item or use its motion authority. |
 | `engine.impulse` | Object plus `{momentum, point}`; real physics under Move/reach. Foreign avatar animation needs its separate Avatar grant. |
 | `engine.transfer` | Source plus `{to, term, amount, to_max?}`; conserved quantity, source Move and recipient Use. Availability and bounds cap the transfer; returns actual `amount`. |
-| `engine.hold_goods` | Goods root, `{}`; Transfer on it and its parts; stores it for its existing owner. |
 
 Land actions are `engine.offer_plot {plot, price, buyer?, expires_s?}`, `engine.set_offer_price {offer, price}`, `engine.accept {offer, max_price, payer?, beneficiary?}`, `engine.return` on an item, `engine.abandon_plot {plot}`, `engine.split_plot {plot, x}` or `{plot, y}`, and `engine.join_plots {plots={a,b}}`. Buying land can be remote. Acceptance never pays more than `max_price`. Return requires the plot's Return right; a live Build grant protects the item's owner until revoked. Returned goods bypass the mailbox gift cap.
 

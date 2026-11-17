@@ -91,7 +91,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   declare_construction_actions(terms, native_declarations);
   declare_model_edit(terms, native_declarations);
   declare_physical_actions(terms, native_declarations);
-  declare_hold_goods_action(terms, native_declarations);
   const auto role = [&](const char *group, const char *name) {
     return mechanical.values.at(group).at(name).get<TermId>();
   };

@@ -1083,11 +1083,6 @@ NativeCompletion split_plot(perm::State &, ObjectState &, const LandSettings &, 
 NativeCompletion join_plots(perm::State &, ObjectState &, const NativeCall &);
 step::NativeCompletion return_goods(perm::State &, ObjectState &, const DeliveryTargets &,
                                     const space::Space &, const NativeCall &, bool forced = false);
-step::NativeCompletion hold_goods(amber::perm::State &perm_state, amber::ObjectState &objects_state,
-                                  const DeliveryTargets &delivery, const space::Space &space,
-                                  std::size_t mailbox_max, const step::NativeCall &call);
-void declare_hold_goods_action(react::Terms &terms, react::NativeActions &declarations);
-std::string validate_hold_goods(const nlohmann::json &input);
 
 struct State {
   WorkQueues queues;
