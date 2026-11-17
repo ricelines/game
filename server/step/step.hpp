@@ -342,9 +342,6 @@ Monotonic::time_point finish_frame(Clock &, PhaseCosts &, const Frame &, double 
 
 step::InputWork enqueue_input(Inputs &, Input);
 InputCompletion complete_input(Inputs &, std::uint64_t, nlohmann::json reply);
-void write_inputs(snap::Output &, const Inputs &,
-                  std::optional<std::span<const std::uint64_t>> selected_ids = {});
-void read_inputs(snap::Input &, Inputs &);
 
 bool in_reach(Vec3 actor_point, Bounds target, float reach_m);
 
@@ -851,8 +848,7 @@ void reconcile_mass(AssemblyMasses &, const react::ValueRead &, const Relation &
 void write_timers(snap::Output &, const TimerWheel &, const snap::ObjectSelection & = {});
 void read_timers(snap::Input &, TimerWheel &);
 void write_queues(snap::Output &, const WorkQueues &, const Intents &, std::uint64_t next_record,
-                  const snap::ObjectSelection & = {},
-                  std::span<const std::uint64_t> selected_inputs = {});
+                  const snap::ObjectSelection & = {});
 std::uint64_t read_queues(snap::Input &, WorkQueues &, Intents &);
 
 NativeCompletion replace_instance(amber::ObjectState &objects_state,

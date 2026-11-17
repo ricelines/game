@@ -36,10 +36,10 @@ void round_trip_and_real_vm_continuation() {
   require(loaded.players.rows[1].notices == original.players.rows[1].notices &&
               loaded.players.rows[1].notices_dropped == 4,
           "the complete checkpoint preserves pending player notices and overflow count");
-  require(view.sections.size() == 13 && loaded.next_record == 31 &&
-              loaded.inputs.rows.size() == 1 && loaded.motion.size() == 2 &&
+  require(view.sections.size() == 13 && loaded.next_record == 31 && loaded.inputs.rows.empty() &&
+              loaded.queues.turns.empty() && loaded.motion.size() == 2 &&
               loaded.parts.get(original.f.b.slot()),
-          "all thirteen owner sections restore their actual nonempty tables");
+          "world sections restore while pending network input and its queued turn are discarded");
   require(loaded.f.processes[1].get(original.f.a.slot())->rate == 1 &&
               loaded.f.processes[1].get(original.f.a.slot())->step0 == 0 &&
               react::read_state(loaded.f.properties, loaded.f.processes, original.f.a, 1, 20, 20)

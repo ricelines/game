@@ -164,8 +164,7 @@ void saved_work_continues_in_causal_order_with_typed_payload_and_origin() {
           "typed payload or causal chain changed on restore");
   require(std::get<react::EventWork>(pop_foreground(restored)->work).event == 10,
           "external input overtook saved causal work");
-  require(std::get<InputWork>(pop_foreground(restored)->work).id == 987654321,
-          "opaque external input id survives ordered queue restore");
+  require(!pop_foreground(restored), "pending network inputs are not restored");
   promote_due(restored_wheel, 65536, restored);
   const auto fired = pop_foreground(restored);
   require(fired && fired->threshold && fired->threshold->watch_index == 2 &&

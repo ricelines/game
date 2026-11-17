@@ -96,21 +96,7 @@ void read_scst(snap::Input &in, react::State &react_state, std::size_t slots) {
   react::read_instances(in, react_state.installations, slots);
   react::read_world_scripts(in, react_state.world_scripts);
 }
-void write_queues_section(snap::Output &out, const step::WorkQueues &queues,
-                          const step::Intents &intents, std::uint64_t next_record,
-                          const step::Inputs &inputs, const snap::ObjectSelection &selected,
-                          std::span<const std::uint64_t> selected_inputs) {
-  step::write_queues(out, queues, intents, next_record, selected, selected_inputs);
-  step::write_inputs(out, inputs,
-                     selected.all ? std::nullopt
-                                  : std::optional<std::span<const std::uint64_t>>(selected_inputs));
-}
-std::uint64_t read_queues_section(snap::Input &in, step::WorkQueues &queues, step::Intents &intents,
-                                  step::Inputs &inputs) {
-  auto next_record = step::read_queues(in, queues, intents);
-  step::read_inputs(in, inputs);
-  return next_record;
-}
+
 void write_reqs(snap::Output &out, const elaborate::Requests &requests,
                 const elaborate::GapCounts &gaps, const elaborate::LastGaps &last,
                 const elaborate::CaptureRefs &captures,
@@ -275,7 +261,6 @@ void encode_checkpoint(
   auto &timers = step_state.timers;
   auto &queues = step_state.queues;
   auto &intents = step_state.intents;
-  auto &inputs = step_state.inputs;
   auto &requests = elaborate_state.requests;
   auto &gap_counts = elaborate_state.gap_counts;
   auto &last_gaps = elaborate_state.last_gaps;
@@ -342,7 +327,7 @@ void encode_checkpoint(
   }
   {
     const auto marker = snap::begin_section(out, snap::tags[9]);
-    write_queues_section(out, queues, intents, next_record, inputs, selected, {});
+    step::write_queues(out, queues, intents, next_record, selected);
     snap::end_section(out, marker);
   }
   {
@@ -400,7 +385,6 @@ Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_st
   auto &timers = step_state.timers;
   auto &queues = step_state.queues;
   auto &intents = step_state.intents;
-  auto &inputs = step_state.inputs;
   auto &requests = elaborate_state.requests;
   auto &gap_counts = elaborate_state.gap_counts;
   auto &last_gaps = elaborate_state.last_gaps;
@@ -457,7 +441,7 @@ Decoded decode_checkpoint(const snap::View &view, amber::ObjectState &objects_st
   }
   {
     auto in = snap::section_input(view, snap::tags[9]);
-    result.next_record = read_queues_section(in, queues, intents, inputs);
+    result.next_record = step::read_queues(in, queues, intents);
     snap::check_complete(in);
   }
   {
@@ -626,16 +610,8 @@ void flush_gaps(amber::step::State &step_state, record::Journal &journal,
   }
   pending.clear();
 }
-void restore_pending_work(Inputs &inputs, elaborate::CaptureRefs &captures,
-                          const std::filesystem::path &catalog_root) {
-  // Active fixture subprocesses belong to the old process. Do not turn
-  // interrupted approvals into durable workflows or replay their actions.
-  std::erase_if(inputs.rows, [](const auto &row) { return row.second.awaiting; });
-  for (auto &[id, input] : inputs.rows) {
-    (void)id;
-    input.session = 0;
-    input.sequence = 0;
-  }
+void restore_pending_captures(elaborate::CaptureRefs &captures,
+                              const std::filesystem::path &catalog_root) {
   for (auto &[hash, capture] : captures.rows)
     if (capture.status == elaborate::CaptureStatus::Pending) {
       capture.path = catalog_root / "captures" / (hash + ".amb.zst");

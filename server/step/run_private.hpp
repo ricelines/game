@@ -105,8 +105,8 @@ initialize_physics(amber::step::State &step_state, const amber::catalog::State &
 } // namespace amber::step
 
 namespace amber::step::checkpoint {
-void restore_pending_work(Inputs &inputs, elaborate::CaptureRefs &captures,
-                          const std::filesystem::path &catalog_root);
+void restore_pending_captures(elaborate::CaptureRefs &captures,
+                              const std::filesystem::path &catalog_root);
 } // namespace amber::step::checkpoint
 
 namespace amber::step {

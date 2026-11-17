@@ -37,12 +37,23 @@ template <class S> void serialize(S &s, react::Timer &v) {
 
 namespace amber::step {
 
-template <class S> void serialize(S &s, InputWork &v) {
-  s.value8b(v.id);
-}
-
 template <class S> void serialize(S &s, ForegroundItem &v) {
-  snap::field(s, v.work);
+  std::uint8_t kind = std::holds_alternative<react::EventWork>(v.work) ? 0 : 1;
+  s.value1b(kind);
+  switch (kind) {
+  case 0:
+    if constexpr (std::is_same_v<S, snap::Input>)
+      v.work.template emplace<react::EventWork>();
+    s.object(std::get<react::EventWork>(v.work));
+    break;
+  case 1:
+    if constexpr (std::is_same_v<S, snap::Input>)
+      v.work.template emplace<react::WatchWork>();
+    s.object(std::get<react::WatchWork>(v.work));
+    break;
+  default:
+    throw std::runtime_error("invalid snapshot foreground work kind");
+  }
   snap::field(s, v.threshold);
 }
 template <class S> void serialize(S &s, Intent &v) {
@@ -71,15 +82,11 @@ void read_timers(snap::Input &in, TimerWheel &wheel) {
     schedule(wheel, std::move(timer));
 }
 void write_queues(snap::Output &out, const WorkQueues &q, const Intents &intents,
-                  std::uint64_t next_record, const snap::ObjectSelection &selected,
-                  std::span<const std::uint64_t> selected_inputs) {
+                  std::uint64_t next_record, const snap::ObjectSelection &selected) {
   out.value8b(next_record);
   auto write_lane = [&](const auto &lane) {
-    if (selected.all) {
-      out.container(lane, snap::max_collection());
-      return;
-    }
-    std::deque<ForegroundItem> kept;
+    std::vector<const ForegroundItem *> kept;
+    kept.reserve(lane.size());
     for (const auto &item : lane) {
       const bool include = std::visit(
           [&](const auto &work) {
@@ -89,14 +96,14 @@ void write_queues(snap::Output &out, const WorkQueues &q, const Intents &intents
             else if constexpr (std::is_same_v<T, react::WatchWork>)
               return selected.contains(work.source.subject);
             else
-              return std::find(selected_inputs.begin(), selected_inputs.end(), work.id) !=
-                     selected_inputs.end();
+              return false;
           },
           item.work);
       if (include && (!item.threshold || selected.contains(item.threshold->consumer)))
-        kept.push_back(item);
+        kept.push_back(&item);
     }
-    out.container(kept, snap::max_collection());
+    out.container(kept, snap::max_collection(),
+                  [](snap::Output &s, const ForegroundItem *item) { s.object(*item); });
   };
   write_lane(q.causal);
   write_lane(q.turns);

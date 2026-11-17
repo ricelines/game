@@ -151,7 +151,7 @@ void completion_priority_and_stale_admission_refunds() {
           "a stale catch-up item consumed the background minimum");
 }
 
-void copied_inputs_and_restore() {
+void copied_inputs_and_completion() {
   step::Inputs inputs;
   step::Input one;
   one.kind = net::ControlKind::RegisterModel;
@@ -172,20 +172,9 @@ void copied_inputs_and_restore() {
   const auto immediate = step::complete_input(inputs, second.id, {{"ok", true}});
   require(immediate.session == 18 && inputs.rows.contains(first.id),
           "independent completion removed another pending input");
-  snap::Buffer bytes;
-  snap::Output out{bytes};
-  step::write_inputs(out, inputs);
-  out.adapter().flush();
-  step::Inputs restored;
-  snap::Input in{bytes.data(), bytes.size()};
-  step::read_inputs(in, restored);
-  const auto &row = restored.rows.at(first.id);
-  require(row.awaiting && row.origin == one.origin && row.caller == one.caller &&
-              row.fields["source"] == "copied source" && restored.next_id == inputs.next_id,
-          "pending input codec lost typed authority, copied data or identity high water");
-  auto reply = step::complete_input(restored, first.id, {{"ok", true}, {"model", 42}});
+  auto reply = step::complete_input(inputs, first.id, {{"ok", true}, {"model", 42}});
   require(reply.session == 17 && reply.sequence == 8 && reply.request == 23 &&
-              reply.fields["model"] == 42 && restored.rows.empty(),
+              reply.fields["model"] == 42 && inputs.rows.empty(),
           "completion did not return to its exact original request");
 }
 
@@ -283,7 +272,7 @@ int main() {
   try {
     clock_budget_and_background_progress();
     completion_priority_and_stale_admission_refunds();
-    copied_inputs_and_restore();
+    copied_inputs_and_completion();
     explicit_watch_planning_and_live_dispatch();
     action_plans_keep_authority_separate();
     std::cout << "Scheduler, copied-input and live invocation planning checks passed.\n";

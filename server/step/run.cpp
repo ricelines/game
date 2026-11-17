@@ -189,7 +189,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
         space::ensure_terrain(space_state, plot.bounds);
 
     clock.step = restored->header.step;
-    checkpoint::restore_pending_work(inputs, captures, catalog_root);
+    checkpoint::restore_pending_captures(captures, catalog_root);
     catalog::restore_scripts(scripts, vm, rules, registry, terms, settings.pins,
                              catalog_root / "scripts", launch.data / "scripts");
     catalog::restore_assets(assets, models, parameters, terms, settings.pins, launch.assets);
