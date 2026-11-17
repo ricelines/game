@@ -54,7 +54,7 @@ void a_watch_is_acknowledged_only_when_its_handler_starts() {
                                         f.scripts, {{f.a, 1}, {}}, 1, 20);
   require(retried.invocations.size() == 1, "unstarted watch change remains pending");
   invoke(f, retried.invocations.front(), journal);
-  require(std::get<double>(f.states.at({f.a, script}).at(std::string("runs"))) == 1 &&
+  require(std::get<double>(f.states.at({f.a, script}).values.at(std::string("runs"))) == 1 &&
               step::plan_watch(f.subscriptions, f.values(), f.allocations, f.triggers, f.scripts,
                                {{f.a, 1}, {}}, 1, 20)
                   .invocations.empty(),
@@ -126,8 +126,8 @@ void chosen_actions_and_typed_inputs() {
               records[0]["root"] == records[0]["id"] && records[0]["result"] == "applied" &&
               records[1]["kind"] == "handler" && records[1]["cause"] == records[0]["id"],
           "only the authenticated player action is chosen; its real handler keeps the cause");
-  require(std::get<double>(f.states.at({f.a, script}).at(std::string("amount"))) == 2.5 &&
-              std::get<std::string>(f.states.at({f.a, script}).at(std::string("note"))) ==
+  require(std::get<double>(f.states.at({f.a, script}).values.at(std::string("amount"))) == 2.5 &&
+              std::get<std::string>(f.states.at({f.a, script}).values.at(std::string("note"))) ==
                   "omitted",
           "raw typed inputs reach actual Lua with optional inputs absent");
 
@@ -179,7 +179,7 @@ void chosen_actions_and_typed_inputs() {
   records = journal.take();
   require(records.size() == 2 && records[0]["agent"] == false && records[1]["agent"] == true &&
               records[0]["result"] == "denied" && records[1]["result"] == "denied" &&
-              std::get<double>(f.states.at({f.a, script}).at(std::string("calls"))) == 2,
+              std::get<double>(f.states.at({f.a, script}).values.at(std::string("calls"))) == 2,
           "real denial retains chosen classification and leaves script state unchanged");
 
   auto &native = f.react_state.native_declarations;
@@ -239,7 +239,7 @@ void chosen_actions_and_typed_inputs() {
               records[0]["things"] == nlohmann::json::array({to_string(f.a)}) &&
               records[0]["agent"] == true && records[0]["changed"] == false &&
               records[0]["response"] == malformed.outcome->reply &&
-              std::get<double>(f.states.at({f.a, script}).at(std::string("calls"))) == 2,
+              std::get<double>(f.states.at({f.a, script}).values.at(std::string("calls"))) == 2,
           "declaration validation records one chosen denial without invoking the handler");
 }
 void canonical_results_and_actual_bounds() {
@@ -413,8 +413,9 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
   };
   crossing(21);
   for (auto key : std::array<ScriptKey, 2>{{{f.a, direct}, {f.a, sibling}}})
-    require(std::get<double>(f.states.at(key).at(std::string("count"))) == 1 &&
-                std::abs(std::get<double>(f.states.at(key).at(std::string("last"))) - 1.05) < 1e-9,
+    require(std::get<double>(f.states.at(key).values.at(std::string("count"))) == 1 &&
+                std::abs(std::get<double>(f.states.at(key).values.at(std::string("last"))) - 1.05) <
+                    1e-9,
             "both handlers receive the actual sampled source scalar once");
   require(!f.states.contains({f.a, bare}) && !f.states.contains({f.b, bare}),
           "bare quantity siblings never consume ordinary threshold work");
@@ -425,8 +426,8 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
   require(next.size() == 2 && next[0].due == 41 && next[1].due == 41,
           "coalesced source evaluation rearms one future token per consumer");
   crossing(41);
-  require(std::get<double>(f.states.at({f.a, direct}).at(std::string("count"))) == 2 &&
-              std::get<double>(f.states.at({f.a, sibling}).at(std::string("count"))) == 2 &&
+  require(std::get<double>(f.states.at({f.a, direct}).values.at(std::string("count"))) == 2 &&
+              std::get<double>(f.states.at({f.a, sibling}).values.at(std::string("count"))) == 2 &&
               step::timers(timers).size() == 2 &&
               !step::valid_event({obsolete.event, obsolete.threshold}, identity(f.objects),
                                  f.processes, f.subscriptions, 41, 20),
@@ -476,7 +477,7 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
   records = journal.take();
   require(next.size() == 2 && next.front().due > 1000000 && records.size() == rearms &&
               next.back().event.origin.cause == records.back()["id"] &&
-              std::get<double>(f.states.at({f.a, direct}).at(std::string("count"))) == 2,
+              std::get<double>(f.states.at({f.a, direct}).values.at(std::string("count"))) == 2,
           "far-future replacements retain latest real origin without invented threshold callbacks");
   auto plans = step::plan_event(f.triggers, f.values(), {f.a, {}, 6, Value(-.5), origin}, 41, 20);
   plans.front().input.deadline = RunDeadline::after(2000);
@@ -490,8 +491,8 @@ void threshold_plans_use_current_subscriptions(bool benchmark) {
   while (step::pop_foreground(queues)) {
   }
   crossing(step::timers(timers).front().due);
-  require(std::get<double>(f.states.at({f.a, direct}).at(std::string("count"))) == 3 &&
-              std::get<double>(f.states.at({f.a, sibling}).at(std::string("count"))) == 3 &&
+  require(std::get<double>(f.states.at({f.a, direct}).values.at(std::string("count"))) == 3 &&
+              std::get<double>(f.states.at({f.a, sibling}).values.at(std::string("count"))) == 3 &&
               step::timers(timers).size() == 2,
           "next real crossing still reaches both scripts exactly once after replacements");
   // A stopped real process has no future crossing. Its old far-future tokens

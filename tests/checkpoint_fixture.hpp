@@ -103,7 +103,7 @@ struct Fixture {
     for (auto &timer : armed.timers)
       step::schedule(timers, std::move(timer));
     f.bind(unrelated, f.c);
-    f.states[{f.c, unrelated}][std::string("private")] = std::string("unrelated");
+    f.states[{f.c, unrelated}].insert(std::string("private"), std::string("unrelated"));
     const std::array<ScriptId, 1> explicit_scripts{script};
     react::set_instances(f.installed, f.b, explicit_scripts, f.scripts);
     f.shared.resize(5);

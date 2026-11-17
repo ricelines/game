@@ -351,24 +351,6 @@ void retire_object(Properties &props, Processes &processes, ScriptStates &states
     states.erase({object, script});
   random.erase(object.bits);
 }
-std::size_t StateKeyHash::operator()(const StateKey &key) const {
-  if (const auto *text = std::get_if<std::string>(&key))
-    return (*this)(StateStringKey{*text});
-  return std::hash<std::int64_t>{}(std::get<std::int64_t>(key)) ^ 0x9e3779b9;
-}
-std::size_t StateKeyHash::operator()(StateStringKey key) const {
-  return std::hash<std::string_view>{}(key.text);
-}
-bool StateKeyEqual::operator()(const StateKey &a, const StateKey &b) const {
-  return a == b;
-}
-bool StateKeyEqual::operator()(const StateKey &a, StateStringKey b) const {
-  const auto *text = std::get_if<std::string>(&a);
-  return text && *text == b.text;
-}
-bool StateKeyEqual::operator()(StateStringKey a, const StateKey &b) const {
-  return (*this)(b, a);
-}
 std::size_t AllocationKeyHash::operator()(const AllocationKey &key) const {
   return FactKeyHash{}({key.subject, key.term}) ^
          std::hash<std::uint64_t>{}(key.contributor.bits +

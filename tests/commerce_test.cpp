@@ -1020,13 +1020,13 @@ void plot_changes_dispatch_before_authority_is_removed() {
     for (const auto &[script, object] : {std::pair{land, f.f.a}, {lease, f.f.b}}) {
       const auto &state = f.f.states.at({object, script});
       const auto number = [&](const char *key) {
-        return std::get<double>(state.at(std::string(key)));
+        return std::get<double>(state.values.at(std::string(key)));
       };
       require(number("count") == count && number("plot") == 1 && number("other") == other &&
                   number("area") == area && number("other_area") == other_area &&
-                  std::get<std::string>(state.at(std::string("op"))) == op &&
-                  std::get<std::string>(state.at(std::string("owner"))) == owner &&
-                  std::get<std::string>(state.at(std::string("old_owner"))) == old_owner,
+                  std::get<std::string>(state.values.at(std::string("op"))) == op &&
+                  std::get<std::string>(state.values.at(std::string("owner"))) == owner &&
+                  std::get<std::string>(state.values.at(std::string("old_owner"))) == old_owner,
               "dispatched plot change has the wrong fields or was duplicated");
     }
     require(!f.f.states.contains({f.f.c, builder}), "build-only observer received a plot event");

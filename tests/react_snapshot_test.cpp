@@ -19,10 +19,10 @@ void reaction_roundtrip_and_capture() {
   Processes processes(3);
   processes[1].set(a.slot(), Process{3, 20, -1, 0, 5});
   ScriptStates states;
-  states[{a, 4}][std::string("handle")] = b;
-  states[{a, 4}][std::int64_t{1}] = 4.0;
-  states[{a, 4}][std::string("1")] = std::string("different");
-  states[{outside, 4}][std::string("x")] = 99.0;
+  states[{a, 4}].insert(std::string("handle"), b);
+  states[{a, 4}].insert(std::int64_t{1}, 4.0);
+  states[{a, 4}].insert(std::string("1"), std::string("different"));
+  states[{outside, 4}].insert(std::string("x"), 99.0);
   Subscriptions subscriptions;
   bind_watch(subscriptions, {a, 1},
              {{b, 4}, 0, Answer{true, Value(3.0)}, {1, {{Threshold::Predicate::Below, 2}}}, {}});
@@ -52,6 +52,7 @@ void reaction_roundtrip_and_capture() {
   Properties loaded_props;
   Processes loaded_processes;
   ScriptStates loaded_states;
+  loaded_states[{a, 4}].insert(std::string("stale"), std::string(500, 'x'));
   Subscriptions loaded_subscriptions;
   RandomStates loaded_random;
   AuthoredRelations loaded_relations;
@@ -72,6 +73,16 @@ void reaction_roundtrip_and_capture() {
           "closed-form process fields survive snapshot");
   require(loaded_states.size() == 1 && loaded_states.at({a, 4}) == states.at({a, 4}),
           "flat state tags/keys/handles survive snapshot");
+  std::size_t state_bytes = 0;
+  for (const auto &[key, value] : loaded_states.at({a, 4}).values) {
+    state_bytes += sizeof(StateKey) + sizeof(StateAtom) + 2 * sizeof(void *);
+    if (const auto *text = std::get_if<std::string>(&key))
+      state_bytes += text->size();
+    if (const auto *text = std::get_if<std::string>(&value))
+      state_bytes += text->size();
+  }
+  require(loaded_states.at({a, 4}).bytes == state_bytes,
+          "restore rebuilds the persistent charge from the saved entries");
   require(loaded_random.size() == 1 && loaded_random.at(a.bits) == 345,
           "RNG selected full handle restored");
   require(loaded_subscriptions.rows.at({a, 1})[0].last == subscriptions.rows.at({a, 1})[0].last,

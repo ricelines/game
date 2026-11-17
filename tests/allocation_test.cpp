@@ -84,8 +84,8 @@ struct Fixture {
     const auto state = f.states.find({object, consumer});
     if (state == f.states.end())
       return 0;
-    const auto value = state->second.find(std::string("count"));
-    return value == state->second.end() ? 0 : std::get<double>(value->second);
+    const auto value = state->second.values.find(std::string("count"));
+    return value == state->second.values.end() ? 0 : std::get<double>(value->second);
   }
 };
 void redistribution_and_lifetime_meters() {
@@ -97,9 +97,9 @@ void redistribution_and_lifetime_meters() {
   x.publish();
   require(x.count(x.f.a) == 1 && x.count(x.f.b) == 1 && x.count(x.third) == 0,
           "same-total redistribution wakes only demanders whose allocation changed");
-  near(std::get<double>(x.f.states.at({x.f.a, x.consumer}).at(std::string("total"))), 13,
+  near(std::get<double>(x.f.states.at({x.f.a, x.consumer}).values.at(std::string("total"))), 13,
        "watch payload remains total demand");
-  near(std::get<double>(x.f.states.at({x.f.b, x.consumer}).at(std::string("allocation"))), 5,
+  near(std::get<double>(x.f.states.at({x.f.b, x.consumer}).values.at(std::string("allocation"))), 5,
        "actual Luau reads the reconciled allocation");
   x.now = 20;
   x.contribute(x.supplier, 10, 0);
@@ -146,8 +146,8 @@ void thresholds_and_relation_rebinding() {
   x.publish();
   require(x.count(x.f.a) == 2 && x.count(x.f.b) == 1,
           "the shared term's relation fallback compares the old and new allocations");
-  near(std::get<double>(x.f.states.at({x.f.a, x.consumer}).at(std::string("allocation"))), .5,
-       "rebound Luau consumer sees the actual new subject");
+  near(std::get<double>(x.f.states.at({x.f.a, x.consumer}).values.at(std::string("allocation"))),
+       .5, "rebound Luau consumer sees the actual new subject");
 }
 void priority_scopes_and_retirement() {
   Fixture x(Combine::SharePriority);
@@ -219,7 +219,7 @@ void snapshot_answers_and_live_share() {
     end}})");
   const InvocationPlan call{{script, "novel.cue"}, x.f.a, {}, 6, {}, {}};
   x.f.run(std::span(&call, 1));
-  near(std::get<double>(x.f.states.at({x.f.a, script}).at(std::string("immediate"))), 1,
+  near(std::get<double>(x.f.states.at({x.f.a, script}).values.at(std::string("immediate"))), 1,
        "get_share reads current rows before any reconciliation pass");
 }
 } // namespace

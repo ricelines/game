@@ -135,12 +135,12 @@ void stored_scripts_keep_data_and_restart_without_a_saved_execution() {
   const auto key = ScriptKey{f.object, 2};
   auto first = f.run(2, 4);
   require(first.outcome.status == react::RunOutcome::Status::Ok, "script started");
-  const auto count = f.states.at(key).at(std::string("count"));
+  const auto count = f.states.at(key).values.at(std::string("count"));
   f.objects.flags[f.object.slot()] |= Held;
   f.objects.plot[f.object.slot()] = 0;
   require(!react::find_handler(f.triggers, f.values, key, 4, 20, 20),
           "stored script stayed active");
-  require(f.states.at(key).at(std::string("count")) == count, "storage changed script data");
+  require(f.states.at(key).values.at(std::string("count")) == count, "storage changed script data");
   // A visible held item still runs; hidden inventory alone stops execution.
   f.objects.plot[f.object.slot()] = 1;
   require(bool(react::find_handler(f.triggers, f.values, key, 4, 20, 20)),
@@ -148,7 +148,7 @@ void stored_scripts_keep_data_and_restart_without_a_saved_execution() {
   f.objects.flags[f.object.slot()] &= ~Held;
   auto next = f.run(2, 4);
   require(next.outcome.status == react::RunOutcome::Status::Ok &&
-              std::get<double>(f.states.at(key).at(std::string("count"))) ==
+              std::get<double>(f.states.at(key).values.at(std::string("count"))) ==
                   std::get<double>(count) + 1,
           "placed script could not continue from ordinary stored data");
 }
@@ -197,18 +197,18 @@ void persistence_and_activation() {
   Fixture f;
   const auto first = f.run(2, 4);
   require(first.outcome.status == react::RunOutcome::Status::Ok, "first RNG handler");
-  const auto draw = std::get<double>(f.states.at({f.object, 2}).at(std::string("last")));
+  const auto draw = std::get<double>(f.states.at({f.object, 2}).values.at(std::string("last")));
   f.run(2, 4);
-  require(std::get<double>(f.states.at({f.object, 2}).at(std::string("count"))) == 2 &&
-              std::get<double>(f.states.at({f.object, 2}).at(std::string("last"))) != draw,
+  require(std::get<double>(f.states.at({f.object, 2}).values.at(std::string("count"))) == 2 &&
+              std::get<double>(f.states.at({f.object, 2}).values.at(std::string("last"))) != draw,
           "scalar state and RNG continue across invocations");
   f.run(2, 4, f.other);
-  require(std::get<double>(f.states.at({f.other, 2}).at(std::string("count"))) == 1,
+  require(std::get<double>(f.states.at({f.other, 2}).values.at(std::string("count"))) == 1,
           "another installation has its own persisted scalar state");
   react::set_activation(f.vm, 2, false, false);
   const auto disabled = f.run(2, 4);
   require(disabled.outcome.status == react::RunOutcome::Status::Missing &&
-              std::get<double>(f.states.at({f.object, 2}).at(std::string("count"))) == 2,
+              std::get<double>(f.states.at({f.object, 2}).values.at(std::string("count"))) == 2,
           "inactive cached script cannot execute even with an old handler reference");
 }
 void withdrawing_from_retired_subject_is_idempotent() {
@@ -216,7 +216,7 @@ void withdrawing_from_retired_subject_is_idempotent() {
   const auto script = f.add(R"(return {kind='model',contributes={'novel.signal'},on={
     ['novel.cue']=function(self) self:contribute(self.state.old,'novel.signal',0) end}})");
   react::ScriptState state;
-  state[std::string("old")] = f.b;
+  state.insert(std::string("old"), f.b);
   destroy(f.objects, f.b);
   react::Invocation invocation;
   invocation.self = {f.a, script};
@@ -249,8 +249,8 @@ void model_rebind_retires_only_removed_installations() {
   react::project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
   f.bind(old, f.a);
   f.bind(keep, f.a);
-  f.states[{f.a, old}][std::string("retired")] = true;
-  f.states[{f.a, keep}][std::string("saved")] = std::string("surviving state");
+  f.states[{f.a, old}].insert(std::string("retired"), true);
+  f.states[{f.a, keep}].insert(std::string("saved"), std::string("surviving state"));
   react::set_contribution(f.shared, f.gives_to, f.terms.rows[4], f.a, f.b, 10, f.effects);
   react::set_contribution(f.shared, f.gives_to, f.terms.rows[2], f.a, f.b, 7, f.effects);
   amber::perm::State perm_state;
@@ -284,7 +284,7 @@ void model_rebind_retires_only_removed_installations() {
   };
   const auto [changed, effects] = replace(f.a);
   require(changed && !f.states.contains({f.a, old}) &&
-              std::get<std::string>(f.states.at({f.a, keep}).at(std::string("saved"))) ==
+              std::get<std::string>(f.states.at({f.a, keep}).values.at(std::string("saved"))) ==
                   "surviving state",
           "changing the same root model retires removed state but retains explicit script state");
   require(!grants.rows[old_grant].live && grants.rows[kept_grant].live,
@@ -316,13 +316,13 @@ void model_rebind_retires_only_removed_installations() {
   const std::array retained_default{old, keep};
   react::set_instances(f.installed, f.c, retained_default, f.scripts);
   react::project_instance(f.triggers, f.installed, f.scripts, f.terms, f.c);
-  f.states[{f.c, old}][std::string("saved")] = true;
+  f.states[{f.c, old}].insert(std::string("saved"), true);
   const auto explicit_grant = grant(old, f.c);
   react::set_contribution(f.shared, f.gives_to, f.terms.rows[4], f.c, f.b, 3, f.effects);
   const auto explicit_result = replace(f.c);
   require(
       !explicit_result.first && grants.rows[explicit_grant].live &&
-          std::get<bool>(f.states.at({f.c, old}).at(std::string("saved"))) &&
+          std::get<bool>(f.states.at({f.c, old}).values.at(std::string("saved"))) &&
           f.shared[4].get(f.b.slot())->total == 3,
       "an old default surviving as an explicit installation keeps state, grants and contribution");
   ObjectInit init;
@@ -330,13 +330,13 @@ void model_rebind_retires_only_removed_installations() {
   init.material = 8;
   init.owner = 1;
   const auto same_default = create(f.objects, init);
-  f.states[{same_default, old}][std::string("saved")] = true;
+  f.states[{same_default, old}].insert(std::string("saved"), true);
   const auto model_grant = grant(old, same_default);
   react::set_contribution(f.shared, f.gives_to, f.terms.rows[4], same_default, f.b, 5, f.effects);
   const auto model_result = replace(same_default, 3);
   require(
       !model_result.first && grants.rows[model_grant].live &&
-          std::get<bool>(f.states.at({same_default, old}).at(std::string("saved"))) &&
+          std::get<bool>(f.states.at({same_default, old}).values.at(std::string("saved"))) &&
           f.shared[4].get(f.b.slot())->total == 8,
       "changing models retains an unchanged default script and its state, grant and contribution");
   const auto rule = f.add(R"(return {kind='rule',applies_to={material='novel.other'},
@@ -346,7 +346,7 @@ void model_rebind_retires_only_removed_installations() {
   react::project_rules(f.triggers, f.rules);
   init.material = 9;
   const auto with_rule = create(f.objects, init);
-  f.states[{with_rule, old}][std::string("retired")] = true;
+  f.states[{with_rule, old}].insert(std::string("retired"), true);
   const auto removed_grant = grant(old, with_rule);
   react::set_contribution(f.shared, f.gives_to, f.terms.rows[4], with_rule, f.b, 5, f.effects);
   const auto rule_result = replace(with_rule, 2, 9);

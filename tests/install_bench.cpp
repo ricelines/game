@@ -46,7 +46,7 @@ void watches(unsigned count) {
   unsigned delivered = 0;
   for (auto h : objects)
     if (const auto state = f.states.find({h, script}); state != f.states.end())
-      delivered += unsigned(std::get<double>(state->second.at(std::string("count"))));
+      delivered += unsigned(std::get<double>(state->second.values.at(std::string("count"))));
   test_runtime::require(delivered == iterations,
                         "actual Luau deliveries must preserve exact count");
   report("own_state_dirty_primary_dependencies_delivery_luau", count, samples);

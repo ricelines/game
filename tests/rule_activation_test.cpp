@@ -34,8 +34,8 @@ struct Runner {
     const auto row = f.states.find({object, script});
     if (row == f.states.end())
       return 0;
-    const auto count = row->second.find(std::string("runs"));
-    return count == row->second.end() ? 0 : std::get<double>(count->second);
+    const auto count = row->second.values.find(std::string("runs"));
+    return count == row->second.values.end() ? 0 : std::get<double>(count->second);
   }
 };
 std::string rule() {

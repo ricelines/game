@@ -33,10 +33,10 @@ void run(unsigned unrelated) {
     f.run(plans, i);
   }
   const auto elapsed = std::chrono::steady_clock::now() - start;
-  test_runtime::require(std::get<double>(f.states.at({f.b, script}).at(std::string("count"))) ==
-                                count &&
-                            react::read(f.values(), f.b, 2, count, 20).value.numeric() == count,
-                        "benchmark must preserve real Luau state and authoritative result");
+  test_runtime::require(
+      std::get<double>(f.states.at({f.b, script}).values.at(std::string("count"))) == count &&
+          react::read(f.values(), f.b, 2, count, 20).value.numeric() == count,
+      "benchmark must preserve real Luau state and authoritative result");
   std::cout << unrelated
             << " unrelated objects: contribution + primary rule/watch resolution + "
                "actual Luau/state write "

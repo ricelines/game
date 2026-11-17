@@ -178,7 +178,7 @@ void script_spending() {
   require(perm::balance(f.ledger, perm::Account::player(2)) == 66 &&
               perm::balance(f.ledger, perm::Account::player(3)) == 34 &&
               f.grants.rows[grant].spent == 34 &&
-              std::get<bool>(f.f.states.at({f.f.a, f.script}).at(std::string("returned"))),
+              std::get<bool>(f.f.states.at({f.f.a, f.script}).values.at(std::string("returned"))),
           "actual synchronous self.act payment did not return with its capped transfer applied");
   const auto logs = f.journal.take();
   require(logs.size() == 3 && logs[0]["kind"] == "handler" && logs[1]["name"] == "engine.pay" &&

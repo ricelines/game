@@ -51,7 +51,7 @@ struct EventBinding {
 };
 struct RunContext {
   Invocation *invocation = nullptr;
-  std::size_t state_bytes = 0, state_limit = 0;
+  std::size_t state_limit = 0;
   const std::size_t *heap_bytes = nullptr;
   std::size_t event_fields_max = 0;
   lua_State *thread = nullptr;
@@ -125,20 +125,6 @@ void interrupt(lua_State *L, int gc) {
   if (run && run->invocation && run->invocation->deadline.passed())
     luaL_error(L, "handler deadline exceeded");
 }
-std::size_t atom_size(const StateAtom &atom) {
-  return sizeof(StateAtom) +
-         (std::holds_alternative<std::string>(atom) ? std::get<std::string>(atom).size() : 0);
-}
-std::size_t key_size(const StateKey &key) {
-  return sizeof(StateKey) +
-         (std::holds_alternative<std::string>(key) ? std::get<std::string>(key).size() : 0);
-}
-std::size_t state_size(const ScriptState &state) {
-  std::size_t result = 0;
-  for (auto &[key, value] : state)
-    result += key_size(key) + atom_size(value) + sizeof(void *) * 2;
-  return result;
-}
 StateKey state_key(lua_State *L, int index) {
   if (lua_type(L, index) == LUA_TSTRING) {
     std::size_t size;
@@ -152,13 +138,13 @@ StateKey state_key(lua_State *L, int index) {
   }
   luaL_error(L, "state key must be a string or integer");
 }
-ScriptState::iterator find_state(lua_State *L, ScriptState &state, int index) {
+ScriptState::Entries::iterator find_state(lua_State *L, ScriptState &state, int index) {
   if (lua_type(L, index) == LUA_TSTRING) {
     std::size_t size;
     const char *text = lua_tolstring(L, index, &size);
-    return state.find(StateStringKey{{text, size}});
+    return state.values.find(StateStringKey{{text, size}});
   }
-  return state.find(state_key(L, index));
+  return state.values.find(state_key(L, index));
 }
 StateAtom state_atom(lua_State *L, int index) {
   switch (lua_type(L, index)) {
@@ -205,7 +191,7 @@ int state_index(lua_State *L) {
   auto *proxy = static_cast<StateProxy *>(luaL_checkudatatagged(L, 1, state_tag));
   context(L);
   auto found = find_state(L, *proxy->state, 2);
-  if (found == proxy->state->end())
+  if (found == proxy->state->values.end())
     lua_pushnil(L);
   else
     push_atom(L, found->second);
@@ -215,33 +201,29 @@ int state_newindex(lua_State *L) {
   auto *proxy = static_cast<StateProxy *>(luaL_checkudatatagged(L, 1, state_tag));
   auto &run = context(L);
   auto found = find_state(L, *proxy->state, 2);
-  const std::size_t previous =
-      found == proxy->state->end()
-          ? 0
-          : key_size(found->first) + atom_size(found->second) + sizeof(void *) * 2;
   if (lua_isnil(L, 3)) {
-    if (found != proxy->state->end()) {
+    if (found != proxy->state->values.end()) {
       proxy->state->erase(found);
-      run.state_bytes -= previous;
       run.invocation->effects->changed = true;
     }
     return 0;
   }
+  const std::size_t previous =
+      found == proxy->state->values.end() ? 0 : state_entry_bytes(found->first, found->second);
   std::optional<StateKey> key;
-  if (found == proxy->state->end())
+  if (found == proxy->state->values.end())
     key = state_key(L, 2);
   auto atom = state_atom(L, 3);
-  const auto next =
-      (key ? key_size(*key) : key_size(found->first)) + atom_size(atom) + sizeof(void *) * 2;
-  if (run.state_bytes - previous + next + (run.heap_bytes ? *run.heap_bytes : 0) > run.state_limit)
+  const auto next = state_entry_bytes(key ? *key : found->first, atom);
+  if (proxy->state->bytes - previous + next + (run.heap_bytes ? *run.heap_bytes : 0) >
+      run.state_limit)
     luaL_error(L, "script state memory limit exceeded");
-  run.state_bytes = run.state_bytes - previous + next;
-  if (found == proxy->state->end() || found->second != atom)
+  if (found == proxy->state->values.end() || found->second != atom)
     run.invocation->effects->changed = true;
-  if (found == proxy->state->end())
-    proxy->state->emplace(std::move(*key), std::move(atom));
+  if (found == proxy->state->values.end())
+    proxy->state->insert(std::move(*key), std::move(atom));
   else
-    found->second = std::move(atom);
+    proxy->state->replace(found, std::move(atom));
   return 0;
 }
 void destroy_iterator(lua_State *, void *pointer) {
@@ -254,8 +236,8 @@ int state_next(lua_State *L) {
   auto *iterator = static_cast<StateIterator *>(lua_touserdata(L, lua_upvalueindex(1)));
   while (iterator->index < iterator->keys.size()) {
     auto &key = iterator->keys[iterator->index++];
-    auto found = iterator->state->find(key);
-    if (found == iterator->state->end())
+    auto found = iterator->state->values.find(key);
+    if (found == iterator->state->values.end())
       continue;
     push_key(L, key);
     push_atom(L, found->second);
@@ -265,23 +247,23 @@ int state_next(lua_State *L) {
 }
 int state_iter(lua_State *L) {
   auto *proxy = static_cast<StateProxy *>(luaL_checkudatatagged(L, 1, state_tag));
-  auto &run = context(L);
+  context(L);
   std::size_t snapshot_bytes = 0;
-  for (const auto &[key, value] : *proxy->state) {
+  for (const auto &[key, value] : proxy->state->values) {
     (void)value;
-    snapshot_bytes += key_size(key);
+    snapshot_bytes += state_key_bytes(key);
   }
   void *userdata = nullptr;
   lua_getallocf(L, &userdata);
   auto &allocator = *static_cast<Allocator *>(userdata);
   auto &charged = allocator.used[allocator.current];
-  if (charged + run.state_bytes + snapshot_bytes + sizeof(StateIterator) > allocator.limit)
+  if (charged + proxy->state->bytes + snapshot_bytes + sizeof(StateIterator) > allocator.limit)
     luaL_error(L, "state iterator memory limit exceeded");
   auto *iterator = new (lua_newuserdatatagged(L, sizeof(StateIterator), iterator_tag))
       StateIterator{{}, 0, proxy->state, &charged, snapshot_bytes};
   charged += snapshot_bytes;
-  iterator->keys.reserve(proxy->state->size());
-  for (auto &[key, value] : *proxy->state) {
+  iterator->keys.reserve(proxy->state->values.size());
+  for (auto &[key, value] : proxy->state->values) {
     (void)value;
     iterator->keys.push_back(key);
   }
@@ -294,7 +276,7 @@ int state_length(lua_State *L) {
   auto *proxy = static_cast<StateProxy *>(luaL_checkudatatagged(L, 1, state_tag));
   context(L);
   std::int64_t length = 0;
-  while (proxy->state->contains(StateKey{length + 1}))
+  while (proxy->state->values.contains(StateKey{length + 1}))
     ++length;
   lua_pushnumber(L, static_cast<double>(length));
   return 1;
@@ -897,14 +879,12 @@ RunOutcome Vm::Impl::advance(Invocation &inv) {
   auto *L = run.thread;
   const auto script = inv.self.script;
   allocator.current = script;
-  allocator.state_bytes = &run.state_bytes;
+  allocator.state_bytes = inv.state ? &inv.state->bytes : nullptr;
   int status = LUA_ERRRUN;
   if (inv.state)
     status = lua_resume(L, nullptr, 0);
-  else
-    run.state_bytes = 0;
   RunOutcome result;
-  result.memory_bytes = allocator.used[script] + run.state_bytes;
+  result.memory_bytes = allocator.used[script] + (inv.state ? inv.state->bytes : 0);
   allocator.state_bytes = nullptr;
   allocator.current = 0;
   if (status == LUA_YIELD && run.action) {
@@ -952,7 +932,6 @@ RunOutcome run_handler(Vm &vm, const HandlerRef &handler, Invocation &inv) {
     inv.deadline = RunDeadline::after(impl.settings.handler_ms);
   auto run = std::make_unique<RunContext>();
   run->invocation = &inv;
-  run->state_bytes = state_size(*inv.state);
   run->state_limit = impl.allocator.limit;
   run->heap_bytes = &impl.allocator.used[handler.script];
   run->event_fields_max = impl.settings.event_fields_max;
@@ -971,8 +950,6 @@ RunOutcome resume_handler(Vm &vm, Invocation &inv, const nlohmann::json &result)
   auto &impl = *vm.impl_;
   auto &run = *impl.calls.back();
   assert(run.invocation == &inv);
-  if (inv.state)
-    run.state_bytes = state_size(*inv.state);
   run.result = &result;
   return impl.advance(inv);
 }

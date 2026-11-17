@@ -32,7 +32,7 @@ void real_watch_drives_authored_state() {
           "complete handler index projects unwatched event/action functions");
   const InvocationPlan cue{event[0], f.a, {}, 6, Value{}, {}};
   f.run(std::span<const InvocationPlan>(&cue, 1));
-  require(std::get<bool>(f.states.at({f.a, model}).at(StateKey{std::string("cued")})),
+  require(std::get<bool>(f.states.at({f.a, model}).values.at(StateKey{std::string("cued")})),
           "projected event executes actual authored function");
   require(f.changed({f.a, 1}).empty(), "installation creates a baseline, not a callback");
   f.state(f.a, 1, 3);
@@ -41,7 +41,7 @@ void real_watch_drives_authored_state() {
   f.run(plans);
   require(read(f.values(), f.a, 2, 0, 20).value.numeric() == 6,
           "novel watch runs actual Luau setter");
-  require(std::get<double>(f.states.at({f.a, model}).at(StateKey{std::string("runs")})) == 1,
+  require(std::get<double>(f.states.at({f.a, model}).values.at(StateKey{std::string("runs")})) == 1,
           "real persistent state changed once");
   require(f.changed({f.a, 1}).empty(), "unchanged typed answer suppresses repeated callbacks");
   auto extra = f.add(
@@ -141,7 +141,7 @@ void threshold_restore_and_selected_instance_codec() {
   std::swap(f.subscriptions, loaded_subs);
   f.run(plans, 41);
   std::swap(f.subscriptions, loaded_subs);
-  require(std::get<bool>(f.states.at({f.a, id}).at(StateKey{std::string("crossed")})),
+  require(std::get<bool>(f.states.at({f.a, id}).values.at(StateKey{std::string("crossed")})),
           "threshold invokes real Luau after restore");
   check_changed(loaded_subs, f.values(), f.allocations, {f.a, 1}, 41, 20, {});
   set_rate(f.react_state, f.terms.rows[1], f.a, -1, 0, 10, 41, 20, f.effects);
@@ -238,7 +238,7 @@ void selector_changes_publish_after_subscription_rebinding() {
           "quantity-before-flag mutation cannot be swallowed by a current baseline");
   f.run(plans);
   require(read(f.values(), f.a, 2, 0, 20).value.numeric() == 45 &&
-              std::get<double>(f.states.at({f.a, rule}).at(std::string("count"))) == 1,
+              std::get<double>(f.states.at({f.a, rule}).values.at(std::string("count"))) == 1,
           "new flag-selected watch executes the actual current-state Luau handler once");
   auto unchanged =
       sync_rule_watches(f.react_state, f.values(), f.scripts, f.effects.ordered, 0, 20, {});

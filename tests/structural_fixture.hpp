@@ -116,7 +116,7 @@ struct Fixture {
   ScriptId add(std::string_view source) {
     script = f.add(source);
     f.models.rows[1].script = script;
-    f.states[{f.a, script}][std::string("tokens")] = 10.;
+    f.states[{f.a, script}].insert(std::string("tokens"), 10.);
     react::project_model(f.triggers, f.models, f.scripts, f.terms, 1);
     return script;
   }

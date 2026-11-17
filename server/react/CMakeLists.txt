@@ -1,5 +1,6 @@
 add_library(amber_react STATIC
   values.cpp
+  script_state.cpp
   watches.cpp
   vm.cpp
   execution.cpp

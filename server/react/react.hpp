@@ -335,7 +335,21 @@ struct StateKeyEqual {
   bool operator()(StateStringKey, const StateKey &) const;
 };
 
-using ScriptState = std::unordered_map<StateKey, StateAtom, StateKeyHash, StateKeyEqual>;
+std::size_t state_key_bytes(const StateKey &);
+std::size_t state_entry_bytes(const StateKey &, const StateAtom &);
+
+struct ScriptState {
+  using Entries = std::unordered_map<StateKey, StateAtom, StateKeyHash, StateKeyEqual>;
+  Entries values;
+  // Persistent entry charge; the VM heap is counted separately for SCRIPT_KB.
+  std::size_t bytes = 0;
+
+  std::pair<Entries::iterator, bool> insert(StateKey, StateAtom);
+  void replace(Entries::iterator, StateAtom);
+  void erase(Entries::iterator);
+  void restore(Entries);
+  bool operator==(const ScriptState &) const = default;
+};
 
 using ScriptStates = std::unordered_map<ScriptKey, ScriptState, ScriptKeyHash>;
 

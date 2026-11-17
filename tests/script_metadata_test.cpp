@@ -103,7 +103,7 @@ struct Fixture {
     properties.resize(6);
     processes.resize(6);
     properties[2].set(root.slot(), Value(10.0));
-    state[std::int64_t{3}] = 5.0;
+    state.insert(std::int64_t{3}, 5.0);
     meters[{root, part, 2, false}] = {2, 0, 3};
     players.rows.resize(4);
     plots.rows.push_back({1, 2, 0, 7, {-5, -4, 30, 40}, {}});
@@ -190,7 +190,7 @@ void single_solid_measurement_has_no_assembly_metadata() {
 }
 void retained_handles_grant_no_reads() {
   Fixture f;
-  f.state[std::string("saved")] = f.unrelated;
+  f.state.insert(std::string("saved"), f.unrelated);
   require(f.run("self:object(self.state.saved)").status == react::RunOutcome::Status::Error,
           "a retained handle does not authorize object metadata reads");
   require(f.run("self:measure_instance(self.state.saved)").status ==
@@ -201,7 +201,7 @@ void retained_handles_grant_no_reads() {
   end)")
                   .status == react::RunOutcome::Status::Error,
           "iterating state does not acquire retained handles");
-  f.state[std::string("saved")] = to_string(f.unrelated);
+  f.state.replace(f.state.values.find(std::string("saved")), to_string(f.unrelated));
   require(f.run("self:object(self.state.saved)").status == react::RunOutcome::Status::Error,
           "a stored string is not promoted into a typed object reference");
 }

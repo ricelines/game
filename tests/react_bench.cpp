@@ -14,6 +14,43 @@ template <class Fn> void bench(const char *name, std::size_t iterations, Fn run)
             << " ns/op=" << elapsed / static_cast<double>(iterations) << " checksum=" << checksum
             << '\n';
 }
+void one_write_with_stored_state(std::size_t entries) {
+  Vm vm({4096, 50, 5, 64});
+  ScriptDeclaration declaration;
+  declaration.id = 1;
+  const auto code =
+      compile_script("return {on={tick=function(self) self.state.count=self.state.count+1 end}}");
+  const auto loaded = load_script(vm, code, declaration);
+  if (loaded.status != RunOutcome::Status::Ok)
+    throw std::runtime_error(loaded.error);
+  ScriptState state;
+  state.insert(std::string("count"), 0.0);
+  for (std::size_t i = 1; i < entries; ++i)
+    state.insert("plot:" + std::to_string(i), static_cast<double>(i));
+  DeferredEffects effects;
+  Invocation invocation;
+  invocation.self = {Handle::make(1, 1), 1};
+  invocation.state = &state;
+  invocation.effects = &effects;
+  const HandlerRef handler{1, "tick"};
+  auto run = [&] {
+    invocation.deadline = RunDeadline::after(5);
+    const auto result = run_handler(vm, handler, invocation);
+    if (result.status != RunOutcome::Status::Ok)
+      throw std::runtime_error(result.error);
+  };
+  for (unsigned i = 0; i < 1000; ++i)
+    run();
+  constexpr std::size_t iterations = 100000;
+  const auto name = "one_state_write_entries_" + std::to_string(entries);
+  std::cout << name << " state_bytes=" << state.bytes
+            << " excludes=compile,load,state_population,warmup includes=handler_entry,one_write\n";
+  bench(name.c_str(), iterations, [&] {
+    for (std::size_t i = 0; i < iterations; ++i)
+      run();
+    return std::get<double>(state.values.at(std::string("count")));
+  });
+}
 } // namespace
 int main() {
   constexpr std::size_t count = 100000;
@@ -72,9 +109,11 @@ int main() {
       auto result = run_handler(vm, handler, invocation);
       if (result.status != RunOutcome::Status::Ok)
         throw std::runtime_error(result.error);
-      checksum += std::get<double>(states[row].at(StateKey{std::string("n")}));
+      checksum += std::get<double>(states[row].values.at(StateKey{std::string("n")}));
       effects.ordered.clear();
     }
     return checksum;
   });
+  one_write_with_stored_state(30);
+  one_write_with_stored_state(30000);
 }

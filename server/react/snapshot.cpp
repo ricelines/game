@@ -191,7 +191,7 @@ void write_script_states(snap::Output &out, const ScriptStates &states,
   }
   out.container(keys, snap::max_collection(), [&](snap::Output &s, ScriptKey &key) {
     snap::field(s, key);
-    write_map(s, states.at(key), [](const auto &) { return true; });
+    write_map(s, states.at(key).values, [](const auto &) { return true; });
   });
   std::vector<std::pair<FactKey, std::vector<WatchBinding>>> rows;
   for (const auto &[source, bindings] : subscriptions.rows) {
@@ -212,7 +212,9 @@ void read_script_states(snap::Input &in, ScriptStates &states, Subscriptions &su
   std::vector<ScriptKey> keys;
   in.container(keys, snap::max_collection(), [&](snap::Input &s, ScriptKey &key) {
     snap::field(s, key);
-    read_map(s, states[key]);
+    ScriptState::Entries entries;
+    read_map(s, entries);
+    states[key].restore(std::move(entries));
   });
   read_map(in, subscriptions.rows);
 }

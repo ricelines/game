@@ -149,7 +149,7 @@ void mass_light_replication_lifetimes() {
               space::capacity(space).native_available == capacity,
           "variant projection lost parameter-dependent mass/light/zone or duplicated a sensor");
 
-  f.states[{root, 77}][std::string("kept")] = 42.;
+  f.states[{root, 77}].insert(std::string("kept"), 42.);
   const auto bounds = space::volume_bounds(space, root, space::VolumeKind::Zone);
   require(bounds.has_value(), "visible authored zone must have its actual sensor bounds");
   const Vec3 zone_only{bounds->min.x + .1f, bounds->min.y + .1f, bounds->max.z - .1f};
@@ -172,7 +172,7 @@ void mass_light_replication_lifetimes() {
               lights.rows.empty() && zones.rows.value.empty() && replicas.rows.empty() &&
               masses.rows.at(root.bits).total_kg == 10 &&
               !space::bounds(space, identity(f.objects), root) &&
-              std::get<double>(f.states.at({root, 77}).at(std::string("kept"))) == 42,
+              std::get<double>(f.states.at({root, 77}).values.at(std::string("kept"))) == 42,
           "hidden assembly kept ghost projections or lost measured mass/private state");
 
   step::invalidate_mass(masses, identity(f.objects), declared, assembly.objects);

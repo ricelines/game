@@ -204,7 +204,8 @@ void own_motion_queries_and_speech() {
   require(heard.size() == 1 && heard[0].sound.speech && heard[0].sound.name == "Public speaker",
           "heard speech carries canonical public speaker metadata");
   result = f.invoke(std::vector<EventField>{{"mode", std::string("stored")}});
-  require(result.changed && std::get<bool>(f.f.states.at({f.f.a, script}).at(std::string("said"))),
+  require(result.changed &&
+              std::get<bool>(f.f.states.at({f.f.a, script}).values.at(std::string("said"))),
           "speech preserves an independent earlier state write");
 }
 void declared_part_batch_and_foreign_rejection(bool benchmark = false) {
@@ -228,7 +229,8 @@ void declared_part_batch_and_foreign_rejection(bool benchmark = false) {
     end}})");
   auto result = f.invoke(std::vector<EventField>{{"mode", std::string("batch")}});
   require(result.outcome.status == react::RunOutcome::Status::Ok && result.changed &&
-              std::get<double>(f.f.states.at({f.f.a, script}).at(std::string("count"))) == 300,
+              std::get<double>(f.f.states.at({f.f.a, script}).values.at(std::string("count"))) ==
+                  300,
           "one script batches all actual declared part poses without foreign Move grants");
   const auto before = f.f.objects.position[f.f.c.slot()];
   result = f.invoke(std::vector<EventField>{{"mode", std::string("foreign")}}, f.f.c);
@@ -270,10 +272,12 @@ void exact_queries_do_not_grant_event_authority() {
       end
     end}})");
   const auto read = f.invoke(std::vector<EventField>{{"mode", std::string("query")}});
-  require(read.outcome.status == react::RunOutcome::Status::Ok &&
-              std::get<Handle>(f.f.states.at({f.f.a, f.script}).at(std::string("hit"))) == f.f.b &&
-              std::get<bool>(f.f.states.at({f.f.a, f.script}).at(std::string("world_readonly"))),
-          "readonly world queries return actual geometry handles and readonly query methods");
+  require(
+      read.outcome.status == react::RunOutcome::Status::Ok &&
+          std::get<Handle>(f.f.states.at({f.f.a, f.script}).values.at(std::string("hit"))) ==
+              f.f.b &&
+          std::get<bool>(f.f.states.at({f.f.a, f.script}).values.at(std::string("world_readonly"))),
+      "readonly world queries return actual geometry handles and readonly query methods");
   const auto denied = f.invoke(std::vector<EventField>{{"mode", std::string("emit_query")}});
   require(denied.outcome.status == react::RunOutcome::Status::Error && f.queues.causal.empty(),
           "an exact query grants no event mutation authority on an unrelated object");

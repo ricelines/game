@@ -119,7 +119,7 @@ void install_script_state(const Json &plan, const Symbols &symbols, react::Scrip
         atom = symbols.objects.at(value.at("object").get<std::string>());
       else
         throw std::invalid_argument("initial script state needs a flat scalar or typed handle");
-      if (!state.emplace(std::move(name), std::move(atom)).second)
+      if (!state.insert(std::move(name), std::move(atom)).second)
         throw std::invalid_argument("duplicate initial flat-state key");
     }
   }

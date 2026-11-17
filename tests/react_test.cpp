@@ -16,6 +16,17 @@ void require(bool ok, const char *message) {
 void near(double a, double b, const char *message) {
   require(std::abs(a - b) < 1e-8, message);
 }
+void require_state_bytes(const ScriptState &state) {
+  std::size_t expected = 0;
+  for (const auto &[key, value] : state.values) {
+    expected += sizeof(StateKey) + sizeof(StateAtom) + 2 * sizeof(void *);
+    if (const auto *text = std::get_if<std::string>(&key))
+      expected += text->size();
+    if (const auto *text = std::get_if<std::string>(&value))
+      expected += text->size();
+  }
+  require(state.bytes == expected, "persistent script bytes equal a fresh entry walk");
+}
 Term term(TermId id, const char *name, Source source = Source::State,
           Combine combine = Combine::None) {
   Term t;
@@ -378,11 +389,11 @@ void action_handlers_receive_the_actual_caller() {
   child.deadline = RunDeadline::after(1000);
   child.action_caller = PlayerId{2};
   require(run_handler(f.vm, {script, "novel.touch"}, child).status == RunOutcome::Status::Ok &&
-              std::get<std::string>(state.at(std::string("kind"))) == "player",
+              std::get<std::string>(state.values.at(std::string("kind"))) == "player",
           "player action exposes its actual player caller");
   child.action_caller.reset();
   require(run_handler(f.vm, {script, "novel.touch"}, child).status == RunOutcome::Status::Ok &&
-              std::get<std::string>(state.at(std::string("kind"))) == "event",
+              std::get<std::string>(state.values.at(std::string("kind"))) == "event",
           "events have no action caller");
   Invocation parent = child;
   parent.self = {f.a, script};
@@ -392,7 +403,7 @@ void action_handlers_receive_the_actual_caller() {
           "real self.act yields its script caller");
   child.action_caller = action.action->request.caller;
   require(run_handler(f.vm, {script, "novel.touch"}, child).status == RunOutcome::Status::Ok &&
-              std::get<std::string>(state.at(std::string("kind"))) == "script",
+              std::get<std::string>(state.values.at(std::string("kind"))) == "script",
           "self.act exposes the script and its installed object as readonly caller metadata");
   require(resume_handler(f.vm, parent, {{"ok", true}}).status == RunOutcome::Status::Ok,
           "caller metadata does not alter action suspension and return");
@@ -417,15 +428,17 @@ void luau_state_and_limits() {
   DeferredEffects effects;
   auto result = execute(vm, state, effects, object, 1);
   require(result.status == RunOutcome::Status::Error, "handler error");
-  near(std::get<double>(state.at(StateKey{std::int64_t{1}})), 12, "integer state key retained");
-  require(std::get<std::string>(state.at(StateKey{std::string("1")})) == "separate",
+  near(std::get<double>(state.values.at(StateKey{std::int64_t{1}})), 12,
+       "integer state key retained");
+  require(std::get<std::string>(state.values.at(StateKey{std::string("1")})) == "separate",
           "string key distinct");
-  require(std::get<Handle>(state.at(StateKey{std::string("owner")})) == object,
+  require(std::get<Handle>(state.values.at(StateKey{std::string("owner")})) == object,
           "handle exact bits");
-  require(!state.contains(StateKey{std::string("remove")}), "nil deletes state");
-  near(std::get<double>(state.at(StateKey{std::string("count")})), 4,
+  require(!state.values.contains(StateKey{std::string("remove")}), "nil deletes state");
+  near(std::get<double>(state.values.at(StateKey{std::string("count")})), 4,
        "real userdata generic iteration");
   require(effects.changed, "state writes counted before error");
+  require_state_bytes(state);
   require(!compile_script("local n=0; return {on={run=function(self) n+=1 end}}").errors.empty(),
           "captured scalar mutation rejected");
   require(!compile_script("local n=0; return {on={run=function(self) n=1 end}}").errors.empty(),
@@ -440,7 +453,8 @@ void luau_state_and_limits() {
   DeferredEffects fe;
   require(execute(frozen, fs, fe, object, 2).status == RunOutcome::Status::Error,
           "captured table mutation fails");
-  require(fs.contains(StateKey{std::string("before")}), "write before frozen-table failure stays");
+  require(fs.values.contains(StateKey{std::string("before")}),
+          "write before frozen-table failure stays");
   Vm cutoff({4096, 50, 5, 64});
   d.id = 3;
   auto spin =
@@ -454,7 +468,7 @@ void luau_state_and_limits() {
   runaway.effects = &ce;
   require(run_handler(cutoff, {3, "run"}, runaway).status == RunOutcome::Status::Cutoff,
           "VM interrupt applies the configured handler CPU limit");
-  require(cs.contains(StateKey{std::string("before")}), "write before cutoff stays");
+  require(cs.values.contains(StateKey{std::string("before")}), "write before cutoff stays");
   Vm nested({4096, 50, 5, 64});
   d.id = 4;
   auto invalid =
@@ -465,7 +479,7 @@ void luau_state_and_limits() {
   DeferredEffects ne;
   require(execute(nested, ns, ne, object, 4).status == RunOutcome::Status::Error,
           "nested state rejected");
-  require(ns.size() == 1, "no rollback or hidden nested state");
+  require(ns.values.size() == 1, "no rollback or hidden nested state");
   Vm memory({256, 50, 5, 64});
   d.id = 5;
   auto large = compile_script("return {on={run=function(self) self.state.before=1; for i=1,10000 "
@@ -476,8 +490,9 @@ void luau_state_and_limits() {
   auto limited = execute(memory, ms, me, object, 5);
   require(limited.status == RunOutcome::Status::Error && limited.memory_bytes <= 256 * 1024,
           "combined Lua/state memory limit enforced");
-  require(ms.contains(StateKey{std::string("before")}) && ms.size() > 1,
+  require(ms.values.contains(StateKey{std::string("before")}) && ms.values.size() > 1,
           "partial writes survive memory limit");
+  require_state_bytes(ms);
   DeferredEffects repeat_effects;
   require(execute(memory, ms, repeat_effects, object, 5).status == RunOutcome::Status::Error,
           "repeated memory failure remains protected during VM call setup");
@@ -498,6 +513,34 @@ void luau_state_and_limits() {
   auto iter_result = execute(iterators, is, ie, object, 6);
   require(iter_result.status == RunOutcome::Status::Error && iter_result.memory_bytes <= 256 * 1024,
           "retained iterator snapshots count against script budget");
+}
+void script_state_byte_accounting() {
+  ScriptState state;
+  require_state_bytes(state);
+  state.insert(std::int64_t{1}, 4.0);
+  state.insert(std::string("1"), true);
+  state.insert(std::string("target"), Handle::make(9, 4));
+  const std::string binary_key("stored\0text", 11);
+  state.insert(binary_key, std::string(256, 'x'));
+  require_state_bytes(state);
+  require(!state.insert(binary_key, false).second &&
+              std::get<std::string>(state.values.at(binary_key)).size() == 256,
+          "duplicate insertion preserves the value and its charge");
+  require_state_bytes(state);
+  auto found = state.values.find(StateStringKey{binary_key});
+  state.replace(found, std::string(8192, 'y'));
+  require_state_bytes(state);
+  state.replace(found, std::string("short"));
+  require_state_bytes(state);
+  state.replace(found, false);
+  require_state_bytes(state);
+  state.erase(found);
+  require_state_bytes(state);
+  while (!state.values.empty()) {
+    state.erase(state.values.begin());
+    require_state_bytes(state);
+  }
+  require(state.bytes == 0, "erasing the final state entry releases its entire charge");
 }
 void state_keys_keep_owned_bytes_between_handlers() {
   Vm vm({256, 50, 5, 64});
@@ -520,13 +563,14 @@ void state_keys_keep_owned_bytes_between_handlers() {
     DeferredEffects effects;
     require(execute(vm, state, effects, Handle::make(1, 1), 1).status == RunOutcome::Status::Ok,
             "read, update and delete dynamic keys across handler lifetimes");
+    require_state_bytes(state);
   }
   std::string prefix;
   for (unsigned i = 0; i < 8; ++i)
     prefix += "account";
   const auto key = prefix + std::string("\0credit", 7);
-  require(state.size() == 2 && std::get<double>(state.at(key)) == 2 &&
-              std::get<double>(state.at(prefix)) == 23,
+  require(state.values.size() == 2 && std::get<double>(state.values.at(key)) == 2 &&
+              std::get<double>(state.values.at(prefix)) == 23,
           "state owns long binary keys and preserves bytes after a zero byte");
 }
 void live_activation_and_dispatch_authority() {
@@ -548,17 +592,19 @@ void live_activation_and_dispatch_authority() {
   inv.random = &rng;
   inv.effects = &effects;
   HandlerRef handler{11, "run", 1, 1, true};
-  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Missing && state.empty(),
+  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Missing &&
+              state.values.empty(),
           "inactive rule does not run");
   set_activation(vm, 11, true, true);
   inv.deadline = {};
   require(run_handler(vm, handler, inv).status == RunOutcome::Status::Ok &&
-              std::get<bool>(state.at(std::string("ran"))),
+              std::get<bool>(state.values.at(std::string("ran"))),
           "activation updates the cached closure declaration");
-  state.clear();
+  state = {};
   set_activation(vm, 11, true, false);
   inv.deadline = {};
-  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Missing && state.empty(),
+  require(run_handler(vm, handler, inv).status == RunOutcome::Status::Missing &&
+              state.values.empty(),
           "deactivation takes effect without reloading the closure");
 }
 void luau_bound_values_and_events() {
@@ -597,13 +643,13 @@ void luau_bound_values_and_events() {
               std::get<ScriptHolder>(result.action->request.caller) == ScriptHolder{1, f.a} &&
               result.action->arguments == nlohmann::json{{"amount", 1}},
           "act suspends at its call site as the installed script holder");
-  require(!state.contains(StateKey{std::string("observed")}),
+  require(!state.values.contains(StateKey{std::string("observed")}),
           "Lua statements after act wait for the actual action result");
   result = resume_handler(vm, bound_invocation,
                           {{"ok", true}, {"effect", "applied"}, {"created", {to_string(f.a)}}});
   if (result.status != RunOutcome::Status::Ok)
     throw std::runtime_error(result.error);
-  near(std::get<double>(state.at(StateKey{std::string("observed")})), 3,
+  near(std::get<double>(state.values.at(StateKey{std::string("observed")})), 3,
        "bindings read immediate changes");
   require(effects.ordered.size() == 6, "writes, events and timers survive action suspension");
   auto &timer = std::get<react::Timer>(effects.ordered[3]);
@@ -645,9 +691,9 @@ void luau_bound_values_and_events() {
   foreign_invocation.deadline = {};
   require(run_handler(foreign, {3, "read_foreign"}, foreign_invocation).status ==
                   RunOutcome::Status::Error &&
-              std::get<bool>(foreign_state.at(StateKey{std::string("attempted")})) &&
-              !foreign_state.contains(StateKey{std::string("copied")}) &&
-              !foreign_state.contains(StateKey{std::string("returned")}) &&
+              std::get<bool>(foreign_state.values.at(StateKey{std::string("attempted")})) &&
+              !foreign_state.values.contains(StateKey{std::string("copied")}) &&
+              !foreign_state.values.contains(StateKey{std::string("returned")}) &&
               read(projection, f.b, 1, 0, 20).value.numeric() == 7,
           "an acquired handle does not expose a foreign value read host or continue past it");
   Vm cyclic({4096, 50, 5, 64});
@@ -711,18 +757,18 @@ void synchronous_actions_and_nested_deadlines() {
           "nested targetless ordinary actions accept nil while the caller waits");
   require(resume_handler(vm, inner, {{"ok", false}, {"denied", {{"need", "use"}}}}).status ==
                   RunOutcome::Status::Ok &&
-              std::get<std::string>(inner_state.at(std::string("denied"))) == "use",
+              std::get<std::string>(inner_state.values.at(std::string("denied"))) == "use",
           "callee resumes with the actual canonical denial");
   require(resume_handler(vm, outer, {{"ok", true}, {"created", {to_string(f.c)}}}).status ==
                   RunOutcome::Status::Ok &&
-              std::get<Handle>(outer_state.at(std::string("after"))) == f.c,
+              std::get<Handle>(outer_state.values.at(std::string("after"))) == f.c,
           "outer call retains its own Lua stack and receives real created handles");
   outer.deadline = RunDeadline::after(1000);
   require(run_handler(vm, handler, outer).status == RunOutcome::Status::Action,
           "start another ordinary action");
   outer.deadline = RunDeadline{std::chrono::steady_clock::now(), {}};
   require(resume_handler(vm, outer, {{"ok", true}}).status == RunOutcome::Status::Cutoff &&
-              std::get<double>(outer_state.at(std::string("before"))) == 2,
+              std::get<double>(outer_state.values.at(std::string("before"))) == 2,
           "nested work does not reset the caller deadline or roll back prior writes");
   outer.deadline = RunDeadline::after(1000);
   require(run_handler(vm, handler, outer).status == RunOutcome::Status::Action &&
@@ -761,14 +807,18 @@ void nested_calls_share_live_state() {
   const HandlerRef handler{1, "run"};
   require(run_handler(vm, handler, outer).status == RunOutcome::Status::Action,
           "outer handler suspends before a child adds shared state");
+  require_state_bytes(state);
   require(run_handler(vm, handler, inner).status == RunOutcome::Status::Ok &&
-              std::get<std::string>(state.at(std::string("large"))) == std::string(8192, 'x'),
+              std::get<std::string>(state.values.at(std::string("large"))) ==
+                  std::string(8192, 'x'),
           "nested same-script call mutates the actual shared installation state");
+  require_state_bytes(state);
   const auto outcome = resume_handler(vm, outer, {{"ok", true}});
   require(outcome.status == RunOutcome::Status::Ok &&
-              !std::get<bool>(state.at(std::string("large"))) &&
-              std::get<bool>(state.at(std::string("returned"))),
+              !std::get<bool>(state.values.at(std::string("large"))) &&
+              std::get<bool>(state.values.at(std::string("returned"))),
           "parent continues and replaces the state added by its nested call");
+  require_state_bytes(state);
 }
 void candidate_start_uses_current_installation() {
   test_runtime::Fixture f(1000);
@@ -816,7 +866,7 @@ void candidate_start_uses_current_installation() {
               first_result.outcome.status == RunOutcome::Status::Error,
           "model handler error retains its completed effect");
   // These are the same primary installation/state changes made by uninstall.
-  f.states[{f.a, removed}][std::string("old")] = true;
+  f.states[{f.a, removed}].insert(std::string("old"), true);
   const std::array remaining{retained};
   set_instances(f.installed, f.a, remaining, f.scripts);
   project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
@@ -878,7 +928,8 @@ void suspended_handler_sees_replaced_parts() {
   refresh_parts(invocation, identity(f.objects), declared);
   const auto outcome = resume_handler(f.vm, invocation, {{"ok", true}});
   require(outcome.status == RunOutcome::Status::Ok &&
-              std::get<Handle>(f.states.at({root, script}).at(std::string("after"))) == new_part &&
+              std::get<Handle>(f.states.at({root, script}).values.at(std::string("after"))) ==
+                  new_part &&
               read(f.values(), new_part, 1, 0, 20).value.numeric() == 42,
           "continued parts query and own-part state write use the live replacement closure");
 }
@@ -894,6 +945,7 @@ int main() {
   dispatch_order();
   action_handlers_receive_the_actual_caller();
   luau_state_and_limits();
+  script_state_byte_accounting();
   state_keys_keep_owned_bytes_between_handlers();
   live_activation_and_dispatch_authority();
   luau_bound_values_and_events();

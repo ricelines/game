@@ -164,7 +164,7 @@ int main() {
                 react::installed_scripts(f.models, f.installed, identity(f.objects), f.a).size() ==
                     1,
             "default plus instance installation duplicated actual behavior");
-    f.states[{f.a, script}][std::string("kept")] = true;
+    f.states[{f.a, script}].insert(std::string("kept"), true);
     const auto uninstalled = ed::uninstall_script(call(1, f.a, {{"script", sid}}), f.react_state,
                                                   values, f.catalog_state, perm_state, 6);
     require(uninstalled.changed && f.states.contains({f.a, script}) && grants.rows[grant].live,

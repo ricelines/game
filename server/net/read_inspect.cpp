@@ -97,8 +97,8 @@ Json grant_record(const perm::Grants &grants, const perm::Grant &grant, Step now
 }
 Json state_record(const react::ScriptState &state) {
   std::vector<react::StateKey> keys;
-  keys.reserve(state.size());
-  for (const auto &[key, value] : state) {
+  keys.reserve(state.values.size());
+  for (const auto &[key, value] : state.values) {
     (void)value;
     keys.push_back(key);
   }
@@ -106,7 +106,7 @@ Json state_record(const react::ScriptState &state) {
   Json result = Json::array();
   constexpr std::array types{"number", "boolean", "string", "handle"};
   for (const auto &key : keys) {
-    const auto &atom = state.at(key);
+    const auto &atom = state.values.at(key);
     Json row;
     row["key"] = std::visit([](const auto &value) -> Json { return value; }, key);
     row["type"] = types[atom.index()];
