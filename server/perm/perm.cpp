@@ -1248,22 +1248,23 @@ SwapResult return_goods(State &state, const ReturnRequest &request, Step now) {
       return {allowed.reason, {}, {}};
   }
   std::vector<OfferId> closed;
-  for (auto &offer : state.offers.rows)
-    if (offer.live && offer.goods == goods.object) {
-      if (offer.trade) {
-        auto &trade = state.trades.rows[offer.trade];
-        // Other trade goods retain custody; the adapter clears their escrow flags.
-        for (auto &side : trade.sides)
-          if (side.offer && state.offers.rows[side.offer].live) {
-            close_offer(state.offers, state.offers.rows[side.offer]);
-            closed.push_back(side.offer);
-          }
-        trade.live = false;
-      } else {
-        close_offer(state.offers, offer);
-        closed.push_back(offer.id);
+  if (goods.flags & Escrow)
+    for (auto &offer : state.offers.rows)
+      if (offer.live && offer.goods == goods.object) {
+        if (offer.trade) {
+          auto &trade = state.trades.rows[offer.trade];
+          // Other trade goods retain custody; the adapter clears their escrow flags.
+          for (auto &side : trade.sides)
+            if (side.offer && state.offers.rows[side.offer].live) {
+              close_offer(state.offers, state.offers.rows[side.offer]);
+              closed.push_back(side.offer);
+            }
+          trade.live = false;
+        } else {
+          close_offer(state.offers, offer);
+          closed.push_back(offer.id);
+        }
       }
-    }
   auto &owner = state.players.rows.at(goods.owner);
   std::erase(owner.inventory, goods.object);
   std::erase(owner.mailbox, goods.object);

@@ -358,13 +358,17 @@ int main(int argc, char **argv) {
             "the architects' way group must be controlled by root");
     install_land(plan, perm_state, land_space, settings.land);
     perm::update_plots(objects, plots, created, true);
-    require(plan.at("land").at("lots") == Json::array({{{"owner", 2}, {"at", {8, 50}}},
-                                                       {{"owner", 2}, {"at", {24, 50}}},
-                                                       {{"owner", 3}, {"at", {40, 50}}},
-                                                       {{"owner", 4}, {"at", {56, 50}}},
-                                                       {{"owner", 5}, {"at", {-16, 50}}},
-                                                       {{"owner", 6}, {"at", {-32, 50}}},
-                                                       {{"owner", 7}, {"at", {-48, 50}}}}),
+    Json owned_lots = Json::array();
+    for (const auto &lot : plan.at("land").at("lots"))
+      if (lot.at("owner") != 0)
+        owned_lots.push_back(lot);
+    require(owned_lots == Json::array({{{"owner", 2}, {"at", {8, 50}}},
+                                       {{"owner", 2}, {"at", {24, 50}}},
+                                       {{"owner", 3}, {"at", {40, 50}}},
+                                       {{"owner", 4}, {"at", {56, 50}}},
+                                       {{"owner", 5}, {"at", {-16, 50}}},
+                                       {{"owner", 6}, {"at", {-32, 50}}},
+                                       {{"owner", 7}, {"at", {-48, 50}}}}),
             "seeded residents own the specified lots, including both cafe lots");
     for (const auto &lot : plan.at("land").value("lots", Json::array())) {
       const auto at = lot.at("at").get<std::array<float, 2>>();
@@ -372,7 +376,10 @@ int main(int argc, char **argv) {
         return plot.id && plot.bounds[0] == at[0] && plot.bounds[1] == at[1];
       });
       require(found != plots.rows.end() && found->owner == lot.at("owner").get<PlayerId>(),
-              "each seeded resident owns the lot named by its minimum corner");
+              "each initial lot has its authored owner");
+      if (lot.contains("preset"))
+        require(found->preset == step::rights(lot.at("preset"), perm::ScopeKind::Plot),
+                "initial lot presets use the ordinary land rights");
     }
     perm::Ledger &ledger = perm_state.ledger;
     auto money_plan = plan;

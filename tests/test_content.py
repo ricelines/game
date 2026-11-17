@@ -100,8 +100,19 @@ def test_root_owned_and_starting_body_grants_have_real_scopes(authored):
                     ]
                     if mode == "seeded"
                     else []
-                ),
+                )
+                + [
+                    {"owner": 0, "at": at, "preset": ["build", "enter", "run_scripts"]}
+                    for at in ([8, 82], [24, 82])
+                ],
             }
+            sandbox_grants = [
+                row
+                for row in plan["grants"]
+                if row["holder"] == {"script": "sandbox", "on": "world"}
+            ]
+            assert {tuple(row["scope"]["plot_at"]) for row in sandbox_grants} == {(8, 82), (24, 82)}
+            assert all(row["issuer"] == 0 and row["rights"] == ["return"] for row in sandbox_grants)
             assert not any(
                 "caller" in row or "owned_on_plot" in row["scope"] for row in plan["grants"]
             )
@@ -1897,3 +1908,250 @@ def test_native_bad_inputs_return_signatures_without_changing_money_or_grants(tm
 
     state = asyncio.run(live_land_world(tmp_path, baked_plan, exercise, edit=land_player_fixture))
     assert state["script_errors"] == 0
+
+
+def sandbox_fixture(plan, *, count=1):
+    plan["bootstrap"] = [row for row in plan["bootstrap"] if row["target"] == "world"]
+    plan["world_settings"]["base.stakes"] = False
+    next(row for row in plan["balances"] if row["holder"] == "p:2")["amount"] = 0
+    model = next(row for row in plan["models"] if row["key"] == "chair").copy()
+    model.update(key="sandbox_fixture", text={"name": "Sandbox test goods"}, author=2)
+    plan["models"].append(model)
+    template = next(row for row in plan["objects"] if row["model"] == "chair")
+    for i in range(count):
+        plan["objects"].append(
+            {
+                **template,
+                "key": f"sandbox.test.{i}",
+                "model": "sandbox_fixture",
+                "owner": 2,
+                "at": [12 + i % 6, 88 + i // 6, 0],
+                "rotation": [0, 0, 0, 1],
+                "flags": ["static"],
+            }
+        )
+    for key, at in (("resident.mira", [12, 84, 0]), ("resident.sol", [20, 84, 0])):
+        body = next(row for row in plan["objects"] if row["key"] == key)
+        body["at"], body["rotation"] = at, [0, 0, 0, 1]
+
+
+async def sandbox_goods(player):
+    view = await player.request("look", limit=1000)
+    return next(
+        row
+        for row in view["things"] + view["far"]
+        if row.get("says", {}).get("name") == "Sandbox test goods"
+    )
+
+
+def test_sandbox_build_is_public_but_other_pool_land_is_not(tmp_path, baked_plan):
+    async def exercise(owner, tenant):
+        await wait_for_land_rules(owner)
+        goods = await sandbox_goods(owner)
+        for position in ([20, 100, 0], [30, 100, 0]):
+            created = await owner.act("engine.create", model=goods["model"], position=position)
+            assert created["ok"] and created["created"], created
+            item = await owner.request("inspect", target=created["created"][0])
+            lot = await owner.request("inspect", target=f"plot:{item['plot']}")
+            assert lot["owner"] == "p:0" and lot["open"] and lot["build_open"]
+            assert "for_sale" not in lot
+        refused = await owner.act("engine.create", model=goods["model"], position=[44, 100, 0])
+        assert not refused["ok"] and refused["denied"]["need"] == "build", refused
+        assert (await owner.act("engine.balance"))["balance"] == 0
+        offers = (await owner.act("engine.offers"))["offers"]
+        assert any("plot" in row for row in offers)
+        for row in offers:
+            if "plot" in row:
+                lot = await owner.request("inspect", target=f"plot:{row['plot']}")
+                assert not lot["build_open"]
+
+    state = asyncio.run(
+        live_land_world(
+            tmp_path,
+            baked_plan,
+            exercise,
+            edit=sandbox_fixture,
+            settings={"base.land_notice_days": 1000},
+        )
+    )
+    assert state["script_errors"] == 0
+
+
+def test_sandbox_returns_aged_goods_to_current_owner_in_bounded_runs(tmp_path, baked_plan):
+    count = 51
+
+    async def exercise(owner, tenant):
+        await owner.wait_until_step(40)
+        original = await sandbox_goods(owner)
+        item = await owner.request("inspect", target=original["h"])
+        assert (await owner.act("engine.give", original["h"], recipient="p:3"))["ok"]
+        assert (
+            await tenant.act("engine.place_existing", original["h"], position=item["position"])
+        )["ok"]
+        await owner.wait_until_step(160)
+        created = await owner.act("engine.create", model=original["model"], position=[20, 106, 0])
+        assert created["ok"], created
+        young = created["created"][0]
+        await owner.wait_until_step(200)
+        owner_inventory = (await owner.act("engine.inventory"))["inventory"]
+        tenant_inventory = (await tenant.act("engine.inventory"))["inventory"]
+        assert original["h"] in tenant_inventory and original["h"] not in owner_inventory
+        assert len(owner_inventory) == count - 1
+        assert young not in owner_inventory
+        current = await owner.request("inspect", target=young)
+        assert current["parent"] is None and current["position"] == [20, 106, 0]
+
+    state = asyncio.run(
+        live_land_world(
+            tmp_path,
+            baked_plan,
+            exercise,
+            edit=lambda plan: sandbox_fixture(plan, count=count),
+            settings={
+                "base.land_notice_days": 1000,
+                "base.sandbox_hours": 5 / 3600,
+                "base.sandbox_sweep_seconds": 1,
+            },
+        )
+    )
+    assert state["script_errors"] == 0
+    returned = [row for row in land_events(tmp_path) if row.get("name") == "engine.return"]
+    assert len(returned) == count
+    by_handler = {}
+    for row in returned:
+        by_handler[row["cause"]] = by_handler.get(row["cause"], 0) + 1
+    assert max(by_handler.values()) <= 50
+    assert len(by_handler) >= 2
+
+
+def test_joined_player_can_build_sell_and_rejoin_after_restore(tmp_path, baked_plan, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+    from game_restart_live import Native
+
+    from gateway import cli
+    from gateway.authoring import Authoring
+    from gateway.credentials import read_key_file
+    from gateway.http import create_app
+    from gateway.session import Session, Sessions
+
+    monkeypatch.delenv("AMBERGRIS_JOIN_AUTH", raising=False)
+    private_key = tmp_path / "newcomer.key"
+    joined = {}
+
+    async def exercise(owner, tenant):
+        await wait_for_land_rules(owner)
+        model = (await sandbox_goods(owner))["model"]
+        sessions = Sessions(owner.url)
+        async with TestClient(TestServer(create_app(sessions, Authoring()))) as client:
+            address = str(client.make_url("/")).rstrip("/")
+            result = await cli.run(
+                cli.parser().parse_args(
+                    ["--gateway", address, "join", "New builder", "--key-file", str(private_key)]
+                )
+            )
+            assert result == {"player": "p:9", "key_file": str(private_key)}
+            assert private_key.stat().st_mode & 0o777 == 0o600
+            session = await sessions.get(read_key_file(private_key))
+            joined.update(player=result["player"], body=session.welcome["body"])
+            observed = await cli.run(
+                cli.parser().parse_args(
+                    ["--gateway", address, "--key-file", str(private_key), "look"]
+                )
+            )
+            assert math.dist(observed["self"]["at"], [0, 0, 0]) < 0.1
+            assert (await session.tool("do", {"action": "engine.balance"}))["balance"] == 0
+            moved = await cli.run(
+                cli.parser().parse_args(
+                    [
+                        "--gateway",
+                        address,
+                        "--key-file",
+                        str(private_key),
+                        "do",
+                        "base.move_to",
+                        "--args",
+                        '{"point":[1,0,0]}',
+                    ]
+                )
+            )
+            assert moved["ok"] and moved["effect"] == "started"
+            created = await session.tool(
+                "do",
+                {"action": "engine.create", "args": {"model": model, "position": [20, 100, 0]}},
+            )
+            assert created["ok"], created
+            goods = created["created"][0]
+            offered = await session.tool(
+                "do", {"action": "engine.offer", "target": goods, "args": {"price": 37}}
+            )
+            assert offered["ok"], offered
+            previous = (await owner.act("engine.balance"))["balance"]
+            bought = await owner.act("engine.accept", offer=offered["offer"], max_price=37)
+            assert bought["ok"], bought
+            assert (await session.tool("do", {"action": "engine.balance"}))["balance"] == 37
+            assert (await owner.act("engine.balance"))["balance"] == previous - 37
+            assert (await owner.request("inspect", target=goods))["owner"] == "p:2"
+            duplicate_path = tmp_path / "duplicate.key"
+            refused = await cli.run(
+                cli.parser().parse_args(
+                    [
+                        "--gateway",
+                        address,
+                        "join",
+                        "  NEW BUILDER  ",
+                        "--key-file",
+                        str(duplicate_path),
+                    ]
+                )
+            )
+            assert refused == {"error": "name_taken"}
+            assert not duplicate_path.exists()
+
+    def edit(plan):
+        sandbox_fixture(plan)
+        next(row for row in plan["balances"] if row["holder"] == "p:2")["amount"] = 1000
+
+    state = asyncio.run(
+        live_land_world(
+            tmp_path, baked_plan, exercise, edit=edit, settings={"base.land_notice_days": 1000}
+        )
+    )
+    assert state["script_errors"] == 0
+
+    async def restored():
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            number = listener.getsockname()[1]
+        args = SimpleNamespace(
+            server=ROOT / ".build/release/amb-server",
+            plan=tmp_path / "plan.json",
+            config=ROOT / "config.toml",
+            profile="development",
+            port=number,
+        )
+        native = Native(args, tmp_path / "world", tmp_path, "resumed")
+        await native.start()
+        sessions = Sessions(f"ws://127.0.0.1:{number}/ws")
+        try:
+            player = await sessions.get(read_key_file(private_key))
+            assert player.welcome["player"] == joined["player"]
+            assert player.welcome["body"] == joined["body"]
+            assert (await player.tool("do", {"action": "engine.balance"}))["balance"] == 37
+            newcomer = Session(sessions.url, "", "second")
+            try:
+                await newcomer.join("Next builder")
+                assert newcomer.welcome["player"] == "p:10"
+                observed = await newcomer.tool("look", {})
+                assert math.dist(observed["self"]["at"], [0, 0, 0]) < 0.1
+                assert (await newcomer.tool("do", {"action": "engine.balance"}))["balance"] == 0
+                moved = await newcomer.tool(
+                    "do", {"action": "base.move_to", "args": {"point": [-1, 0, 0]}}
+                )
+                assert moved["ok"] and moved["effect"] == "started"
+            finally:
+                await newcomer.close()
+        finally:
+            await sessions.close()
+            await native.stop()
+
+    asyncio.run(restored())

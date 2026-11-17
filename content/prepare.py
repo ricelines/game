@@ -189,7 +189,7 @@ def validate_symbols(plan: dict) -> None:
     if plan["land"]["way_group"] not in groups:
         raise ValueError("Unknown way group")
     for row in plan["land"].get("lots", []):
-        if row["owner"] not in players:
+        if row["owner"] not in players | {0}:
             raise ValueError("Unknown lot owner")
     for row in plan["grants"]:
         if row["issuer"] not in players | {0}:

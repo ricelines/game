@@ -68,6 +68,8 @@ void install_land(const Json &plan, perm::State &perm, space::State &space,
     if (found == perm.plots.rows.end())
       throw std::invalid_argument("initial lot must name a lot's minimum corner");
     perm::set_plot_owner(perm.plots, found->id, row.at("owner").get<PlayerId>());
+    if (row.contains("preset"))
+      found->preset = step::rights(row.at("preset"), perm::ScopeKind::Plot);
   }
   fill_pool(perm, space, settings);
 }

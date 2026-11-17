@@ -2278,5 +2278,47 @@
         "type": "integer"
       }
     ]
+  },
+  {
+    "name": "base.sandbox_hours",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "Hours after first observation before sandbox goods return to their owners."
+  },
+  {
+    "name": "base.sandbox_sweep_seconds",
+    "kind": "quantity",
+    "source": "setting",
+    "dimensions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "description": "Seconds between sandbox sweeps."
+  },
+  {
+    "name": "base.sandbox_boot",
+    "kind": "event",
+    "description": "Continue bounded discovery of public sandbox lots."
+  },
+  {
+    "name": "base.sandbox_sweep",
+    "kind": "event",
+    "description": "Observe sandbox goods and return those whose stay has expired."
   }
 ]

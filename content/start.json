@@ -92,6 +92,12 @@
       "file": "scripts/lease.luau",
       "author": 1,
       "world_rule": false
+    },
+    {
+      "key": "sandbox",
+      "file": "scripts/sandbox.luau",
+      "author": 1,
+      "world_rule": false
     }
   ],
   "models": [
@@ -1079,7 +1085,9 @@
     "base.land_exempt_value": 0,
     "base.land_open_discount": 0,
     "base.land_notice_days": 7,
-    "base.land_period_days": 30
+    "base.land_period_days": 30,
+    "base.sandbox_hours": 24,
+    "base.sandbox_sweep_seconds": 600
   },
   "objects": [
     {
@@ -3732,6 +3740,44 @@
       "starts": [
         "seeded"
       ]
+    },
+    {
+      "issuer": 0,
+      "holder": {
+        "script": "sandbox",
+        "on": "world"
+      },
+      "scope": {
+        "plot_at": [
+          8,
+          82
+        ]
+      },
+      "rights": [
+        "return"
+      ],
+      "cap": 0,
+      "period_s": 0,
+      "expires_s": 31536000
+    },
+    {
+      "issuer": 0,
+      "holder": {
+        "script": "sandbox",
+        "on": "world"
+      },
+      "scope": {
+        "plot_at": [
+          24,
+          82
+        ]
+      },
+      "rights": [
+        "return"
+      ],
+      "cap": 0,
+      "period_s": 0,
+      "expires_s": 31536000
     }
   ],
   "bootstrap": [
@@ -3849,6 +3895,12 @@
       "event": "base.start",
       "payload": null,
       "script": "land"
+    },
+    {
+      "target": "world",
+      "script": "sandbox",
+      "event": "base.start",
+      "payload": null
     }
   ],
   "script_state": [
@@ -4105,6 +4157,30 @@
         "starts": [
           "seeded"
         ]
+      },
+      {
+        "at": [
+          8,
+          82
+        ],
+        "owner": 0,
+        "preset": [
+          "build",
+          "enter",
+          "run_scripts"
+        ]
+      },
+      {
+        "at": [
+          24,
+          82
+        ],
+        "owner": 0,
+        "preset": [
+          "build",
+          "enter",
+          "run_scripts"
+        ]
       }
     ]
   },
@@ -4113,6 +4189,11 @@
       "script": "land",
       "space": "land",
       "description": "Browse and manage plots."
+    },
+    {
+      "script": "sandbox",
+      "space": "land",
+      "description": "Public sandboxes at (8, 82) and (24, 82); aged goods return to their owners."
     }
   ]
 }
