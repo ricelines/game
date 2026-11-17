@@ -23,7 +23,7 @@ struct State;
 
 namespace amber::step {
 struct LandSettings {
-  float street_width_m, port_spacing_m, block_m, way_m, lot_front_m;
+  float street_width_m, port_spacing_m, block_m, way_m, lot_front_m, lot_min_m;
   std::uint32_t pool_lots_min;
   GroupId way_group = 0;
 };
@@ -1079,7 +1079,7 @@ std::string validate_split_plot(const Json &);
 std::string validate_join_plots(const Json &);
 NativeCompletion abandon_plot(perm::State &, ObjectState &, const DeliveryTargets &,
                               const space::Space &, const NativeCall &);
-NativeCompletion split_plot(perm::State &, ObjectState &, const NativeCall &);
+NativeCompletion split_plot(perm::State &, ObjectState &, const LandSettings &, const NativeCall &);
 NativeCompletion join_plots(perm::State &, ObjectState &, const NativeCall &);
 step::NativeCompletion return_goods(perm::State &, ObjectState &, const DeliveryTargets &,
                                     const space::Space &, const NativeCall &, bool forced = false);

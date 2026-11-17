@@ -177,6 +177,8 @@ struct Fixture {
     const auto operation = std::get<react::ExchangeAction>(declarations.rows.at(action).operation);
     amber::Settings settings{};
     settings.mailbox_max = mailbox_max;
+    settings.land.lot_min_m =
+        float(toml::parse_file(AMBER_CONFIG_PATH)["land"]["LOT_MIN_M"].value<double>().value());
     auto out =
         step::native_exchange(objects_state, perm_state, space_state, delivery, settings, operation,
                               {{actor, action, target, {}}, std::move(args), {}, 20, 20, {}});
@@ -917,6 +919,8 @@ void land_refusals_have_fixes_and_denial_records() {
          "correct the supplied transfer for plot:2");
   denied(f.call(f.ids.split_plot, PlayerId{1}, {{"plot", 1}, {"x", -20}}),
          "cut at a whole meter strictly inside the lot");
+  denied(f.call(f.ids.split_plot, PlayerId{1}, {{"plot", 1}, {"x", -19}}),
+         "cut at least LOT_MIN_M m from each edge");
   f.plots.rows[2].kind = perm::PlotKind::Lot;
   f.plots.rows[2].owner = 1;
   f.plots.rows[2].bounds[0] = 1;

@@ -139,7 +139,7 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
   case react::ExchangeAction::SplitPlot: {
     if (const auto error = validate_split_plot(call.arguments); !error.empty())
       throw std::invalid_argument(error);
-    out = split_plot(perm_state, objects_state, call);
+    out = split_plot(perm_state, objects_state, settings.land, call);
     break;
   }
   case react::ExchangeAction::JoinPlots: {

@@ -60,7 +60,8 @@ NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
   out.permissions_changed = true;
   return out;
 }
-NativeCompletion split_plot(perm::State &state, ObjectState &objects, const NativeCall &call) {
+NativeCompletion split_plot(perm::State &state, ObjectState &objects, const LandSettings &settings,
+                            const NativeCall &call) {
   const auto id = call.arguments.at("plot").get<PlotId>();
   if (auto refusal = lot(state, id, call))
     return *refusal;
@@ -72,6 +73,10 @@ NativeCompletion split_plot(perm::State &state, ObjectState &objects, const Nati
       cut >= plot.bounds[axis + 2])
     return commerce_detail::denied("transfer", "plot:" + std::to_string(id), "invalid cut",
                                    "cut at a whole meter strictly inside the lot");
+  if (cut - plot.bounds[axis] < settings.lot_min_m ||
+      plot.bounds[axis + 2] - cut < settings.lot_min_m)
+    return commerce_detail::denied("transfer", "plot:" + std::to_string(id), "piece is too narrow",
+                                   "cut at least LOT_MIN_M m from each edge");
   const auto next = perm::split_plot(state, id, axis, cut, call.step);
   auto out = commerce_detail::result(true, {{"plots", {id, next}}});
   refresh(objects, state.plots, id, next, out);
