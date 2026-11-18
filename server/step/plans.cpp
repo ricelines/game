@@ -137,8 +137,17 @@ prepare_reactive(react::State &react_state, const react::ValueRead &values,
       enqueue_watch(step_state.queues, {*item.threshold, event->origin});
       return std::vector<react::PlannedInvocation>{};
     }
-    if (event->receiver && !values.identity.valid(event->receiver))
-      return {};
+    if (event->receiver) {
+      if (!values.identity.valid(event->receiver))
+        return {};
+      // A stored object is data; work issued before it was placed again is stale.
+      const auto slot = event->receiver.slot();
+      if ((values.identity.flags[slot] & Held) && !values.plots[slot])
+        return {};
+      if (const auto placed = react_state.placed.find(event->receiver.bits);
+          placed != react_state.placed.end() && event->issued < placed->second)
+        return {};
+    }
     return plan_event(react_state.triggers, values, *event, now, hz);
   }
   const auto &watch = std::get<react::WatchWork>(item.work);

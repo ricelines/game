@@ -184,6 +184,28 @@ void removing_an_installed_watch_cancels_its_crossing() {
   require(!step::pop_foreground(step_state.queues) && !f.states.contains({f.a, script}),
           "the removed crossing cannot recreate retired script state");
 }
+void stored_objects_drop_work_issued_before_placement() {
+  test_runtime::Fixture f(250);
+  const auto script = f.add(R"(return {kind='instance',on={['novel.cue']=function(self)end}})");
+  react::set_instances(f.installed, f.a, std::span(&script, 1), f.scripts);
+  react::project_instance(f.triggers, f.installed, f.scripts, f.terms, f.a);
+  step::State step_state;
+  const auto runs = [&](Step issued) {
+    react::EventWork work{f.a, {}, 6, {}, {}};
+    work.issued = issued;
+    const auto plans = step::prepare_reactive(f.react_state, f.values(), f.scripts, step_state,
+                                              {work, {}}, 30, 20);
+    return plans && !plans->empty();
+  };
+  require(runs(10), "a placed object's event runs its handler");
+  f.objects.flags[f.a.slot()] |= Held;
+  set_plot(f.objects, f.a.slot(), 0);
+  require(!runs(20), "a stored object is data and runs nothing");
+  f.objects.flags[f.a.slot()] &= ~Held;
+  f.react_state.placed[f.a.bits] = 25;
+  require(!runs(20), "work issued before the object was placed again is dropped");
+  require(runs(25), "work issued when the object was placed runs");
+}
 void chosen_actions_and_typed_inputs() {
   test_runtime::Fixture f(250);
   f.objects.owner[f.a.slot()] = 1;
@@ -545,11 +567,14 @@ void threshold_plans_use_current_declarations(bool benchmark) {
           "a replacement timer makes an already queued older crossing harmless");
   snap::Buffer bytes;
   snap::Output out{bytes};
-  react::write_script_states(out, f.states, f.watch_answers);
+  react::write_script_states(out, f.states, f.watch_answers, react::Placements{});
   out.adapter().flush();
   bytes.resize(out.adapter().writtenBytesCount());
   snap::Input in{bytes.data(), bytes.size()};
-  react::read_script_states(in, f.states, f.watch_answers);
+  {
+    react::Placements placed;
+    react::read_script_states(in, f.states, f.watch_answers, placed);
+  }
   snap::check_complete(in);
   const auto restored_due = step::timers(timers).front().due;
   require(f.changed({f.a, 1}, restored_due).size() == 2,
@@ -646,6 +671,7 @@ int main(int argc, char **argv) {
     distinct_thresholds_wake_their_current_handlers();
     selector_changes_refresh_a_running_process();
     removing_an_installed_watch_cancels_its_crossing();
+    stored_objects_drop_work_issued_before_placement();
     chosen_actions_and_typed_inputs();
     canonical_results_and_actual_bounds();
     threshold_plans_use_current_declarations(benchmark);

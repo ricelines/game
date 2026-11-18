@@ -22,16 +22,11 @@ struct State;
 #include <unordered_set>
 
 namespace amber::step {
-struct LandSettings {
-  float street_width_m, port_spacing_m, block_m, way_m, lot_front_m, lot_min_m;
-  std::uint32_t pool_lots_min;
-  GroupId way_group = 0;
-};
 struct Block {
   std::int32_t i, j;
 };
-void survey_block(perm::State &, space::State &, const LandSettings &, Block);
-void fill_pool(perm::State &, space::State &, const LandSettings &);
+void survey_block(perm::State &, space::State &, const perm::LandSettings &, Block);
+void fill_pool(perm::State &, space::State &, const perm::LandSettings &);
 
 struct InputWork {
   std::uint64_t id = 0;
@@ -261,7 +256,7 @@ Json failure(std::string);
 } // namespace amber::step::authoring
 
 namespace amber::step {
-inline constexpr char runtime_version[] = "ambergris-0.8";
+inline constexpr char runtime_version[] = "ambergris-0.9";
 
 struct NavigationRequests {
   struct Request {
@@ -286,11 +281,10 @@ void append_inputs(WorkQueues &, std::vector<Work>);
 void promote_due(TimerWheel &, Step now, WorkQueues &);
 std::optional<ForegroundItem> pop_foreground(WorkQueues &);
 std::optional<react::BackgroundItem> pop_background(WorkQueues &);
-PushResult enqueue_event(WorkQueues &, react::EventWork, std::size_t limit);
+PushResult enqueue_event(WorkQueues &, react::EventWork, std::size_t limit, Step now);
 PushResult enqueue_watch(WorkQueues &, react::WatchWork);
 void enqueue_background(WorkQueues &, react::BackgroundItem);
 void schedule(TimerWheel &, react::Timer);
-void discard_script_work(WorkQueues &, TimerWheel &, std::span<const Handle>);
 void cancel_threshold(TimerWheel &, FactKey);
 void apply_thresholds(TimerWheel &, std::vector<react::ThresholdChange>);
 void refresh_rule_thresholds(TimerWheel &, const react::State &, const react::ValueRead &,
@@ -425,7 +419,7 @@ void declare_physical_actions(react::Terms &, react::NativeActions &);
 std::vector<Handle> plot_things(const ObjectState &, PlotId, const RunDeadline *deadline = nullptr);
 void bind_metadata(const amber::ObjectState &objects_state,
                    const amber::catalog::State &catalog_state, amber::react::State &react_state,
-                   const perm::State &, float port_spacing_m);
+                   const perm::State &, const perm::LandSettings &);
 
 using Json = nlohmann::json;
 struct CommerceDeclarations {
@@ -529,7 +523,7 @@ step::NativeCompletion group_create(perm::Groups &groups, perm::Players &players
                                     const step::NativeCall &call);
 step::NativeCompletion group_member(const perm::Groups &groups, perm::Players &players,
                                     const step::NativeCall &call);
-step::NativeCompletion plot_permissions(perm::State &, const LandSettings &,
+step::NativeCompletion plot_permissions(perm::State &, const perm::LandSettings &,
                                         const step::NativeCall &, TermId plot_changed);
 
 using Json = nlohmann::json;
@@ -862,7 +856,7 @@ void install_relations(const Json &, const Symbols &, const react::Terms &,
                        react::AuthoredRelations &, react::DeferredEffects &);
 void install_profiles(const Json &, const Symbols &, net::Profiles &, perm::Players &,
                       const std::filesystem::path &key_root);
-void install_land(const Json &, perm::State &, space::State &, const LandSettings &);
+void install_land(const Json &, perm::State &, space::State &, const perm::LandSettings &);
 void install_money(const Json &, const Symbols &, IdentityRead, AuthorityRead,
                    const perm::Players &, const perm::Groups &, perm::Ledger &);
 void install_grants(const Json &, const Symbols &, const amber::ObjectState &objects_state,
@@ -933,12 +927,12 @@ void install_declared_attachments(amber::ObjectState &objects_state,
                                   amber::space::State &space_state,
                                   std::span<const Handle> objects);
 NativeCompletion abandon_plot(perm::State &, ObjectState &, const DeliveryTargets &,
-                              const space::Space &, const LandSettings &, const NativeCall &,
+                              const space::Space &, const perm::LandSettings &, const NativeCall &,
                               TermId plot_changed);
-NativeCompletion split_plot(perm::State &, ObjectState &, const LandSettings &, const NativeCall &,
-                            TermId plot_changed);
-NativeCompletion join_plots(perm::State &, ObjectState &, const LandSettings &, const NativeCall &,
-                            TermId plot_changed);
+NativeCompletion split_plot(perm::State &, ObjectState &, const perm::LandSettings &,
+                            const NativeCall &, TermId plot_changed);
+NativeCompletion join_plots(perm::State &, ObjectState &, const perm::LandSettings &,
+                            const NativeCall &, TermId plot_changed);
 step::NativeCompletion return_goods(perm::State &, ObjectState &, const DeliveryTargets &,
                                     const space::Space &, const NativeCall &, bool forced = false);
 

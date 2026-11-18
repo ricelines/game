@@ -514,7 +514,7 @@ step::NativeCompletion group_member(const perm::Groups &groups, perm::Players &p
     return bad_input(error.what());
   }
 }
-step::NativeCompletion plot_permissions(perm::State &state, const LandSettings &settings,
+step::NativeCompletion plot_permissions(perm::State &state, const perm::LandSettings &settings,
                                         const step::NativeCall &call, TermId plot_changed) {
   auto &plots = state.plots;
   const auto &players = state.players;
@@ -569,7 +569,7 @@ step::NativeCompletion plot_permissions(perm::State &state, const LandSettings &
       const auto area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]);
       commerce_detail::plot_changed(
           out, holders, plot_changed, call,
-          {"permissions", perm::plot_facts(plots, id, settings.port_spacing_m), plot.owner, area});
+          {"permissions", perm::plot_facts(plots, id, settings), plot.owner, area});
     }
     return out;
   } catch (const std::exception &error) {

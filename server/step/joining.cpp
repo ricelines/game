@@ -41,7 +41,7 @@ bool newcomer_available(const catalog::State &catalog, const nlohmann::json &new
 JoinResult create_join(const net::JoinRequest &request, net::Profiles &profiles,
                        perm::State &permissions, ObjectState &objects,
                        const catalog::State &catalog, const nlohmann::json &newcomer, ModelId model,
-                       const Clock &clock, const space::State &space) {
+                       const Clock &clock) {
   JoinResult result;
   const auto name = trim(request.name);
   const auto characters = std::count_if(name.begin(), name.end(),
@@ -60,15 +60,10 @@ JoinResult create_join(const net::JoinRequest &request, net::Profiles &profiles,
     result.refusal = "refused";
     return result;
   }
-  const auto &asset = catalog.assets.rows.at(catalog.models.rows.at(model).asset);
-  const auto size = asset.maximum - asset.minimum;
-  const auto position =
-      space::clear_character_position(space.space, {}, .5f * std::max(size.x, size.y), size.z);
   result.player = static_cast<PlayerId>(profiles.rows.size());
   result.key = net::generate_key();
   permissions.players.rows.resize(std::size_t(result.player) + 1);
   ObjectInit init;
-  init.position = position;
   init.owner = init.maker = result.player;
   init.created_step = clock.step;
   init.flags = Body;

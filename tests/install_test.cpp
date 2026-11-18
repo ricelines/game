@@ -174,12 +174,16 @@ void threshold_restore_and_selected_instance_codec() {
   snap::Output out{bytes};
   const std::array<Handle, 1> chosen{f.a};
   write_instances(out, f.installed, identity(f.objects), std::span<const Handle>(chosen));
-  write_script_states(out, f.states, f.watch_answers, SnapshotSelection(chosen));
+  write_script_states(out, f.states, f.watch_answers, react::Placements{},
+                      SnapshotSelection(chosen));
   bytes.resize(out.adapter().writtenBytesCount());
   const auto saved = f.watch_answers.at({f.a, 1});
   snap::Input in{bytes.data(), bytes.size()};
   read_instances(in, f.installed, f.objects.model.size());
-  read_script_states(in, f.states, f.watch_answers);
+  {
+    react::Placements placed;
+    read_script_states(in, f.states, f.watch_answers, placed);
+  }
   snap::check_complete(in);
   require(f.installed.get(f.a.slot()) && !f.installed.get(f.b.slot()),
           "selected installation snapshot excludes unrelated object");

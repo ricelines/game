@@ -119,7 +119,6 @@ BodyPreflight can_add(const Space &, std::span<const BodySpec>, std::size_t sens
                       std::span<const Handle> retiring = {});
 ImportResult import_geometry(Space &, const GeometrySource &);
 GeometryId sensor_box_geometry(Space &, Vec3 size);
-Vec3 clear_character_position(const Space &, Vec3 origin, float radius_m, float height_m);
 struct BodyMotion {
   Motion motion;
   bool collision_solid, independent;
@@ -245,14 +244,24 @@ struct MoveRequest {
 // Install ready navigation before preparing requested moves. Permission boundaries
 // are supplied only for a new plan; ordinary steps use the retained route data.
 bool needs_plan(const State &, IdentityRead, const MoveRequest &);
-void plan_move(State &, IdentityRead, const MoveRequest &, std::span<const TravelBoundary>);
 enum class PathStatus { Ready, PendingTiles, NoSurface, Unreachable, AccessDenied };
 struct Path {
   PathStatus status;
   std::vector<Vec3> corners;
   float length_m;
 };
-Path path(const State &, IdentityRead, Handle, const Goal &, std::span<const TravelBoundary>);
+// Candidate routes to a goal before land access is applied. The caller looks up
+// the closed plots that overlap `extent`; the shortest route clear of them wins.
+struct Routes {
+  Vec3 from;
+  std::vector<Path> ready;
+  PathStatus failure = PathStatus::NoSurface;
+  Bounds extent;
+};
+Routes routes(const State &, IdentityRead, Handle, const Goal &);
+Path shortest_open(const Routes &, std::span<const TravelBoundary>);
+void plan_move(State &, IdentityRead, const MoveRequest &, const Routes &,
+               std::span<const TravelBoundary>);
 enum class IntentState { Moving, WaitingNavigation, Arrived, Blocked, TargetGone };
 struct IntentProgress {
   Handle body;

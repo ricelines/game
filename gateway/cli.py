@@ -42,6 +42,10 @@ def parser():
     inspect.add_argument("target")
     inspect.add_argument("--owner")
     inspect.add_argument("--for-sale", action=argparse.BooleanOptionalAction, default=None)
+    inspect.add_argument("--fronts", choices=["street", "alley", "back way", "none"])
+    inspect.add_argument("--max-price", type=int)
+    inspect.add_argument("--min-area", type=int)
+    inspect.add_argument("--sort", choices=["price", "distance", "area", "id"])
     inspect.add_argument("--cursor", type=int)
     inspect.add_argument("--limit", type=int)
     actions = commands.add_parser("actions")
@@ -198,6 +202,10 @@ async def run(options):
                 "target",
                 "owner",
                 "for_sale",
+                "fronts",
+                "max_price",
+                "min_area",
+                "sort",
                 "cursor",
                 "name",
                 "page",

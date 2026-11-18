@@ -129,6 +129,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   auto &players = perm_state.players;
   auto &groups = perm_state.groups;
   auto &plots = perm_state.plots;
+  plots.cell_m = settings.land.block_m;
 
   auto &ledger = perm_state.ledger;
 
@@ -159,8 +160,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
 
   react::bind_values(vm, values, react_state);
   react::bind_events(vm, terms);
-  bind_metadata(objects_state, catalog_state, react_state, perm_state,
-                settings.land.port_spacing_m);
+  bind_metadata(objects_state, catalog_state, react_state, perm_state, settings.land);
   bind_physical(react_state, objects_state, step_state, perm_state, settings.part_batch_max,
                 space_state, catalog_state);
   if (!restored)
@@ -346,7 +346,9 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
   std::deque<step::authoring::Completion> authored;
   std::deque<elaborate::FixtureResult> fixture_results;
   std::size_t script_errors = 0, phase_cursor = 0;
-  std::vector<double> phase_ms;
+  // Wall time per step, and the step thread's own CPU time: on a host that
+  // steals time without reporting it, only CPU time measures our own work.
+  std::vector<double> phase_ms, phase_cpu_ms;
   double phase_max_ms = 0;
   constexpr std::size_t phase_samples_max = 4096;
   while (!stopping && (fixture_action || clock.step < final_step)) {
@@ -355,6 +357,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       elaborate::complete_capture(captures, completed);
     const bool fixture_action_phase = fixture_action.has_value();
     const auto frame_started = Monotonic::now();
+    const auto frame_cpu_started = amber::thread_cpu_time();
     auto frame = fixture_action_phase
                      ? Frame{clock.step,
                              frame_started,
@@ -396,7 +399,7 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
       if (admission) {
         if (const auto *request = std::get_if<net::JoinRequest>(&admission->request)) {
           auto joined = create_join(*request, profiles, perm_state, objects_state, catalog_state,
-                                    plan.at("newcomer"), newcomer_model, clock, space_state);
+                                    plan.at("newcomer"), newcomer_model, clock);
           record::Event event;
           event.step = clock.step;
           event.kind = record::Kind::System;
@@ -406,9 +409,9 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
           event.things = joined.objects;
           if (joined.player)
             event.detail = {{"player", "p:" + std::to_string(joined.player)},
-                            {"name", profiles.rows[joined.player].name}};
+                            {"player_name", profiles.rows[joined.player].name}};
           else
-            event.detail = {{"name", request->name}, {"reason", joined.refusal}};
+            event.detail = {{"player_name", request->name}, {"reason", joined.refusal}};
           const auto origin = journal.append(std::move(event));
           if (!joined.player)
             sessions.reject(admission->session, std::move(joined.refusal));
@@ -648,7 +651,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                   react::action_signature(terms, native_declarations, action->call.request.action);
             change_custody(objects_state, space_state, relation_terms, plots, illumination_sources,
                            completed);
-            discard_script_work(queues, timers, completed.hidden_objects);
             auto &removed = completed.removed_objects;
             std::sort(removed.begin(), removed.end());
             removed.erase(std::unique(removed.begin(), removed.end()), removed.end());
@@ -710,9 +712,11 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                     std::get_if<react::ConstructionAction>(&action->resolution.native_operation);
                 operation && *operation == react::ConstructionAction::PlaceExisting &&
                 completed.changed)
-              for (auto object : completed.visible_objects)
+              for (auto object : completed.visible_objects) {
+                react_state.placed[object.bits] = clock.step;
                 completed.effects.ordered.emplace_back(
                     react::EventWork{object, {}, role("events", "start"), {}, action->call.origin});
+              }
             const auto first_changed = mutated.size();
             reconcile_effects(values, react_state, step_state, clock, completed.effects);
             publish_value_changes(replication, processes,
@@ -734,12 +738,6 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
         continue;
       }
       auto &handler = std::get<HandlerRun>(*selected);
-      std::erase_if(handler.completed.effects.ordered, [&](const react::Effect &effect) {
-        const auto *timer = std::get_if<react::Timer>(&effect);
-        return timer && ids.valid(timer->event.receiver) &&
-               (ids.flags[timer->event.receiver.slot()] & Held) &&
-               !objects.plot[timer->event.receiver.slot()];
-      });
       const auto first_changed = mutated.size();
       reconcile_effects(values, react_state, step_state, clock, handler.completed.effects);
       publish_value_changes(replication, processes, std::span(mutated).subspan(first_changed));
@@ -804,7 +802,8 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                     settings.event_queue_max);
     publish_value_changes(replication, processes, mutated);
     mutated.clear();
-    refresh_connections(net_state, space_state, step_state, catalog_state, objects_state);
+    refresh_connections(net_state, space_state, step_state, catalog_state, objects_state,
+                        physics.moved);
     if (launch.network && clock.step % settings.repl_every == 0)
       server.publish(net::publication(replication, ids, poses, values, clock.step, hz));
     flush_connections(net_state, server, step_state, objects_state, catalog_state);
@@ -826,11 +825,16 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     }
     const auto now = Monotonic::now();
     const auto duration = std::chrono::duration<double, std::milli>(now - frame.started).count();
+    const auto cpu =
+        std::chrono::duration<double, std::milli>(amber::thread_cpu_time() - frame_cpu_started)
+            .count();
     phase_max_ms = std::max(phase_max_ms, duration);
-    if (phase_ms.size() < phase_samples_max)
+    if (phase_ms.size() < phase_samples_max) {
       phase_ms.push_back(duration);
-    else {
+      phase_cpu_ms.push_back(cpu);
+    } else {
       phase_ms[phase_cursor] = duration;
+      phase_cpu_ms[phase_cursor] = cpu;
       phase_cursor = (phase_cursor + 1) % phase_samples_max;
     }
     const auto next =
@@ -872,9 +876,12 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
     output.exceptions(std::ios::failbit | std::ios::badbit);
     output << report.dump(2) << '\n';
   }
-  std::sort(phase_ms.begin(), phase_ms.end());
-  const auto percentile = [&](double p) {
-    return phase_ms.empty() ? 0 : phase_ms[static_cast<std::size_t>((phase_ms.size() - 1) * p)];
+  std::vector<double> phase_wait_ms(phase_ms.size());
+  for (std::size_t i = 0; i < phase_ms.size(); ++i)
+    phase_wait_ms[i] = std::max(0.0, phase_ms[i] - phase_cpu_ms[i]);
+  const auto percentile = [](std::vector<double> samples, double p) {
+    std::sort(samples.begin(), samples.end());
+    return samples.empty() ? 0 : samples[static_cast<std::size_t>((samples.size() - 1) * p)];
   };
   std::cout << Json{{"status", "stopped"},
                     {"profile", launch.profile},
@@ -887,8 +894,11 @@ int run(const RunOptions &launch, const volatile std::sig_atomic_t &stopping) {
                     {"gaps", gaps.size()},
                     {"script_errors", script_errors},
                     {"phase_max_ms", phase_max_ms},
-                    {"phase_p50_ms", percentile(.5)},
-                    {"phase_p95_ms", percentile(.95)},
+                    {"phase_p50_ms", percentile(phase_ms, .5)},
+                    {"phase_p95_ms", percentile(phase_ms, .95)},
+                    {"phase_cpu_p50_ms", percentile(phase_cpu_ms, .5)},
+                    {"phase_cpu_p95_ms", percentile(phase_cpu_ms, .95)},
+                    {"phase_off_cpu_p95_ms", percentile(phase_wait_ms, .95)},
                     {"phase_sample_steps", phase_ms.size()},
                     {"phase_sample_window", "most_recent_steps"},
                     {"snapshot_pause_max_ms", snapshot_progress.pause_max_ms}}

@@ -3,7 +3,6 @@
 #include "view_private.hpp"
 
 #include <charconv>
-#include <unordered_map>
 
 namespace amber::net::view_detail {
 namespace {
@@ -48,8 +47,8 @@ Json inspect_land(const catalog::State &catalog, const react::State &react_state
   const auto forward =
       embodied ? rotate(poses.rotation[call.principal.body.slot()], {0, 1, 0}) : Vec3{};
   const auto record = [&](const perm::Plot &plot, const perm::Offer *offer) {
-    auto row = perm::plot_record(plots, permissions.grants, plot.id, settings.land.port_spacing_m,
-                                 clock.step, offer);
+    auto row =
+        perm::plot_record(plots, permissions.grants, plot.id, settings.land, clock.step, offer);
     if (embodied) {
       const Vec3 delta{std::clamp(position.x, plot.bounds[0], plot.bounds[2]) - position.x,
                        std::clamp(position.y, plot.bounds[1], plot.bounds[3]) - position.y, 0};
@@ -78,6 +77,9 @@ Json inspect_land(const catalog::State &catalog, const react::State &react_state
     result["land"] = {{"target", "land"}};
     return result;
   }
+  // Three questions, one call each: what is around me (the default, S5), what
+  // could I buy (for_sale), and what does a player hold (owner). Filters apply
+  // to all three; every row names the calls that act on it.
   std::optional<PlayerId> owner;
   if (fields.contains("owner")) {
     const auto requested = fields.at("owner").get<std::string>();
@@ -90,45 +92,109 @@ Json inspect_land(const catalog::State &catalog, const react::State &react_state
   }
   const std::optional<bool> for_sale =
       fields.contains("for_sale") ? std::optional(fields["for_sale"].get<bool>()) : std::nullopt;
-  std::unordered_map<PlotId, const perm::Offer *> offered;
-  for (const auto &offer : permissions.offers.rows)
-    if (offer.live && offer.plot && (!offer.expires_step || offer.expires_step > clock.step) &&
-        (!offer.buyer || offer.buyer == call.principal.player))
-      offered.try_emplace(offer.plot, &offer);
+  const auto fronts = fields.value("fronts", std::string{});
+  const auto max_price = fields.contains("max_price")
+                             ? std::optional(fields["max_price"].get<std::int64_t>())
+                             : std::nullopt;
+  const auto min_area = fields.value("min_area", 0.0);
   const auto cursor = fields.value("cursor", std::uint64_t{});
   const auto limit = fields.value("limit", settings.perception.things_max);
+  const auto mode = owner ? "owner" : for_sale.value_or(false) ? "for_sale" : "in_sight";
+  const auto sort =
+      fields.value("sort", std::string(owner                             ? "id"
+                                       : std::string(mode) == "for_sale" ? "price"
+                                                                         : "distance"));
+  if (owner && sort != "id")
+    throw std::invalid_argument("an owner's plots are listed in plot order");
+  if (sort != "id" && sort != "price" && sort != "distance" && sort != "area")
+    throw std::invalid_argument("sort must be price, distance or area");
+  if ((sort == "distance" || std::string(mode) == "in_sight") && !embodied)
+    throw std::invalid_argument("listing by distance needs a live body; filter for_sale or owner");
+  const auto distance = [&](const perm::Plot &plot) {
+    return Vec3{std::clamp(position.x, plot.bounds[0], plot.bounds[2]) - position.x,
+                std::clamp(position.y, plot.bounds[1], plot.bounds[3]) - position.y, 0}
+        .length();
+  };
+  const auto area = [](const perm::Plot &plot) {
+    return (plot.bounds[2] - plot.bounds[0]) * (plot.bounds[3] - plot.bounds[1]);
+  };
+  const auto offer_of = [&](PlotId id) {
+    return perm::plot_offer(permissions.offers, id, clock.step, call.principal.player);
+  };
+  const auto keep = [&](const perm::Plot &plot) {
+    const auto *offer = offer_of(plot.id);
+    return plot.id && (!for_sale || bool(offer) == *for_sale) &&
+           (fronts.empty() || perm::plot_facts(plots, plot.id, settings.land).fronts == fronts) &&
+           (!max_price || (offer && offer->price <= *max_price)) && area(plot) >= min_area;
+  };
+  const auto row = [&](const perm::Plot &plot) {
+    const auto *offer = offer_of(plot.id);
+    auto result = record(plot, offer);
+    const auto &b = plot.bounds;
+    result["center"] = {(b[0] + b[2]) / 2, (b[1] + b[3]) / 2, 0};
+    if (offer && plot.owner != call.principal.player)
+      result["accept"] = {
+          {"action", "engine.accept"},
+          {"args", {{"offer", "offer:" + std::to_string(offer->id)}, {"max_price", offer->price}}}};
+    return result;
+  };
   Json land = Json::array();
   bool more = false;
-  PlotId last = 0;
-  const auto append = [&](const perm::Plot &plot) {
-    if (!plot.id || plot.kind != perm::PlotKind::Lot)
-      return true;
-    const auto found = offered.find(plot.id);
-    const auto *offer = found == offered.end() ? nullptr : found->second;
-    if (for_sale && bool(offer) != *for_sale)
-      return true;
-    if (land.size() == limit) {
-      more = true;
-      return false;
-    }
-    land.push_back(record(plot, offer));
-    last = plot.id;
-    return true;
-  };
+  Json next_cursor = nullptr;
   if (owner) {
+    // Plot order, continued after the last id returned.
     if (const auto found = plots.by_owner.find(*owner); found != plots.by_owner.end())
       for (auto it = std::ranges::upper_bound(found->second, cursor); it != found->second.end();
-           ++it)
-        if (!append(plots.rows[*it]))
+           ++it) {
+        const auto &plot = plots.rows[*it];
+        if (plot.kind != perm::PlotKind::Lot || !keep(plot))
+          continue;
+        if (land.size() == limit) {
+          more = true;
           break;
-  } else
-    for (auto index = cursor < plots.rows.size() ? std::size_t(cursor) + 1 : plots.rows.size();
-         index < plots.rows.size(); ++index)
-      if (!append(plots.rows[index]))
-        break;
+        }
+        land.push_back(row(plot));
+        next_cursor = plot.id;
+      }
+    if (!more)
+      next_cursor = nullptr;
+  } else {
+    // Plots in sight, or lots on offer; then sorted and paged by position.
+    std::vector<PlotId> found;
+    if (std::string(mode) == "in_sight") {
+      const auto sight = settings.perception.sight_m;
+      for (auto id : perm::plots_touching(plots, {position.x - sight, position.y - sight,
+                                                  position.x + sight, position.y + sight}))
+        if (distance(plots.rows[id]) <= sight)
+          found.push_back(id);
+    } else
+      for (const auto &[id, offer] : permissions.offers.by_plot)
+        found.push_back(id);
+    std::erase_if(found, [&](PlotId id) { return !keep(plots.rows[id]); });
+    const auto key = [&](PlotId id) -> double {
+      const auto &plot = plots.rows[id];
+      return sort == "distance" ? distance(plot)
+             : sort == "area"   ? -area(plot)
+             : sort == "price"  ? double(offer_of(id) ? offer_of(id)->price : 0)
+                                : double(id);
+    };
+    std::ranges::sort(found, [&](PlotId a, PlotId b) {
+      const auto ka = key(a), kb = key(b);
+      return ka != kb ? ka < kb : a < b;
+    });
+    const auto begin = std::min<std::size_t>(cursor, found.size());
+    const auto end = std::min<std::size_t>(begin + limit, found.size());
+    for (auto index = begin; index < end; ++index)
+      land.push_back(row(plots.rows[found[index]]));
+    more = end < found.size();
+    if (more)
+      next_cursor = end;
+  }
   return {{"land", std::move(land)},
+          {"mode", mode},
+          {"sort", sort},
           {"more", more},
-          {"next_cursor", more ? Json(last) : Json(nullptr)},
+          {"next_cursor", next_cursor},
           {"rules", land_rules(react_state)},
           {"actions", {{"target", "land"}}}};
 }

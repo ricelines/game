@@ -163,7 +163,8 @@ struct Scene {
     sp::install_ready_navigation(space);
     for (const auto &move : moves)
       if (sp::needs_plan(space_state, identity(objects), move)) {
-        sp::plan_move(space_state, identity(objects), move, forbidden);
+        sp::plan_move(space_state, identity(objects), move,
+                      sp::routes(space_state, identity(objects), move.body, move.goal), forbidden);
         ++planned_moves;
       }
     sp::step(space, objects_state, relations, ++clock, dt, moves, result);

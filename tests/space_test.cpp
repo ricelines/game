@@ -3,41 +3,13 @@
 #include "space_fixture.hpp"
 namespace {
 using namespace testspace;
+sp::Path route_to(const sp::State &state, IdentityRead ids, Handle body, const sp::Goal &goal,
+                  std::span<const sp::TravelBoundary> forbidden) {
+  return sp::shortest_open(sp::routes(state, ids, body, goal), forbidden);
+}
 bool edge(const sp::Edges &edges, Handle from, Handle to) {
   auto *list = edges.out.get(from.slot());
   return list && std::find(list->begin(), list->end(), to) != list->end();
-}
-void clear_character_spawns() {
-  Scene scene;
-  scene.box({40, 40, 1}, {0, 0, -1}, sp::Motion::Static, 0, false);
-  scene.box({4, 4, 3}, {}, sp::Motion::Static, 0, false, false);
-  ObjectInit init;
-  init.model = 1;
-  const auto zone = create(scene.objects, init);
-  const auto geometry = sp::sensor_box_geometry(scene.space, {4, 4, 4});
-  require(sp::add_volume(scene.space, identity(scene.objects), transforms(scene.objects),
-                         {zone, geometry, {{0, 0, 1}, {}}, sp::VolumeKind::Zone})
-                  .status == sp::Status::Ok,
-          "spawn sensor fixture");
-  std::vector<Vec3> positions;
-  for (int i = 0; i < 20; ++i) {
-    const auto position = sp::clear_character_position(scene.space, {}, .3f, 1.8f);
-    require(position.z == 0 && (i || position == Vec3{}),
-            "clear origin or floor tangency was rejected by spawn search");
-    for (auto earlier : positions)
-      require((position - earlier).length() >= .6f,
-              "new character spawn overlaps an existing character");
-    positions.push_back(position);
-    scene.character(position);
-  }
-
-  Scene blocked;
-  const Vec3 origin{5, -4, 0};
-  blocked.box({6, 6, 3}, origin, sp::Motion::Kinematic, 0, false);
-  const auto position = sp::clear_character_position(blocked.space, origin, .3f, 1.8f);
-  require(position.z == origin.z &&
-              std::max(std::abs(position.x - origin.x), std::abs(position.y - origin.y)) >= 3.3f,
-          "spawn search did not clear the solid obstacle around its supplied origin");
 }
 void characters_pass_through_each_other() {
   Scene scene;
@@ -189,7 +161,7 @@ void rays_and_visibility_preserve_ordered_intersections() {
   const auto glass = scene.box({.2f, 2, 2}, {1, 0, 0}, sp::Motion::Static, .5f, false);
   const auto tinted = scene.box({.2f, 2, 2}, {2, 0, 0}, sp::Motion::Static, .25f, false);
   const auto wall = scene.box({.2f, 2, 2}, {3, 0, 0}, sp::Motion::Static, 0, false);
-  scene.box({.2f, 2, 2}, {4, 0, 0}, sp::Motion::Static, .8f, false);
+  const auto behind = scene.box({.2f, 2, 2}, {4, 0, 0}, sp::Motion::Static, .8f, false);
   const Vec3 from{0, 0, 1}, to{5, 0, 1};
   const auto ids = identity(scene.objects);
   const auto hit = sp::raycast(scene.space, ids, from, to, {});
@@ -207,6 +179,19 @@ void rays_and_visibility_preserve_ordered_intersections() {
   require(!blocked.clear && blocked.transmission == 0 &&
               blocked.through == std::vector<Handle>{glass, tinted, wall},
           "visibility includes its first opaque blocker without reporting objects behind it");
+  const auto dimmed = sp::visibility(scene.space, ids, from, to, {}, .2f);
+  require(!dimmed.clear && std::abs(dimmed.transmission - .125f) < .001f &&
+              dimmed.through == std::vector<Handle>{glass, tinted},
+          "nearer transparent surfaces can cross the threshold before an opaque blocker");
+  const auto unbounded = sp::visibility(scene.space, ids, from, to, {}, 0);
+  require(unbounded.clear && unbounded.transmission == 0 &&
+              unbounded.through == std::vector<Handle>{glass, tinted, wall, behind},
+          "a zero threshold still reports surfaces beyond a fully opaque object");
+  destroy(scene.objects, wall);
+  const auto stale = sp::visibility(scene.space, identity(scene.objects), from, to, {}, .01f);
+  require(stale.clear && std::abs(stale.transmission - .1f) < .001f &&
+              stale.through == std::vector<Handle>{glass, tinted, behind},
+          "stale opaque bodies cannot shorten the visibility query");
 }
 void sensor_contacts_use_body_overlap() {
   Scene scene;
@@ -269,10 +254,15 @@ void sensor_contacts_use_body_overlap() {
           "relocate static sensor subject");
   scene.tick();
   require(edge(scene.relations.in_zone, fixed, zone), "static relocation lost zone overlap");
-  scene.objects.position[zone.slot()] = {10, 0, 0};
+  require(sp::set_pose(scene.space, identity(scene.objects), transforms(scene.objects), zone,
+                       {{10, 0, 0}, {}})
+                  .status == sp::Status::Ok,
+          "relocate zone owner");
   scene.tick();
   require(!edge(scene.relations.in_zone, fixed, zone), "moved sensor retained static member");
-  scene.objects.position[zone.slot()] = {};
+  require(sp::set_pose(scene.space, identity(scene.objects), transforms(scene.objects), zone, {})
+                  .status == sp::Status::Ok,
+          "return zone owner");
   scene.tick();
   require(edge(scene.relations.in_zone, fixed, zone), "moved sensor failed to regain member");
   sp::remove(scene.space, identity(scene.objects), zone, parents(scene.objects),
@@ -296,8 +286,10 @@ void plot_membership_follows_real_motion_and_hidden_custody() {
   const auto holder = scene.character({-1, 0, 0});
   const auto item = scene.box({.2f, .2f, .2f}, {-1, 0, 1}, sp::Motion::Kinematic, 0, false, false);
   perm::Plots plots;
+  plots.cell_m = 72;
   plots.rows.push_back({1, 1, 0, 0, {-5, -5, 0, 5}, {}});
   plots.rows.push_back({2, 2, 0, 0, {0, -5, 5, 5}, {}});
+  perm::rebuild_plot_index(plots);
   const std::array selected{item};
   auto refresh = [&](bool visible) {
     return perm::update_plots(scene.objects, plots, selected, visible);
@@ -379,7 +371,10 @@ void gravity_visibility_zones_and_snapshot() {
   require(!blocked.clear, "opaque wall passed sight");
   auto ray = sp::raycast(scene.space, identity(scene.objects), {3, 0, 1}, {5, 0, 1}, {});
   require(ray && ray->object == wall, "ray did not hit real wall");
-  scene.objects.position[zone.slot()] = {100, 100, 0};
+  require(sp::set_pose(scene.space, identity(scene.objects), transforms(scene.objects), zone,
+                       {{100, 100, 0}, {}})
+                  .status == sp::Status::Ok,
+          "translate zone owner");
   scene.tick();
   require(!edge(scene.relations.in_zone, falling, zone), "translated sensor retained old members");
   std::vector<sp::DebugLine> lines;
@@ -552,7 +547,7 @@ void crowd_doorway_and_stale_tiles() {
   sp::set_pose(edits.space, identity(edits.objects), transforms(edits.objects), wall,
                {{10, 0, 0}, {}});
   edits.wait_navigation();
-  auto route = sp::path(edits.space_state, identity(edits.objects), walker,
+  auto route = route_to(edits.space_state, identity(edits.objects), walker,
                         sp::PointGoal{{5, 0, 0}, .1f}, {});
   require(route.status == sp::PathStatus::Ready, "stale worker result restored an obsolete wall");
   sp::MoveRequest gone{walker, 9, sp::ObjectGoal{wall, 1.5f}, {}};
@@ -617,7 +612,7 @@ void real_stair_navigation() {
   scene.box({5, 5, .2f}, {7.825f, 0, 1.6f});
   auto walker = scene.character({-2, 0, 0});
   scene.wait_navigation();
-  auto route = sp::path(scene.space_state, identity(scene.objects), walker,
+  auto route = route_to(scene.space_state, identity(scene.objects), walker,
                         sp::PointGoal{{8, 0, 1.8f}, .15f}, {});
   require(route.status == sp::PathStatus::Ready && route.corners.size() > 1,
           "real staircase has no path");
@@ -635,7 +630,7 @@ void real_stair_navigation() {
   std::cout << "stair endpoint " << position.x << "," << position.y << "," << position.z << "\n";
   require(arrived && position.z > 1.7f, "CharacterVirtual failed to climb Detour staircase");
   sp::TravelBoundary closed{{{4, -5, 0}, {5, -5, 0}, {5, 5, 0}, {4, 5, 0}}, -1, 5};
-  auto denied = sp::path(scene.space_state, identity(scene.objects), walker,
+  auto denied = route_to(scene.space_state, identity(scene.objects), walker,
                          sp::PointGoal{{-2, 0, 0}, .1f}, {&closed, 1});
   require(denied.status == sp::PathStatus::AccessDenied, "forbidden entry path accepted");
   auto wall = scene.box({.2f, 20, 4}, {6, 0, 0});
@@ -643,7 +638,7 @@ void real_stair_navigation() {
   auto revision = sp::navigation_revision(scene.space);
   scene.wait_navigation();
   require(sp::navigation_revision(scene.space) > revision, "construction did not replace tiles");
-  auto unreachable = sp::path(scene.space_state, identity(scene.objects), walker,
+  auto unreachable = route_to(scene.space_state, identity(scene.objects), walker,
                               sp::PointGoal{{-2, 0, 0}, .1f}, {});
   require(unreachable.status == sp::PathStatus::Unreachable,
           "new wall did not invalidate navigation");
@@ -708,7 +703,8 @@ void waiting_navigation_finishes_after_unrelated_tiles() {
     scene.tick();
   scene.box({1, 1, .2f}, {50, 50, 0});
   const sp::MoveRequest move{walker, 1, sp::PointGoal{{5, 0, 0}, .1f}};
-  sp::plan_move(scene.space_state, identity(scene.objects), move, {});
+  sp::plan_move(scene.space_state, identity(scene.objects), move,
+                sp::routes(scene.space_state, identity(scene.objects), move.body, move.goal), {});
   require(!sp::needs_plan(scene.space_state, identity(scene.objects), move),
           "an unchanged pending route does not repeat its path query");
   scene.wait_navigation();
@@ -727,7 +723,7 @@ void object_goal_uses_reachable_side() {
   for (int i = 0; i < 4; ++i)
     scene.tick();
   const sp::MoveRequest move{walker, 1, sp::ObjectGoal{target, 1.5f}};
-  const auto route = sp::path(scene.space_state, identity(scene.objects), walker, move.goal, {});
+  const auto route = route_to(scene.space_state, identity(scene.objects), walker, move.goal, {});
   require(route.status == sp::PathStatus::Ready && route.corners.back().x < 1,
           "an object with its far side off the floor retains the reachable near-side route");
   bool arrived = false;
@@ -749,7 +745,7 @@ void one_plan_follows_multiple_corners() {
   for (int i = 0; i < 4; ++i)
     scene.tick();
   const sp::MoveRequest move{walker, 1, sp::PointGoal{{8, 0, 0}, .15f}};
-  const auto route = sp::path(scene.space_state, identity(scene.objects), walker, move.goal, {});
+  const auto route = route_to(scene.space_state, identity(scene.objects), walker, move.goal, {});
   require(route.status == sp::PathStatus::Ready && route.corners.size() >= 4,
           "alternating walls require a route with at least three corners");
   bool arrived = false;
@@ -1466,7 +1462,6 @@ int main(int argc, char **argv) {
       density_benchmarks();
       return 0;
     }
-    clear_character_spawns();
     characters_pass_through_each_other();
     returns_release_seated_standing_and_static_occupants();
     expired_native_queries_stop();

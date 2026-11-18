@@ -87,7 +87,7 @@ void flush_connections(amber::net::State &net_state, net::Server &server,
 
 void refresh_connections(amber::net::State &net_state, amber::space::State &space_state,
                          amber::step::State &step_state, const amber::catalog::State &catalog_state,
-                         const amber::ObjectState &objects_state);
+                         const amber::ObjectState &objects_state, std::span<const Handle> moved);
 } // namespace amber::step
 
 namespace amber::step {
@@ -97,7 +97,7 @@ void admit_operator(const net::Admission &, net::State &, perm::State &, const n
                     const amber::Settings &, record::Journal &, const Clock &);
 JoinResult create_join(const net::JoinRequest &, net::Profiles &, perm::State &, ObjectState &,
                        const catalog::State &, const nlohmann::json &newcomer, ModelId,
-                       const Clock &, const space::State &);
+                       const Clock &);
 react::DeferredEffects activate_join(const catalog::State &, react::State &, ObjectState &,
                                      space::State &, net::State &, State &, const amber::Settings &,
                                      std::span<const Handle>);

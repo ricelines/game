@@ -23,6 +23,7 @@
 #include <thread>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace amber::space {
 inline JPH::Vec3 jv(Vec3 v) {
@@ -79,6 +80,9 @@ struct Mirror {
   bool route_dirty = true;
   std::size_t waypoint = 0;
   float stuck_s = 0;
+  // A grounded character with no intent on unmoving ground skips its update
+  // until something wakes it (dirty_objects) or it is asked to move.
+  bool resting = false;
   Vec3 last_goal;
   PathStatus path_status = PathStatus::NoSurface;
   std::optional<Pose> kinematic_start;
@@ -110,25 +114,36 @@ struct NavResult {
   std::vector<unsigned char> bytes;
   std::string error;
 };
+// Broadphase trees: 0 static, 1 other bodies and sensors, 2 free characters'
+// inner bodies, which the physics system pairs only with moving bodies.
 class Layers final : public JPH::BroadPhaseLayerInterface {
 public:
-  JPH::uint GetNumBroadPhaseLayers() const override { return 2; }
+  JPH::uint GetNumBroadPhaseLayers() const override { return 3; }
   JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override {
-    return JPH::BroadPhaseLayer(layer == 0 ? 0 : 1);
+    return JPH::BroadPhaseLayer(layer == 0 ? 0 : layer == 3 ? 2 : 1);
   }
 };
 class BroadFilter final : public JPH::ObjectVsBroadPhaseLayerFilter {
 public:
   bool ShouldCollide(JPH::ObjectLayer layer, JPH::BroadPhaseLayer broad) const override {
-    return layer == 4 ? broad.GetValue() == 1 : layer != 0 || broad.GetValue() != 0;
+    const auto tree = broad.GetValue();
+    if (layer == 4)
+      return false;
+    if (layer == 2 || layer == 3)
+      return tree == 1;
+    return tree != 2 ? layer != 0 || tree != 0 : layer == 1;
   }
 };
 class PairFilter final : public JPH::ObjectLayerPairFilter {
 public:
   bool ShouldCollide(JPH::ObjectLayer a, JPH::ObjectLayer b) const override {
+    // Layer 4 (attached, non-solid and query bodies) pairs with nothing; sensors
+    // (2) pair only with moving solid bodies (1). See add_volume.
     if (a == 4 || b == 4)
-      return a == 2 || b == 2;
-    return !(a == 0 && b == 0) && !(a == 2 && b == 2) && !(a == 3 && b == 3);
+      return false;
+    if (a == 2 || b == 2)
+      return a == 1 || b == 1;
+    return !(a == 0 && b == 0) && !(a == 3 && b == 3);
   }
 };
 struct CachedContact : Contact {
@@ -144,14 +159,16 @@ struct Space::Native {
   JPH::JobSystemSingleThreaded jobs;
   std::vector<std::shared_ptr<Geometry>> geometries{nullptr};
   std::shared_ptr<Geometry> terrain_geometry;
-  std::map<std::uint64_t, Mirror> bodies;
-  std::set<std::uint64_t> character_handles, logical_roots;
-  std::vector<Volume> volumes;
-  std::map<std::uint64_t, Attachment> attachments;
+  std::unordered_map<std::uint64_t, Mirror> bodies;
+  std::unordered_set<std::uint64_t> character_handles, logical_roots;
+  // Sensor volumes by owner, at most one of each kind; a sensor body's handle
+  // entry names its owner, so a body finds its volume without a search.
+  std::unordered_map<std::uint64_t, std::vector<Volume>> volumes;
+  std::unordered_map<std::uint64_t, Attachment> attachments;
   std::unordered_map<std::uint64_t, std::uint64_t> compound_parent;
   std::unordered_map<std::uint64_t, GeometryId> compound_geometry;
   std::vector<GeometryId> free_compound_geometry;
-  std::set<std::uint64_t> dirty_objects;
+  std::unordered_set<std::uint64_t> dirty_objects;
   std::vector<Bounds> dirty_bounds;
   std::vector<Contact> contacts;
   std::vector<RelationChange> zone_changes;
@@ -208,6 +225,9 @@ struct Space::Native {
   void dirty_navigation(Bounds);
   void wake(Bounds);
 };
+void remove_volumes(Space::Native &, Handle owner);
+const Volume *volume_of(const Space::Native &, JPH::BodyID);
+const Volume *volume_of(const Space::Native &, Handle owner, VolumeKind);
 NavResult build_tile(const NavJob &, const NavSettings &);
 void start_navigation_workers(Space::Native &);
 void stop_navigation_workers(Space::Native &);

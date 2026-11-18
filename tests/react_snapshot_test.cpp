@@ -44,7 +44,7 @@ void reaction_roundtrip_and_capture() {
   write_properties(out, props, processes, selection);
   write_relations(out, relations, selection);
   write_shared(out, shared, gives, allocations, selection);
-  write_script_states(out, states, watch_answers, selection);
+  write_script_states(out, states, watch_answers, react::Placements{}, selection);
   write_random(out, random, selection);
   out.adapter().flush();
   bytes.resize(out.adapter().writtenBytesCount());
@@ -62,7 +62,10 @@ void reaction_roundtrip_and_capture() {
   read_properties(in, loaded_props, loaded_processes, 4);
   read_relations(in, loaded_relations, 4);
   read_shared(in, loaded_shared, loaded_gives, loaded_allocations, 4);
-  read_script_states(in, loaded_states, loaded_answers);
+  {
+    react::Placements placed;
+    read_script_states(in, loaded_states, loaded_answers, placed);
+  }
   read_random(in, loaded_random);
   snap::check_complete(in);
   require(loaded_props[1].get(a.slot()) && !loaded_props[1].get(outside.slot()),
@@ -195,7 +198,8 @@ void world_installations_and_state_survive_only_full_snapshots() {
   snap::Buffer bytes;
   snap::Output out{bytes};
   write_world_scripts(out, world);
-  write_script_states(out, states, {});
+  const react::Placements placed{{Handle::make(3, 1).bits, 9}};
+  write_script_states(out, states, {}, placed);
   out.adapter().flush();
   bytes.resize(out.adapter().writtenBytesCount());
   std::vector<WorldScript> restored;
@@ -203,8 +207,10 @@ void world_installations_and_state_survive_only_full_snapshots() {
   WatchAnswers restored_answers;
   snap::Input in{bytes.data(), bytes.size()};
   read_world_scripts(in, restored);
-  read_script_states(in, restored_states, restored_answers);
+  react::Placements restored_placed;
+  read_script_states(in, restored_states, restored_answers, restored_placed);
   snap::check_complete(in);
+  require(restored_placed == placed, "snapshot lost the step an object was last placed");
   const auto *installation = world_script(restored, 7);
   require(restored.size() == 1 && installation && installation->space == "civic" &&
               installation->description == "Public services" &&
@@ -215,12 +221,15 @@ void world_installations_and_state_survive_only_full_snapshots() {
   snap::Output capture_out{capture};
   write_world_scripts(capture_out, {});
   const std::array selected{object};
-  write_script_states(capture_out, states, {}, SnapshotSelection(selected));
+  write_script_states(capture_out, states, {}, react::Placements{}, SnapshotSelection(selected));
   capture_out.adapter().flush();
   capture.resize(capture_out.adapter().writtenBytesCount());
   snap::Input capture_in{capture.data(), capture.size()};
   read_world_scripts(capture_in, restored);
-  read_script_states(capture_in, restored_states, restored_answers);
+  {
+    react::Placements placed;
+    read_script_states(capture_in, restored_states, restored_answers, placed);
+  }
   snap::check_complete(capture_in);
   require(restored.empty() && restored_states.size() == 1 && restored_states.contains({object, 2}),
           "local object capture retained world installation state");

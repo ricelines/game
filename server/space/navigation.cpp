@@ -419,12 +419,12 @@ void request_corner(Space::Native &n, Mirror &body) {
     n.crowd->requestMoveTarget(body.agent, ref, nearest);
 }
 void plan_move(State &state, IdentityRead identity, const MoveRequest &request,
-               std::span<const TravelBoundary> forbidden) {
+               const Routes &candidates, std::span<const TravelBoundary> forbidden) {
   auto &n = *state.space.native;
   auto &body = n.bodies.at(request.body.bits);
   if (body.intent != request.intent)
     body.stuck_s = 0;
-  auto result = path(state, identity, request.body, request.goal, forbidden);
+  auto result = shortest_open(candidates, forbidden);
   body.route = std::move(result.corners);
   body.waypoint = 0;
   body.path_status = result.status;
@@ -508,14 +508,15 @@ bool travel_blocked(Vec3 a, Vec3 b, std::span<const TravelBoundary> regions) {
   }
   return false;
 }
-Path path(const State &state, IdentityRead identity, Handle body, const Goal &goal,
-          std::span<const TravelBoundary> forbidden) {
+Routes routes(const State &state, IdentityRead identity, Handle body, const Goal &goal) {
   const auto &n = *state.space.native;
-  Path result{PathStatus::NoSurface, {}, 0};
+  Routes result;
   auto found = n.bodies.find(body.bits);
   if (!identity.valid(body) || found == n.bodies.end())
     return result;
-  const Vec3 from = found->second.pose.position;
+  result.from = found->second.pose.position;
+  result.extent = {result.from, result.from};
+  result.failure = n.dirty_tiles.empty() ? PathStatus::Unreachable : PathStatus::PendingTiles;
   std::vector<Vec3> candidates;
   const auto *object = std::get_if<ObjectGoal>(&goal);
   std::optional<Bounds> target;
@@ -533,12 +534,10 @@ Path path(const State &state, IdentityRead identity, Handle body, const Goal &go
       for (int y = 0; y < 3; ++y)
         if (x != 1 || y != 1)
           candidates.push_back({xs[x], ys[y], b.min.z});
-    candidates.push_back(from);
+    candidates.push_back(result.from);
   }
-  float shortest = INFINITY;
-  bool denied = false;
   for (auto to : candidates) {
-    auto attempt = route(n, from, to);
+    auto attempt = route(n, result.from, to);
     if (attempt.status != PathStatus::Ready)
       continue;
     if (object) {
@@ -549,8 +548,19 @@ Path path(const State &state, IdentityRead identity, Handle body, const Goal &go
       if ((p - nearest).length() > object->reach_m)
         continue;
     }
+    for (auto p : attempt.corners)
+      include(result.extent, p);
+    result.ready.push_back(std::move(attempt));
+  }
+  return result;
+}
+Path shortest_open(const Routes &routes, std::span<const TravelBoundary> forbidden) {
+  Path result{routes.failure, {}, 0};
+  float shortest = INFINITY;
+  bool denied = false;
+  for (const auto &attempt : routes.ready) {
     bool blocked = false;
-    Vec3 previous = from;
+    Vec3 previous = routes.from;
     for (auto p : attempt.corners) {
       if (travel_blocked(previous, p, forbidden)) {
         blocked = true;
@@ -564,13 +574,11 @@ Path path(const State &state, IdentityRead identity, Handle body, const Goal &go
     }
     if (attempt.length_m < shortest) {
       shortest = attempt.length_m;
-      result = std::move(attempt);
+      result = attempt;
     }
   }
-  if (!std::isfinite(shortest))
-    result.status =
-        denied ? PathStatus::AccessDenied
-               : (!n.dirty_tiles.empty() ? PathStatus::PendingTiles : PathStatus::Unreachable);
+  if (!std::isfinite(shortest) && denied)
+    result.status = PathStatus::AccessDenied;
   return result;
 }
 

@@ -8,6 +8,8 @@ using namespace amber;
 using namespace amber::perm;
 
 namespace {
+// The fixture plots follow config.toml's default layout (S13.1).
+const LandSettings land{100, 1000, 72, 8, 16, 4, 4};
 void require(bool condition, const char *message) {
   if (!condition)
     throw std::runtime_error(message);
@@ -53,9 +55,10 @@ void plots_follow_owner_changes_and_boundaries() {
   Fixture f;
   auto &state = f.perm_state;
   auto &plots = state.plots;
+  plots.cell_m = 72;
   plots.rows.push_back({1, 0, 0, 2, {0, 0, 16, 32}, {}});
   plots.rows.push_back({2, 0, 0, 2, {16, 0, 32, 32}, {}});
-  rebuild_plot_owners(plots);
+  rebuild_plot_index(plots);
   require(plots.by_owner.at(0) == std::vector<PlotId>{1, 2}, "pool omitted a lot");
   const auto script = Holder::script(1, Handle::make(1, 1));
   const auto grant = create_root_grant(state.grants, state.players,
@@ -82,14 +85,16 @@ void plots_follow_owner_changes_and_boundaries() {
   require(plots.by_owner.at(0) == std::vector<PlotId>{1, 2},
           "setting the same owner duplicated the plot");
   const auto owners = plots.by_owner;
-  rebuild_plot_owners(plots);
+  rebuild_plot_index(plots);
   require(plots.by_owner == owners, "restored owner lists differ from live plots");
 }
 
 void grant_indexes_follow_every_lifetime_change() {
   Fixture f;
   auto &state = f.perm_state;
+  state.plots.cell_m = 72;
   state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
+  perm::rebuild_plot_index(state.plots);
   const auto object = Handle::make(20, 1);
   const auto script = Holder::script(7, object);
   const auto parent = f.grant(1, script, Scope::plot(1), 1, 31);
@@ -139,7 +144,9 @@ void grant_indexes_follow_every_lifetime_change() {
 void changing_plot_owner_clears_only_old_owner_authority() {
   Fixture f;
   auto &state = f.perm_state;
+  state.plots.cell_m = 72;
   state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
+  perm::rebuild_plot_index(state.plots);
   const auto parent = f.grant(1, Holder::script(1, Handle::make(1, 1)), Scope::plot(1), 1, 7);
   const auto child = create_grant(f.grants, f.players, f.grants.rows[parent].holder,
                                   {1, Holder::player(2), Scope::plot(1), 1, 0, 0, 500},
@@ -151,13 +158,10 @@ void changing_plot_owner_clears_only_old_owner_authority() {
       create_root_grant(f.grants, f.players, {0, Holder::player(5), Scope::plot(1), 1, 0, 0, 1000},
                         {Holder::player(5), 5, false}, 1);
   require(bool(root), "root grant failed");
-  state.offers.rows.push_back({});
-  auto &offer = state.offers.rows.back();
-  offer.id = 1;
-  offer.live = true;
-  offer.plot = 1;
-  offer.expires_step = 900;
-  state.offers.expiring.emplace(900, 1);
+  perm::Offer row;
+  row.plot = 1;
+  row.expires_step = 900;
+  perm::open_offer(state.offers, row);
   const auto removed = change_plot_owner(state, 1, 2);
   require(removed == std::vector<GrantId>{parent, child.grant, owned} &&
               state.plots.rows[1].owner == 2 && f.grants.rows[root.grant].live &&
@@ -172,7 +176,9 @@ void changing_plot_owner_clears_only_old_owner_authority() {
 void split_copies_grant_parent_and_deadlines() {
   Fixture f;
   auto &state = f.perm_state;
+  state.plots.cell_m = 72;
   state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
+  perm::rebuild_plot_index(state.plots);
   const auto parent =
       f.grant(1, Holder::script(1, Handle::make(1, 1)), Scope::plot(1), 1, 7, 0, 0, 100);
   const auto child = create_grant(f.grants, f.players, f.grants.rows[parent].holder,
@@ -196,7 +202,9 @@ void split_copies_grant_parent_and_deadlines() {
 void plot_sales_recheck_price_authority_and_burn_pool_payments() {
   Fixture f;
   auto &state = f.perm_state;
+  state.plots.cell_m = 72;
   state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
+  perm::rebuild_plot_index(state.plots);
   const auto maker = Holder::script(1, Handle::make(7, 1));
   const auto grant = f.grant(1, maker, Scope::plot(1), 1, 8);
   const auto offered = offer_plot(state, maker, 1, 20, 2, 100, 2);
@@ -213,9 +221,9 @@ void plot_sales_recheck_price_authority_and_burn_pool_payments() {
   require(accept_plot(state, buyer, offered.offer, 20, 3).reason == Reason::PriceChanged &&
               balance(f.ledger, buyer.payer.account) == 100 && state.plots.rows[1].owner == 1,
           "price ceiling did not protect buyer before mutation");
-  require(!plot_record(state.plots, state.grants, 1, 1000, 3, plot_offer(state.offers, 1, 3, 3))
+  require(!plot_record(state.plots, state.grants, 1, land, 3, plot_offer(state.offers, 1, 3, 3))
                   .contains("for_sale") &&
-              plot_record(state.plots, state.grants, 1, 1000, 3,
+              plot_record(state.plots, state.grants, 1, land, 3,
                           plot_offer(state.offers, 1, 3, 2))["for_sale"]["price"] == 30,
           "private plot offer visibility");
   revoke(state.grants, state.players, grant);
@@ -227,7 +235,9 @@ void plot_sales_recheck_price_authority_and_burn_pool_payments() {
               balance(f.ledger, buyer.payer.account) == 70 &&
               balance(f.ledger, Account::player(1)) == 30,
           "remote plot sale failed");
+  state.plots.cell_m = 72;
   state.plots.rows.push_back({2, 0, 0, 2, {16, 0, 32, 32}, {}});
+  perm::rebuild_plot_index(state.plots);
   const auto root = create_root_grant(
       f.grants, f.players, {0, maker, Scope::all_land(), 8u << 8, 0, 0, 1000}, {maker, 1, true}, 1);
   require(bool(root), "root authority fixture");
@@ -240,7 +250,9 @@ void plot_sales_recheck_price_authority_and_burn_pool_payments() {
 void returns_respect_build_grants_and_ignore_mailbox_limits() {
   Fixture f;
   auto &state = f.perm_state;
+  state.plots.cell_m = 72;
   state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
+  perm::rebuild_plot_index(state.plots);
   const Target item{Handle::make(2, 1), 2, 0, 0, 1, Escrow};
   state.players.rows[2].mailbox.push_back(Handle::make(90, 1));
   const auto build = f.grant(1, Holder::player(2), Scope::plot(1), 1, 1);
@@ -248,12 +260,11 @@ void returns_respect_build_grants_and_ignore_mailbox_limits() {
   require(return_goods(state, request, 2).reason == Reason::MissingRight,
           "build grantee was returned");
   revoke(state.grants, state.players, build);
-  auto &offered = state.offers.rows.emplace_back();
-  offered.id = 1;
+  Offer offered;
   offered.goods = item.object;
-  offered.live = true;
+  const auto offer_id = open_offer(state.offers, offered);
   const auto returned = return_goods(state, request, 2);
-  require(bool(returned) && returned.closed == std::vector<OfferId>{1} &&
+  require(bool(returned) && returned.closed == std::vector<OfferId>{offer_id} &&
               returned.custody[0].stay_static && state.players.rows[2].mailbox.size() == 2,
           "full mailbox blocked return or return did not preserve physical fallback");
   auto own = request;
@@ -269,8 +280,10 @@ void returns_respect_build_grants_and_ignore_mailbox_limits() {
 void plot_offer_snapshots_keep_remote_maker_and_its_authority() {
   Fixture f;
   auto &state = f.perm_state;
+  state.plots.cell_m = 72;
   state.plots.rows.push_back({1, 1, 0, 2, {0, 0, 16, 32}, {}});
   state.plots.rows.push_back({2, 3, 0, 2, {16, 0, 32, 32}, {}});
+  perm::rebuild_plot_index(state.plots);
   Objects objects;
   ObjectInit init;
   init.model = 1;
@@ -294,6 +307,7 @@ void plot_offer_snapshots_keep_remote_maker_and_its_authority() {
   write_grants(out, state.grants, state.offers, state.trades, state.owner_limits, &selection);
   bytes.resize(out.adapter().writtenBytesCount());
   State restored;
+  restored.plots.cell_m = 72;
   snap::Input in{bytes.data(), bytes.size()};
   read_players(in, restored.players, restored.ledger, restored.plots, restored.groups);
   read_grants(in, restored.grants, restored.players, restored.offers, restored.trades,
@@ -324,8 +338,10 @@ void moved_goods_leave_plot_scoped_authority() {
   const auto item = create(objects, init);
   OwnerLimits limits;
   Plots plots;
+  plots.cell_m = 72;
   plots.rows.push_back({1, 1, 0, 0, {-5, -5, 0, 5}, {}});
   plots.rows.push_back({2, 2, 0, 0, {0, -5, 5, 5}, {}});
+  perm::rebuild_plot_index(plots);
   const std::array selected{item, Handle::make(item.slot(), item.generation() + 1)};
   auto refresh = [&](bool visible) { return update_plots(objects, plots, selected, visible); };
   require(refresh(true) == std::vector<Handle>{item}, "plot refresh accepted stale generation");
@@ -334,10 +350,12 @@ void moved_goods_leave_plot_scoped_authority() {
           "moving within a plot preserves membership");
   plots.rows[1].id = 0;
   plots.rows.push_back({3, 1, 0, 0, {-5, -5, 0, 5}, {}});
+  perm::rebuild_plot_index(plots);
   require(refresh(true) == std::vector<Handle>{item} && objects.plot[item.slot()] == 3,
-          "a cleared current row falls back to scanning live plots");
+          "a cleared current row falls back to the plot index");
   plots.rows.pop_back();
   plots.rows[1].id = 1;
+  perm::rebuild_plot_index(plots);
   refresh(true);
   const auto script = Holder::script(7, Handle::make(30, 1));
   f.grant(1, script, Scope::owned_on_plot(1, 1), 1, bit(Verb::Move));
@@ -367,16 +385,17 @@ void moved_goods_leave_plot_scoped_authority() {
 void plot_records_show_live_land_control() {
   Fixture f;
   Plots plots;
+  plots.cell_m = 72;
   plots.rows.push_back({1, 0, 1, 6, {0, -50, 72, 50}, {}, PlotKind::Street});
   plots.rows.push_back({2, 2, 0, 2, {8, 50, 24, 82}, {}, PlotKind::Lot});
-  rebuild_plot_owners(plots);
+  rebuild_plot_index(plots);
   const auto root_scope = Scope::all_land();
   const auto root =
       create_root_grant(f.grants, f.players, {0, Holder::player(4), root_scope, Rights{24} << 8},
                         {Holder::player(4), 4, true}, 0);
   const auto ordinary = f.grant(2, Holder::player(3), Scope::plot(2), 2, 24, 0, 0, 10);
   require(bool(root) && ordinary, "land record fixture creates real grants");
-  const auto record = plot_record(plots, f.grants, 2, 1000, 5);
+  const auto record = plot_record(plots, f.grants, 2, land, 5);
   require(record["open"] == true && record["fronts"] == "street" &&
               record["bounds"] == nlohmann::json::array({8, 50, 24, 82}) &&
               record["rights"].size() == 2 && record["rights"][0]["holder"] == "p:4" &&
@@ -384,9 +403,9 @@ void plot_records_show_live_land_control() {
               record["rights"][0]["verbs"] == nlohmann::json::array({"transfer", "return"}),
           "lot records expose ordinary and root land control as named verbs");
   plots.rows[2].preset = 0;
-  require(plot_record(plots, f.grants, 2, 1000, 5)["open"] == false, "closed lot reported open");
-  require(plot_record(plots, f.grants, 2, 1000, 10)["rights"].size() == 1 &&
-              plot_record(plots, f.grants, 1, 1000, 5)["rights"].empty(),
+  require(plot_record(plots, f.grants, 2, land, 5)["open"] == false, "closed lot reported open");
+  require(plot_record(plots, f.grants, 2, land, 10)["rights"].size() == 1 &&
+              plot_record(plots, f.grants, 1, land, 5)["rights"].empty(),
           "expired grants and all-land authority on ways are excluded");
 }
 void object_checks_do_not_inherit_owner_or_groups_for_scripts() {
@@ -657,8 +676,10 @@ void owned_and_all_land_cover_only_their_declared_scopes() {
   Fixture f;
   Objects objects;
   Plots plots;
+  plots.cell_m = 72;
   plots.rows.push_back({1, 2, 0, 0, {-5, -5, 5, 5}, {}, PlotKind::Lot});
   plots.rows.push_back({2, 0, 0, 0, {-5, 5, 5, 10}, {}, PlotKind::Street});
+  perm::rebuild_plot_index(plots);
   OwnerLimits limits;
   ObjectInit init;
   init.model = 1;
@@ -1341,7 +1362,9 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
   auto &trades = f.perm_state.trades;
   auto &plots = f.perm_state.plots;
   auto &groups = f.perm_state.groups;
+  plots.cell_m = 72;
   plots.rows.push_back({1, 1, 4, Rights{2}, {-1, -2, 3, 4}, {3}});
+  perm::rebuild_plot_index(plots);
   groups.rows.push_back({1, 1, "Authored group"});
   const PlayerId wallet = 1;
   f.ledger.balance[Account::player(wallet)] = 100;
@@ -1377,6 +1400,7 @@ void snapshot_keeps_shared_allowances_escrow_and_pending_confirmation() {
   restored.objects = f.objects;
   auto &restored_trades = restored.perm_state.trades;
   Plots restored_plots;
+  restored_plots.cell_m = 72;
   Groups restored_groups;
   snap::Input in{bytes.data(), bytes.size()};
   read_players(in, restored.players, restored.ledger, restored_plots, restored_groups);

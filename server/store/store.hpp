@@ -20,6 +20,8 @@
 namespace amber {
 
 // A script run's time limit (S4.3): CPU time used by the thread running it.
+// CPU time this thread has used; a busy or stealing host does not advance it.
+std::chrono::nanoseconds thread_cpu_time();
 struct RunDeadline {
   std::chrono::steady_clock::time_point wall = std::chrono::steady_clock::time_point::max();
   std::chrono::nanoseconds cpu_end{};

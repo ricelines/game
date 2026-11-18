@@ -22,8 +22,8 @@ SnapshotSelection capture_authority(AuthorityRead authority, std::span<const Han
     selected.groups.insert(authority.group[object.slot()]);
     selected.plots.insert(authority.plot[object.slot()]);
   }
-  for (const auto &offer : offers.rows)
-    if (offer.id && offer.live &&
+  for (const auto id : offers.live)
+    if (const auto &offer = offers.rows[id];
         (offer.plot ? selected.plots.contains(offer.plot)
                     : selected.objects.contains(offer.goods)) &&
         std::all_of(offer.parts.begin(), offer.parts.end(),
@@ -269,7 +269,7 @@ void read_players(snap::Input &in, Players &players, Ledger &ledger, Plots &plot
       throw std::invalid_argument("invalid or duplicate account balance");
   }
   snap::field(in, plots.rows);
-  rebuild_plot_owners(plots);
+  rebuild_plot_index(plots);
   snap::field(in, groups.rows);
 }
 void write_grants(snap::Output &out, const Grants &grants, const Offers &offers,
@@ -313,6 +313,6 @@ void read_grants(snap::Input &in, Grants &grants, Players &players, Offers &offe
   snap::read_sparse(in, limits, [](snap::Input &s, Rights &value) { s.value4b(value); });
   limits.rebuild_positions(slots);
   rebuild_grant_lookup(grants, players);
-  rebuild_offer_deadlines(offers);
+  rebuild_offer_index(offers);
 }
 } // namespace amber::perm

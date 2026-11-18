@@ -10,7 +10,11 @@ namespace amber::checkpoint_test {
 namespace cp = step::checkpoint;
 struct Fixture {
   space::State space_state{testspace::settings(), 8};
-  amber::perm::State perm_state;
+  amber::perm::State perm_state = [] {
+    amber::perm::State state;
+    state.plots.cell_m = 72; // BLOCK_M, as the server sets it before a restore
+    return state;
+  }();
   amber::net::State net_state{test_net::options()};
   amber::step::State step_state;
   amber::elaborate::State elaborate_state;
@@ -138,9 +142,11 @@ struct Fixture {
     players.rows[1].grants_held = {1};
     players.rows[1].grants_given = {2};
     players.rows[3].groups = {2};
+    plots.cell_m = 72;
     plots.rows.resize(3);
     plots.rows[1] = {1, 1, 1, perm::all_rights, {-10, -10, 10, 10}, {}};
     plots.rows[2] = {2, 3, 2, 0, {20, 20, 30, 30}, {}};
+    perm::rebuild_plot_index(plots);
     groups.rows.resize(3);
     groups.rows[1] = {1, 2, "local group"};
     groups.rows[2] = {2, 3, "remote group"};
@@ -181,6 +187,7 @@ struct Fixture {
     offers.rows.resize(3);
     offers.rows[1] = {1, 1, 2, f.b, 5, 500, 1, true, {part}};
     offers.rows[2] = {2, 3, 0, f.c, 2, 500, 0, true, {}};
+    perm::rebuild_offer_index(offers);
     trades.rows.resize(2);
     trades.rows[1] = {1, {1, 2}, {{{1, 0, false}, {0, 5, false}}}, true};
     limits.set(f.a.slot(), perm::bit(perm::Verb::Transfer));
@@ -196,8 +203,8 @@ struct Fixture {
                      net::all_modes,
                      {std::string(64, char('a' + id))}});
     const amber::Origin origin{9, 4, {1, 2}, 1.5, false};
-    step::enqueue_event(queues, {f.a, f.b, 6, Value(true), origin}, 1000);
-    step::enqueue_event(queues, {f.c, f.b, 6, Value(false), origin}, 1000);
+    step::enqueue_event(queues, {f.a, f.b, 6, Value(true), origin}, 1000, 0);
+    step::enqueue_event(queues, {f.c, f.b, 6, Value(false), origin}, 1000, 0);
     step::enqueue_background(queues, {f.a, 4, script, origin, 2});
     step::start_move(intents, f.a, f.b, origin, 1.2f);
     step::start_move(intents, f.c, Vec3{50, 50, 0}, origin);

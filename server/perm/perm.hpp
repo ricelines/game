@@ -172,6 +172,16 @@ struct Plot {
 struct Plots {
   std::vector<Plot> rows{Plot{}};
   std::unordered_map<PlayerId, std::vector<PlotId>> by_owner;
+  // Plot ids by the BLOCK_M-square cells their bounds overlap (S13.1), so the
+  // plot under a point, or the plots near one, are found in a few cells.
+  float cell_m = 0;
+  std::unordered_map<std::uint64_t, std::vector<PlotId>> by_cell;
+};
+// The surveyed layout (S13.1); plots, their facts and surveying all read it.
+struct LandSettings {
+  float street_width_m, port_spacing_m, block_m, way_m, lot_front_m, lot_min_m;
+  std::uint32_t pool_lots_min;
+  GroupId way_group = 0;
 };
 struct PlotFacts {
   PlotId id;
@@ -182,10 +192,13 @@ struct PlotFacts {
   float port_x;
   bool open, build_open;
 };
-PlotFacts plot_facts(const Plots &, PlotId, float port_spacing_m);
+PlotFacts plot_facts(const Plots &, PlotId, const LandSettings &);
 void set_plot_owner(Plots &, PlotId, PlayerId);
-void rebuild_plot_owners(Plots &);
+PlotId add_plot(Plots &, Plot);
+void rebuild_plot_index(Plots &);
 const Plot *plot_at(const Plots &, Vec3);
+// Live plots whose bounds touch the box [min x, min y, max x, max y], by id.
+std::vector<PlotId> plots_touching(const Plots &, std::array<float, 4>);
 struct Decision {
   Reason reason = Reason::MissingRight;
   GrantId grant = 0;
@@ -245,6 +258,11 @@ struct Offer {
 struct Offers {
   std::vector<Offer> rows{Offer{}};
   std::set<std::pair<Step, OfferId>> expiring;
+  // The other ends of live offers' relations (S1): rows are never removed, so
+  // nothing outside a snapshot walks them.
+  std::set<OfferId> live;
+  std::unordered_map<std::uint64_t, std::vector<OfferId>> by_object; // goods and escrowed parts
+  std::unordered_map<PlotId, OfferId> by_plot;
 };
 struct CustodyChange {
   Handle goods, parent;
@@ -366,7 +384,8 @@ OfferResult offer(amber::perm::State &perm_state, PermissionFlags, Holder, const
 OfferResult cancel_offer(amber::perm::State &perm_state, PermissionFlags, Holder, const Target &,
                          OfferId, Step, std::span<const Target> parts = {});
 // Deadline lookup is derived, rebuilt once from authoritative rows on restore.
-void rebuild_offer_deadlines(Offers &);
+OfferId open_offer(Offers &, Offer);
+void rebuild_offer_index(Offers &);
 std::vector<OfferId> advance_offers(Offers &, IdentityRead, PermissionFlags, Step now,
                                     std::size_t max_entries);
 
@@ -440,6 +459,6 @@ struct PlotHolder {
 };
 std::vector<PlotHolder> plot_holders(const Plot &, const Grants &, Step);
 const Offer *plot_offer(const Offers &, PlotId, Step, PlayerId caller);
-nlohmann::json plot_record(const Plots &, const Grants &, PlotId, float port_spacing_m, Step,
+nlohmann::json plot_record(const Plots &, const Grants &, PlotId, const LandSettings &, Step,
                            const Offer * = nullptr);
 } // namespace amber::perm

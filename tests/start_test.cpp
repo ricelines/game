@@ -148,7 +148,7 @@ void check_joining(const Json &plan, catalog::State &catalog, react::State &reac
   space::State space(settings.space, settings.light_cell_m);
   const auto expected = static_cast<PlayerId>(net.profiles.rows.size());
   auto joined = step::create_join({"  New arrival  "}, net.profiles, permissions, objects, catalog,
-                                  plan.at("newcomer"), model, clock, space);
+                                  plan.at("newcomer"), model, clock);
   require(joined.player == expected && joined.refusal.empty(),
           "join did not allocate the next player");
   const auto &profile = net.profiles.rows.at(joined.player);
@@ -204,7 +204,7 @@ void check_joining(const Json &plan, catalog::State &catalog, react::State &reac
              grants_before = permissions.grants.rows.size();
   for (const auto &name : {std::string(" new ARRIVAL "), std::string(""), std::string(33, 'x')}) {
     const auto refused = step::create_join({name}, net.profiles, permissions, objects, catalog,
-                                           plan.at("newcomer"), model, clock, space);
+                                           plan.at("newcomer"), model, clock);
     require(!refused.player &&
                 refused.refusal == (name == " new ARRIVAL " ? "name_taken" : "bad_input"),
             "join did not reject a duplicate or invalid name");
@@ -218,15 +218,9 @@ void check_joining(const Json &plan, catalog::State &catalog, react::State &reac
   for (int i = 0; i < 32; ++i)
     unicode_name += "界";
   const auto second = step::create_join({unicode_name}, net.profiles, permissions, objects, catalog,
-                                        plan.at("newcomer"), model, clock, space);
+                                        plan.at("newcomer"), model, clock);
   require(second.player == joined.player + 1,
           "second join did not preserve Unicode or allocate the next id");
-  const auto second_body = net.profiles.rows[second.player].body;
-  const auto &asset = catalog.assets.rows.at(catalog.models.rows.at(model).asset);
-  const auto size = asset.maximum - asset.minimum;
-  require((objects.objects.position[second_body.slot()] - objects.objects.position[body.slot()])
-                  .length() >= std::max(size.x, size.y),
-          "successive joins overlap their physical bodies");
   step::activate_join(catalog, react, objects, space, net, step, settings, second.objects);
 
   net.sessions.accept(net::Connected{100});
@@ -261,9 +255,8 @@ void check_joining(const Json &plan, catalog::State &catalog, react::State &reac
              players_without_script = permissions.players.rows.size();
   const auto objects_without_script = objects.objects.model.size(),
              grants_without_script = permissions.grants.rows.size();
-  const auto unavailable =
-      step::create_join({"Later arrival"}, net.profiles, permissions, objects, catalog,
-                        plan.at("newcomer"), configured_model, clock, space);
+  const auto unavailable = step::create_join({"Later arrival"}, net.profiles, permissions, objects,
+                                             catalog, plan.at("newcomer"), configured_model, clock);
   require(!unavailable.player && unavailable.refusal == "refused" &&
               net.profiles.rows.size() == profiles_without_script &&
               permissions.players.rows.size() == players_without_script &&

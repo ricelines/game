@@ -104,10 +104,12 @@ struct Fixture {
     properties[2].set(root.slot(), Value(10.0));
     state.insert(std::int64_t{3}, 5.0);
     players.rows.resize(4);
+    plots.cell_m = 72;
     plots.rows.push_back({1, 2, 0, 7, {-5, -4, 30, 40}, {}});
-    perm::rebuild_plot_owners(plots);
+    perm::rebuild_plot_index(plots);
     catalog_state.mechanical.values["measurements"] = {{"density", 1}, {"capacity", 6}};
-    step::bind_metadata(objects_state, catalog_state, react_state, perm_state, 1000);
+    step::bind_metadata(objects_state, catalog_state, react_state, perm_state,
+                        perm::LandSettings{100, 1000, 72, 8, 16, 4, 4});
   }
   react::RunOutcome run(std::string_view body) {
     const auto source = "return {on={run=function(self,from,args) " + std::string(body) + " end}}";
@@ -188,8 +190,9 @@ void plot_records_preserve_public_fields_and_readonly_rights() {
   Fixture f;
   f.plots.rows[1].bounds = {8, 50, 24, 82};
   f.plots.rows[1].preset = 3;
+  f.plots.cell_m = 72;
   f.plots.rows.push_back({2, 0, 0, 2, {0, -50, 72, 50}, {}, perm::PlotKind::Street});
-  perm::rebuild_plot_owners(f.plots);
+  perm::rebuild_plot_index(f.plots);
   const auto world = perm::Holder::script(90, {});
   require(
       bool(perm::create_root_grant(

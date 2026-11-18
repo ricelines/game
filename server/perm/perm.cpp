@@ -1,6 +1,7 @@
 #include "perm.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <unordered_set>
@@ -25,11 +26,74 @@ void set_plot_owner(Plots &plots, PlotId id, PlayerId owner) {
     ids.insert(std::ranges::lower_bound(ids, id), id);
   }
 }
-void rebuild_plot_owners(Plots &plots) {
+namespace {
+std::uint64_t cell_key(std::int64_t x, std::int64_t y) {
+  return (std::uint64_t(std::uint32_t(x)) << 32) | std::uint32_t(y);
+}
+// Calls f with the key of every cell the box [x0, y0, x1, y1] touches.
+template <class F> void touched_cells(const Plots &plots, std::array<float, 4> box, F f) {
+  if (!(plots.cell_m > 0))
+    throw std::logic_error("the plot index needs the block size");
+  const auto lo_x = std::int64_t(std::floor(box[0] / plots.cell_m)),
+             lo_y = std::int64_t(std::floor(box[1] / plots.cell_m)),
+             hi_x = std::int64_t(std::floor(box[2] / plots.cell_m)),
+             hi_y = std::int64_t(std::floor(box[3] / plots.cell_m));
+  for (auto x = lo_x; x <= hi_x; ++x)
+    for (auto y = lo_y; y <= hi_y; ++y)
+      f(cell_key(x, y));
+}
+void index_cells(Plots &plots, PlotId id) {
+  touched_cells(plots, plots.rows[id].bounds, [&](std::uint64_t key) {
+    auto &ids = plots.by_cell[key];
+    ids.insert(std::ranges::lower_bound(ids, id), id);
+  });
+}
+void unindex_cells(Plots &plots, PlotId id) {
+  touched_cells(plots, plots.rows[id].bounds, [&](std::uint64_t key) {
+    const auto found = plots.by_cell.find(key);
+    if (found == plots.by_cell.end())
+      return;
+    std::erase(found->second, id);
+    if (found->second.empty())
+      plots.by_cell.erase(found);
+  });
+}
+} // namespace
+PlotId add_plot(Plots &plots, Plot plot) {
+  plot.id = PlotId(plots.rows.size());
+  const auto owner = plot.owner;
+  plots.rows.push_back(std::move(plot));
+  const auto id = plots.rows.back().id;
+  plots.rows[id].owner = owner;
+  auto &ids = plots.by_owner[owner];
+  ids.insert(std::ranges::lower_bound(ids, id), id);
+  index_cells(plots, id);
+  return id;
+}
+void rebuild_plot_index(Plots &plots) {
   plots.by_owner.clear();
+  plots.by_cell.clear();
   for (const auto &plot : plots.rows)
-    if (plot.id)
+    if (plot.id) {
       plots.by_owner[plot.owner].push_back(plot.id);
+      index_cells(plots, plot.id);
+    }
+}
+std::vector<PlotId> plots_touching(const Plots &plots, std::array<float, 4> box) {
+  std::vector<PlotId> result;
+  if (plots.by_cell.empty())
+    return result;
+  touched_cells(plots, box, [&](std::uint64_t key) {
+    if (const auto found = plots.by_cell.find(key); found != plots.by_cell.end())
+      for (auto id : found->second) {
+        const auto &b = plots.rows[id].bounds;
+        if (b[0] <= box[2] && box[0] <= b[2] && b[1] <= box[3] && box[1] <= b[3])
+          result.push_back(id);
+      }
+  });
+  std::ranges::sort(result);
+  result.erase(std::unique(result.begin(), result.end()), result.end());
+  return result;
 }
 
 std::vector<PlotHolder> plot_holders(const Plot &plot, const Grants &grants, Step now) {
@@ -64,39 +128,45 @@ std::vector<PlotHolder> plot_holders(const Plot &plot, const Grants &grants, Ste
   return result;
 }
 const Offer *plot_offer(const Offers &offers, PlotId plot, Step now, PlayerId caller) {
-  for (const auto &offer : offers.rows)
-    if (offer.live && offer.plot == plot && (!offer.expires_step || offer.expires_step > now) &&
-        (!offer.buyer || offer.buyer == caller))
-      return &offer;
-  return nullptr;
+  const auto found = offers.by_plot.find(plot);
+  if (found == offers.by_plot.end())
+    return nullptr;
+  const auto &offer = offers.rows[found->second];
+  return (!offer.expires_step || offer.expires_step > now) &&
+                 (!offer.buyer || offer.buyer == caller)
+             ? &offer
+             : nullptr;
 }
-PlotFacts plot_facts(const Plots &plots, PlotId id, float port_spacing_m) {
+namespace {
+// S13.1's layout fixes every way, so a lot's frontage follows from its bounds:
+// the Street, a back way along x (the previous block's or its own), else an alley.
+std::string_view frontage(const Plot &plot, const LandSettings &s) {
+  if (plot.kind != PlotKind::Lot)
+    return "none";
+  const auto &b = plot.bounds;
+  const float half = s.street_width_m / 2;
+  // Mirror the south side so that y grows away from the Street.
+  const float near = b[1] >= 0 ? b[1] : -b[3];
+  const float far = b[1] >= 0 ? b[3] : -b[1];
+  if (near == half)
+    return "street";
+  const auto block_edge = [&](float y) {
+    const float k = (y - half) / s.block_m;
+    return k >= 1 && k == std::floor(k);
+  };
+  if (block_edge(near) || block_edge(far + s.way_m))
+    return "back way";
+  const float column = std::floor(b[0] / s.block_m) * s.block_m;
+  if (b[0] == column + s.way_m || b[2] == column + s.block_m)
+    return "alley";
+  return "none";
+}
+} // namespace
+PlotFacts plot_facts(const Plots &plots, PlotId id, const LandSettings &land) {
   const auto &plot = plots.rows.at(id);
   const auto &b = plot.bounds;
-  const char *fronts = "none";
-  const auto root = plots.by_owner.find(0);
-  if (root != plots.by_owner.end())
-    for (auto way_id : root->second) {
-      const auto &way = plots.rows[way_id];
-      if (way.kind == PlotKind::Lot)
-        continue;
-      const auto &w = way.bounds;
-      const bool vertical =
-          (b[0] == w[2] || b[2] == w[0]) && std::max(b[1], w[1]) < std::min(b[3], w[3]);
-      const bool horizontal =
-          (b[1] == w[3] || b[3] == w[1]) && std::max(b[0], w[0]) < std::min(b[2], w[2]);
-      if (horizontal && way.kind == PlotKind::Street) {
-        fronts = "street";
-        break;
-      }
-      if (way.kind == PlotKind::Alley) {
-        if (horizontal) {
-          fronts = "back way";
-        } else if (vertical && std::string_view(fronts) == "none") {
-          fronts = "alley";
-        }
-      }
-    }
+  const auto port_spacing_m = land.port_spacing_m;
+  const auto fronts = frontage(plot, land);
   const auto port = std::int64_t(std::round((b[0] + b[2]) / (2 * port_spacing_m)));
   return {plot.id,
           plot.owner,
@@ -108,10 +178,10 @@ PlotFacts plot_facts(const Plots &plots, PlotId id, float port_spacing_m) {
           bool(plot.preset & (Rights{1} << unsigned(LandVerb::Build)))};
 }
 nlohmann::json plot_record(const Plots &plots, const Grants &grants, PlotId id,
-                           float port_spacing_m, Step now, const Offer *offer) {
+                           const LandSettings &land, Step now, const Offer *offer) {
   using Json = nlohmann::json;
   const auto &plot = plots.rows.at(id);
-  const auto facts = plot_facts(plots, id, port_spacing_m);
+  const auto facts = plot_facts(plots, id, land);
   const auto &b = facts.bounds;
   Json rights = Json::array();
   for (const auto &[held, verbs] : plot_holders(plot, grants, now)) {
@@ -176,11 +246,19 @@ Gate check_right(std::string_view right, Caller caller, const perm::Target &targ
           decision ? std::string{} : std::string(perm::reason_text(decision.reason))};
 }
 const Plot *plot_at(const Plots &plots, Vec3 position) {
-  for (const auto &plot : plots.rows)
-    if (plot.id && position.x >= plot.bounds[0] && position.y >= plot.bounds[1] &&
-        position.x < plot.bounds[2] && position.y < plot.bounds[3])
-      return &plot;
-  return nullptr;
+  const Plot *result = nullptr;
+  if (plots.by_cell.empty())
+    return result;
+  touched_cells(plots, {position.x, position.y, position.x, position.y}, [&](std::uint64_t key) {
+    if (const auto found = plots.by_cell.find(key); found != plots.by_cell.end())
+      for (auto id : found->second) {
+        const auto &plot = plots.rows[id];
+        if (!result && position.x >= plot.bounds[0] && position.y >= plot.bounds[1] &&
+            position.x < plot.bounds[2] && position.y < plot.bounds[3])
+          result = &plot;
+      }
+  });
+  return result;
 }
 std::vector<Handle> update_plots(Objects &objects, const Plots &plots,
                                  std::span<const Handle> moved, bool in_world) {
@@ -917,14 +995,52 @@ std::vector<GrantId> transfer_goods(AuthorityWrite authority, OwnerLimits &limit
 }
 } // namespace
 
+namespace {
+void index_offer(Offers &offers, const Offer &row) {
+  offers.live.insert(row.id);
+  if (row.plot)
+    offers.by_plot[row.plot] = row.id;
+  if (row.goods)
+    offers.by_object[row.goods.bits].push_back(row.id);
+  for (auto part : row.parts)
+    offers.by_object[part.bits].push_back(row.id);
+  if (row.expires_step && !row.trade)
+    offers.expiring.emplace(row.expires_step, row.id);
+}
+void unindex_object(Offers &offers, Handle object, OfferId id) {
+  const auto found = offers.by_object.find(object.bits);
+  if (found == offers.by_object.end())
+    return;
+  std::erase(found->second, id);
+  if (found->second.empty())
+    offers.by_object.erase(found);
+}
+} // namespace
+OfferId open_offer(Offers &offers, Offer row) {
+  row.id = static_cast<OfferId>(offers.rows.size());
+  row.live = true;
+  offers.rows.push_back(std::move(row));
+  index_offer(offers, offers.rows.back());
+  return offers.rows.back().id;
+}
 void close_offer(Offers &offers, Offer &row) {
+  if (!row.live)
+    return;
   offers.expiring.erase({row.expires_step, row.id});
+  offers.live.erase(row.id);
+  if (row.plot)
+    if (const auto found = offers.by_plot.find(row.plot);
+        found != offers.by_plot.end() && found->second == row.id)
+      offers.by_plot.erase(found);
+  if (row.goods)
+    unindex_object(offers, row.goods, row.id);
+  for (auto part : row.parts)
+    unindex_object(offers, part, row.id);
   row.live = false;
 }
 void close_plot_offers(Offers &offers, PlotId id) {
-  for (auto &row : offers.rows)
-    if (row.live && row.plot == id)
-      close_offer(offers, row);
+  if (const auto found = offers.by_plot.find(id); found != offers.by_plot.end())
+    close_offer(offers, offers.rows[found->second]);
 }
 
 std::vector<GrantId> change_plot_owner(State &state, PlotId id, PlayerId owner) {
@@ -942,14 +1058,12 @@ std::vector<GrantId> change_plot_owner(State &state, PlotId id, PlayerId owner) 
 }
 
 PlotId split_plot(State &state, PlotId id, int axis, float cut, Step now) {
-  auto &plot = state.plots.rows[id];
-  auto upper = plot;
-  upper.id = PlotId(state.plots.rows.size());
-  const auto next = upper.id;
-  plot.bounds[axis + 2] = cut;
+  unindex_cells(state.plots, id);
+  auto upper = state.plots.rows[id];
+  state.plots.rows[id].bounds[axis + 2] = cut;
   upper.bounds[axis] = cut;
-  state.plots.rows.push_back(std::move(upper));
-  set_plot_owner(state.plots, next, state.plots.rows[next].owner);
+  index_cells(state.plots, id);
+  const auto next = add_plot(state.plots, std::move(upper));
   std::vector<GrantId> originals;
   if (const auto found = state.grants.by_plot.find(id); found != state.grants.by_plot.end())
     originals = found->second;
@@ -973,11 +1087,14 @@ PlotId split_plot(State &state, PlotId id, int axis, float cut, Step now) {
   return next;
 }
 std::vector<GrantId> join_plots(State &state, PlotId a, PlotId b) {
+  unindex_cells(state.plots, a);
+  unindex_cells(state.plots, b);
   auto &left = state.plots.rows[a];
   auto &right = state.plots.rows[b];
   const auto l = left.bounds, r = right.bounds;
   left.bounds = {std::min(l[0], r[0]), std::min(l[1], r[1]), std::max(l[2], r[2]),
                  std::max(l[3], r[3])};
+  index_cells(state.plots, a);
   right.id = 0;
   set_plot_owner(state.plots, b, 0);
   const auto found = state.grants.by_plot.find(b);
@@ -1014,11 +1131,8 @@ OfferResult offer(amber::perm::State &perm_state, PermissionFlags flags, Holder 
   const auto components = check_parts(goods, parts);
   if (!components)
     return {components.reason, 0, {}};
-  const auto id = static_cast<OfferId>(offers.rows.size());
-  offers.rows.push_back({id, goods.owner, buyer, goods.object, price, expiry, 0, true,
-                         part_handles(parts), 0, seller});
-  if (expiry)
-    offers.expiring.emplace(expiry, id);
+  const auto id = open_offer(offers, {0, goods.owner, buyer, goods.object, price, expiry, 0, true,
+                                      part_handles(parts), 0, seller});
   flags.set(goods.object.slot(), flags.get(goods.object.slot()) | Escrow);
   escrow_parts(flags, offers.rows.back().parts, true);
   return {Reason::Allowed, id, {{goods.object, {}, true}}};
@@ -1040,14 +1154,14 @@ OfferResult offer_plot(State &state, Holder actor, PlotId id, std::int64_t price
     return {Reason::Expired, 0, {}};
   if (buyer >= state.players.rows.size())
     return {Reason::UnknownHolder, 0, {}};
-  for (const auto &row : state.offers.rows)
-    if (row.live && row.plot == id && (!row.expires_step || row.expires_step > now))
+  if (const auto found = state.offers.by_plot.find(id); found != state.offers.by_plot.end()) {
+    auto &row = state.offers.rows[found->second];
+    if (!row.expires_step || row.expires_step > now)
       return {Reason::Duplicate, 0, {}};
-  const auto offer = OfferId(state.offers.rows.size());
-  state.offers.rows.push_back(
-      {offer, plot.owner, buyer, {}, price, expiry, 0, true, {}, id, actor});
-  if (expiry)
-    state.offers.expiring.emplace(expiry, offer);
+    close_offer(state.offers, row);
+  }
+  const auto offer =
+      open_offer(state.offers, {0, plot.owner, buyer, {}, price, expiry, 0, true, {}, id, actor});
   return {Reason::Allowed, offer, {}};
 }
 Reason set_offer_price(Offers &offers, Holder actor, OfferId id, std::int64_t price, Step now) {
@@ -1117,11 +1231,14 @@ OfferResult cancel_offer(amber::perm::State &perm_state, PermissionFlags flags, 
   return {Reason::Allowed, id, {}};
 }
 
-void rebuild_offer_deadlines(Offers &offers) {
+void rebuild_offer_index(Offers &offers) {
   offers.expiring.clear();
+  offers.live.clear();
+  offers.by_object.clear();
+  offers.by_plot.clear();
   for (const auto &row : offers.rows)
-    if (row.id && row.live && !row.trade && row.expires_step)
-      offers.expiring.emplace(row.expires_step, row.id);
+    if (row.id && row.live)
+      index_offer(offers, row);
 }
 
 std::vector<OfferId> advance_offers(Offers &offers, IdentityRead identity, PermissionFlags flags,
@@ -1248,23 +1365,27 @@ SwapResult return_goods(State &state, const ReturnRequest &request, Step now) {
       return {allowed.reason, {}, {}};
   }
   std::vector<OfferId> closed;
+  std::vector<OfferId> held;
   if (goods.flags & Escrow)
-    for (auto &offer : state.offers.rows)
-      if (offer.live && offer.goods == goods.object) {
-        if (offer.trade) {
-          auto &trade = state.trades.rows[offer.trade];
-          // Other trade goods retain custody; the adapter clears their escrow flags.
-          for (auto &side : trade.sides)
-            if (side.offer && state.offers.rows[side.offer].live) {
-              close_offer(state.offers, state.offers.rows[side.offer]);
-              closed.push_back(side.offer);
-            }
-          trade.live = false;
-        } else {
-          close_offer(state.offers, offer);
-          closed.push_back(offer.id);
-        }
+    if (const auto found = state.offers.by_object.find(goods.object.bits);
+        found != state.offers.by_object.end())
+      held = found->second;
+  for (auto id : held)
+    if (auto &offer = state.offers.rows[id]; offer.live && offer.goods == goods.object) {
+      if (offer.trade) {
+        auto &trade = state.trades.rows[offer.trade];
+        // Other trade goods retain custody; the adapter clears their escrow flags.
+        for (auto &side : trade.sides)
+          if (side.offer && state.offers.rows[side.offer].live) {
+            close_offer(state.offers, state.offers.rows[side.offer]);
+            closed.push_back(side.offer);
+          }
+        trade.live = false;
+      } else {
+        close_offer(state.offers, offer);
+        closed.push_back(offer.id);
       }
+    }
   auto &owner = state.players.rows.at(goods.owner);
   std::erase(owner.inventory, goods.object);
   std::erase(owner.mailbox, goods.object);
@@ -1342,10 +1463,10 @@ TradeResult change_trade(amber::perm::State &perm_state, PermissionFlags flags, 
       escrow_parts(flags, offers.rows[previous.offer].parts, false);
     }
   }
-  const auto offer_id = static_cast<OfferId>(offers.rows.size());
   // Direct-trade money is the amount this side gives, independent of a goods sale price.
-  offers.rows.push_back({offer_id, actor, trade.players[1 - side], goods ? goods->object : Handle{},
-                         0, 0, id, true, part_handles(parts), 0, Holder::player(actor)});
+  const auto offer_id =
+      open_offer(offers, {0, actor, trade.players[1 - side], goods ? goods->object : Handle{}, 0, 0,
+                          id, true, part_handles(parts), 0, Holder::player(actor)});
   previous = {offer_id, money, false};
   trade.sides[1 - side].confirmed = false;
   if (goods) {
@@ -1360,9 +1481,13 @@ TradeResult change_trade(amber::perm::State &perm_state, PermissionFlags flags, 
 std::vector<Handle> invalidate_goods_offers(Offers &offers, Trades &trades, IdentityRead identity,
                                             PermissionFlags flags, Handle object) {
   std::vector<Handle> changed;
-  for (auto &row : offers.rows) {
-    if (!row.live || (row.goods != object &&
-                      std::find(row.parts.begin(), row.parts.end(), object) == row.parts.end()))
+  const auto found = offers.by_object.find(object.bits);
+  if (found == offers.by_object.end())
+    return changed;
+  const auto ids = found->second;
+  for (auto id : ids) {
+    auto &row = offers.rows[id];
+    if (!row.live)
       continue;
     if (row.trade) {
       for (const auto &side : trades.rows[row.trade].sides)

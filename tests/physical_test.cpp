@@ -302,8 +302,10 @@ void immediate_part_motion_reallocates_plot_priority() {
   f.f.terms.rows[11].along = 3;
   f.f.terms.rows[12].source = react::Source::Setting;
   react::validate_shared_terms(f.f.terms);
+  f.plots.cell_m = 72;
   f.plots.rows.push_back({1, 1, 0, 0, {-5, -5, 0, 10}, {}});
   f.plots.rows.push_back({2, 1, 0, 0, {0, -5, 5, 10}, {}});
+  perm::rebuild_plot_index(f.plots);
   f.f.plots.rows[1][12] = Value(0.);
   f.f.plots.rows[2][12] = Value(10.);
   f.f.instance_settings.columns.resize(13);

@@ -2,7 +2,7 @@
 
 An authorable simulation: one C++20 server owns world state, ordinary Luau scripts own behavior, build123d sources produce measured geometry, and a Godot web client watches the same world that agents use through the gateway.
 
-The prototype is under correction and does not yet satisfy the design or all acceptance gates. The [Technicals](design/technicals.md) and [Specs](design/specs.md) are generated copies of the design doc, which holds the requirements.
+The prototype is under correction and does not yet satisfy the design or all acceptance gates. The [design doc](https://docs.google.com/document/d/1zJ2WDWIEMRXXinCnkyQ4KbKp2xhuI_rLnsroY57X0Mg) holds the requirements.
 
 ## Build
 
@@ -183,3 +183,15 @@ The content-dependent importer and authoring checks require the prepared plan an
 The native suites use real Luau, Jolt and Recast/Detour. Performance records distinguish module benchmarks, live server/socket tests, model-driven world events and the browser hardware used. An unavailable dataset or failed hardware gate remains reported as such.
 
 Ordinary JSON timing reports are always available.
+
+To profile the 500-client density load, build the `profile` preset (Release
+optimization with line tables and frame pointers) and attach `perf` with
+frame-pointer call graphs once the joins finish:
+
+```sh
+.tools/bin/cmake --preset profile
+.tools/bin/cmake --build --preset profile
+uv run python tests/density.py --server .build/profile/amb-server --restricted-host-bake \
+  --seconds 60 --no-reconnect
+perf record -F 499 --call-graph fp -p "$(pgrep -x amb-server)" -- sleep 30
+```

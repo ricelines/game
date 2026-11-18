@@ -49,7 +49,7 @@ struct Fixture {
   step::DeliveryTargets &delivery = step_state.delivery;
   react::NativeActions &declarations = react_state.native_declarations;
   cm::CommerceDeclarations ids;
-  step::LandSettings land_settings{};
+  perm::LandSettings land_settings{};
   std::size_t mailbox_max = 1;
   std::array<Handle, 2> bodies;
   explicit Fixture(std::uint32_t capacity = 64)
@@ -63,14 +63,23 @@ struct Fixture {
                       .value<double>()
                       .value())) {
     const auto config = toml::parse_file(AMBER_CONFIG_PATH);
-    land_settings.lot_min_m = float(config["land"]["LOT_MIN_M"].value<double>().value());
-    land_settings.port_spacing_m = float(config["land"]["PORT_SPACING_M"].value<double>().value());
+    const auto land = [&](const char *name) {
+      return float(config["land"][name].value<double>().value());
+    };
+    land_settings = {land("STREET_WIDTH_M"),
+                     land("PORT_SPACING_M"),
+                     land("BLOCK_M"),
+                     land("WAY_M"),
+                     land("LOT_FRONT_M"),
+                     land("LOT_MIN_M"),
+                     std::uint32_t(land("POOL_LOTS_MIN"))};
     players.rows.resize(4);
     ledger.balance = {{perm::Account::player(1), 100}, {perm::Account::player(2), 100}};
+    plots.cell_m = 72;
     plots.rows.resize(3);
     plots.rows[1] = {1, 1, 0, 0, {-20, -20, 0, 20}, {}};
     plots.rows[2] = {2, 2, 0, 0, {0, -20, 20, 20}, {}};
-    perm::rebuild_plot_owners(plots);
+    perm::rebuild_plot_index(plots);
     f.objects.owner[f.a.slot()] = 1;
     f.objects.owner[f.b.slot()] = 1;
     f.terms.rows.resize(32);
@@ -786,6 +795,7 @@ void offline_notices_survive_restore_and_do_not_fill_the_goods_mailbox() {
   perm::Players restored;
   perm::Ledger ledger;
   perm::Plots plots;
+  plots.cell_m = 72;
   perm::Groups groups;
   snap::Input input{bytes.data(), bytes.size()};
   perm::read_players(input, restored, ledger, plots, groups);
@@ -1041,8 +1051,8 @@ void land_refusals_have_fixes_and_denial_records() {
 }
 void plot_changes_dispatch_before_authority_is_removed() {
   Fixture f;
-  f.plots.rows[1].bounds = {990, -20, 1010, 20};
-  f.plots.rows[2].bounds = {990, -25, 1010, -20};
+  f.plots.rows[1].bounds = {990, 50, 1010, 90};
+  f.plots.rows[2].bounds = {990, -50, 1010, 50};
   f.plots.rows[2].kind = perm::PlotKind::Street;
   perm::set_plot_owner(f.plots, 2, 0);
   const auto admin = step::declare_admin(f.f.terms, f.declarations);
@@ -1143,8 +1153,8 @@ void plot_changes_dispatch_before_authority_is_removed() {
     require(!f.f.states.contains({f.f.c, builder}), "build-only observer received a plot event");
   };
   const auto facts = [](double min_x, double max_x, bool open, bool build_open) {
-    return nlohmann::json{{"min_x", min_x}, {"min_y", -20},       {"max_x", max_x},
-                          {"max_y", 20},    {"fronts", "street"}, {"port", 1},
+    return nlohmann::json{{"min_x", min_x}, {"min_y", 50},        {"max_x", max_x},
+                          {"max_y", 90},    {"fronts", "street"}, {"port", 1},
                           {"port_x", 1000}, {"open", open},       {"build_open", build_open}};
   };
   const auto with = [](nlohmann::json result, std::string_view prefix,
@@ -1187,7 +1197,7 @@ void plot_changes_dispatch_before_authority_is_removed() {
           with(with(full, "other_", upper), "old_", lower));
   deliver(std::move(sold), "owner", 0, "p:2", "p:1", 800, 0, full);
   deliver(std::move(abandoned), "owner", 0, "p:0", "p:2", 800, 0, full);
-  const auto record = perm::plot_record(f.plots, f.grants, 1, f.land_settings.port_spacing_m, 20);
+  const auto record = perm::plot_record(f.plots, f.grants, 1, f.land_settings, 20);
   require(record.at("build_open") == true && record.at("open") == false &&
               record.at("fronts") == "street" && record.at("port") == 1 &&
               record.at("port_x") == 1000,

@@ -208,9 +208,9 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
 NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
                                     const amber::react::State &react_state,
                                     amber::perm::State &perm_state,
-                                    amber::ObjectState &objects_state, const LandSettings &settings,
-                                    bool architect, react::PermissionAction operation,
-                                    const NativeCall &call) {
+                                    amber::ObjectState &objects_state,
+                                    const perm::LandSettings &settings, bool architect,
+                                    react::PermissionAction operation, const NativeCall &call) {
 
   auto &players = perm_state.players;
   auto &groups = perm_state.groups;

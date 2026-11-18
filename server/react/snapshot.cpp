@@ -175,7 +175,8 @@ void read_shared(snap::Input &in, SharedColumns &shared, GivesTo &gives,
   });
 }
 void write_script_states(snap::Output &out, const ScriptStates &states,
-                         const WatchAnswers &watch_answers, const SnapshotSelection &selected) {
+                         const WatchAnswers &watch_answers, const Placements &placed,
+                         const SnapshotSelection &selected) {
   std::vector<ScriptKey> keys;
   for (const auto &[key, state] : states) {
     (void)state;
@@ -188,8 +189,10 @@ void write_script_states(snap::Output &out, const ScriptStates &states,
   });
   write_map(out, watch_answers,
             [&](const FactKey &source) { return selected.contains(source.subject); });
+  write_map(out, placed, [&](std::uint64_t object) { return selected.contains(Handle{object}); });
 }
-void read_script_states(snap::Input &in, ScriptStates &states, WatchAnswers &watch_answers) {
+void read_script_states(snap::Input &in, ScriptStates &states, WatchAnswers &watch_answers,
+                        Placements &placed) {
   states.clear();
   std::vector<ScriptKey> keys;
   in.container(keys, snap::max_collection(), [&](snap::Input &s, ScriptKey &key) {
@@ -199,6 +202,7 @@ void read_script_states(snap::Input &in, ScriptStates &states, WatchAnswers &wat
     states[key].restore(std::move(entries));
   });
   read_map(in, watch_answers);
+  read_map(in, placed);
 }
 void write_world_scripts(snap::Output &out, const std::vector<WorldScript> &world) {
   auto rows = world;

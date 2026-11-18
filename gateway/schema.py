@@ -30,14 +30,20 @@ TOOLS = [
         "inspect",
         (
             "Read one thing's full measured record, maker's claims, rights and state; or "
-            "self/inventory/grants/plot. Land lists lots anywhere, in plot-ID order, with "
-            "optional owner (self or p:N), for_sale, cursor and limit filters. Use the returned "
-            "next_cursor to continue; inspect plot:N for one lot."
+            "self/inventory/grants/plot. Target land lists plots within sight, nearest first; "
+            "for_sale=true searches lots on offer anywhere (sort price, distance or area); "
+            "owner (self or p:N) lists that player's lots. Filters: fronts (street, alley, "
+            "back way), max_price, min_area. Rows carry center, inspect, and accept when you "
+            "can buy. Continue with next_cursor; inspect plot:N for one lot."
         ),
         {
             "target": {"type": "string"},
             "owner": {"type": "string"},
             "for_sale": {"type": "boolean"},
+            "fronts": {"type": "string", "enum": ["street", "alley", "back way", "none"]},
+            "max_price": {"type": "integer", "minimum": 0},
+            "min_area": {"type": "integer", "minimum": 0},
+            "sort": {"type": "string", "enum": ["price", "distance", "area", "id"]},
             "cursor": {"type": "integer", "minimum": 0},
             "limit": {"type": "integer", "minimum": 1},
         },

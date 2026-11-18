@@ -43,26 +43,26 @@ void land_browse_and_actions() {
   plots.push_back({}); // A joined-away ID must not appear in a later page.
   plots.push_back({5, 2, 0, 0, {24, 50, 40, 82}, {}});
   plots.push_back({6, 2, 0, 0, {40, 50, 56, 82}, {}});
-  perm::rebuild_plot_owners(permissions.plots);
+  permissions.plots.cell_m = 72;
+  perm::rebuild_plot_index(permissions.plots);
   const auto offer = [&](PlotId plot, PlayerId buyer, Step expiry) {
     perm::Offer row;
-    row.id = perm::OfferId(permissions.offers.rows.size());
     row.plot = plot;
     row.seller = plots[plot].owner;
     row.buyer = buyer;
     row.price = 19;
     row.expires_step = expiry;
-    row.live = true;
-    permissions.offers.rows.push_back(row);
+    perm::open_offer(permissions.offers, row);
   };
   offer(3, 0, 0);
   offer(5, 3, 0);
   offer(6, 0, 5);
   Settings settings{};
   settings.perception.things_max = 1;
+  settings.perception.sight_m = 30;
   settings.perception.events_per_response = 40;
   settings.actions_page = 50;
-  settings.land.port_spacing_m = 1000;
+  settings.land = {100, 1000, 72, 8, 16, 4, 4};
   observe::Hearing hearing;
   net::Invocation call;
   call.session = 1;
@@ -111,14 +111,39 @@ void land_browse_and_actions() {
   require(page["land"].size() == 1 && page["land"][0]["plot"] == 3 &&
               page["land"][0]["for_sale"]["price"] == 19,
           "sale browsing includes remote visible offers, excluding private and expired offers");
-  call.request.fields["for_sale"] = false;
-  require(inspect()["land"].size() == 3, "for_sale false excludes only offers visible to caller");
-  call.request.fields.erase("for_sale");
+  require(page["land"][0]["accept"] == Json{{"action", "engine.accept"},
+                                            {"args", {{"offer", "offer:1"}, {"max_price", 19}}}},
+          "a buyable row names the exact acceptance call");
+  call.request.fields = {{"target", "land"}};
+  require(inspect().contains("error"), "plots in sight need a live body");
+  ObjectInit init;
+  init.model = 1;
+  init.position = {30, 60, 0};
+  call.principal.body = create(objects.objects, init);
   page = inspect();
-  require(page["land"].size() == 4, "unfiltered browsing omitted a live lot");
+  std::vector<int> nearby;
   for (const auto &plot : page["land"])
-    require(plot.contains("for_sale") == (plot["plot"] == 3),
-            "unfiltered browsing retains visible offers while hiding private and expired ones");
+    nearby.push_back(plot["plot"]);
+  require(page["mode"] == "in_sight" && nearby == std::vector<int>{5} && page["more"] == true &&
+              page["land"][0]["dist_m"] == 0 &&
+              page["land"][0]["center"] == Json::array({32, 66, 0}),
+          "land in sight starts at the nearest plot and pages");
+  call.request.fields["limit"] = 10;
+  nearby.clear();
+  page = inspect();
+  for (const auto &plot : page["land"])
+    nearby.push_back(plot["plot"]);
+  require(nearby == std::vector<int>{5, 2, 1, 6},
+          "land in sight lists plots within SIGHT_M nearest first, never the distant lot");
+  call.request.fields["fronts"] = "street";
+  nearby.clear();
+  page = inspect();
+  for (const auto &plot : page["land"])
+    nearby.push_back(plot["plot"]);
+  require(nearby == std::vector<int>{5, 2, 6}, "the fronts filter narrows plots in sight");
+  call.request.fields = {{"target", "land"}, {"for_sale", true}, {"sort", "distance"}};
+  require(inspect()["land"][0]["plot"] == 3, "sale search sorts by distance when asked");
+  call.principal.body = {};
   call.request.fields = {{"target", "plot:3"}};
   const auto remote = inspect();
   require(remote["plot"] == 3 && remote["actions"]["target"] == "plot:3" &&
@@ -196,7 +221,15 @@ void land_browse_and_actions() {
       net::validate_inspect(
           {{"target", "land"}, {"owner", "self"}, {"for_sale", true}, {"cursor", 0}, {"limit", 2}})
               .empty() &&
-          !net::validate_inspect({{"target", "land"}, {"for_sale", 1}}).empty(),
+          !net::validate_inspect({{"target", "land"}, {"for_sale", 1}}).empty() &&
+          net::validate_inspect({{"target", "land"},
+                                 {"for_sale", true},
+                                 {"fronts", "street"},
+                                 {"max_price", 30},
+                                 {"min_area", 100},
+                                 {"sort", "price"}})
+              .empty() &&
+          !net::validate_inspect({{"target", "land"}, {"max_price", -1}}).empty(),
       "land browse wire inputs preserve typed filters and paging");
   permissions.offers.rows[1].expires_step = clock.step;
   offer(3, 0, 0);
@@ -235,7 +268,6 @@ void events_projection(bool benchmark) {
   feed.rows.back().record["authors"] = {"p:2", "p:9"};
   feed.rows.back().record["cause"] = 6;
   feed.rows.back().record["result"] = "applied";
-  feed.rows.back().record["observation"] = {{"things", Json::array({{{"h", thing}}})}};
   feed.rows.back().record["measured"] = {{"volume", 1}};
   feed.rows.back().record["source"] = "authored source";
   net::Invocation call;
@@ -258,7 +290,6 @@ void events_projection(bool benchmark) {
               result["events"][1]["id"] == 7 &&
               result["events"][1]["authors"] == full["events"][1]["authors"] &&
               result["events"][1]["cause"] == 6 && result["events"][1]["result"] == "applied" &&
-              !result["events"][1].contains("observation") &&
               !result["events"][1].contains("measured") && !result["events"][1].contains("source"),
           "summary query changed privacy/filter/causal attribution or copied heavy details");
   call.request.fields.erase("detail");
@@ -708,9 +739,11 @@ int main(int argc, char **argv) {
             "actual VM changes inspected object's own state");
     scripts.rows[1].source = "verified public source";
     perm::Plots &plots = perm_state.plots;
+    plots.cell_m = 72;
     plots.rows.push_back({1, 2, 0, 0, {80, 30, 90, 40}, {}});
     plots.rows.push_back({2, 3, 0, 0, {-20, -10, -10, 0}, {}});
     plots.rows.push_back({3, 2, 0, 0, {95, 30, 105, 40}, {}});
+    perm::rebuild_plot_index(plots);
 
     const auto inspect = [&](const net::Invocation &request) {
       return vi::read_inspect(
@@ -719,7 +752,7 @@ int main(int argc, char **argv) {
           [&] {
             amber::Settings loaded{};
             loaded.perception = perception;
-            loaded.land.port_spacing_m = 1000;
+            loaded.land = {100, 1000, 72, 8, 16, 4, 4};
             return loaded;
           }(),
           request);
@@ -831,10 +864,15 @@ int main(int argc, char **argv) {
             "inspection exposed a no-longer-applicable rule state as an installed script");
     call.principal.player = 2;
     call.request.fields = {{"target", "land"}};
-    const auto all_land = inspect(call).fields;
-    require(all_land["land"].size() == 3 && all_land["land"][0]["plot"] == 1 &&
-                all_land["land"][1]["plot"] == 2 && all_land["land"][2]["plot"] == 3,
-            "land browsing includes remote lots in plot ID order");
+    const auto in_sight = inspect(call).fields;
+    require(in_sight["land"].size() == 1 && in_sight["land"][0]["plot"] == 2 &&
+                in_sight["land"][0]["dist_m"] == 10,
+            "land in sight lists the nearby plot and leaves out distant lots");
+    call.request.fields = {{"target", "land"}, {"owner", "p:2"}};
+    const auto owned = inspect(call).fields;
+    require(owned["land"].size() == 2 && owned["land"][0]["plot"] == 1 &&
+                owned["land"][1]["plot"] == 3,
+            "an owner's lots are listed from anywhere in plot order");
     call.request.fields = {{"target", "plot:2"}};
     const auto land = inspect(call).fields;
     require(land["owner"] == "p:3" && land["plot"] == 2 &&

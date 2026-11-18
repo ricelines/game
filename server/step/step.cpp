@@ -54,31 +54,8 @@ void schedule(TimerWheel &wheel, react::Timer timer) {
     }
   }
   timer.due = std::max(timer.due, wheel.now + 1);
+  timer.event.issued = wheel.now;
   put_timer(wheel, std::move(timer));
-}
-void discard_script_work(WorkQueues &queues, TimerWheel &wheel, std::span<const Handle> objects) {
-  if (objects.empty())
-    return;
-  std::vector<Handle> selected(objects.begin(), objects.end());
-  std::sort(selected.begin(), selected.end());
-  const auto includes = [&](Handle object) {
-    return std::binary_search(selected.begin(), selected.end(), object);
-  };
-  const auto event = [&](const ForegroundItem &item) {
-    const auto *work = std::get_if<react::EventWork>(&item.work);
-    return work && includes(work->receiver);
-  };
-  queues.emitted_events -= std::erase_if(queues.causal, event);
-  std::erase_if(queues.turns, event);
-  std::erase_if(queues.background,
-                [&](const react::BackgroundItem &item) { return includes(item.receiver); });
-  for (unsigned level = 0; level < wheel.levels.size(); ++level)
-    for (unsigned bucket = 0; bucket < wheel.levels[level].size(); ++bucket) {
-      auto &rows = wheel.levels[level][bucket];
-      for (std::size_t index = rows.size(); index-- > 0;)
-        if (includes(rows[index].event.receiver))
-          remove_timer(wheel, {level, bucket, index});
-    }
 }
 void cancel_threshold(TimerWheel &wheel, FactKey key) {
   if (const auto found = wheel.thresholds.find(key); found != wheel.thresholds.end())
@@ -128,9 +105,10 @@ std::optional<react::BackgroundItem> pop_background(WorkQueues &queues) {
   queues.background.pop_front();
   return item;
 }
-PushResult enqueue_event(WorkQueues &q, react::EventWork w, std::size_t limit) {
+PushResult enqueue_event(WorkQueues &q, react::EventWork w, std::size_t limit, Step now) {
   if (q.emitted_events >= limit)
     return PushResult::Overflow;
+  w.issued = now;
   q.causal.push_back({std::move(w), {}});
   ++q.emitted_events;
   return PushResult::Queued;

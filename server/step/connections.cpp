@@ -58,6 +58,15 @@ void transport_view(net::Server &server, net::ReplicationIndex &replication,
                      {"objects", net::object_metadata(ids, auth, parent, catalog_state, visible)}}
                     .dump());
 }
+std::optional<Vec3> body_eye(const catalog::State &catalog, const amber::ObjectState &objects,
+                             Handle body) {
+  const auto identity = amber::identity(objects.objects);
+  const auto effective =
+      catalog::resolve_asset(catalog.models, catalog.parameters, identity.model[body.slot()],
+                             objects.objects.params[body.slot()]);
+  return net::observer_eye(catalog.assets.rows.at(effective.hash), body,
+                           amber::transforms(objects.objects));
+}
 } // namespace
 
 std::optional<net::Authenticated>
@@ -103,7 +112,8 @@ connection_notice(const net::SessionNotice &notice, amber::net::State &net_state
           row.player = value.principal.player;
           row.body = value.principal.body;
           if (identity.valid(row.body)) {
-            row.eye = poses.position[row.body.slot()];
+            row.eye = body_eye(catalog_state, objects_state, row.body)
+                          .value_or(poses.position[row.body.slot()]);
             listeners.push_back({value.session, row.body, row.eye});
             if (value.principal.mode == net::Mode::Play) {
               delivery.present_bodies[row.player] = row.body;
@@ -195,8 +205,8 @@ void answer_query(amber::net::State &net_state, amber::space::State &space_state
       event.kind = record::Kind::Observation;
       event.actor = record::Actor::player(request.principal.player);
       event.name = "look";
+      // S7: an observation record lists the handles it showed, not its text.
       event.things = views.rows.at(request.session).last_observation;
-      event.detail = {{"observation", reply.fields}};
       event.credits =
           record::credits(values.identity, attribution, models, scripts, event.things, 0, hz);
       journal.append(std::move(event));
@@ -221,7 +231,7 @@ void answer_query(amber::net::State &net_state, amber::space::State &space_state
   default:
     throw std::logic_error("mutation reached query dispatch");
   }
-  sessions.complete(request.session, request.sequence, reply.fields);
+  sessions.complete(request.session, request.sequence, std::move(reply.fields));
   if (request.request.kind == net::ControlKind::Look && request.principal.binary)
     transport_view(server, replication, objects_state, catalog_state, request.session,
                    views.rows.at(request.session).eye);
@@ -270,27 +280,26 @@ void flush_connections(amber::net::State &net_state, net::Server &server,
 
 void refresh_connections(amber::net::State &net_state, amber::space::State &space_state,
                          amber::step::State &step_state, const amber::catalog::State &catalog_state,
-                         const amber::ObjectState &objects_state) {
+                         const amber::ObjectState &objects_state, std::span<const Handle> moved) {
   auto &sessions = net_state.sessions;
   auto &views = net_state.session_views;
   auto &listeners = space_state.listeners;
   auto &delivery = step_state.delivery;
-  auto &models = catalog_state.models;
-  auto &parameters = catalog_state.parameters;
-  auto &assets = catalog_state.assets;
-
-  auto poses = amber::transforms(std::as_const(objects_state.objects));
+  // Only a body that moved this step has a new eye.
+  std::vector<std::uint64_t> moved_bits;
+  moved_bits.reserve(moved.size());
+  for (auto object : moved)
+    moved_bits.push_back(object.bits);
+  std::ranges::sort(moved_bits);
 
   listeners.clear();
   delivery.present_bodies.clear();
   const auto identity = amber::identity(objects_state.objects);
   for (auto &[session, row] : views.rows)
     if (identity.valid(row.body)) {
-      const auto effective =
-          catalog::resolve_asset(models, parameters, identity.model[row.body.slot()],
-                                 objects_state.objects.params[row.body.slot()]);
-      if (const auto eye = net::observer_eye(assets.rows.at(effective.hash), row.body, poses))
-        row.eye = *eye;
+      if (std::ranges::binary_search(moved_bits, row.body.bits))
+        if (const auto eye = body_eye(catalog_state, objects_state, row.body))
+          row.eye = *eye;
       listeners.push_back({session, row.body, row.eye});
       if (const auto principal = sessions.principal(session);
           principal && principal->mode == net::Mode::Play)

@@ -292,7 +292,7 @@ async def exercise(args, evidence, player_id, key):
         async with Player(
             "plot owner", f"ws://127.0.0.1:{args.port}/ws", key.parent / "2.key", evidence
         ) as landlord:
-            plots = (await landlord.request("inspect", target="land"))["land"]
+            plots = (await landlord.request("inspect", target="land", owner="self"))["land"]
             owned_plot = next(
                 plot
                 for plot in plots

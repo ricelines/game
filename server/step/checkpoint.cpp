@@ -85,14 +85,14 @@ void read_players(snap::Input &in, perm::Players &players, perm::Ledger &ledger,
 }
 void write_scst(snap::Output &out, const react::State &react_state, IdentityRead identity,
                 std::optional<std::span<const Handle>> selected) {
-  react::write_script_states(out, react_state.states, react_state.watch_answers,
+  react::write_script_states(out, react_state.states, react_state.watch_answers, react_state.placed,
                              selected ? snap::ObjectSelection(*selected) : snap::ObjectSelection{});
   react::write_instances(out, react_state.installations, identity, selected);
   const std::vector<react::WorldScript> empty;
   react::write_world_scripts(out, selected ? empty : react_state.world_scripts);
 }
 void read_scst(snap::Input &in, react::State &react_state, std::size_t slots) {
-  react::read_script_states(in, react_state.states, react_state.watch_answers);
+  react::read_script_states(in, react_state.states, react_state.watch_answers, react_state.placed);
   react::read_instances(in, react_state.installations, slots);
   react::read_world_scripts(in, react_state.world_scripts);
 }

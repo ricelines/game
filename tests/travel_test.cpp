@@ -14,7 +14,9 @@ void entry_authority_is_sampled_for_each_plan() {
     scene.tick();
   perm::State permissions;
   permissions.players.rows.resize(4);
+  permissions.plots.cell_m = 72;
   permissions.plots.rows.push_back({1, 1, 0, 0, {-1, -2, 1, 2}, {}});
+  perm::rebuild_plot_index(permissions.plots);
   step::State state;
   state.clock = {.step = scene.clock, .hz = 20};
   const auto holder = perm::Holder::player(2);

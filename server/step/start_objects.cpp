@@ -162,7 +162,7 @@ void queue_bootstrap(const Json &plan, const Symbols &symbols, const react::Term
                              std::move(payload),
                              {},
                              script},
-                            event_limit);
+                            event_limit, 0);
     if (queued != step::PushResult::Queued)
       throw std::invalid_argument("initial event queue exceeds configured capacity");
   }

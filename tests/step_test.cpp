@@ -145,24 +145,15 @@ void native_action_input_contracts() {
               problem.find("number") != std::string::npos,
           "nested input error did not identify its field and required type");
 }
-void storing_discards_work_without_a_suspended_execution() {
+void queued_and_scheduled_work_records_when_it_was_issued() {
   WorkQueues queues;
   TimerWheel wheel;
-  const auto stored = Handle::make(1, 1), live = Handle::make(2, 1);
-  auto work = event(3);
-  work.receiver = stored;
-  enqueue_event(queues, work, 100);
-  queues.turns.push_back({work, {}});
-  queues.background.push_back({stored, 3, 1, {}, 1});
-  schedule(wheel, {10, work, {}});
-  work.receiver = live;
-  enqueue_event(queues, work, 100);
-  schedule(wheel, {10, work, {}});
-  discard_script_work(queues, wheel, std::span(&stored, 1));
-  require(queues.emitted_events == 1 && queues.causal.size() == 1 && queues.turns.empty() &&
-              queues.background.empty() && timers(wheel).size() == 1 &&
-              timers(wheel)[0].event.receiver == live,
-          "storage retained work or removed another object's work");
+  wheel.now = 7;
+  enqueue_event(queues, event(3), 100, 5);
+  schedule(wheel, {10, event(3), {}});
+  require(std::get<react::EventWork>(queues.causal.front().work).issued == 5 &&
+              timers(wheel)[0].event.issued == 7,
+          "queued and scheduled work did not record the step it was issued");
 }
 void publication_stamps_completed_origin() {
   record::Journal journal(8, {});
@@ -200,8 +191,8 @@ void ordering_and_overflow() {
   second.cause = 42;
   require(enqueue_watch(q, {{Handle::make(3, 1), 8}, second}) == PushResult::Coalesced,
           "watch coalesces");
-  require(enqueue_event(q, event(3), 1) == PushResult::Queued, "event accepted");
-  require(enqueue_event(q, event(4), 1) == PushResult::Overflow, "event bound");
+  require(enqueue_event(q, event(3), 1, 0) == PushResult::Queued, "event accepted");
+  require(enqueue_event(q, event(4), 1, 0) == PushResult::Overflow, "event bound");
   enqueue_watch(q, {{Handle::make(3, 2), 8}, second});
   require(std::get<react::WatchWork>(pop_foreground(q)->work).origin.cause == 41,
           "first watch origin retained");
@@ -263,7 +254,7 @@ void saved_work_continues_in_causal_order_with_typed_payload_and_origin() {
                                                    {"text", std::string("actual value")},
                                                    {"term", TermRef{77}}},
                            origin};
-  enqueue_event(q, emitted, 100);
+  enqueue_event(q, emitted, 100, 0);
   enqueue_background(q, {body, 12, 8, origin, 6});
   TimerWheel wheel;
   wheel.now = 200;
@@ -493,7 +484,7 @@ void mixed_due_replacement_preserves_events_across_rebucketing() {
 } // namespace
 int main() {
   native_action_input_contracts();
-  storing_discards_work_without_a_suspended_execution();
+  queued_and_scheduled_work_records_when_it_was_issued();
   publication_stamps_completed_origin();
   ordering_and_overflow();
   timer_cascades();

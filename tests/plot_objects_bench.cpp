@@ -18,9 +18,10 @@ nlohmann::json measure(std::size_t unrelated) {
   catalog::State catalog_state;
   react::State react_state{{4096, 50, 5, 64}};
   perm::State permissions;
+  permissions.plots.cell_m = 72;
   permissions.plots.rows.push_back({1, 1, 0, 0, {0, 0, 16, 32}, {}});
   permissions.plots.rows.push_back({2, 1, 0, 0, {16, 0, 32, 32}, {}});
-  perm::rebuild_plot_owners(permissions.plots);
+  perm::rebuild_plot_index(permissions.plots);
   ObjectInit init;
   init.model = 1;
   init.owner = 1;
@@ -33,7 +34,8 @@ nlohmann::json measure(std::size_t unrelated) {
   std::array<Handle, 10> expected;
   for (auto &object : expected)
     object = create(objects_state.objects, init);
-  step::bind_metadata(objects_state, catalog_state, react_state, permissions, 1000);
+  step::bind_metadata(objects_state, catalog_state, react_state, permissions,
+                      perm::LandSettings{100, 1000, 72, 8, 16, 4, 4});
   react::ScriptDeclaration declaration;
   declaration.id = 1;
   declaration.author = 1;

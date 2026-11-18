@@ -741,7 +741,7 @@ async def owned_land(player):
 async def wait_for_land_rules(player):
     async with asyncio.timeout(30):
         while True:
-            view = await player.request("inspect", target="land", limit=1)
+            view = await player.request("inspect", target="land", owner="self", limit=1)
             if any(rule["writing"] for rule in view["rules"]):
                 return
             await asyncio.sleep(0.05)
@@ -1089,13 +1089,15 @@ def test_land_one_handler_split_then_abandon_restores_pool_and_sale(tmp_path, ba
         assert (await land_quote(owner, lot["plot"]))["due"] == pytest.approx(
             initial["due"] + 30, rel=0, abs=1e-6
         )
-        plots, cursor = [], 0
-        while True:
-            page = await owner.request("inspect", target="land", cursor=cursor)
-            plots.extend(page["land"])
-            if not page["more"]:
-                break
-            cursor = page["next_cursor"]
+        plots = []
+        for holder in ("p:0", "self"):
+            cursor = 0
+            while True:
+                page = await owner.request("inspect", target="land", owner=holder, cursor=cursor)
+                plots.extend(page["land"])
+                if not page["more"]:
+                    break
+                cursor = page["next_cursor"]
         child = next(row for row in plots if row["bounds"] == [16, 50, 24, 82])
         assert child["owner"] == "p:0"
         offers = (await owner.act("engine.offers"))["offers"]
@@ -1225,7 +1227,7 @@ def test_land_legislation_waits_for_notice_without_moving_due_dates(tmp_path, ba
             "ok"
         ]
         await owner.wait_until_step(requested + 4)
-        rules = (await owner.request("inspect", target="land", limit=1))["rules"]
+        rules = (await owner.request("inspect", target="land", owner="self", limit=1))["rules"]
         writing = "\n".join(rule["writing"] for rule in rules)
         announced = re.search(
             r"land_street_rate: current 0.01, coming 0.02 on day ([\d.]+)", writing

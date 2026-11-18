@@ -20,11 +20,22 @@
         "CMAKE_CXX_FLAGS_DEBUG": "-g1",
         "AMBER_SANITIZE": false
       }
+    },
+    {
+      "name": "profile",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/.build/profile",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -DNDEBUG -g1 -fno-omit-frame-pointer",
+        "AMBER_SANITIZE": false
+      }
     }
   ],
   "buildPresets": [
     {"name": "debug", "configurePreset": "debug", "targets": ["check-binaries"]},
-    {"name": "dev", "inherits": "debug", "configurePreset": "dev"}
+    {"name": "dev", "inherits": "debug", "configurePreset": "dev"},
+    {"name": "profile", "configurePreset": "profile", "targets": ["amb-server"]}
   ],
   "testPresets": [
     {"name": "debug", "configurePreset": "debug", "output": {"outputOnFailure": true}},

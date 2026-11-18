@@ -5,13 +5,11 @@
 #include <time.h>
 
 namespace amber {
-namespace {
 std::chrono::nanoseconds thread_cpu_time() {
   timespec value{};
   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &value);
   return std::chrono::seconds(value.tv_sec) + std::chrono::nanoseconds(value.tv_nsec);
 }
-} // namespace
 RunDeadline RunDeadline::after(double milliseconds) {
   const auto budget = std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::duration<double, std::milli>(milliseconds));

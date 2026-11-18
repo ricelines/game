@@ -66,7 +66,7 @@ NativeCompletion native_exchange(amber::ObjectState &objects_state, amber::perm:
 NativeCompletion native_permissions(const amber::catalog::State &catalog_state,
                                     const amber::react::State &react_state,
                                     amber::perm::State &perm_state,
-                                    amber::ObjectState &objects_state, const LandSettings &,
+                                    amber::ObjectState &objects_state, const perm::LandSettings &,
                                     bool architect, react::PermissionAction operation,
                                     const NativeCall &call);
 NativeCompletion native_scripts(amber::catalog::State &catalog_state,

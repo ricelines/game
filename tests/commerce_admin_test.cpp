@@ -173,7 +173,7 @@ int main() {
   try {
     world_scripts_spend_and_delegate_only_explicit_grants();
     test_runtime::Fixture f;
-    step::LandSettings land_settings{};
+    perm::LandSettings land_settings{};
     land_settings.port_spacing_m = float(
         toml::parse_file(AMBER_CONFIG_PATH)["land"]["PORT_SPACING_M"].value<double>().value());
     amber::perm::State perm_state;
@@ -183,7 +183,9 @@ int main() {
     perm::Grants &grants = perm_state.grants;
     perm::OwnerLimits &limits = perm_state.owner_limits;
     perm::Plots &plots = perm_state.plots;
+    plots.cell_m = 72;
     plots.rows.push_back({1, 1, 0, 0, {-10, -10, 10, 10}, {}});
+    perm::rebuild_plot_index(plots);
     f.objects.owner[f.a.slot()] = 1;
     f.objects.owner[f.b.slot()] = 2;
     f.objects.owner[f.c.slot()] = 3;

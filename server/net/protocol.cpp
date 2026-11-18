@@ -233,9 +233,12 @@ std::string validate_look(const Json &row) {
                 number(row, "events_limit", 1)});
 }
 std::string validate_inspect(const Json &row) {
-  return first({fields(row, {"target"}, {"owner", "for_sale", "cursor", "limit", "events_limit"}),
-                string(row, "target"), string(row, "owner"), number(row, "cursor", 0),
-                number(row, "limit", 1), number(row, "events_limit", 1),
+  return first({fields(row, {"target"},
+                       {"owner", "for_sale", "fronts", "max_price", "min_area", "sort", "cursor",
+                        "limit", "events_limit"}),
+                string(row, "target"), string(row, "owner"), string(row, "fronts"),
+                string(row, "sort"), number(row, "max_price", 0), number(row, "min_area", 0),
+                number(row, "cursor", 0), number(row, "limit", 1), number(row, "events_limit", 1),
                 row.contains("for_sale") && !row["for_sale"].is_boolean()
                     ? "for_sale must be a boolean"
                     : ""});

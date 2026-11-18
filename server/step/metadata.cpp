@@ -99,7 +99,7 @@ struct InstanceMeasureBinding {
 };
 struct PlotReadBinding {
   const perm::State &permissions;
-  float port_spacing_m;
+  perm::LandSettings land;
   AuthorityRead authority;
 };
 void text(lua_State *L, std::string_view text) {
@@ -425,7 +425,7 @@ int plot_binding(lua_State *L) {
   if (!id || id >= plots.rows.size() || plots.rows[id].id != id)
     luaL_error(L, "unknown plot");
   const auto &plot = plots.rows[id];
-  const auto facts = perm::plot_facts(plots, id, b.port_spacing_m);
+  const auto facts = perm::plot_facts(plots, id, b.land);
   lua_createtable(L, 0, 13);
   number_field(L, "plot", id);
   text(L, perm::plot_kind_names[static_cast<unsigned>(plot.kind)]);
@@ -526,7 +526,7 @@ std::vector<Handle> plot_things(const ObjectState &state, PlotId id, const RunDe
 }
 void bind_metadata(const amber::ObjectState &objects_state,
                    const amber::catalog::State &catalog_state, amber::react::State &react_state,
-                   const perm::State &permissions, float port_spacing_m) {
+                   const perm::State &permissions, const perm::LandSettings &land) {
   const auto &plots = permissions.plots;
   const auto values = amber::react::value_read(objects_state, catalog_state, react_state);
 
@@ -565,10 +565,10 @@ void bind_metadata(const amber::ObjectState &objects_state,
                               materials, models, parameters, assets, density}));
   react::register_binding(
       vm, "plot", plot_binding,
-      std::make_shared<PlotReadBinding>(PlotReadBinding{permissions, port_spacing_m, authority}));
+      std::make_shared<PlotReadBinding>(PlotReadBinding{permissions, land, authority}));
   react::register_binding(
       vm, "plots", plots_binding,
-      std::make_shared<PlotReadBinding>(PlotReadBinding{permissions, port_spacing_m, authority}));
+      std::make_shared<PlotReadBinding>(PlotReadBinding{permissions, land, authority}));
   react::register_binding(
       vm, "plot_objects", plot_objects_binding,
       std::make_shared<PlotObjectsBinding>(PlotObjectsBinding{objects_state, plots}));

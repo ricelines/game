@@ -29,7 +29,7 @@ void refresh(ObjectState &objects, const perm::Plots &plots, PlotId first, PlotI
 } // namespace
 NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
                               const DeliveryTargets &delivery, const space::Space &space,
-                              const LandSettings &settings, const NativeCall &call,
+                              const perm::LandSettings &settings, const NativeCall &call,
                               TermId plot_changed) {
   const auto id = call.arguments.at("plot").get<PlotId>();
   if (auto refusal = lot(state, id, call))
@@ -62,11 +62,12 @@ NativeCompletion abandon_plot(perm::State &state, ObjectState &objects,
   commerce_detail::record(out, call, "abandon_plot", {}, out.reply);
   commerce_detail::plot_changed(
       out, holders, plot_changed, call,
-      {"owner", perm::plot_facts(state.plots, id, settings.port_spacing_m), owner, area});
+      {"owner", perm::plot_facts(state.plots, id, settings), owner, area});
   return out;
 }
-NativeCompletion split_plot(perm::State &state, ObjectState &objects, const LandSettings &settings,
-                            const NativeCall &call, TermId plot_changed) {
+NativeCompletion split_plot(perm::State &state, ObjectState &objects,
+                            const perm::LandSettings &settings, const NativeCall &call,
+                            TermId plot_changed) {
   const auto requested_cut =
       call.arguments.at(call.arguments.contains("x") ? "x" : "y").get<double>();
   if (!std::isfinite(float(requested_cut)) || std::floor(requested_cut) != requested_cut)
@@ -93,15 +94,16 @@ NativeCompletion split_plot(perm::State &state, ObjectState &objects, const Land
   commerce_detail::record(out, call, "split_plot", out.changed_objects, out.reply);
   const auto &lower = state.plots.rows[id].bounds;
   const auto &upper = state.plots.rows[next].bounds;
-  commerce_detail::plot_changed(
-      out, holders, plot_changed, call,
-      {"split", perm::plot_facts(state.plots, id, settings.port_spacing_m), owner,
-       (lower[2] - lower[0]) * (lower[3] - lower[1]), (upper[2] - upper[0]) * (upper[3] - upper[1]),
-       perm::plot_facts(state.plots, next, settings.port_spacing_m)});
+  commerce_detail::plot_changed(out, holders, plot_changed, call,
+                                {"split", perm::plot_facts(state.plots, id, settings), owner,
+                                 (lower[2] - lower[0]) * (lower[3] - lower[1]),
+                                 (upper[2] - upper[0]) * (upper[3] - upper[1]),
+                                 perm::plot_facts(state.plots, next, settings)});
   return out;
 }
-NativeCompletion join_plots(perm::State &state, ObjectState &objects, const LandSettings &settings,
-                            const NativeCall &call, TermId plot_changed) {
+NativeCompletion join_plots(perm::State &state, ObjectState &objects,
+                            const perm::LandSettings &settings, const NativeCall &call,
+                            TermId plot_changed) {
   auto a = call.arguments.at("plots").at(0).get<PlotId>();
   auto b = call.arguments.at("plots").at(1).get<PlotId>();
   if (a > b)
@@ -126,8 +128,8 @@ NativeCompletion join_plots(perm::State &state, ObjectState &objects, const Land
   const auto owner = left.owner;
   const auto area = (l[2] - l[0]) * (l[3] - l[1]);
   const auto other_area = (r[2] - r[0]) * (r[3] - r[1]);
-  const auto old = perm::plot_facts(state.plots, a, settings.port_spacing_m);
-  const auto other = perm::plot_facts(state.plots, b, settings.port_spacing_m);
+  const auto old = perm::plot_facts(state.plots, a, settings);
+  const auto other = perm::plot_facts(state.plots, b, settings);
   const auto removed = perm::join_plots(state, a, b);
   auto out = commerce_detail::result(true, {{"plot", a}});
   std::map<PlayerId, std::vector<GrantId>> notices;
@@ -140,9 +142,9 @@ NativeCompletion join_plots(perm::State &state, ObjectState &objects, const Land
   refresh(objects, state.plots, a, b, out);
   commerce_detail::record(out, call, "join_plots", out.changed_objects,
                           {{"plots", {a, b}}, {"plot", a}});
-  commerce_detail::plot_changed(out, holders, plot_changed, call,
-                                {"join", perm::plot_facts(state.plots, a, settings.port_spacing_m),
-                                 owner, area, other_area, other, old});
+  commerce_detail::plot_changed(
+      out, holders, plot_changed, call,
+      {"join", perm::plot_facts(state.plots, a, settings), owner, area, other_area, other, old});
   return out;
 }
 } // namespace amber::step

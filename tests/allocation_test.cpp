@@ -239,11 +239,14 @@ void snapshot_answers_and_immediate_share_reads() {
   snap::Buffer bytes;
   snap::Output out{bytes};
   write_shared(out, x.f.shared, x.f.gives_to, x.f.allocations);
-  write_script_states(out, x.f.states, x.f.watch_answers);
+  write_script_states(out, x.f.states, x.f.watch_answers, react::Placements{});
   bytes.resize(out.adapter().writtenBytesCount());
   snap::Input in{bytes.data(), bytes.size()};
   read_shared(in, x.f.shared, x.f.gives_to, x.f.allocations, x.f.objects.generation.size());
-  read_script_states(in, x.f.states, x.f.watch_answers);
+  {
+    react::Placements placed;
+    read_script_states(in, x.f.states, x.f.watch_answers, placed);
+  }
   snap::check_complete(in);
   require(evaluate_watch(x.f.react_state, x.f.values(), x.f.scripts, {{x.subject, 11}, {}}, 0, 20)
               .invocations.empty(),

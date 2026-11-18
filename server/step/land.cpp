@@ -6,7 +6,7 @@
 
 namespace amber::step {
 namespace {
-std::set<std::pair<int, int>> surveyed(const perm::Plots &plots, const LandSettings &s) {
+std::set<std::pair<int, int>> surveyed(const perm::Plots &plots, const perm::LandSettings &s) {
   std::set<std::pair<int, int>> result;
   for (const auto &plot : plots.rows)
     if (plot.id && plot.kind != perm::PlotKind::Street) {
@@ -17,13 +17,15 @@ std::set<std::pair<int, int>> surveyed(const perm::Plots &plots, const LandSetti
     }
   return result;
 }
-bool street_lot(const perm::Plot &p, const LandSettings &s) {
+bool street_lot(const perm::Plot &p, const perm::LandSettings &s) {
   return p.bounds[1] == s.street_width_m / 2 || p.bounds[3] == -s.street_width_m / 2;
 }
 } // namespace
-void survey_block(perm::State &perm, space::State &space, const LandSettings &s, Block block) {
+void survey_block(perm::State &perm, space::State &space, const perm::LandSettings &s,
+                  Block block) {
   if (!block.j)
     throw std::invalid_argument("a land block cannot lie on the Street");
+  perm.plots.cell_m = s.block_m;
   if (surveyed(perm.plots, s).contains({block.i, block.j}))
     return;
   const float x = block.i * s.block_m;
@@ -31,12 +33,10 @@ void survey_block(perm::State &perm, space::State &space, const LandSettings &s,
   auto add = [&](perm::PlotKind kind, std::array<float, 4> bounds) {
     if (block.j < 0 && kind != perm::PlotKind::Street)
       bounds = {bounds[0], -bounds[3], bounds[2], -bounds[1]};
-    const auto id = PlotId(perm.plots.rows.size());
     const bool way = kind != perm::PlotKind::Lot;
-    perm::Plot plot{id, 0, way ? s.way_group : 0, way ? perm::Rights(6 | (1 << 8)) : 2, bounds, {}};
+    perm::Plot plot{0, 0, way ? s.way_group : 0, way ? perm::Rights(6 | (1 << 8)) : 2, bounds, {}};
     plot.kind = kind;
-    perm.plots.rows.push_back(std::move(plot));
-    perm::set_plot_owner(perm.plots, id, 0);
+    perm::add_plot(perm.plots, std::move(plot));
     space::ensure_terrain(space, bounds);
   };
   const bool has_street = std::ranges::any_of(perm.plots.rows, [&](const auto &p) {
@@ -52,7 +52,7 @@ void survey_block(perm::State &perm, space::State &space, const LandSettings &s,
       add(perm::PlotKind::Lot,
           {x + front, y + row * depth, x + front + s.lot_front_m, y + (row + 1) * depth});
 }
-void fill_pool(perm::State &perm, space::State &space, const LandSettings &s) {
+void fill_pool(perm::State &perm, space::State &space, const perm::LandSettings &s) {
   for (;;) {
     std::size_t street = 0, back = 0;
     for (const auto &p : perm.plots.rows)

@@ -72,8 +72,10 @@ struct Fixture {
     f.materials.rows[8] = {{10, Value(1000.0)}, {11, Value(0.0)}};
     f.objects.owner[f.a.slot()] = 1;
     players.rows.resize(3);
+    plots.cell_m = 72;
     plots.rows.resize(2);
     plots.rows[1] = {1, 1, 0, 0, {-10, -10, 10, 10}, {}};
+    perm::rebuild_plot_index(plots);
     testspace::Box root({1, 1, 1}), child({.2f, .2f, .4f});
     auto root_geometry = space::import_geometry(world, root.source());
     auto child_geometry = space::import_geometry(world, child.source());
@@ -108,7 +110,8 @@ struct Fixture {
     f.assets.rows[1].volume = 1;
     f.assets.rows[2].volume = .016;
     step::declare_construction_actions(f.terms, declarations);
-    step::bind_metadata(f.objects_state, f.catalog_state, f.react_state, perm_state, 1000);
+    step::bind_metadata(f.objects_state, f.catalog_state, f.react_state, perm_state,
+                        perm::LandSettings{100, 1000, 72, 8, 16, 4, 4});
     f.objects.position[f.a.slot()] = {0, -2, 0};
     f.state(f.a, 1, 10);
   }

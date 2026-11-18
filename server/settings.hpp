@@ -11,7 +11,7 @@ namespace amber {
 // Launch configuration only. This value owns no live simulation state.
 struct Settings {
   step::Settings clock;
-  step::LandSettings land;
+  perm::LandSettings land;
   react::VmSettings scripts;
   space::Settings space;
   net::Settings network;

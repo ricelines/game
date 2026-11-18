@@ -35,6 +35,7 @@ struct EventWork {
   EventPayload payload;
   amber::Origin origin;
   ScriptId recipient_script = 0; // internal targeted delivery; zero broadcasts normally
+  Step issued = 0;               // when queued or scheduled
 };
 struct WatchWork {
   FactKey source;
@@ -252,6 +253,7 @@ struct WatchDeclaration {
 };
 
 using WatchAnswers = std::unordered_map<FactKey, WatchAnswer, FactKeyHash>;
+using Placements = std::unordered_map<std::uint64_t, Step>;
 
 struct AllocationRows {
   std::unordered_map<FactKey, std::unordered_map<std::uint64_t, double>, FactKeyHash> values;
@@ -715,8 +717,8 @@ void write_shared(snap::Output &, const SharedColumns &, const GivesTo &, const 
                   const SnapshotSelection & = {});
 void read_shared(snap::Input &, SharedColumns &, GivesTo &, AllocationRows &, std::size_t slots);
 void write_script_states(snap::Output &, const ScriptStates &, const WatchAnswers &,
-                         const SnapshotSelection & = {});
-void read_script_states(snap::Input &, ScriptStates &, WatchAnswers &);
+                         const Placements &, const SnapshotSelection & = {});
+void read_script_states(snap::Input &, ScriptStates &, WatchAnswers &, Placements &);
 void write_world_scripts(snap::Output &, const std::vector<WorldScript> &);
 void read_world_scripts(snap::Input &, std::vector<WorldScript> &);
 void write_random(snap::Output &, const RandomStates &, const SnapshotSelection & = {});
@@ -758,6 +760,10 @@ struct State {
   Triggers triggers;
   RuleVersions rules;
   WatchAnswers watch_answers;
+  // The step each object was last placed from storage. A stored object is data:
+  // work for it is dropped while stored, and work issued before it was placed
+  // again is dropped too, so its scripts restart from base.start.
+  Placements placed;
   InstanceScripts installations;
   std::vector<WorldScript> world_scripts;
   NativeActions native_declarations;

@@ -10,6 +10,7 @@ template <class S> void serialize(S &s, react::EventWork &v) {
   snap::field(s, v.payload);
   s.object(v.origin);
   s.value4b(v.recipient_script);
+  s.value8b(v.issued);
 }
 template <class S> void serialize(S &s, react::WatchWork &v) {
   s.object(v.source);

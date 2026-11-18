@@ -6,8 +6,7 @@ Json summary(const Json &record) {
   Json result = Json::object();
   for (auto field = record.begin(); field != record.end(); ++field) {
     const auto &name = field.key();
-    if (name != "observation" && name != "measured" && name != "source" && name != "bytecode" &&
-        name != "manifest")
+    if (name != "measured" && name != "source" && name != "bytecode" && name != "manifest")
       result[name] = field.value();
   }
   return result;

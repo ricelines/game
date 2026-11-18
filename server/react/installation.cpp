@@ -100,6 +100,7 @@ void retire_reactions(const ValueRead &values, amber::react::State &react_state,
     return std::binary_search(retired.begin(), retired.end(), row.first.object);
   });
   for (auto h : objects) {
+    react_state.placed.erase(h.bits);
     for (const auto &term : values.terms.rows)
       react_state.watch_answers.erase({h, term.id});
     for (auto &column : properties)

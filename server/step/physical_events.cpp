@@ -54,7 +54,7 @@ void publish_physical(amber::step::State &step_state, record::Journal &journal,
            std::vector<EventField>{
                {"point", contact.point}, {"normal", normal}, {"started", Value(contact.started)}},
            origin},
-          event_limit);
+          event_limit, now);
       if (result == step::PushResult::Overflow) {
         record::Event event;
         event.step = now;
@@ -100,17 +100,20 @@ space::StepResult advance_motion(space::State &space_state, amber::ObjectState &
       goal = space::ObjectGoal{std::get<Handle>(intent.goal), reach_m};
     const space::MoveRequest request{Handle{bits}, intent.id, std::move(goal), intent.speed_m_s};
     if (space::needs_plan(space_state, ids, request)) {
+      // Only plots that the candidate routes cross can close them.
+      const auto candidates = space::routes(space_state, ids, request.body, request.goal);
+      const auto &e = candidates.extent;
       std::vector<space::TravelBoundary> forbidden;
       const auto player = perm::Holder::player(auth.owner[request.body.slot()]);
-      for (const auto &plot : plots.rows)
-        if (plot.id &&
+      for (const auto id : perm::plots_touching(plots, {e.min.x, e.min.y, e.max.x, e.max.y}))
+        if (const auto &plot = plots.rows[id];
             !perm::check_land(player, perm::LandVerb::Enter, plot, players, grants, now)) {
           const auto [x0, y0, x1, y1] = plot.bounds;
           forbidden.push_back({{{x0, y0, 0}, {x1, y0, 0}, {x1, y1, 0}, {x0, y1, 0}},
                                std::numeric_limits<float>::lowest(),
                                std::numeric_limits<float>::max()});
         }
-      space::plan_move(space_state, ids, request, forbidden);
+      space::plan_move(space_state, ids, request, candidates, forbidden);
     }
     moving.push_back(request);
   }
@@ -153,7 +156,7 @@ void publish_intent_endings(amber::step::State &step_state, const react::Terms &
                                                             ? "replaced"
                                                             : terms.rows[event].name)}},
          ending.intent.origin},
-        event_queue_max);
+        event_queue_max, now);
     if (queued_ending == step::PushResult::Overflow) {
       record::Event dropped;
       dropped.step = now;
@@ -192,5 +195,7 @@ void sample_motion(std::vector<observe::MotionSample> &motion,
     motion.push_back({object, velocity});
     previous_positions.set(object.slot(), std::pair{object, position});
   }
+  // Sorted once per step so each look finds a candidate's speed by search.
+  std::ranges::sort(motion, {}, [](const observe::MotionSample &row) { return row.object.bits; });
 }
 } // namespace amber::step

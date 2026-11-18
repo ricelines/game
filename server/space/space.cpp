@@ -100,18 +100,51 @@ bool navigates(const Mirror &body) {
   return body.spec.collision_solid &&
          (body.spec.navigation_surface || body.spec.navigation_obstacle);
 }
+void remove_volumes(Space::Native &n, Handle owner) {
+  const auto found = n.volumes.find(owner.bits);
+  if (found == n.volumes.end())
+    return;
+  const auto owned = std::move(found->second);
+  n.volumes.erase(found);
+  for (const auto &volume : owned) {
+    const auto bounds = shape_bounds(n.geometries[volume.spec.geometry]->mesh, volume.world);
+    destroy_rigid(n, volume.body);
+    n.dirty_bounds.push_back(bounds);
+    n.wake(bounds);
+  }
+}
+const Volume *volume_of(const Space::Native &n, JPH::BodyID id) {
+  const auto owner = n.handles.find(id.GetIndexAndSequenceNumber());
+  if (owner == n.handles.end())
+    return nullptr;
+  const auto found = n.volumes.find(owner->second.bits);
+  if (found == n.volumes.end())
+    return nullptr;
+  const auto volume = std::ranges::find(found->second, id, &Volume::body);
+  return volume == found->second.end() ? nullptr : &*volume;
+}
+const Volume *volume_of(const Space::Native &n, Handle owner, VolumeKind kind) {
+  const auto found = n.volumes.find(owner.bits);
+  if (found == n.volumes.end())
+    return nullptr;
+  const auto volume =
+      std::ranges::find(found->second, kind, [](const Volume &v) { return v.spec.kind; });
+  return volume == found->second.end() ? nullptr : &*volume;
+}
 void native_pose(Space::Native &n, Mirror &body, Pose pose) {
   if ((pose.position != body.pose.position || pose.rotation != body.pose.rotation) &&
-      (body.spec.motion == Motion::Static || n.compound_parent.contains(body.spec.object.bits) ||
-       (body.character && n.attachments.contains(body.spec.object.bits)))) {
-    // Static query parts and attached virtual characters do not run Jolt's
-    // ordinary moving-body/virtual-character sensor contact update.
+      (body.spec.motion == Motion::Static || !body.spec.collision_solid ||
+       n.compound_parent.contains(body.spec.object.bits) ||
+       n.attachments.contains(body.spec.object.bits))) {
+    // Sensors pair only with free moving solid bodies; every other body that
+    // moves reconciles its zones and containers once.
     body.membership.reconcile_zones = true;
     body.membership.containers_dirty = true;
   }
   if (body.character) {
     body.character->SetPosition(jv(pose.position));
     body.character->SetRotation(jq(pose.rotation));
+    body.resting = false;
   } else
     n.physics.GetBodyInterface().SetPositionAndRotation(
         body.body, jv(pose.position), jq(pose.rotation), JPH::EActivation::Activate);
@@ -273,6 +306,40 @@ std::vector<JPH::RayCastResult> ray_hits(const Space &space, Vec3 from, Vec3 to,
             [](auto a, auto b) { return a.mFraction < b.mFraction; });
   return std::move(collector.hits);
 }
+class SightRays final : public JPH::CastRayCollector {
+  const Space::Native &n;
+  IdentityRead identity;
+  RunDeadline deadline;
+  float minimum;
+
+public:
+  struct Intersection {
+    Handle object;
+    float fraction, transmission;
+  };
+  std::vector<Intersection> hits;
+  SightRays(const Space::Native &state, IdentityRead ids, RunDeadline until, float threshold)
+      : n(state), identity(ids), deadline(until), minimum(threshold) {}
+  void AddHit(const JPH::RayCastResult &hit) override {
+    if (deadline.passed()) {
+      ForceEarlyOut();
+      return;
+    }
+    const auto owner = n.handles.find(hit.mBodyID.GetIndexAndSequenceNumber());
+    if (owner == n.handles.end() || !identity.valid(owner->second))
+      return;
+    const auto body = n.bodies.find(owner->second.bits);
+    if (body == n.bodies.end())
+      return;
+    const auto transmission = body->second.own_geometry
+                                  ? body->second.own_geometry->spec.surface.transmission
+                                  : body->second.spec.surface.transmission;
+    hits.push_back({owner->second, hit.mFraction, transmission});
+    // Keep nearer glass and the blocker itself, but do not visit geometry behind it.
+    if (transmission == 0 && minimum > 0 && hit.mFraction < GetEarlyOutFraction())
+      UpdateEarlyOutFraction(hit.mFraction);
+  }
+};
 void erase_value(SparseColumn<std::vector<Handle>> &column, Handle key, Handle value) {
   auto *values = column.get(key.slot());
   if (!values)
@@ -330,16 +397,37 @@ std::vector<Handle> overlapping_zones(Space::Native &n, IdentityRead identity, c
   const auto transform =
       JPH::RMat44::sRotationTranslation(jq(body.pose.rotation), jv(body.pose.position))
           .PreTranslated(shape->GetCenterOfMass());
-  JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> hits;
-  n.physics.GetNarrowPhaseQuery().CollideShape(shape, JPH::Vec3::sReplicate(1), transform,
-                                               JPH::CollideShapeSettings{}, JPH::RVec3::sZero(),
-                                               hits, {}, sensors);
+  const auto box = shape->GetWorldSpaceBounds(transform, JPH::Vec3::sReplicate(1));
+  JPH::AllHitCollisionCollector<JPH::CollideShapeBodyCollector> candidates;
+  n.physics.GetBroadPhaseQuery().CollideAABox(box, candidates, {}, sensors);
   std::vector<Handle> zones;
-  for (const auto &hit : hits.mHits) {
-    const auto volume = std::ranges::find(n.volumes, hit.mBodyID2, &Volume::body);
-    if (volume != n.volumes.end() && volume->spec.kind == VolumeKind::Zone &&
-        volume->spec.owner != body.spec.object && identity.valid(volume->spec.owner))
-      zones.push_back(volume->spec.owner);
+  for (const auto id : candidates.mHits) {
+    const auto *volume = volume_of(n, id);
+    if (!volume || volume->spec.kind != VolumeKind::Zone ||
+        volume->spec.owner == body.spec.object || !identity.valid(volume->spec.owner))
+      continue;
+    // Authored zones are boxes: a body whose bounds lie inside one overlaps it,
+    // with no narrow-phase test. Only a body across a zone's edge needs one.
+    const auto &geometry = *n.geometries[volume->spec.geometry];
+    bool inside = geometry.hull && geometry.hull->GetSubType() == JPH::EShapeSubType::Box;
+    for (int corner = 0; inside && corner < 8; ++corner) {
+      const Vec3 point{corner & 1 ? box.mMax.GetX() : box.mMin.GetX(),
+                       corner & 2 ? box.mMax.GetY() : box.mMin.GetY(),
+                       corner & 4 ? box.mMax.GetZ() : box.mMin.GetZ()};
+      const auto local = relative(volume->world, {point, {}}).position;
+      inside = local.x >= geometry.bounds.min.x && local.x <= geometry.bounds.max.x &&
+               local.y >= geometry.bounds.min.y && local.y <= geometry.bounds.max.y &&
+               local.z >= geometry.bounds.min.z && local.z <= geometry.bounds.max.z;
+    }
+    if (!inside) {
+      JPH::AnyHitCollisionCollector<JPH::CollideShapeCollector> hit;
+      n.physics.GetBodyInterface().GetTransformedShape(id).CollideShape(
+          shape, JPH::Vec3::sReplicate(1), transform, JPH::CollideShapeSettings{},
+          JPH::RVec3::sZero(), hit);
+      if (!hit.HadHit())
+        continue;
+    }
+    zones.push_back(volume->spec.owner);
   }
   std::sort(zones.begin(), zones.end());
   zones.erase(std::unique(zones.begin(), zones.end()), zones.end());
@@ -394,9 +482,7 @@ void membership(Space &space, IdentityRead identity, ParentWrite parents,
     float smallest = INFINITY;
     Handle immediate;
     for (auto container : containers) {
-      const auto volume = std::ranges::find_if(n.volumes, [&](const Volume &v) {
-        return v.spec.owner == container && v.spec.kind == VolumeKind::Container;
-      });
+      const auto *volume = volume_of(n, container, VolumeKind::Container);
       const auto &bounds = n.geometries[volume->spec.geometry]->bounds;
       const auto size = bounds.max - bounds.min;
       const auto size3 = size.x * size.y * size.z;
@@ -422,9 +508,18 @@ void membership(Space &space, IdentityRead identity, ParentWrite parents,
       if (speed > n.settings.contact_slop_m / seconds) {
         const float duration = (body.route[body.waypoint] - body.pose.position).length() / speed;
         float boundary = duration;
-        for (const auto &volume : n.volumes) {
-          if (volume.spec.kind != VolumeKind::Container)
+        // Only containers whose bounds the swept segment crosses can end it early.
+        class Sensors final : public JPH::ObjectLayerFilter {
+          bool ShouldCollide(JPH::ObjectLayer layer) const override { return layer == 2; }
+        } sensors;
+        JPH::AllHitCollisionCollector<JPH::RayCastBodyCollector> crossed;
+        n.physics.GetBroadPhaseQuery().CastRay({jv(center), jv(velocity * duration)}, crossed, {},
+                                               sensors);
+        for (const auto &candidate : crossed.mHits) {
+          const auto *found = volume_of(n, candidate.mBodyID);
+          if (!found || found->spec.kind != VolumeKind::Container)
             continue;
+          const auto &volume = *found;
           const auto *shape = n.geometries[volume.spec.geometry]->mesh.GetPtr();
           const auto inverse = jq(volume.world.rotation).Conjugated();
           const auto from = inverse * jv(center - volume.world.position) - shape->GetCenterOfMass();
@@ -479,8 +574,9 @@ Space::Native::~Native() {
     if (body.own_geometry)
       destroy_rigid(*this, body.own_geometry->query_body);
   }
-  for (auto &volume : volumes)
-    destroy_rigid(*this, volume.body);
+  for (auto &[owner, owned] : volumes)
+    for (auto &volume : owned)
+      destroy_rigid(*this, volume.body);
   JPH::BodyIDVector remaining;
   physics.GetBodies(remaining);
   for (auto id : remaining)
@@ -563,8 +659,8 @@ void Space::Native::CharacterListener::add(const JPH::CharacterVirtual *characte
   if (hit.mIsSensorB) {
     auto found = pairs.find(key);
     if (found == pairs.end()) {
-      const auto volume = std::ranges::find(state.volumes, hit.mBodyB, &Volume::body);
-      if (volume == state.volumes.end())
+      const auto *volume = volume_of(state, hit.mBodyB);
+      if (!volume)
         return;
       CachedContact contact{{first, second, {}, {}, true}, volume->spec.kind};
       pairs.emplace(key, contact);
@@ -618,15 +714,10 @@ void Space::Native::Listener::add(const JPH::Body &a, const JPH::Body &b,
     const auto &subject = a.IsSensor() ? b : a;
     if (sensor.GetUserData() == subject.GetUserData())
       return;
-    // Free characters use CharacterVirtual's callbacks; attached characters
-    // skip that update and are detected through their inner rigid body.
-    if (state.character_handles.contains(subject.GetUserData()) &&
-        !state.attachments.contains(subject.GetUserData()))
-      return;
     auto found = pairs.find(key);
     if (found == pairs.end()) {
-      const auto volume = std::ranges::find(state.volumes, sensor.GetID(), &Volume::body);
-      if (volume == state.volumes.end())
+      const auto *volume = volume_of(state, sensor.GetID());
+      if (!volume)
         return;
       CachedContact contact{{{subject.GetUserData()}, {sensor.GetUserData()}, {}, {}, true},
                             volume->spec.kind};
@@ -678,8 +769,12 @@ Bounds Space::Native::world_bounds(const Mirror &body, Pose pose) const {
   return shape_bounds(shape, pose);
 }
 void Space::Native::wake(Bounds region) {
+  // Characters keep Jolt's padding between themselves and what they stand on.
+  const float gap = JPH::CharacterVirtualSettings{}.mCharacterPadding + settings.contact_slop_m;
+  const Vec3 margin{gap, gap, gap};
   JPH::AllHitCollisionCollector<JPH::CollideShapeBodyCollector> candidates;
-  physics.GetBroadPhaseQuery().CollideAABox({jv(region.min), jv(region.max)}, candidates);
+  physics.GetBroadPhaseQuery().CollideAABox({jv(region.min - margin), jv(region.max + margin)},
+                                            candidates);
   for (auto id : candidates.mHits) {
     auto owner = handles.find(id.GetIndexAndSequenceNumber());
     if (owner == handles.end())
@@ -784,43 +879,6 @@ GeometryId sensor_box_geometry(Space &space, Vec3 size) {
   n.geometries.push_back(std::move(geometry));
   return id;
 }
-Vec3 clear_character_position(const Space &space, Vec3 origin, float radius_m, float height_m) {
-  class Obstruction final : public JPH::CollideShapeCollector {
-    float slop;
-
-  public:
-    explicit Obstruction(float value) : slop(value) {}
-    void AddHit(const JPH::CollideShapeResult &hit) override {
-      if (hit.mPenetrationDepth > slop)
-        ForceEarlyOut();
-    }
-  };
-  const auto &n = *space.native;
-  const auto shape = character_shape(radius_m, height_m);
-  SolidObjects solids;
-  auto clear = [&](Vec3 position) {
-    Obstruction obstruction(n.settings.contact_slop_m);
-    const auto matrix =
-        JPH::RMat44::sTranslation(jv(position)).PreTranslated(shape->GetCenterOfMass());
-    n.physics.GetNarrowPhaseQuery().CollideShape(shape, JPH::Vec3::sReplicate(1), matrix,
-                                                 JPH::CollideShapeSettings{}, JPH::RVec3::sZero(),
-                                                 obstruction, {}, solids);
-    return !obstruction.ShouldEarlyOut();
-  };
-  if (clear(origin))
-    return origin;
-  const auto spacing = 2 * (radius_m + n.settings.sweep_skin_m);
-  for (int ring = 1;; ++ring) {
-    Vec3 offset{-float(ring), -float(ring), 0};
-    for (const Vec3 direction : {Vec3{1, 0, 0}, Vec3{0, 1, 0}, Vec3{-1, 0, 0}, Vec3{0, -1, 0}})
-      for (int step = 0; step < 2 * ring; ++step) {
-        const auto position = origin + offset * spacing;
-        if (clear(position))
-          return position;
-        offset = offset + direction;
-      }
-  }
-}
 std::optional<BodyMotion> body_motion(const Space &space, IdentityRead identity, Handle object) {
   const auto &n = *space.native;
   if (!identity.valid(object))
@@ -891,8 +949,9 @@ BodyPreflight can_add(const Space &space, std::span<const BodySpec> bodies, std:
         available.characters_available += body->second.character != nullptr;
       }
     }
-    for (const auto &volume : n.volumes)
-      released += removed.contains(volume.spec.owner.bits);
+    for (auto bits : removed)
+      if (const auto found = n.volumes.find(bits); found != n.volumes.end())
+        released += found->second.size();
   }
   const auto native = available.native_available + released, required = bodies.size() + sensors;
   return {required <= native && characters <= available.characters_available ? Status::Ok
@@ -1068,15 +1127,7 @@ void remove(Space &space, IdentityRead identity, Handle object, ParentWrite pare
     n.compound_geometry.erase(geometry);
   }
   ++n.volume_revision;
-  std::erase_if(n.volumes, [&](const Volume &volume) {
-    if (volume.spec.owner != object)
-      return false;
-    const auto bounds = shape_bounds(n.geometries[volume.spec.geometry]->mesh, volume.world);
-    destroy_rigid(n, volume.body);
-    n.dirty_bounds.push_back(bounds);
-    n.wake(bounds);
-    return true;
-  });
+  remove_volumes(n, object);
   n.attachments.erase(object.bits);
   for (auto child = n.attachments.begin(); child != n.attachments.end();)
     if (child->second.parent == object) {
@@ -1133,7 +1184,8 @@ OperationResult can_custody(const Space &space, IdentityRead identity, Handle ob
   const bool retiring_body =
       n.bodies.contains(object.bits) ||
       std::ranges::any_of(descendants, [&](Handle h) { return n.bodies.contains(h.bits); }) ||
-      std::ranges::any_of(n.volumes, [&](const Volume &v) { return member(v.spec.owner); });
+      n.volumes.contains(object.bits) ||
+      std::ranges::any_of(descendants, [&](Handle h) { return n.volumes.contains(h.bits); });
   return can_release_occupants(space, object, descendants, retiring_body, stay_static);
 }
 OperationResult custody(amber::ObjectState &objects_state, Handle object, Handle custodian,
@@ -1156,15 +1208,8 @@ OperationResult custody(amber::ObjectState &objects_state, Handle object, Handle
     assembly.insert(h.bits);
   auto &n = *space.native;
   ++n.volume_revision;
-  std::erase_if(n.volumes, [&](const Volume &volume) {
-    if (!assembly.contains(volume.spec.owner.bits))
-      return false;
-    const auto bounds = shape_bounds(n.geometries[volume.spec.geometry]->mesh, volume.world);
-    destroy_rigid(n, volume.body);
-    n.dirty_bounds.push_back(bounds);
-    n.wake(bounds);
-    return true;
-  });
+  for (auto bits : assembly)
+    remove_volumes(n, {bits});
   // Retiring native goods first supplies the one temporary slot required to
   // restore unrelated kinematic occupants to their ordinary dynamic motion.
   for (auto bits : assembly)
@@ -1208,9 +1253,7 @@ OperationResult add_volume(Space &space, IdentityRead identity, TransformRead tr
     return {Status::MissingGeometry, {}};
   if (capacity(space).native_available == 0)
     return {Status::Capacity, {}};
-  if (std::ranges::any_of(n.volumes, [&](const Volume &volume) {
-        return volume.spec.owner == spec.owner && volume.spec.kind == spec.kind;
-      }))
+  if (volume_of(n, spec.owner, spec.kind))
     return {Status::AlreadyParented, {}};
   auto pose =
       compose({transforms.position[spec.owner.slot()], transforms.rotation[spec.owner.slot()]},
@@ -1221,7 +1264,10 @@ OperationResult add_volume(Space &space, IdentityRead identity, TransformRead tr
   const auto *shape = geometry.hull ? geometry.hull.GetPtr() : geometry.mesh.GetPtr();
   JPH::BodyCreationSettings settings(shape, jv(pose.position), jq(pose.rotation),
                                      JPH::EMotionType::Kinematic, 2);
-  // Active kinematic sensors track sleeping and static subjects too.
+  // Sensors stay awake and pair only with moving solid bodies (layer 1), whose
+  // contacts persist while they sleep inside. Static, attached and non-solid
+  // subjects are reconciled once whenever they are placed, moved or woken
+  // (membership()); free characters report sensors from their own update.
   settings.mIsSensor = true;
   settings.mCollideKinematicVsNonDynamic = true;
   settings.mAllowSleeping = false;
@@ -1230,7 +1276,7 @@ OperationResult add_volume(Space &space, IdentityRead identity, TransformRead tr
   if (body.IsInvalid())
     return {Status::UnsupportedMotion, {}};
   n.handles[body.GetIndexAndSequenceNumber()] = spec.owner;
-  n.volumes.push_back({spec, pose, body});
+  n.volumes[spec.owner.bits].push_back({spec, pose, body});
   ++n.volume_revision;
   const auto bounds = shape_bounds(n.geometries[spec.geometry]->mesh, pose);
   n.dirty_bounds.push_back(bounds);
@@ -1239,9 +1285,8 @@ OperationResult add_volume(Space &space, IdentityRead identity, TransformRead tr
 }
 std::optional<Bounds> volume_bounds(const Space &space, Handle owner, VolumeKind kind) {
   const auto &n = *space.native;
-  const auto found = std::ranges::find_if(
-      n.volumes, [&](const Volume &v) { return v.spec.owner == owner && v.spec.kind == kind; });
-  if (found == n.volumes.end())
+  const auto *found = volume_of(n, owner, kind);
+  if (!found)
     return {};
   return shape_bounds(n.geometries[found->spec.geometry]->mesh, found->world);
 }
@@ -1255,9 +1300,8 @@ void volumes_at(const Space &space, IdentityRead identity, Vec3 point, VolumeKin
   JPH::AllHitCollisionCollector<JPH::CollideShapeBodyCollector> candidates;
   n.physics.GetBroadPhaseQuery().CollidePoint(jv(point), candidates, {}, sensors);
   for (auto id : candidates.mHits) {
-    auto volume = std::ranges::find_if(n.volumes, [&](const Volume &v) { return v.body == id; });
-    if (volume != n.volumes.end() && volume->spec.kind == kind &&
-        identity.valid(volume->spec.owner) &&
+    const auto *volume = volume_of(n, id);
+    if (volume && volume->spec.kind == kind && identity.valid(volume->spec.owner) &&
         point_in(*n.geometries[volume->spec.geometry], volume->world, point))
       out.push_back(volume->spec.owner);
   }
@@ -1265,6 +1309,18 @@ void volumes_at(const Space &space, IdentityRead identity, Vec3 point, VolumeKin
   out.erase(std::unique(out.begin(), out.end()), out.end());
 }
 
+namespace {
+// Reads use Jolt's cached box for rigid bodies instead of re-transforming
+// their shapes; a character's capsule is cheap and its inner body may lag.
+Bounds current_bounds(const Space::Native &n, const Mirror &body) {
+  if (!body.character)
+    if (const auto *rigid = n.physics.GetBodyLockInterfaceNoLock().TryGetBody(body.body)) {
+      const auto &box = rigid->GetWorldSpaceBounds();
+      return {av(box.mMin), av(box.mMax)};
+    }
+  return n.world_bounds(body);
+}
+} // namespace
 std::optional<Bounds> bounds(const State &state, IdentityRead identity, Handle object) {
   if (!identity.valid(object))
     return {};
@@ -1273,7 +1329,7 @@ std::optional<Bounds> bounds(const State &state, IdentityRead identity, Handle o
     std::optional<Bounds> result;
     auto body = n.bodies.find(subject.bits);
     if (body != n.bodies.end())
-      result = n.world_bounds(body->second);
+      result = current_bounds(n, body->second);
     const auto *children = state.physical_relations.attached_to.in.get(subject.slot());
     if (!children)
       return result;
@@ -1312,22 +1368,21 @@ std::optional<Hit> raycast(const Space &space, IdentityRead identity, Vec3 from,
 Visibility visibility(const Space &space, IdentityRead identity, Vec3 from, Vec3 to,
                       QueryFilter filter, float minimum) {
   const auto &n = *space.native;
+  SightRays collector(n, identity, filter.deadline, minimum);
+  ObjectFilter objects(filter.include_sensors);
+  BodyFilter bodies(n, filter, true);
+  n.physics.GetNarrowPhaseQuery().CastRay({jv(from), jv(to - from)}, JPH::RayCastSettings{},
+                                          collector, {}, objects, bodies);
+  std::sort(collector.hits.begin(), collector.hits.end(),
+            [](const auto &a, const auto &b) { return a.fraction < b.fraction; });
   Visibility result{true, 1, {}};
   std::set<std::uint64_t> seen;
-  for (const auto &hit : ray_hits(space, from, to, filter)) {
+  for (const auto &hit : collector.hits) {
     if (filter.deadline.passed())
       break;
-    const auto owner = n.handles.find(hit.mBodyID.GetIndexAndSequenceNumber());
-    if (owner == n.handles.end() || !identity.valid(owner->second))
-      continue;
-    if (seen.insert(owner->second.bits).second) {
-      auto it = n.bodies.find(owner->second.bits);
-      if (it == n.bodies.end())
-        continue;
-      result.transmission *= it->second.own_geometry
-                                 ? it->second.own_geometry->spec.surface.transmission
-                                 : it->second.spec.surface.transmission;
-      result.through.push_back(owner->second);
+    if (seen.insert(hit.object.bits).second) {
+      result.transmission *= hit.transmission;
+      result.through.push_back(hit.object);
       if (result.transmission < minimum) {
         result.clear = false;
         break;
@@ -1346,7 +1401,8 @@ void near(const Space &space, IdentityRead identity, Vec3 point, float radius, Q
     RunDeadline deadline;
     explicit Candidates(RunDeadline until) : deadline(until) {}
     void AddHit(const JPH::BodyID &id) override {
-      if (deadline.passed())
+      // Reading the clock per body costs more than the body; check every 64.
+      if (bodies.size() % 64 == 0 && deadline.passed())
         ForceEarlyOut();
       else
         bodies.push_back(id);
@@ -1354,9 +1410,11 @@ void near(const Space &space, IdentityRead identity, Vec3 point, float radius, Q
   } candidates(filter.deadline);
   ObjectFilter objects(filter.include_sensors);
   n.physics.GetBroadPhaseQuery().CollideSphere(jv(point), radius, candidates, {}, objects);
-  std::set<std::uint64_t> seen;
-  for (auto id : candidates.bodies) {
-    if (filter.deadline.passed())
+  std::unordered_set<std::uint64_t> seen;
+  seen.reserve(candidates.bodies.size());
+  for (std::size_t index = 0; index < candidates.bodies.size(); ++index) {
+    const auto id = candidates.bodies[index];
+    if (index % 64 == 0 && filter.deadline.passed())
       break;
     auto owner = n.handles.find(id.GetIndexAndSequenceNumber());
     if (owner == n.handles.end())
@@ -1369,7 +1427,7 @@ void near(const Space &space, IdentityRead identity, Vec3 point, float radius, Q
     if (found == n.bodies.end() || !seen.insert(h.bits).second)
       continue;
     const auto &body = found->second;
-    auto b = space.native->world_bounds(body);
+    auto b = current_bounds(n, body);
     Vec3 p{std::clamp(point.x, b.min.x, b.max.x), std::clamp(point.y, b.min.y, b.max.y),
            std::clamp(point.z, b.min.z, b.max.z)};
     auto d = (p - point).length();
@@ -1531,6 +1589,7 @@ OperationResult detach(amber::ObjectState &objects_state, amber::space::State &s
   n.physics.GetBodyInterface().SetObjectLayer(body->body, body->character              ? 3
                                                           : body->spec.collision_solid ? layer(mode)
                                                                                        : 4);
+  body->resting = false;
   if (body->character)
     body->character->SetLinearVelocity(jv(release.linear_velocity_m_s));
   else
@@ -1633,6 +1692,27 @@ SweepMove translate(Space &space, IdentityRead identity, TransformWrite transfor
   return {cast ? Status::Obstructed : Status::Ok, actual, cast};
 }
 
+namespace {
+// A free character's own update meets static, moving and sensor bodies; the
+// physics system pairs its inner body with neither sensors nor characters.
+class CharacterLayers final : public JPH::ObjectLayerFilter {
+  bool ShouldCollide(JPH::ObjectLayer layer) const override { return layer <= 2; }
+} const character_layers;
+// Its own update searches every broadphase tree except the other characters.
+class CharacterBroadPhase final : public JPH::BroadPhaseLayerFilter {
+  bool ShouldCollide(JPH::BroadPhaseLayer layer) const override { return layer.GetValue() != 2; }
+} const character_broadphase;
+// Terrain and static bodies never carry a resting character anywhere.
+bool static_ground(const Space::Native &n, JPH::BodyID ground) {
+  if (ground.IsInvalid())
+    return true;
+  const auto owner = n.handles.find(ground.GetIndexAndSequenceNumber());
+  if (owner == n.handles.end())
+    return true;
+  const auto body = n.bodies.find(owner->second.bits);
+  return body == n.bodies.end() || body->second.spec.motion == Motion::Static;
+}
+} // namespace
 void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &relations, Step now,
           float seconds, std::span<const MoveRequest> requests, StepResult &out) {
   auto identity = amber::identity(std::as_const(objects_state.objects));
@@ -1644,8 +1724,7 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
   ZoneValue(requests.size());
   auto &n = *space.native;
   out = {};
-  std::set<std::uint64_t> touched = n.dirty_objects;
-  touched.insert(n.character_handles.begin(), n.character_handles.end());
+  std::unordered_set<std::uint64_t> touched = n.dirty_objects;
   auto include_active = [&] {
     const auto count = n.physics.GetNumActiveBodies(JPH::EBodyType::RigidBody);
     const auto *ids = n.physics.GetActiveBodiesUnsafe(JPH::EBodyType::RigidBody);
@@ -1657,7 +1736,8 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
   };
   // Include bodies active before Update too: the final falling frame may put a body to sleep.
   include_active();
-  std::map<std::uint64_t, const MoveRequest *> active;
+  std::unordered_map<std::uint64_t, const MoveRequest *> active;
+  active.reserve(requests.size());
   std::set<std::uint64_t> target_gone;
   for (const auto &request : requests)
     active[request.body.bits] = &request;
@@ -1668,8 +1748,11 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
     auto input = active.find(bits);
     if (input == active.end()) {
       if (body.intent) {
+        // Characters pass through each other, so an idle crowd agent does
+        // nothing; the next plan adds a new one (plan_move).
         if (body.agent >= 0)
-          n.crowd->resetMoveTarget(body.agent);
+          n.crowd->removeAgent(body.agent);
+        body.agent = -1;
         body.intent = 0;
         body.route.clear();
         body.forbidden.clear();
@@ -1714,11 +1797,14 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
     n.crowd->update(seconds, nullptr);
   for (auto bits : n.character_handles) {
     auto &body = n.bodies.at(bits);
+    const auto input = active.find(bits);
+    if (input == active.end() && body.resting && !n.dirty_objects.contains(bits))
+      continue;
+    touched.insert(bits);
     if (n.attachments.contains(bits))
       continue;
     auto old = body.pose.position;
     Vec3 desired;
-    const auto input = active.find(bits);
     if (input != active.end() && body.path_status == PathStatus::Ready && body.agent >= 0) {
       auto *agent = n.crowd->getAgent(body.agent);
       desired = world({agent->vel[0], 0, agent->vel[2]});
@@ -1739,9 +1825,12 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
     settings.mStickToFloorStepDown = {0, 0, -c.floor_snap_m};
     BodyFilter filter(n, {{bits}, {}, false});
     body.character->ExtendedUpdate(seconds, jv(n.settings.gravity_m_s2), settings,
-                                   n.physics.GetDefaultBroadPhaseLayerFilter(3),
-                                   n.physics.GetDefaultLayerFilter(3), filter, {}, n.temp);
+                                   character_broadphase, character_layers, filter, {}, n.temp);
     body.pose = {av(body.character->GetPosition()), aq(body.character->GetRotation())};
+    body.resting = input == active.end() &&
+                   body.character->GetGroundState() == JPH::CharacterBase::EGroundState::OnGround &&
+                   (body.pose.position - old).length() < n.settings.contact_slop_m &&
+                   static_ground(n, body.character->GetGroundBodyID());
     if (body.character->GetGroundState() != JPH::CharacterBase::EGroundState::OnGround &&
         body.agent >= 0) {
       n.crowd->removeAgent(body.agent);
@@ -1795,6 +1884,22 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
   if (physics_error != JPH::EPhysicsUpdateError::None)
     throw std::runtime_error("Jolt physics capacity exceeded");
   include_active();
+  // Jolt sleeps resting dynamic bodies but never kinematic ones, which would then
+  // collide with everything around them every step. A kinematic body without
+  // velocity has had this step's contacts; it sleeps until it is moved again.
+  {
+    std::vector<JPH::BodyID> resting;
+    const auto count = n.physics.GetNumActiveBodies(JPH::EBodyType::RigidBody);
+    const auto *ids = n.physics.GetActiveBodiesUnsafe(JPH::EBodyType::RigidBody);
+    const auto &lock = n.physics.GetBodyLockInterfaceNoLock();
+    for (std::uint32_t i = 0; i < count; ++i)
+      if (const auto *body = lock.TryGetBody(ids[i]);
+          body && body->IsKinematic() && !body->IsSensor() &&
+          body->GetLinearVelocity().IsNearZero(0) && body->GetAngularVelocity().IsNearZero(0))
+        resting.push_back(ids[i]);
+    if (!resting.empty())
+      n.physics.GetBodyInterface().DeactivateBodies(resting.data(), int(resting.size()));
+  }
   for (auto bits : touched) {
     auto found = n.bodies.find(bits);
     if (found == n.bodies.end())
@@ -1802,7 +1907,9 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
     auto &body = found->second;
     if (!identity.valid({bits}))
       continue;
-    if (!body.character) {
+    // Attached bodies are posed by their parents (follow below), never simulated;
+    // reading them back from Jolt would add round-off that re-poses them each step.
+    if (!body.character && !n.attachments.contains(bits)) {
       JPH::RVec3 position;
       JPH::Quat rotation;
       n.physics.GetBodyInterface().GetPositionAndRotation(body.body, position, rotation);
@@ -1817,7 +1924,7 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
       }
     }
   }
-  std::set<std::uint64_t> followed;
+  std::unordered_set<std::uint64_t> followed;
   auto follow = [&](auto &&self, Handle child) -> void {
     if (!followed.insert(child.bits).second)
       return;
@@ -1833,7 +1940,11 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
                                                      : parent_body->second.pose;
     const auto target = compose(parent_pose, attachment->second.local_pose);
     if (body != n.bodies.end()) {
-      native_pose(n, body->second, target);
+      // Re-posing an unmoved part would wake it, and it would stay awake for ever.
+      if (body->second.pose.position != target.position ||
+          body->second.pose.rotation != target.rotation) {
+        native_pose(n, body->second, target);
+      }
     } else if (n.logical_roots.contains(child.bits)) {
       if (transforms.position[child.slot()] != target.position ||
           transforms.rotation[child.slot()] != target.rotation) {
@@ -1926,8 +2037,14 @@ void step(Space &space, amber::ObjectState &objects_state, PhysicalRelations &re
         edge(relations.supports, RelationKind::Supports, support, {bits}, true, out.relations);
     }
   }
-  for (auto &volume : n.volumes)
-    if (identity.valid(volume.spec.owner)) {
+  // Only owners that moved this step can carry their volumes elsewhere.
+  std::vector<Volume *> carried;
+  for (auto bits : n.dirty_objects)
+    if (const auto found = n.volumes.find(bits); found != n.volumes.end())
+      for (auto &volume : found->second)
+        carried.push_back(&volume);
+  for (auto *moving : carried)
+    if (auto &volume = *moving; identity.valid(volume.spec.owner)) {
       auto target = compose({transforms.position[volume.spec.owner.slot()],
                              transforms.rotation[volume.spec.owner.slot()]},
                             volume.spec.local_pose);
@@ -1988,6 +2105,7 @@ void capture_motion(const Space &space, IdentityRead identity, std::vector<Motio
   for (const auto &[bits, body] : n.bodies)
     if (identity.valid({bits}) && (body.character || body.spec.motion == Motion::Dynamic))
       out.push_back(motion_row(n, body));
+  std::ranges::sort(out, {}, [](const MotionRow &row) { return row.object.bits; });
 }
 void capture_motion(const Space &space, IdentityRead identity, std::span<const Handle> selected,
                     std::vector<MotionRow> &out) {
@@ -2025,6 +2143,7 @@ void restore_motion(Space &space, IdentityRead identity, std::span<const MotionR
     auto *body = get(n, identity, row.object);
     if (!body)
       continue;
+    body->resting = false;
     if (body->character)
       body->character->SetLinearVelocity(jv(row.linear_velocity_m_s));
     else {
@@ -2104,16 +2223,17 @@ void debug_lines(const Space &space, const DebugSelection &selection, std::vecto
         out.push_back({body.route[i - 1], body.route[i], 0xffff44ff});
   }
   if (selection.volumes)
-    for (const auto &volume : n.volumes) {
-      auto shape = n.geometries[volume.spec.geometry]->mesh;
-      auto matrix =
-          JPH::RMat44::sRotationTranslation(jq(volume.world.rotation), jv(volume.world.position))
-              .PreTranslated(shape->GetCenterOfMass());
-      auto b = shape->GetWorldSpaceBounds(matrix, JPH::Vec3::sReplicate(1));
-      Bounds bounds{av(b.mMin), av(b.mMax)};
-      if (overlaps(bounds, selection.region))
-        wire(shape, volume.world, 0x4488ffff);
-    }
+    for (const auto &[owner, owned] : n.volumes)
+      for (const auto &volume : owned) {
+        auto shape = n.geometries[volume.spec.geometry]->mesh;
+        auto matrix =
+            JPH::RMat44::sRotationTranslation(jq(volume.world.rotation), jv(volume.world.position))
+                .PreTranslated(shape->GetCenterOfMass());
+        auto b = shape->GetWorldSpaceBounds(matrix, JPH::Vec3::sReplicate(1));
+        Bounds bounds{av(b.mMin), av(b.mMax)};
+        if (overlaps(bounds, selection.region))
+          wire(shape, volume.world, 0x4488ffff);
+      }
   if (selection.navigation)
     for (int i = 0; i < n.mesh->getMaxTiles(); ++i) {
       const dtMeshTile *tile = static_cast<const dtNavMesh *>(n.mesh)->getTile(i);

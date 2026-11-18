@@ -1,5 +1,6 @@
 #include "commerce_private.hpp"
 
+#include <set>
 #include <unordered_set>
 
 namespace amber::step {
@@ -42,22 +43,21 @@ step::NativeCompletion rebind_offers(perm::Offers &offers, perm::Trades &trades,
                                      const lifecycle::Parts &parts,
                                      std::span<const Handle> affected, Step now) {
   std::vector<Handle> changed;
+  std::set<perm::OfferId> offer_set;
+  std::set<std::uint32_t> trade_set;
+  for (auto h : affected)
+    if (const auto found = offers.by_object.find(h.bits); found != offers.by_object.end())
+      for (auto id : found->second) {
+        offer_set.insert(id);
+        if (const auto trade = offers.rows[id].trade; trade && trades.rows[trade].live)
+          trade_set.insert(trade);
+      }
   auto offer_ids = Json::array();
+  for (auto id : offer_set)
+    offer_ids.push_back("offer:" + std::to_string(id));
   auto trade_ids = Json::array();
-  for (const auto &row : offers.rows)
-    if (row.live && std::ranges::any_of(affected, [&](Handle h) {
-          return h == row.goods || std::ranges::find(row.parts, h) != row.parts.end();
-        }))
-      offer_ids.push_back("offer:" + std::to_string(row.id));
-  for (const auto &row : trades.rows)
-    if (row.live && std::ranges::any_of(row.sides, [&](const auto &side) {
-          return side.offer && std::ranges::any_of(affected, [&](Handle h) {
-                   const auto &offer = offers.rows[side.offer];
-                   return h == offer.goods ||
-                          std::ranges::find(offer.parts, h) != offer.parts.end();
-                 });
-        }))
-      trade_ids.push_back("trade:" + std::to_string(row.id));
+  for (auto id : trade_set)
+    trade_ids.push_back("trade:" + std::to_string(id));
   for (auto h : affected) {
     auto roots = perm::invalidate_goods_offers(offers, trades, identity, flags, h);
     changed.insert(changed.end(), roots.begin(), roots.end());

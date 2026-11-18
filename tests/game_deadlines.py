@@ -218,7 +218,7 @@ async def navigation(evidence, mira):
         manifest=baked["measured"],
     )
     require(registered.get("ok"), "actual newly baked model registration failed")
-    plots = (await mira.request("inspect", target="land"))["land"]
+    plots = (await mira.request("inspect", target="land", owner="self"))["land"]
     bounds = next(
         plot["bounds"]
         for plot in plots

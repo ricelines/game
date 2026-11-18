@@ -494,15 +494,14 @@ int navigate_binding(lua_State *L) {
   step::MoveGoal goal = lua_type(L, 2) == LUA_TVECTOR ? step::MoveGoal(vec(L, 2))
                                                       : step::MoveGoal(handle(L, 2, b.identity));
   if (auto *point = std::get_if<Vec3>(&goal)) {
-    for (const auto &plot : b.plots.rows)
-      if (plot.id && point->x >= plot.bounds[0] && point->y >= plot.bounds[1] &&
-          point->x <= plot.bounds[2] && point->y <= plot.bounds[3]) {
-        auto holder = Holder::script(i.self.script, i.self.object);
-        auto decision =
-            perm::check_land(holder, perm::LandVerb::Enter, plot, b.players, b.grants, i.step);
-        if (!decision)
-          return denied(L, "enter", body, decision.reason);
-      }
+    // A goal on a shared edge must be open on every plot that touches it.
+    for (const auto id : perm::plots_touching(b.plots, {point->x, point->y, point->x, point->y})) {
+      auto holder = Holder::script(i.self.script, i.self.object);
+      auto decision = perm::check_land(holder, perm::LandVerb::Enter, b.plots.rows[id], b.players,
+                                       b.grants, i.step);
+      if (!decision)
+        return denied(L, "enter", body, decision.reason);
+    }
   }
   std::optional<float> speed;
   if (!lua_isnoneornil(L, 3)) {

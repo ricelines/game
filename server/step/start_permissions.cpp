@@ -33,7 +33,7 @@ void install_profiles(const Json &plan, const Symbols &symbols, net::Profiles &p
   }
 }
 void install_land(const Json &plan, perm::State &perm, space::State &space,
-                  const LandSettings &settings) {
+                  const perm::LandSettings &settings) {
   auto &groups = perm.groups;
   auto &players = perm.players;
   for (const auto &row : plan.at("groups")) {

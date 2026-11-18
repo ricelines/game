@@ -2,9 +2,11 @@
 
 ## Source of truth
 
-Read the original [Technicals](design/technicals.md) and the relevant
-[Specs](design/specs.md) before changing a subsystem. Technicals wins where
-they disagree. Both are generated copies of the design doc; never edit them.
+The design doc is the only source of truth:
+https://docs.google.com/document/d/1zJ2WDWIEMRXXinCnkyQ4KbKp2xhuI_rLnsroY57X0Mg.
+Read its Technicals tab (`t.0`) and the relevant parts of its Specs tab
+(`t.de137kjm03j`) before changing a subsystem. Technicals wins where they
+disagree. Never edit the doc, and keep no local copies of it.
 The user requires a playable, maintainable modular monolith without unnecessary
 machinery. A passing implementation test is not proof of design compliance.
 

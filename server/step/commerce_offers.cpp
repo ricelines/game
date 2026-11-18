@@ -141,8 +141,9 @@ step::NativeCompletion offers(const perm::Offers &offers, const perm::Players &p
     player = authority.owner[caller.installed_on.slot()];
   }
   auto rows = Json::array();
-  for (const auto &row : offers.rows)
-    if (row.id && row.live && !row.trade && (!row.expires_step || row.expires_step > call.step) &&
+  for (const auto id : offers.live)
+    if (const auto &row = offers.rows[id];
+        !row.trade && (!row.expires_step || row.expires_step > call.step) &&
         (!call.request.target || call.request.target == row.goods) &&
         (!row.buyer || row.maker == caller ||
          (player && (row.buyer == *player || row.seller == *player)))) {
@@ -220,18 +221,17 @@ step::NativeCompletion accept(amber::perm::State &perm_state, amber::ObjectState
     out.records.back().kind = record::Kind::System;
     commerce_detail::plot_changed(
         out, holders, plot_changed, call,
-        {"owner", perm::plot_facts(perm_state.plots, plot, settings.land.port_spacing_m), seller,
-         area});
+        {"owner", perm::plot_facts(perm_state.plots, plot, settings.land), seller, area});
     for (std::size_t index = before_survey; index < perm_state.plots.rows.size(); ++index) {
       const auto &surveyed = perm_state.plots.rows[index];
       if (surveyed.kind != perm::PlotKind::Lot)
         continue;
       const auto recipients = perm::plot_holders(surveyed, grants, call.step);
       const auto &b = surveyed.bounds;
-      commerce_detail::plot_changed(
-          out, recipients, plot_changed, call,
-          {"owner", perm::plot_facts(perm_state.plots, surveyed.id, settings.land.port_spacing_m),
-           0, (b[2] - b[0]) * (b[3] - b[1])});
+      commerce_detail::plot_changed(out, recipients, plot_changed, call,
+                                    {"owner",
+                                     perm::plot_facts(perm_state.plots, surveyed.id, settings.land),
+                                     0, (b[2] - b[0]) * (b[3] - b[1])});
     }
     return out;
   }

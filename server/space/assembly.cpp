@@ -315,15 +315,8 @@ AssemblyEdit extract_assembly(Space &space, IdentityRead identity, Handle root,
   // Root first: restore individual query shapes before removing their own bodies.
   for (auto h : edit.before)
     extract_native(n, h);
-  std::erase_if(n.volumes, [&](const Volume &volume) {
-    if (!scope.contains(volume.spec.owner.bits))
-      return false;
-    const auto bounds = shape_bounds(n.geometries[volume.spec.geometry]->mesh, volume.world);
-    destroy_rigid(n, volume.body);
-    n.dirty_bounds.push_back(bounds);
-    n.wake(bounds);
-    return true;
-  });
+  for (auto bits : scope)
+    remove_volumes(n, {bits});
   ++n.volume_revision;
   return edit;
 }
@@ -469,7 +462,8 @@ OperationResult rebuild_assembly(amber::ObjectState &objects_state,
       auto previous = n.world_bounds(body->second);
       native_pose(n, body->second, target);
       n.changed(subject, previous, n.world_bounds(body->second), navigates(body->second));
-    }
+    } else
+      n.dirty_objects.insert(subject.bits);
     transforms.position[subject.slot()] = target.position;
     transforms.rotation[subject.slot()] = target.rotation;
   };

@@ -34,7 +34,7 @@ void clock_budget_and_background_progress() {
   std::deque<elaborate::FixtureResult> fixtures;
   std::deque<step::authoring::Completion> authored;
   std::vector<std::string> trace;
-  step::enqueue_event(pending, {{}, {}, 1, {}, {}}, 100);
+  step::enqueue_event(pending, {{}, {}, 1, {}, {}}, 100, 0);
   step::append_inputs(pending, {step::InputWork{9}});
   step::schedule(due, {1, {{}, {}, 2, {}, {}}, {}});
   for (unsigned i = 0; i < 5; ++i)
@@ -52,7 +52,7 @@ void clock_budget_and_background_progress() {
     if (const auto *event = std::get_if<react::EventWork>(&item.work)) {
       trace.push_back("event" + std::to_string(event->event));
       if (event->event == 1)
-        step::enqueue_event(pending, {{}, {}, 3, {}, {}}, 100);
+        step::enqueue_event(pending, {{}, {}, 3, {}, {}}, 100, 0);
     } else
       trace.push_back("input" + std::to_string(std::get<step::InputWork>(item.work).id));
     const auto background = step::next_work(pending, current, fixtures, authored, started);
@@ -85,7 +85,7 @@ void completion_priority_and_stale_admission_refunds() {
   fixtures.push_back(fixture);
   authored.push_back({21, step::authoring::Failure{"first completed submission"}});
   authored.push_back({22, step::authoring::Failure{"second completed submission"}});
-  step::enqueue_event(queues, {{}, {}, 7, {}, {}}, 100);
+  step::enqueue_event(queues, {{}, {}, 7, {}, {}}, 100, 0);
   step::append_inputs(queues, {step::InputWork{9}});
   step::enqueue_background(queues, {{}, 31, 0, {}, 0});
   step::enqueue_background(queues, {{}, 32, 0, {}, 0});

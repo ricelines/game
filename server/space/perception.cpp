@@ -239,10 +239,13 @@ Scan scan(const amber::ObjectState &objects_state, const Observer &observer, Han
     return a.nearby.distance_m == b.nearby.distance_m ? a.nearby.object < b.nearby.object
                                                       : a.nearby.distance_m < b.nearby.distance_m;
   });
-  std::unordered_map<std::uint64_t, float> speeds;
-  for (auto row : motion)
-    speeds[row.object.bits] = row.velocity.length();
-  std::vector<space::LightSample> samples;
+  const auto speed = [&](Handle object) {
+    const auto found = std::ranges::lower_bound(
+        motion, object.bits, {}, [](const MotionSample &row) { return row.object.bits; });
+    return found != motion.end() && found->object == object ? found->velocity.length() : 0.f;
+  };
+  std::vector<space::LightSample> samples, eye_samples;
+  bool eye_samples_ready = false;
   std::vector<Handle> ignore, zones;
   auto limit = requested ? requested : settings.things_max;
   for (const auto &candidate : candidates) {
@@ -257,11 +260,14 @@ Scan scan(const amber::ObjectState &objects_state, const Observer &observer, Han
     auto size = b.max - b.min;
     bool large = 2 * std::atan(candidate.angular_size / 2) * 180 / std::numbers::pi_v<float> >=
                  settings.far_angular_degrees;
-    bool moving = speeds[object.bits] >= settings.moving_m_s;
+    bool moving = speed(object) >= settings.moving_m_s;
     bool bright = false;
     if (auto it = lights.rows.find(object.bits); it != lights.rows.end()) {
-      light_samples(lights, identity, observer.eye, samples);
-      for (auto s : samples)
+      if (!eye_samples_ready) {
+        light_samples(lights, identity, observer.eye, eye_samples);
+        eye_samples_ready = true;
+      }
+      for (auto s : eye_samples)
         if (s.source == object) {
           auto lux = illuminate(world, identity, observer.body, observer.eye, 0, std::span(&s, 1));
           bright = lux >= settings.far_source_lux;

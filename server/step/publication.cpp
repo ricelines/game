@@ -54,7 +54,7 @@ void publish_effects(react::DeferredEffects &&effects, const amber::Origin &orig
           using T = std::decay_t<decltype(item)>;
           if constexpr (std::is_same_v<T, react::EventWork>) {
             item.origin = origin;
-            if (step::enqueue_event(queues, std::move(item), event_limit) ==
+            if (step::enqueue_event(queues, std::move(item), event_limit, now) ==
                 step::PushResult::Overflow)
               overflow();
           } else if constexpr (std::is_same_v<T, react::WatchWork>) {

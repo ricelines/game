@@ -6,8 +6,9 @@ report. Do not design new mechanisms.
 
 ## Rules for every task
 
-- Do not add documentation files. `docs/` is gone; the design doc copies are
-  in `design/` and must not be edited. `content/authoring.md` is game content
+- Do not add documentation files. `docs/` and the local `design/` copies are
+  gone. Read the design in the Google Doc that AGENTS.md links, and never edit
+  it. `content/authoring.md` is game content
   for agents; keep it accurate to S4 when you change the script API.
 - Read AGENTS.md first. Its boundary rule changed: owners now keep their tables
   in one `State` struct each (see Phase 2).
@@ -25,6 +26,33 @@ report. Do not design new mechanisms.
   run the checks below, write `.cache/brief-report-PHASE.md`, and stop. Do not
   start the next phase until told to.
 
+## Cost rules for every task
+
+These tables grow as the world grows: objects and parts, plots, grants,
+offers, trades, players, sessions, subscriptions, rule history and records.
+Call them growing tables.
+
+- Hot paths are code that runs every step, or once for each moving body,
+  each part, each session or each handler run. A hot path must not loop over
+  a whole growing table. Instead do one of these:
+  - use the table's own order, or a relation that is already stored (both
+    directions are kept);
+  - move the loop to the rarer path that causes the change: when an action
+    starts, when a walk starts or replans, or when a grant or plot changes;
+  - check the common case first and fall back to the loop, as 4.F4 did.
+  If none of these works, leave the loop, measure it, and report it under
+  "Blocked". Do not add an index or cache. AGENTS.md requires a spec change
+  for a new index, and only the owner can make that change.
+- A loop over a whole growing table is allowed on a path that runs once per
+  player action, such as an inspect, an offer or a sale. Name it in your
+  report.
+- Filter first, then build. Do not build a JSON record, a vector or a string
+  for every row and then throw most of them away. Task 4.C3 is the example.
+- Change derived data only where a change touches it. Do not rebuild all of
+  it after every change. Phase 8, item 5 is the example.
+- In every task's report, list each loop over a whole growing table that you
+  added or changed, and say which path it runs on.
+
 Checks after each phase (all must pass):
 
 ```sh
@@ -40,6 +68,36 @@ Pytest does not cover the live journeys. After each phase, also run each
 prepared plan, with newly generated keys, as in the Phase 1 correction pass.
 Report each one's result and evidence path. A journey that cannot run is
 reported as not run, never as passed.
+
+Cost check after each phase. Use the release build, on a quiet host: start
+only when `pgrep -f 'ninja|ctest|amb-server'` prints nothing. Run the
+headless seeded world three times, each with a new data directory:
+
+```sh
+D=$(mktemp -d .cache/cost-XXXX)
+.build/release/amb-server run --plan .cache/content/seeded-plan.json \
+  --config config.toml --data "$D" --no-network --unpaced --steps 6000 \
+  > "$D.log" & pid=$!
+while kill -0 $pid 2>/dev/null; do grep VmHWM /proc/$pid/status; sleep 0.5; done | tail -1
+tail -1 "$D.log"
+```
+
+Report, from the best of the three runs, `elapsed_s`, `phase_p50_ms`,
+`phase_p95_ms`, `overruns`, and the last `VmHWM`, which is peak memory.
+Compare them with the previous phase's report. As a reference, the reviewer
+measured about 13 s for 12000 steps, p50 0.7 ms and p95 1.1 ms, and about
+118 MB peak at the end of Phase 4.
+
+Investigate if any of these happens:
+- `elapsed_s` or `phase_p95_ms` is more than 20% worse than in the previous
+  phase;
+- peak memory grew by more than 20 MB;
+- any run has more than 1 overrun.
+
+To investigate, find the cause and report it with numbers. Do not fix it
+unless one of this phase's tasks already covers it. Also run each
+`.build/release/bench/*` and `tests/*_bench` executable for a subsystem this
+phase changed. Report its numbers before and after the phase.
 
 Report format: one section per task with commit hash, files changed, tests
 added or changed (and why), and anything you were unsure of. Then "Blocked".
@@ -309,6 +367,9 @@ pre-Phase-2 snapshot still restores.
 
 ## Phases 3 to 7: root, land, the market and joining
 
+Order of work from here: the Phase 5 corrections, then Phase 8, then
+Phase 6, then Phase 7.
+
 These five phases replace the land, money and account code. Read these first;
 all of them changed:
 - Technicals 13: "A grant's scope", "Root and the architects", the check's
@@ -320,7 +381,8 @@ all of them changed:
 - Specs S0.3, S1.7, S4.1, S4.2, S4.5, S5.1, S5.3 (`player_actions`), S5.4,
   S6.2, S8.1, S9 and S13.
 
-The design copies are `design/technicals.md` and `design/specs.md`.
+Read these in the Google Doc that AGENTS.md links: the Technicals tab and the
+Specs tab.
 
 Each phase must leave the game working: all checks pass and the journeys run.
 Do the phases in order. Each task is its own commit unless it says otherwise.
@@ -1037,6 +1099,118 @@ Done when: tests show all of the following:
 - `inspect('land')` near the café lists the café's lot first, and `fronts` is
   `street`.
 
+### Phase 4 corrections
+
+Do these before Phase 5, one commit each, in this order. Phase 4 is not done
+until 4.C5's gate passes.
+
+#### 4.C1 The café stands on two of Mira's lots
+
+The café dome (`dome.py`, radius 12) is 24 m across, and a lot is 16 m wide.
+With the (+16, +48, 0) move of task 4.4 the dome covers x 4..28 and y 46..70:
+root's alley, part of Sol's lot, and 4 m of the Street. The café door
+(`cafe.door`, y 46.15) stands on the Street. That was the brief's mistake.
+
+Move the seed world again so that the whole café lies on two adjacent lots
+that Mira owns:
+- Every object position in `content/start.json` moves by a further
+  `(+8, +5, 0)`. From the coordinates before Phase 4, the move is
+  `(+24, +53, 0)`. The dome then covers x 12..36 and y 51..75, and the door
+  is at y 51.15. The residents and public objects stay on the Street
+  (y 46..49), and Sol's collector moves to (41, 58).
+- Seeded lots in `"land"."lots"`:
+  - Mira (2): `(8, 50)` and `(24, 50)`;
+  - Sol (3): `(40, 50)`;
+  - Ivo (4): `(56, 50)`;
+  - Nia (5): `(-16, 50)`;
+  - Rue (6): `(-32, 50)`;
+  - Oren (7): `(-48, 50)`.
+- Change the `plot_at` corners of the residents' `build` grants to match.
+  Mira's three scripts (`body`, `stakes`, `stakes_free`) get one grant for
+  each of her two lots, so six grants for Mira.
+- `tests/start_test.cpp`: the expected corners.
+- Run your layout check script again. In addition to each object's origin,
+  check that the dome's footprint (center ± 12 m in x and y) lies inside
+  Mira's two lots. Save the output in `.cache/brief-phase4/`.
+
+#### 4.C2 `fronts` follows the lot's row, not plot order
+
+S13.1: the near row fronts the Street when |j| = 1 and otherwise the back way
+of the block before it; the far row fronts its own back way. A lot never
+fronts an alley in the default layout. Today `perm::plot_record`
+(`server/perm/perm.cpp`, the loop over `plots.rows` at the top) takes the
+first way plot by id that shares any edge. The far-row lot at the alley
+(e.g. `(8, 82)`) shares an edge with the alley, whose id is lower than the
+back way's, so it says `alley`.
+
+Decide in this order:
+1. If an edge along x (the lot's y0 or y1 side) touches a street plot:
+   `street`.
+2. Else if an edge along x touches an alley-kind plot (a back way): `back way`.
+3. Else if an edge along y (the lot's x0 or x1 side) touches an alley-kind
+   plot: `alley`.
+4. Else `none`.
+
+The last two cases only happen after Phase 5's splits and joins. Add to
+`land_test`: in a surveyed block, all eight lots front `street` or
+`back way` as S13.1 says, including the two at the alley.
+
+#### 4.C3 `inspect('land')` builds records only for plots in sight
+
+`read_inspect.cpp`, the `land` case: today it builds the full record, which
+loops over all plots and all grants, for every plot, and then drops the ones
+out of sight. Compute the distance from the body to the plot's rectangle
+first, and call `record(plot)` only when it is within `SIGHT_M`. No other
+change.
+
+#### 4.C4 The way group is read once
+
+`settings.land.way_group` is set from the start file in `run.cpp`, right after
+`read_plan` (commit 46996d4). Keep that line: Phase 5 surveys after a sale and
+needs it. Your uncommitted change deletes it; undo that deletion. In
+`install_land`, delete the local copy `auto land = settings;` and its second
+read of `way_group`. Use `settings` directly, and keep the check that the group
+exists.
+
+#### 4.C5 The journeys pass on the new layout
+
+The brief put the journey coordinate changes in Phase 7, but its rules require
+every journey to pass after each phase. That was a contradiction. The journey
+updates belong to Phase 4. You have started them, uncommitted, with
+(+16, +48, 0). Redo them with the 4.C1 layout:
+- A position from the old seed layout moves by `(+24, +53, 0)` from its
+  pre-Phase-4 value.
+- A journey acts on land only with the rights the game gives. Mira builds and
+  places on her own lots. Do not route a placement through the architect to
+  get round the Street's rights. With 4.C1:
+  - the chair in `game_spatial.py`'s `obstruction` lands at y 51.15;
+  - the occluder in `optics` lands at y 50.4.
+
+  Both are on Mira's lot, so delete the temporary architect `move` grants
+  you added there and let Mira place them.
+- Where a journey grants or builds on "the caller's lot", pick the caller's
+  owned plot whose bounds contain the position used, not the first owned plot.
+  Mira owns two lots.
+- A place the journey puts something with Mira's authority must be on one of
+  Mira's lots and outside the café. For example, `game_restart_live.py`'s
+  inventory reveal can use (10, 53).
+- Your uncommitted `sweep` change (`mUseShrunkenShapeAndConvexRadius`)
+  changes every kinematic sweep. Commit it alone, with its `terrain_sweep`
+  test. Name the door journey's obstruction result in the report: the door
+  must still stop on the chair.
+
+Done when the 4.F5 gate passes:
+- `ctest --preset debug -j8` passes five runs in a row;
+- every journey passes, each on a fresh prepared plan with new keys, while
+  `ctest --preset debug -j8 --repeat until-fail:3` runs at the same time;
+- no journey world has a `cutoff` record.
+
+If `aq.swim` is still cut off under that load, do not raise `HANDLER_MS` and
+do not change the gate. Measure it: run the seeded world headless for 600
+steps with `HANDLER_MS = 1` and then `2` in a copy of `config.toml`, and
+report how many `aq.swim` cutoffs each gives, idle and under the ctest load.
+Then stop and report under "Blocked".
+
 ## Phase 5: the land market
 
 ### 5.1 A change of owner
@@ -1309,15 +1483,857 @@ Tests:
 Done when: the checks pass, every test above passes, and `game_live_authoring`
 and `game_authoring_restore` pass.
 
+### 5.7 Navigation room for surveyed land
+
+The land market surveys new blocks after sales (5.2), and the navigation tile
+table is too small for that. One navigation tile is
+`TILE_CELLS * CELL_M` = 6.4 m square, so one 256 m terrain tile holds
+40 × 40 = 1600 of them. The seeded world starts with 4 terrain tiles, which
+is 6400 navigation tiles. `[navigation] MAX_TILES = 8192` leaves room for one
+more terrain tile. The first survey of column 3 or column -4 adds two terrain
+tiles, because the Street piece crosses y = 0, and Detour then refuses the new
+tiles. Their only trace is a `navigation:` line on stderr (`run.cpp`, after
+`install_ready_navigation`), and bodies cannot walk onto that land.
+
+- In `config.toml`, set `MAX_TILES = 65536`. That is room for 40 terrain
+  tiles. Replace the comment above it with: `# 1600 tiles per 256 m terrain
+  tile; room for 40 terrain tiles.`
+- Change nothing else: `CELL_M`, `TILE_CELLS`, `POLYGONS_PER_TILE` and the
+  64-bit references stay as they are.
+- The cap only sizes Detour's table of tile slots, about 104 bytes each, so
+  this adds about 6 MB. Navigation for land that exists costs the same as
+  before.
+
+Done when, in addition to the usual checks:
+- a fresh seeded world starts with no navigation errors;
+- you report the server's resident memory after 600 headless steps, before
+  and after the change, on the same plan.
+
+### Phase 5 corrections
+
+Do these before Phase 6. Each one is its own commit. The cost rules at the
+top of this brief now apply, and so does the cost check after each phase.
+
+Order: 5.C1 to 5.C7, then 5.C10, 5.C11, 5.C12, 5.C13 and 5.C14, then 5.C8, then 5.C9. 5.C8 was
+rewritten on 2026-11-17 and needs 5.C10 and 5.C11; if you started the old
+5.C8, rework it to the new text.
+
+#### 5.C1 Land refusals are denials
+
+`server/step/land_actions.cpp` throws `std::invalid_argument` when the actor
+lacks Transfer, when the plot is not a lot, and when a cut or join is
+invalid. A thrown error gives no `denied` reply, no `fix` and no denial
+record. Every other commerce action returns `commerce_detail::denied`.
+
+- In `lot()`, return the refusal instead of throwing. Use
+  `commerce_detail::denied(reason, "transfer", "plot:N", plot.owner)`.
+  Make `abandon_plot`, `split_plot` and `join_plots` return it.
+- An abandon of a pool lot, a bad cut and a bad join are also denials. Use
+  the `commerce_admin.cpp` overload `denied(need, on, why, fix)` with these
+  fixes:
+  - pool lot: "this lot already belongs to the pool";
+  - bad cut: "cut at a whole meter strictly inside the lot";
+  - bad join: "choose two lots of one owner that share a whole edge and
+    form a rectangle".
+- Malformed arguments, such as a missing `plot`, still throw, as in other
+  actions.
+
+Fix texts in `commerce_detail::denied` (`server/step/commerce_helpers.cpp`)
+that are wrong for the new reasons:
+- `PriceChanged`: "inspect the offer and accept again with a max_price of
+  at least its price".
+- In `step::return_goods` (`server/step/returns.cpp`), do not pass the perm
+  reason through unchanged. Map each refusal to its own `denied(need, on,
+  why, fix)`:
+  - own goods: why "you own this", fix "pick it up instead";
+  - the owner holds build: why "its owner holds build on this plot", fix
+    "ask p:OWNER to remove it, or revoke their build grant";
+  - no return right: keep `denied(reason, "return", "plot:N", plot.owner)`.
+- In `step::set_offer_price`, `NotController` means "you are not this
+  offer's maker or seller". Use the same overload with fix "ask the offer's
+  maker or seller".
+
+Tests in `tests/commerce_test.cpp`: each refusal above returns
+`ok: false` with the expected `fix`, and writes a record with
+`result: denied`.
+
+#### 5.C2 Plot grants and offers change only in perm
+
+`split_plot` and `join_plots` change grant rows, players' grant lists and
+offers from `server/step`. Then `split_plot` calls
+`perm::rebuild_grant_lookup`, which rebuilds every key and deadline in the
+world. Perm owns these tables (S0.2), so:
+
+- Make `close_offer(Offers &, Offer &)` public in `perm.hpp` (it is in an
+  anonymous namespace in `perm.cpp`). Add
+  `void close_plot_offers(Offers &, PlotId)`, which closes every live offer
+  on that plot. Use it in `change_plot_owner`, `split_plot` and
+  `join_plots`, and use `close_offer` in the plot branch of
+  `step::cancel_offer` (`commerce_offers.cpp`). Delete the local
+  `close_offers` in `land_actions.cpp` and the inline copy in
+  `cancel_offer`.
+- Move the grant work into `perm::split_plot(State &, PlotId id, int axis,
+  float cut, Step now)`, which returns the new plot id, and
+  `perm::join_plots(State &, PlotId a, PlotId b)`, which returns the
+  removed grant ids. The step functions keep only argument parsing, the
+  denials, `refresh`, notices and records.
+- In `perm::split_plot`, add each copied grant the way `create_grant` adds
+  a new one: `by_key`, `expiring` and `reminders` for that grant only
+  (around `perm.cpp:460-466`). Factor those lines into one helper that
+  both use. Do not call `rebuild_grant_lookup`.
+- Test in `tests/perm_test.cpp`: a copied grant with an expiry expires at
+  the same step as its original, and a copied child keeps its copied
+  parent.
+
+#### 5.C3 One selection for things on a plot
+
+`abandon_plot` repeats the selection of `plot_objects_binding`
+(`server/step/metadata.cpp:227`): not a body, not held, not a declared
+part. Add one function in `server/step`:
+
+```cpp
+std::vector<Handle> plot_things(IdentityRead, std::span<const PlotId> plot,
+                                const Relation &declared_parts, PlotId,
+                                const RunDeadline *deadline = nullptr);
+```
+
+Call it from both places. When a deadline is given, it checks
+`deadline->passed()` between rows and stops early. After the call, the
+binding raises "handler deadline exceeded" if the deadline has passed, as
+today. `RunDeadline` is in `store.hpp`; check the plot column's real name in
+the code.
+
+#### 5.C4 A return reports the offers it closed
+
+`step::return_goods` (`returns.cpp`) copies the id of every live offer in
+the world before each return. Then it loops over that copy to find the
+offers that closed. `abandon_plot` calls it once for every thing on the lot,
+so an abandon costs things × offers.
+
+Make `perm::return_goods` collect the offers it closes in a new
+`std::vector<OfferId> closed` field on `SwapResult`, or in its own return
+value. The adapter clears escrow for exactly those. Delete `live_offers`.
+
+In the same function, call `space::can_custody` with `stay_static = true`.
+That is the mode the return will use. Today a static occupant with no hull
+sends a present owner's goods to the mailbox. Extend the test "an absent
+owner with a full mailbox" with a present owner, whose goods with such an
+occupant go to the inventory.
+
+#### 5.C5 A pending view goes stale only when something in it changes
+
+`net::invalidate` (`server/net/read_look.cpp:109`) runs after every handler
+and at the end of every step (`publication.cpp:29`). For every session, it
+checks every changed object against `row.acquired`. That is wrong in two
+ways:
+- `acquired` holds every handle the session has been told about since it
+  connected, and nothing ever removes them. A change to anything an agent
+  once saw, however far away now, throws away its pending view.
+- The check costs sessions × changes on every handler run.
+
+S5.3 rebuilds a pending view when the agent's surroundings change. Those are
+the things in the view itself: the body, the holding, the zones in
+`pending.self.zones`, and the objects in `pending.things` and
+`pending.far`. Moving into or out of sight is already covered by
+`observe::take_dirty_views`.
+
+- Add `std::unordered_map<std::uint64_t, std::vector<SessionId>> shown_in`
+  to `SessionViews`. It holds, for each handle, the sessions whose pending
+  view contains it.
+- In `refresh_view` (`read_look.cpp`, where `row.pending = std::move(next)`),
+  remove the session from `shown_in` for the old view's handles, then add it
+  for the new view's handles. Do the same removal in `remove_session`, and
+  erase a handle's entry when its vector becomes empty.
+- `invalidate` loops over the changed objects. For each one, it marks every
+  session in `shown_in[object]` not ready. It no longer reads `acquired`.
+- Leave `acquired` itself alone. It still decides which handles a session
+  may name.
+- Tests in `tests/net_test.cpp`, with two sessions:
+  - a change to a thing in only the first one's view makes only the first
+    stale;
+  - a change to a thing the first one saw earlier, but that is no longer in
+    its view, makes nothing stale;
+  - a change to the second one's body makes only the second stale;
+  - after `remove_session`, `shown_in` names the session nowhere.
+
+#### 5.C6 Land tax: what the engine adds
+
+The owner replaced daily rent and the tier with a prepaid land tax. See
+Technicals "Land tax" and Specs S13.3, S5.1, S9.2 and S9.4 in the Google
+Doc.
+
+The design no longer holds or salvages anything. A lot whose tax lapses
+returns to the pool, and everything on it goes back to its owners at once,
+through `engine.abandon_plot`, which already does this.
+
+One commit for each item:
+
+1. Plot records get `open`. S5.1: "open is true when the plot's preset lets
+   everyone enter (S9.1)." In `perm::plot_record`, set it from the plot's
+   preset bit for `LandVerb::Enter`. Update the plot record tests.
+2. `engine.notify {player, text}`. S9.4: "A script may send a notice too,
+   with engine.notify {player, text}, but only to a player who has given it
+   a grant that is still live; the text is cut to 280 characters."
+   - Declare it like the other exchange actions, with right `""`.
+   - Only scripts may call it. Refuse a player caller.
+   - Allow it when one of `players.rows[player].grants_given` is live,
+     unexpired and held by the calling script on its object. Loop over that
+     player's given grants only, not over all grants.
+   - The notice is `{kind: "notice", from: "s:N", on: "<object>", text}`.
+     It goes through `out.notices` like other notices, so it waits in the
+     mailbox when the player is away.
+   - Cut the text at 280 code points.
+   - A refusal is a denial with fix "ask the player to give this script a
+     grant first".
+   - Record name `notify`.
+   - Tests:
+     - sent with a grant;
+     - refused without one, and after the grant is revoked;
+     - text cut at 280;
+     - waits in the mailbox for an absent player.
+3. `LOT_MIN_M = 4` in `[land]` of `config.toml`, read into `LandSettings`.
+   S9.2: a split must leave "each piece at least LOT_MIN_M across the cut".
+   A cut that leaves less is a denial (5.C1) with fix "cut at least
+   LOT_MIN_M m from each edge". Add a test.
+4. Delete `engine.hold_goods`. The land script was its only caller, and no
+   rule uses it now. Remove:
+   - `hold_goods`, `validate_hold_goods` and `declare_hold_goods_action`;
+   - `ExchangeAction::HoldGoods` and its dispatch;
+   - its cases in `tests/goods_test.cpp` (if nothing is left, delete the
+     file and its CMake target);
+   - its row in `content/authoring.md`.
+   Keep the Held flag: a body's hand still uses it.
+5. Remove the `held` field from `self:object` (`metadata.cpp:259`) and the
+   `self:object().held` check in `school.luau`. Nothing holds a school any
+   more. Keep the `vm.cpp` change to zero contributions to a retired
+   subject, and name it in your report.
+
+#### 5.C7 Lease fixes
+
+1. `end_lease` (`lease.luau:16-21`) keeps `tenant`, `rent` and `grace`, so
+   an evicted tenant can call `base.lease_sign` again at once and get the
+   rights back with the debt forgiven. Clear `tenant`, `rent`, `grace`,
+   `plot` and `owner` in `end_lease`. The owner must set terms again.
+2. Technicals (Tenancy): "The owner grants the lease building, entry,
+   running scripts and returning on the plot". `parent()` (line 12) checks
+   only the first three. Require `return` as well. Then `base.lease_sign`
+   refuses until the owner has granted all four, and an eviction can always
+   return the tenant's things.
+3. Eviction ignores `engine.return`'s result. If one fails, keep going, and
+   put the failed object handles in the object's writing with
+   `engine.edit_text`, so the owner can see them.
+
+Tests:
+- an evicted tenant's second `base.lease_sign` is refused;
+- `base.lease_sign` is refused while the owner's grant lacks `return`;
+- the terms and sign checks go through real action dispatch, as a player's
+  `do`, with the `edit` and `use` rights. Do not call the handlers directly
+  with a made-up `caller`.
+
+#### 5.C8 Land tax: the land script
+
+Rewrite `content/scripts/land.luau` to Specs S13 and S13.3 in the Google
+Doc. Read both again: they changed on 2026-11-17, after your current
+draft.
+- Prepaid tax is one date per lot, the day it is paid through. Credit is
+  `(paid_through - now) * tax / day`, worked out only when needed. Nothing
+  falls over time, so no handler adds or subtracts credit as time passes.
+- There is no grace period. A lot lapses on its paid-through date. The
+  notice `land_notice_days` before it is the only warning. Delete
+  `base.rent_grace_days`.
+- A split leaves both pieces with the lot's date. A join gives the
+  survivor `(T1 * d1 + T2 * d2) / (T1 + T2)`.
+- A change of a lot's tax keeps its credit: new date = now + (old date -
+  now) * old tax / new tax.
+- An owner's lots, and the pool, come from `self:plots(owner)` (5.C14). The
+  script keeps no lists of lots.
+- The script learns of every sale, split, join and abandonment from
+  `base.plot_changed` (5.C11) and never reads plots to find them.
+- It posts only the rates in force, coming changes and the pool lots on
+  offer, and answers `base.land_quote {plot}` with a notice.
+S13.2 (value) and S13.4 (selling pool lots) are unchanged.
+
+This script serves every lot in the world, so each event must cost the same
+whether the world has 60 lots or 6000, and its memory must stay small per
+lot. The rules:
+- No handler loops over all lots, all plot ids or all of `self.state`,
+  except in two rare passes: the first run at world start, and applying a
+  legislation change. Both read at most `BATCH` records per run and
+  continue from a cursor on the next step with `self:after(0.05, ...)`.
+- `self:plots()` without an owner is called only in the first run.
+- A timer, a payment for one lot, a quote or a `base.plot_changed` event
+  touches at most two lots and reads at most two records.
+- `base.land_pay` without `plot` touches the caller's own lots only.
+- The totals S13.4's price needs (the value of all lots and of the pool
+  lots, for each class) are running sums, changed wherever a lot's V, class
+  or owner changes.
+- The writing has a fixed size: the rates, exemption and discounts in force,
+  each pending change, and the pool lots on offer.
+
+Registry and start file:
+- Delete these terms and their `world_settings` rows: `base.land_rent_rate`,
+  `base.land_tier_value`, `base.land_tier_multiplier`, `base.rent_hold_days`
+  and `base.rent_grace_days`.
+- Add quantity settings, copying the layout of `base.land_notice_days`'s
+  neighbours: `base.land_street_rate` 0.01, `base.land_back_rate` 0.01,
+  `base.land_exempt_value` 0, `base.land_open_discount` 0 and
+  `base.land_notice_days` 7.
+- Add action terms `base.land_pay {plot?: integer, amount: integer}`,
+  `base.land_auto {on: boolean}` and `base.land_quote {plot: integer}`, all
+  with right `use`, and the event terms `base.land_due` and
+  `base.land_boot`.
+- Keep the residents' spend grants to `land`.
+
+State. S4 allows only numbers, booleans, strings and handles in
+`self.state`, so use flat keys, and only these:
+- for each lot it knows: `v:<id>` and `class:<id>`, which the running sums
+  need when a lot changes;
+- for each owned lot that owes tax: `pt:<id>` (the paid-through time) and
+  `tax:<id>` (the tax per day the date was worked out with);
+- `sandbox:<id>` for a pool lot whose record has `build_open` (6.6);
+- running sums `sum_v:<class>` and `pool_v:<class>`, and the offer state
+  S13.4 needs for the lots on offer (at most `land_on_offer` per class);
+- `auto:<p>`;
+- legislation: `seen:<name>`, `applied:<name>`, `pending_at`, and the
+  re-planning cursor;
+- `boot` (the first run's cursor) and `max_id` (the highest id known).
+No `owner:`, `credit:`, `at:`, `due:`, `zero:`, `noticed:`, `pos:`, `lot:`
+or `lots:` keys. Keep the names; do not encode keys as numbers.
+
+`local BATCH = 50 -- plot records read per run`. Measure it again after
+5.C13 and put the result in the comment.
+
+Handlers:
+- `base.start`: call `self:plots()` once, store its highest id as `max_id`,
+  set `boot` to 1 and send `base.land_boot`.
+- `base.land_boot`: read up to `BATCH` records from `boot`, skipping ways
+  and missing ids. Store each lot's `v` and `class` and add it to the sums.
+  An owned lot that owes tax gets `pt` = now + `land_notice_days` and its
+  `tax` (the seeded lots), and a timer. Advance `boot`; send
+  `base.land_boot` again until `boot` passes `max_id`.
+- `schedule(id)`, one function: set one `self:after` timer with the value
+  `id`, for the notice point (`pt - land_notice_days`) if it is still
+  ahead, otherwise for `pt`.
+- `base.land_due`, a timer whose value is a plot id. Read the record,
+  because the lot's preset, and so `open` and its tax, can change without
+  an event. If the record is gone or the owner is root, drop the lot's
+  `pt` and `tax`. If its tax has changed, move `pt` so the credit is kept.
+  Then:
+  - now is past `pt`: `engine.abandon_plot`. The `owner` event that
+    follows does the rest;
+  - now is past the notice point: if `auto:<owner>`, pay `land_notice_days`
+    of tax under the owner's grant and move `pt`; if that payment fails, or
+    without auto, send the notice. When it fails because the grant is too
+    small or has expired, the notice says so and gives the cap per day the
+    owner's lots need. Then `schedule(id)`;
+  - otherwise (a payment moved `pt`): `schedule(id)`.
+  There is no `due` check: a timer that fires early just schedules again.
+- `base.plot_changed`, with the value of 5.C11:
+  - `split`: both pieces get the lot's `pt`. Read both records, store `v`,
+    `class` and `tax` for both, move the sums from the old values to the
+    new, and move each piece's `pt` if its tax differs from the share it
+    had. Give `other` a timer.
+  - `join`: read the survivor's record. Its `pt` becomes
+    `(T1 * d1 + T2 * d2) / (T1 + T2)` from the two stored lots. Drop
+    `other`'s keys, update the sums and give the survivor a timer.
+  - `owner` from root: the lot gets `pt` = now + `land_notice_days`, its
+    `tax`, a timer, and leaves `pool_v`.
+  - `owner` to root (abandonment or lapse): drop its `pt` and `tax`; it
+    joins `pool_v`.
+  - `owner` between players: nothing changes; the date stays with the lot.
+  - A plot id the script does not know yet: read its record and store it
+    first. Update `max_id`.
+  - A record that is already gone when the event is handled (a later join
+    removed it) is not stored; that later event does the rest.
+- `base.land_pay`:
+  - With `plot`, the caller must be its owner, by its record.
+  - Without `plot`, read no records: take the lots from
+    `self:plots(caller)` and divide the amount over those with `tax` above
+    zero, in proportion to `tax`.
+  - Pay the amount with `engine.pay` from the caller to `p:0`; if it fails,
+    change nothing. Then move each lot's `pt` later by its share divided by
+    its `tax`, in days. Set no timers: each lot's existing timer fires
+    early, finds the later date and schedules again.
+- `base.land_auto`: set `auto:<caller>`.
+- `base.land_quote {plot}`: the caller must be the owner, by the plot's
+  record. Send one `engine.notify`: `plot N: tax T a day (rate R x value V,
+  open|closed), paid through day D`, or `plot N: exempt` when its tax is 0.
+- `base.land_tick`, every `base.settlement_seconds`. It reads no plot
+  records except while re-planning after legislation:
+  1. Legislation: when a `land_` setting differs from `seen:`, set
+     `pending_at` to now plus `land_notice_days`. Once `pending_at` has
+     passed, copy the settings to `applied:` and re-plan every owned lot,
+     ids 1 to `max_id`, `BATCH` per run, with a cursor: its new tax moves
+     its `pt` so the credit is kept. Tax always uses `applied:`.
+  2. Sales, as S13.4, from `self:plots("p:0")` and the running sums. Never
+     offer a lot with `sandbox:<id>` (6.6). Delete the `engine.offers`
+     call.
+  3. Writing, only if something changed since the last writing: the rates,
+     exemption and discount in force; while a change is pending, a line for
+     each changed setting with its current value, its coming value and the
+     day it applies; one line per pool lot on offer.
+
+Delete `hold_contents`, `salvage`, the tier, debt, rent and grace code, the
+held-mass bookkeeping from F.1, the discovery of ids above `max_seen`, the
+polling of offers to detect sales, the search for a containing parent
+lot, the rule that an unexplained owned lot was bought from the pool, the
+owner and pool lists, the zero notice, and the per-lot lines in the
+writing.
+
+Done when, besides the tests: `grep -n "self:plots()" content/scripts/land.luau`
+finds one line, in the `base.start` handler, and no `for` loop in the script
+runs over ids outside `base.land_boot` and the legislation pass.
+
+Tests, in `tests/test_content.py`. Replace the rent, tier, hold, salvage and
+grace tests with:
+- seeded lots start paid through `land_notice_days` from now, and
+  `base.land_quote` reports that day;
+- `base.land_pay` moves the date by amount divided by tax, and the money
+  leaves circulation; a payment over the grant's cap changes nothing;
+- `base.land_pay` without `plot` for an owner of 80 lots moves all 80 dates
+  in proportion to their tax, reads no plot records and sets no timers;
+  each lot's old timer then fires early and schedules again; a payment
+  that fails changes nothing;
+- the notice arrives `land_notice_days` before the date, in the mailbox
+  when the owner is away;
+- with `base.land_auto`, the date moves at the notice point; when the
+  grant's cap is too small, the notice gives the cap needed;
+- a lot lapses on its date, with no grace. The owner's things on it, and a
+  third party's thing, are back with their owners at once. The owner's
+  other lots are untouched;
+- a lot bought from the pool is paid through `land_notice_days` from then;
+  a lot sold between players keeps its date;
+- a split leaves both pieces with the date; a join gives the tax-weighted
+  date, so the two credits add;
+- split a lot, then let the original lot's `base.land_due` run before the
+  event is handled: both pieces still end with the right dates;
+- split a lot and pay for the new piece in the same step: the result is
+  the same whichever runs first;
+- join two exempt lots: when the joined lot's V reaches
+  `land_exempt_value`, it starts to owe tax and gets a date;
+- a change to `base.land_street_rate`: the old rate holds until
+  `land_notice_days` have passed, the writing shows both, and then each
+  lot's date moves so its credit is kept;
+- `land_exempt_value` above a lot's V gives no date and no notices;
+- with `land_open_discount` 0.5, closing a lot's entry doubles its tax at
+  its next timer, and its date moves so its credit is kept;
+- worlds with 600 and with 1200 lots, after 5.C13 and 5.C14: after the
+  first run, no `base.land_tick` run reads a plot record unless a
+  legislation change is being applied, and no run reads more than `BATCH`
+  records. In Release on an idle host, report the longest run of each
+  handler at both sizes. Every handler must take about the same time at
+  both sizes and be under 2.5 ms, except `base.land_pay` without `plot`,
+  whose work grows with the caller's own lots: it must be under 2.5 ms for
+  an owner of 80 lots, and for one owner of all the lots report its time
+  without a limit. Also report the script's state bytes at both sizes and
+  the bytes per lot. If a limit is missed, report the numbers and stop; do
+  not add batching or a cursor to make it pass. Measure with a temporary
+  timer and do not commit it.
+
+Keep the pool sales tests from 5.C6's earlier version:
+- the reference value 2440.01 from the real record of the seeded lot at
+  (8, 50), asserting its `fronts`, `port` and `port_x`;
+- the price at t = 1 day, which is ceil(1.5 × V × K);
+- a player, not the script, buying a pool lot from far away at its posted
+  price with `max_price`, with the money burnt.
+
+#### 5.C9 One lookup for the plot under a point
+
+Three places find the plot that contains a point with the same test
+(`plot.id`, `x >= min x`, `y >= min y`, `x < max x`, `y < max y`, first match
+wins):
+- `placement_plot` in `server/step/construction.cpp` (around 91);
+- the loop in `server/step/commerce_placement.cpp` (around 80-87);
+- the second loop in `perm::update_plots` in `server/perm/perm.cpp` (around
+  130).
+
+Move `placement_plot` to perm as
+`const Plot *plot_at(const Plots &, Vec3)`, declared in `perm.hpp` and
+defined in `perm.cpp`, and call it from all three places. Keep each
+caller's own handling when no plot is found: construction denies, placement
+throws, and `update_plots` sets plot 0.
+
+Do not touch the loop in `server/step/physical_actions.cpp` (around 504).
+It is a different test: its upper bounds are inclusive and it checks every
+plot that contains the point, so a goal on a shared edge must be allowed by
+both plots. Do not merge it into `plot_at`, and do not add an index.
+
+Done when: `grep -n "bounds\[0\]" server/step/construction.cpp
+server/step/commerce_placement.cpp` finds nothing, the checks pass, and the
+diff changes no behavior.
+
+#### 5.C10 No loop over all grants
+
+The grants table keeps every grant ever issued, so it only grows. These
+places loop over all of it, and each one gets slower for the rest of the
+world's life:
+- `server/perm/perm.cpp`, around 37: `plot_record`, for every plot record
+  and so for every `self:plot` read;
+- around 243: `erase_marked`;
+- around 267: `remove_marked`;
+- around 571: `revoke_objects`;
+- around 782: `change_plot_owner`;
+- around 837: `join_plots`;
+- `server/step/editing_scripts.cpp`, around 25: `revoke_holder`;
+- `server/step/commerce_admin.cpp`, around 347: `revoke`, and around 377:
+  `list_grants`;
+- `server/perm/snapshot.cpp`, around 87: `capture_authority`.
+
+Read S9.2 in the Google Doc: "Every reference in a grant is kept in both
+directions ... No operation on grants visits every grant, except restoring
+a snapshot." Keep these lists of live grant ids, all in perm:
+- `Player::grants_held` and `Player::grants_given`. They exist already.
+- `Grants::script_held`: for each script holder (script id and object), the
+  grants it holds.
+- `Grants::children`: for each grant, the grants that name it as parent.
+- `Grants::by_plot`: for each plot, the grants whose scope names it, which
+  are a plot's land and the issuer's objects on that plot.
+- `Grants::by_object`: for each object handle, the grants whose scope names
+  it, which are one object, an avatar, and the object's account.
+- `Grants::all_land`: the grants on all land.
+
+Keep them current wherever a grant becomes live or stops being live: issue,
+revoke, expiry, removal with a parent, the copy on a split, removal on a
+join, clearing on a change of owner, and the sale or destruction of an
+object. Grep every write to `grants.rows` and to `.live`. Each one must be
+in perm and must update the lists. Build them in `rebuild_grant_lookup`
+when a snapshot is restored, and do not save them in the snapshot.
+
+Then replace each loop:
+- `plot_record`: `by_plot[id]` and `all_land`, keeping those with transfer
+  or return. Put this in one function that returns the holders, because
+  5.C11 needs the same list.
+- `erase_marked`: take the list of ids to erase instead of a mark for every
+  grant.
+- `remove_marked`: walk `children` from the ids being removed.
+- `revoke_objects`: `by_object` of each object.
+- `change_plot_owner` and `join_plots`: `by_plot`.
+- `revoke_holder`: `script_held`.
+- `revoke`: the selected holder's `grants_held` or `script_held`.
+- `list_grants`: the issuer's `grants_held` and `grants_given`, and the
+  `children` of the grants it holds.
+- `capture_authority`: the `grants_held` of the selected players and the
+  `script_held` of the selected objects.
+
+`server/step/travel.cpp` also loops over every grant; Phase 8 item 2
+deletes that file.
+
+No other index.
+
+Done when: `grep -rn "grants.rows)" server` finds only
+`rebuild_grant_lookup`, the snapshot reader and `travel.cpp`, and the
+checks pass.
+
+Tests:
+- each list is right after an issue, a revoke that removes children, an
+  expiry, the sale and the destruction of an object, a split, a join, a
+  change of a plot's owner, and a restore;
+- a plot record lists a plot grant and root's all-land grant, and no
+  longer lists them after a revoke or an expiry;
+- in Release, with 100000 live grants that other players issued, time
+  revoking one grant that has two children, and building one plot record.
+  Report both. Neither may grow when you double the other grants.
+
+#### 5.C11 The event `base.plot_changed`
+
+Read S9.2 in the Google Doc: "When a split, a join or a change of owner
+succeeds, every script that held transfer or return on a plot it touched,
+as the plots' records stood just before the change (S5.1), receives the
+event base.plot_changed."
+- Register the event term `base.plot_changed`.
+- Push each event as a `react::EventWork` into the completion's
+  `out.effects.ordered`. `publish_effects` (`publication.cpp`, around 42)
+  already enqueues `EventWork` effects and records an overflow. Add no new
+  field and no new queue.
+- The recipients are the script holders from the function 5.C10 adds for
+  `plot_record`.
+- Every successful split, join and change of owner sends the event. Today
+  they happen in `server/step/land_actions.cpp` (abandon, split and join,
+  which call `perm::change_plot_owner`, `perm::split_plot` and
+  `perm::join_plots`) and in the plot sale, where
+  `server/step/commerce_offers.cpp` (around 188) calls `perm::accept_plot`,
+  which calls `change_plot_owner` (`perm.cpp`, around 949). Grep for any
+  other caller. Collect the holders before the perm call (a sale or a join
+  removes grants), make the call, and if it succeeded add one `EventWork`
+  per distinct script and object: `receiver` is the holder's object,
+  `recipient_script` is its script, and `event` is `base.plot_changed`.
+- The value is a flat record:
+  - split: `{op: "split", plot, other: <new id>, owner, old_owner: owner,
+    area, other_area}`, the areas of the two pieces after the split;
+  - join: `{op: "join", plot: <survivor>, other: <removed>, owner,
+    old_owner: owner, area, other_area}`, the areas before the join;
+  - change of owner, including a sale from the pool and abandonment:
+    `{op: "owner", plot, other: 0, owner, old_owner, area, other_area: 0}`.
+  Owners are `"p:N"` strings and areas are square meters from the bounds.
+- The engine does no tax arithmetic and knows nothing about the land
+  script.
+- Tests, through real dispatch: the land script and a lease each receive
+  the event for a split, a join, a sale and an abandonment, with these
+  values; a script that holds only `build` on the plot receives nothing.
+
+#### 5.C12 Objects by plot
+
+Read S4.2 in the Google Doc: "Each plot keeps a list of the things on it,
+kept with the object's plot as the other direction of that relation (S1),
+so self:plot_objects never visits every object." Today `plot_things`
+(`server/step/metadata.cpp`, around 432) loops over every object slot in
+the world, for `self:plot_objects`, for `engine.abandon_plot` and for the
+5.C3 selections.
+
+- Add a list of slots for each plot next to the plot column in the store's
+  `Objects`: `std::unordered_map<PlotId, std::vector<std::uint32_t>>
+  on_plot`.
+- The plot column is written in four places today: `store.cpp` (around 136
+  and 153), `perm::update_plots` (`perm.cpp`, around 158) and the capture
+  in `server/snap/objects.cpp` (around 63). Make one store function that
+  sets an object's plot and moves its slot between the lists, and call it
+  from all of them. Nothing else writes the column.
+- Build the lists when a snapshot or capture is restored. Do not save them.
+- `plot_things` walks `on_plot[id]` instead of every slot. Keep its
+  deadline check and its rules (no bodies, nothing held, no declared parts).
+- Tests: the list is right after a create, a destroy, a move across a plot
+  edge, a split, a join and a restore; in Release, `self:plot_objects` on
+  a plot with 10 things takes the same time with 1000 and with 100000
+  objects elsewhere. Report both times.
+
+#### 5.C13 Script state size without a walk
+
+Every write to `self.state` already adjusts the run's byte count
+(`server/react/vm.cpp`, around 215-238). But the starting count is worked
+out by `state_size`, which walks the script's whole stored state, at every
+handler entry and after every native call returns (`vm.cpp`, around 136,
+955 and 975). So every handler costs time in proportion to everything the
+script has stored, and a handler that makes several native calls pays it
+again after each one. Codex measured `base.land_auto`, which writes one
+flag, at 0.57 ms with 600 lots and 2.30 ms with 2400, and `base.land_tick`
+at up to 13 ms.
+
+- Keep each script's state byte count with its state, so it lasts between
+  runs: make `ScriptState` a struct holding the map and its byte count,
+  with insert and erase functions that update the count. Every writer of a
+  script's state goes through them. Grep for every write: the Lua state
+  proxy, start-file `script_state`, retiring an object, installation and
+  restore.
+- Handler entry and resume read the stored count. Delete `state_size`.
+- Work the count out once when a snapshot is restored, from the restored
+  map. Do not save it.
+- The limit and the per-entry size rule do not change.
+- Tests: the stored count equals a fresh walk after writes, erasures, a
+  restore, and a nested handler of the same script during a synchronous
+  native call; a script with 30000 state entries starts a handler that
+  writes one key in the same time as a script with 30 entries, in Release.
+  Report both times.
+
+#### 5.C14 Each owner's plots
+
+Read S4.2 in the Google Doc: "self:plots(owner) the ids of the plots that
+owner owns, from a list the engine keeps as the other direction of a plot's
+owner (S1), so it never visits every plot". Root's list is the pool.
+
+- Add `std::unordered_map<PlayerId, std::vector<PlotId>> by_owner` to
+  `perm::Plots`.
+- A plot's owner is written when land is surveyed
+  (`server/step/land.cpp`, around 36), by `perm::change_plot_owner`
+  (`perm.cpp`, around 891), by `perm::split_plot` (the new piece) and by
+  `perm::join_plots` (the removed plot). Make one perm function that sets a
+  plot's owner and moves its id between the lists, and call it from all of
+  them. Nothing else writes `Plot::owner`.
+- Build the lists when a snapshot is restored. Do not save them.
+- `self:plots(owner)` (`plots_binding`, `server/step/metadata.cpp`, around
+  419) takes an optional `"p:N"` and returns that owner's list. Without an
+  owner it returns every plot id, as today. Its cost counts against the
+  run's time limit like the other plot calls.
+- Tests: the lists are right after a survey, a sale, an abandonment, a
+  split, a join and a restore; `self:plots("p:0")` returns the pool.
+
+## Phase 8: remove unspecified derived state
+
+Do this phase after the Phase 5 corrections and before Phase 6. Its number
+is kept so that other references stay valid. Several items remove scans
+that run every step, and new code must not copy them.
+
+Each item is one commit. Bump `runtime_version` once, in the
+first commit that changes the snapshot layout. Old snapshots are rejected; no
+migration.
+
+1. Remove cause tokens from physics. Delete `MechanicalCauses`,
+   `server/space/causality.cpp`, `CauseToken` from every space API, the motion
+   cause rows in MOVE and the `causal_ambiguity` records. A contact, zone or
+   support event carries the Origin of the move_to intent of the body that
+   moved, if it has one, and otherwise an empty Origin (cause null).
+2. Remove `TravelAccess` (`server/step/travel.cpp`, `step.hpp:39-51`). Compute
+   forbidden plot boundaries when a move_to starts or replans. A grant that
+   expires during a walk takes effect at the next replan or the next action.
+   When you compute them, store the bounding box of the path, which covers
+   the start, every corner and the goal. Keep only the forbidden plots whose
+   bounds overlap that box. Each step, if the body's new position is outside
+   the box, replan; the replan computes a new box and a new list. Otherwise
+   test the step against the stored list as today. The per-step check then
+   costs the few closed plots along the path, not every closed lot in the
+   world. Add a
+   space or step test: a walk whose path passes a forbidden lot stops at its
+   edge, and a body pushed outside its path's box replans and is still
+   stopped at a forbidden lot.
+3. Replace per-binding `dependencies` and `refresh_dependencies`
+   (`server/react/install_watches.cpp:257`) with S1.5's rule: for a term with
+   `along`, a change on subject s wakes s and every object in `in[s]` of that
+   relation. No loop over all subscriptions.
+4. Stop saving pending network `Inputs` in snapshots
+   (`server/step/checkpoint.cpp:91-103, 607-626`). After a restore, sessions
+   reconnect and resend.
+5. Do this item last. It is the largest; if any rule test's expected behavior
+   would change, stop and report instead of changing the test. World rules get
+   no per-object watch rows (Technicals 12: "nothing is attached to objects").
+   Today `reconcile_effects` (`server/step/handlers.cpp`) calls
+   `react::sync_rule_watches` after every handler. That rebuilds
+   `latest_rules(rules)` from the whole history and binds watch rows on each
+   matching object (`server/react/install_watches.cpp:205-252`). Instead, a
+   changed `(subject, term)` dispatches like any trigger (S3.4): look up
+   `Triggers[term]`, then run `by_material[material(subject)]` if enabled, the
+   matching `by_flag` entries, `by_model` and `by_instance`. Delete
+   `sync_rule_watches`, `rule_watch_terms` and the rule watch rows in
+   `plan_background` (`server/step/plans.cpp:130-143`). `latest_rules` may
+   remain only on rule activation and rule answer paths.
+
+Items 6 to 10 remove code the owner ruled on. Do them before item 5, which
+stays last.
+
+6. Remove the power meter and the power purchase. The owner took paying
+   for power out of the prototype; it is on the Technicals' Later list as
+   "Paying for power". Delete:
+   - `Meter`, `MeterRows`, `metered`, `react::State::meters`, the meter half
+     of `retire_allocations`, and the meters in `write_shared` and
+     `read_shared`;
+   - the `self:meter` host call (`MeterReadBinding` and its binding in
+     `server/step/metadata.cpp`) and its row in `content/authoring.md`;
+   - `content/scripts/power_buyer.luau`, and its model entry, object,
+     relations and root's spend grant in `content/start.json`. The model
+     entry shares `content/models/equipment.py` with other equipment, so
+     keep that file. Keep `public.collector`: it still
+     supplies the circuit. Also delete the setting
+     `base.purchase_per_joule`, and every term that only the purchase uses.
+     Grep each term (`base.sells_to`, `base.procures`, `base.settle` and the
+     rest) and delete only those nothing else uses. `base.settlement_seconds`
+     stays: the land script uses it;
+   - their tests. Name each deleted test in your report.
+
+   Keep `AllocationRows`, `allocate` and `get_share`: the power circuits
+   share supply between lamps, sockets and pumps under S1.5's share rules.
+   But `allocate` loops over every allocation row in the world each time
+   one subject's allocation changes (`zero_missing`, `values.cpp`, around
+   456). Key `AllocationRows` by subject first, so that `allocate` replaces
+   only that subject's rows and `get_share` finds the subject, then the
+   contributor. `retire_allocations` runs when an object is destroyed, which
+   is rare, and may keep its loop.
+7. Remove `AssemblyMasses`. It is a cached total of an object's mass and its
+   parts' masses, published as `base.assembly_mass`, that `run.cpp` and
+   `handlers.cpp` keep current by hand after every change. Nothing reads
+   `base.assembly_mass`: no script, rule, test or client. Code that needs a
+   mass computes it when it reads it, as `self:measure_instance` already
+   does (`metadata.cpp`, around 205-219). Delete `AssemblyMasses`,
+   `MassRoles`, `validate_mass_roles`, `invalidate_mass`, `refresh_mass`,
+   `retire_mass`, `reconcile_mass`, `server/step/measurements.cpp`, their
+   calls in `run.cpp` and `handlers.cpp`, the `assembly_mass` entry in
+   `content/registry/mechanical.json`, and the `base.assembly_mass` term.
+   Keep `react::RuntimeMeasurements`: illumination still writes it.
+8. One check for native action inputs. Each native action declares a JSON
+   schema with `schema(...)` (in `commerce_schema.cpp`,
+   `commerce_schema_admin.cpp`, `editing_schema.cpp`,
+   `elaboration_schema.cpp`, `native_declarations.cpp`,
+   `physical_actions.cpp` and `model_definition.cpp`), but the schema only
+   feeds the signature text. A hand-written `validate_<action>` function
+   then checks the same rules again. That is two copies of one contract.
+   - Write one function, `std::string check_input(const Json &schema, const
+     Json &arguments)`, that supports exactly the keywords these schemas
+     use. Grep them: today they are `type` (a name or a list), `properties`,
+     `required`, `additionalProperties: false`, `minimum`, `maximum`,
+     `items`, `minItems`, `maxItems`, `enum`, `oneOf` and `anyOf`. Its
+     message names the input and the rule, for example
+     `plot must be an integer >= 1`.
+   - Call it once, where native actions are dispatched
+     (`native_actions.cpp`), before any action runs. A failure is S5.2's
+     `bad_input` with the signature and that message.
+   - Delete every `validate_<action>` function and its declaration in
+     `step.hpp`. Where a deleted validator was stricter than its schema,
+     make the schema say it (whole currency units are `type: integer,
+     minimum: 0`). A rule no keyword can state, such as "exactly one of x
+     and y" in `engine.split_plot`, goes in the schema with `oneOf` if it
+     fits, and otherwise into the action as a `bad_input`. Report each
+     case.
+   - Leave `server/net/protocol.cpp` alone: it checks wire messages, not
+     action inputs. Leave `validate_tests` in `server/elaborate` alone: it
+     checks rule tests.
+   - Existing bad-input tests must pass. Only their message text may
+     change; name each test whose expected text changed.
+9. Measure what `BINDINGS` declares about the model's own geometry. The
+   owner's ruling: a binding may declare intent, never a physical quantity
+   of the model's own shape. Intent stays: a door's axis, travel and speed;
+   a light's site, range and color; a zone's shape and ambient light; the
+   character's push force, acceleration, step, slope and floor snap; the
+   observer's eye.
+   - Character `radius` and `height` (`content/models/body.py`): take them
+     from the body asset's measured bounds. Height is the z extent, and
+     radius is half the larger of the x and y extents. Delete both keys.
+   - The tank's container `shape` (`content/models/tank.py`): the bake
+     measures it. The capacity measurement already finds the cells that
+     hold liquid; also return the bounding box of those cells as a measured
+     `cavity` (min and max) in the asset's measurements. Where a library
+     shape gives its capacity exactly, the library gives its cavity exactly
+     too. `server/step/geometry.cpp` (around 48) builds the container
+     volume from `cavity` instead of `bindings.container.shape`. Delete the
+     shape from the tank's `BINDINGS` and the code in `build` that computes
+     it. A model that binds `container` but has no cavity fails its bake
+     with a clear error.
+   - Bake again and report each value that changed, declared against
+     measured, for example the body's radius.
+   - Update the `BINDINGS` text in `content/authoring.md`.
+10. Stop walkers from replanning when nothing changed
+    (`server/space/space.cpp`):
+    - When a walker reaches a corner (around 1748-1750), the code sets
+      `body.path_revision = 0`, so the next update runs `path()` again:
+      `findPath`, `findStraightPath` and up to 10 candidate goals, at every
+      corner of every walk. Instead, move to the next corner and request it
+      from the crowd, as the code around 1641-1656 does after a plan. Put
+      that request in one function and call it from both places.
+    - Any navigation tile rebuild raises `n.revision` (`navigation.cpp`,
+      around 295), and then every walker replans (`space.cpp`, around 1618).
+      Replan only the walkers whose route box overlaps a rebuilt tile. Item
+      2 already keeps the box of each walker's route. Remove
+      `path_revision` if nothing else needs it.
+    - Keep feeding the crowd one corner at a time: the corners carry the
+      forbidden-plot avoidance. Keep the per-step sync of the crowd agent to
+      the physics body (`corridor.movePosition`): physics owns the position.
+    - Tests: a walk with at least three corners reaches its goal and plans
+      its route once; a tile rebuilt away from the route does not replan
+      the walker; a tile rebuilt on the route does.
+
+Done when: the checks pass, `grep -rn "CauseToken\|MechanicalCauses\|
+TravelAccess\|refresh_dependencies\|sync_rule_watches\|MeterRows\|
+AssemblyMasses\|power_buyer\|std::string validate_" server tests content`
+finds nothing, and `latest_rules` is called only from
+`server/react/activation.cpp` and `server/react/install_dispatch.cpp`.
+
 ## Phase 6: joining and the operator
 
 ### 6.1 Joining
 
-Protocol (S6.2): `{ t: join, version: 1, name, persona }` parsed in
+Read Technicals "Joining" and S6.2 in the Google Doc. They changed on
+2026-11-17: a join takes only a name, and the game stores no persona or
+purpose. To the game, a person and an agent are the same: a player who
+connects from outside with a key.
+
+Protocol (S6.2): `{ t: join, version: 1, name }` parsed in
 `server/net/protocol.cpp` next to `hello` (around 80-103). The server replies
 `{ t: joined, player: "p:N", key }`, then the session continues exactly as
-after `hello` in play mode. A refused join is closed with
-`{ t: bye, reason: refused }`.
+after `hello` in play mode. A join whose name another player already has is
+closed with `{ t: bye, reason: name_taken }`. One that `join_allowed`
+refuses is closed with `{ t: bye, reason: refused }`. Both write a record
+and create nothing.
+
+A name is taken when another profile's `name` is the same string after
+trimming spaces, ignoring case. Joins are rare, so loop over
+`net::Profiles` to check; add no index. Refuse an empty name, or one longer
+than 32 characters, as `bad_input`.
 
 Add one function, `bool join_allowed(const net::JoinRequest &)`, in
 `server/net/sessions.cpp`. It returns true. Call it before anything is
@@ -1329,18 +2345,17 @@ The join is one input on the step thread, like other inputs. It:
 2. creates a key the way `net::create_key_file` does (32 random bytes as
    hex) without writing a file, and stores only its hash with
    `net::put_profile`;
-3. stores `persona` on the profile, and shows it in `inspect('self')`;
-4. resizes `perm::Players`;
-5. creates a body object from the start file's
+3. resizes `perm::Players`;
+4. creates a body object from the start file's
    `"newcomer": {"body_model": "body", ...}`, owned by the player, at
    `(0, 0, 0)`, with flags `body`. Reuse what `install_objects` does for one
    object;
-6. issues the start file's `"newcomer"` `"body_installs"` from the player to
+5. issues the start file's `"newcomer"` `"body_installs"` from the player to
    the body's script. Reuse `editing::detail::slot_choices` and `fill_slots`,
    as `provision_body_grants` does;
-7. pays `"newcomer": {"money": N}` from root, if N > 0;
-8. sends the `base.start` bootstrap event to the body;
-9. writes a record with kind system and name `join`.
+6. pays `"newcomer": {"money": N}` from root, if N > 0;
+7. sends the `base.start` bootstrap event to the body;
+8. writes a record with kind system and name `join`.
 
 Its newcomer block, in both modes:
 
@@ -1357,10 +2372,12 @@ own `body` and `body_installs`.
 
 Gateway:
 - an unauthenticated `POST /join` in `gateway/http.py`, before `player_key`;
-- `Sessions.join(name, persona)` in `gateway/session.py`, which opens a
-  websocket, sends `join`, and returns the key;
-- `amb join NAME --persona TEXT --key-file PATH` in `gateway/cli.py`, before
-  the key check (around 96-98). It writes the key to PATH with mode 0600.
+- `Sessions.join(name)` in `gateway/session.py`, which opens a websocket,
+  sends `join`, and returns the key, or the refusal reason;
+- `amb join NAME --key-file PATH` in `gateway/cli.py`, before the key check
+  (around 96-98). It writes the key to PATH with mode 0600, and prints the
+  reason when the join is refused.
+- The MCP endpoint stays. Some agents prefer it to the CLI.
 
 ### 6.2 The operator
 
@@ -1384,80 +2401,249 @@ Done when: tests show all of the following:
 - a join creates a player whose body stands at Port Zero, holds the newcomer
   grants, has 0 money in forage, and can `look` and `do`;
 - a second join gets the next id;
+- a join with a taken name, in any case, gets `name_taken` and creates
+  nothing;
 - a refused join, with `join_allowed` stubbed in the test, creates nothing;
 - an operator gives the architect role and group membership at runtime, and
   the new architect can then edit a group-1 model;
 - a replaced key works and the old one gets `bad_key`;
 - `amb join` writes a key file that `amb look` then uses.
 
+### 6.3 The density and load run
+
+The Technicals set three acceptance rows that no test measures yet:
+- Reactions at density: well under 50 ms per step.
+- Load: 500 simulated WebSocket clients, with no silent drops, and reconnect
+  storms that recover quickly.
+- Aquarium: about 100 kbps per viewer.
+
+The seeded world has about 360 objects and a few players, so it hides costs
+that grow with players and land. Joining (6.1) makes 500 players cheap to
+create. This task builds the run and reports numbers. It does not fix
+anything.
+
+Write `harness/density.py`, an asyncio script. Reuse the WebSocket client
+code in `gateway/session.py`; do not write a second protocol client.
+1. Start a release `amb-server` on a fresh world from a freshly prepared
+   seeded plan, with the network on and paced, the way
+   `harness/episode.py` starts it. Do not start the gateway.
+2. Open 500 WebSocket clients. Each one sends `join`. Start one join every
+   100 ms.
+3. Each client then loops. It waits a random 1 to 10 s, then does one of
+   these:
+   - 60%: `base.move_to` to a random point with x from -100 to 100 and y
+     from -45 to 45. That is on the Street.
+   - 20%: `look`.
+   - 20%: `inspect('land')`.
+4. Five minutes after the last join, close all 500 sockets at once. Each
+   client then reconnects with `hello` and its key and continues its loop.
+5. Five minutes after that, stop the server with SIGINT.
+
+Add `phase_max_ms` to the server's `stopped` line, computed like the
+percentiles.
+
+Write `.cache/bench/density-<date>.json` with:
+- the server's `stopped` line;
+- the peak `VmHWM` of the server process;
+- the number of records named `overflow` or with a drop reason, by name;
+- per client: messages received, bytes received per second (mean and
+  max), and every socket the server closed, with its reason;
+- the seconds from the mass disconnect until all 500 clients were back and
+  had an action reply.
+
+Name the workload and the exclusions in the file and in your report:
+- no gateway and no LLM;
+- clients run on the same host as the server;
+- no bake work and no authoring.
+
+Gates. Report each as pass or fail, with its number:
+- `phase_p95_ms` under 25 and no overruns after the last join. This brief
+  reads "well under 50 ms" that way.
+- No socket closed by the server, and every dropped message or action has a
+  record (S6.4).
+- Mean bytes per client under 12.5 kB/s, which is 100 kbps.
+- Reconnect time: report it. There is no gate yet.
+
+If a gate fails, do not change server code in this task. Find the five
+largest costs per step, using the Tracy zones in `run.cpp` or timers
+around the step's phases, and report them with numbers. The reviewer writes
+the fix tasks.
+
+Task 5.C5 and Phase 8 removed the scans the reviewer already knew about: the
+pending-view invalidation, the travel check against every closed plot, and
+the rule-watch rebuild after every handler. This run looks for the ones
+nobody has found yet. For each of the five largest costs, name the function
+and say what grows with it: players, plots, objects or sessions.
+
+### 6.4 Hosting
+
+The owner hosts a world on one Linux VM for a private playtest. The
+server and the gateway keep listening on 127.0.0.1. Caddy terminates TLS in
+front of them, as the Technicals' transport section says. Use Caddy alone:
+no nginx, no Docker, no systemd units, no new server or gateway options.
+
+Add `deploy/Caddyfile`, about 20 lines, with `{$AMB_HOST}` as the host name:
+- `https://{$AMB_HOST}` proxies everything, including the `/ws` websocket,
+  to `127.0.0.1:8080`;
+- `https://{$AMB_HOST}:8443` proxies everything to the gateway on
+  `127.0.0.1:8081`, except that `POST /join` first requires `basic_auth`
+  with one user whose bcrypt hash comes from `{$AMB_JOIN_HASH}`. Only the
+  people the owner gives that password can join.
+
+`amb join` sends that basic auth when the environment variable
+`AMBERGRIS_JOIN_AUTH` is set to `user:password`, and only on `/join`. The
+gateway itself checks nothing new.
+
+The client already builds `wss://` from the page's origin
+(`client/main.gd`, around 94-97); keep it. After 6.5 the browser no longer
+calls the gateway, so the gateway needs no browser origin.
+
+Add a "Host a world" section to `README.md`, at most 25 lines: install
+Caddy, set `AMB_HOST` and `AMB_JOIN_HASH` (with `caddy hash-password`),
+run Caddy with `deploy/Caddyfile`, start the server with
+`--profile development` and the gateway, open `https://HOST/`, and join
+with
+`AMBERGRIS_JOIN_AUTH=... bin/amb --gateway https://HOST:8443 join NAME
+--key-file KEY`.
+
+Done when, with `AMB_HOST=localhost` and Caddy's `tls internal`, on this
+host. Point clients at Caddy's local root certificate with `SSL_CERT_FILE`
+and `curl --cacert`; do not turn off certificate checks.
+- `curl` gets the client page over https, and a short aiohttp script opens
+  `wss://localhost/ws`, sends `hello` in watch mode with the spectator key,
+  and gets the server's reply;
+- `amb join` through `https://localhost:8443` works with the password,
+  and without it gets 401 and creates no player;
+- `amb look` with the new key works through Caddy.
+Report the commands and their output. Do not add a test file for this.
+
+### 6.5 The game runs no agents
+
+Do this before 6.4.
+
+The owner's rule, as version 1 states it: "The platform has no model
+provider, credentials, agent SDK, or model configuration. The agent
+connects as an ordinary authenticated player." To the game, a person and an
+agent are the same thing: a player who connects from outside with a key.
+Each brings its own goals and acts on its own motives. The game never
+stores, relays or shows an agent's purpose. The Technicals say the same of
+the gateway: it "translates tool calls into server messages and server
+events into observations, and holds no world state".
+
+Today the gateway runs the residents' OpenAI loops in its own process, and
+the browser's purpose box posts to them. Delete all of it. Do not move it
+into a separate process.
+
+Delete:
+- `harness/` (`resident.py`, `episode.py`, `__init__.py`);
+- `content/residents.json` and
+  `test_residents_supply_intentions_without_prepared_solutions` in
+  `tests/test_content.py`;
+- `openai` from `pyproject.toml`, then run `uv lock`;
+- in `gateway/service.py`: `--residents`, `--model`, `--resident-report`,
+  `--purpose-token`, `--purpose-token-file` and `write_resident_report`;
+- in `gateway/http.py`: `/api/agents`, `/api/purpose`, `purpose_auth`, and
+  the residents' parts of `health` and of shutdown. `create_app` takes no
+  residents and no purpose token;
+- "and model harness" in the `gateway/schema.py` docstring;
+- in `client/main.gd`: the purpose panel, the agent list, `gateway_url`,
+  `purpose_token`, `_gateway`, `_send_purpose`, `_set_agents` and their
+  callbacks. After this the client talks only to the server;
+- `client/tests/browser-purpose.mjs`, and the purpose token and agent
+  checks in `client/tests/browser-smoke.mjs`;
+- `tests/game_ui_gateway.py`;
+- the three resident tests in `tests/test_gateway.py`;
+- the harness half of
+  `test_http_cli_and_harness_expose_same_authoring_operations` in
+  `tests/test_live_authoring.py`. Keep its HTTP and CLI checks and rename
+  it.
+
+README:
+- Remove the resident population paragraph, `--purpose-token-file` and
+  the `?gateway=` URL.
+- Add "Play with an agent", at most 10 lines: a player, person or agent,
+  gets a key (a start-file profile's key file, or `amb join`). Any agent
+  program that can run shell commands, such as Claude Code, Codex or Pi,
+  plays with `bin/amb --key-file KEY look`, `actions` and `do`. An agent
+  that prefers MCP may use the gateway's `/mcp` endpoint with the same key.
+  The agent's model and credentials stay with whoever runs it. To watch,
+  open the client in a window beside the agent; for now the browser only
+  spectates.
+
+Name every deleted test in your report.
+
+Done when: `harness/` and `content/residents.json` are gone,
+`git grep -n -i "openai\|purpose\|resident" -- gateway client harness
+pyproject.toml` finds nothing, the checks pass, and an agent you start by
+hand with a seeded key file can `look` and `do` through `bin/amb`.
+
+### 6.6 Sandboxes
+
+Read Technicals "Sandboxes" and S13.4 in the Google Doc. A newcomer has no
+land and no money. It builds in a sandbox, and earns money by selling what
+it makes. Nobody is given money for joining. This needs no engine feature
+beyond the plot record's `build_open` and 5.C12.
+
+- Plot records get `build_open`. S5.1: "build_open when it lets everyone
+  build". Set it in `perm::plot_record` next to `open`
+  (`perm.cpp`, around 84), from the preset bit for `LandVerb::Build`.
+- Start file: a `land.lots` entry may carry `"preset"`, a list of land
+  verbs, applied when the lot is surveyed (`server/step/land.cpp`, around
+  36). Add two sandbox lots near Port Zero that are not Street lots, in
+  both modes, with owner 0 and preset `build`, `enter` and `run_scripts`.
+  Name their positions in your report.
+- The land script (5.C8) stores `sandbox:<id>` for a pool lot whose record
+  has `build_open` when it first reads it, and never offers that lot.
+- A start-file grant scope may name a lot by position:
+  `{"lot_at": [x, y]}`, resolved to that lot's plot id when the world
+  starts.
+- Add `content/scripts/sandbox.luau`, installed on a new public object
+  `public.sandbox_post` near the sandboxes, and a root grant to it on each
+  sandbox lot with the right `return`.
+- Settings: `base.sandbox_hours` 24 and `base.sandbox_sweep_seconds` 600.
+- The sweeper:
+  - at start, reads `self:plots("p:0")` once and the records of those
+    lots, `BATCH` per run, and keeps the ones with `build_open`;
+  - every `base.sandbox_sweep_seconds`, for each sandbox lot, reads
+    `self:plot_objects(id)`, records when each new thing was first seen,
+    and returns with `engine.return` each thing first seen at least
+    `base.sandbox_hours` ago. It keeps a list per lot of the things it has
+    seen, so it forgets things that are gone by walking that list, never
+    all of `self.state`;
+  - returns at most `BATCH` things per run, and continues on the next step
+    with `self:after(0.05, ...)`.
+- `content/authoring.md`: one paragraph on sandboxes: where they are, that
+  anyone may build there, and that things are returned after
+  `base.sandbox_hours`.
+- The playtest runs with stakes off, so making materials costs nothing.
+
+Tests:
+- a newcomer with no money creates a thing on a sandbox lot, offers it, and
+  a seeded resident buys it; the money reaches the newcomer;
+- the same thing is refused on an ordinary pool lot;
+- a thing older than `base.sandbox_hours` is returned to its current owner;
+  a newer one stays;
+- the land script never offers a sandbox lot.
+
 ## Phase 7: the journeys
 
-Every `tests/game_*.py` journey must pass on the new seed world. Expect
-changes in these:
-- `game_body_permissions.py`: objects on `plot=3` (around 46), and the owned
-  scope (around 65 and 114);
-- `game_actions.py`: the landlord grant (around 310);
-- `game_live_authoring.py`: `place` (around 255);
-- `game_deadlines.py`: pays p:1 (around 111 and 138), which still works;
-- `game_spatial.py`: the architect rebinds the `breaker` and `pump` models,
-  which still works because the architect is their author.
-
-Positions in journeys that assume the old layout move by `(+16, +48, 0)`.
+Every `tests/game_*.py` journey must pass on the world after Phases 5, 8
+and 6.
+Task 4.C5 already moved the journeys onto the new layout. Here, check them
+again against the land market of Phase 5 and the joining of Phase 6.
 Do not loosen any check. Report each journey's result and evidence path.
-
-## Phase 8: remove unspecified derived state
-
-Each item is one commit. Bump `runtime_version` once, in the
-first commit that changes the snapshot layout. Old snapshots are rejected; no
-migration.
-
-1. Remove cause tokens from physics. Delete `MechanicalCauses`,
-   `server/space/causality.cpp`, `CauseToken` from every space API, the motion
-   cause rows in MOVE and the `causal_ambiguity` records. A contact, zone or
-   support event carries the Origin of the move_to intent of the body that
-   moved, if it has one, and otherwise an empty Origin (cause null).
-2. Remove `TravelAccess` (`server/step/travel.cpp`, `step.hpp:39-51`). Compute
-   forbidden plot boundaries when a move_to starts or replans. A grant that
-   expires during a walk takes effect at the next replan or the next action.
-3. Replace per-binding `dependencies` and `refresh_dependencies`
-   (`server/react/install_watches.cpp:257`) with S1.5's rule: for a term with
-   `along`, a change on subject s wakes s and every object in `in[s]` of that
-   relation. No loop over all subscriptions.
-4. Stop saving pending network `Inputs` in snapshots
-   (`server/step/checkpoint.cpp:91-103, 607-626`). After a restore, sessions
-   reconnect and resend.
-5. Do this item last. It is the largest; if any rule test's expected behavior
-   would change, stop and report instead of changing the test. World rules get
-   no per-object watch rows (Technicals 12: "nothing is attached to objects").
-   Today `reconcile_effects` (`server/step/handlers.cpp`) calls
-   `react::sync_rule_watches` after every handler. That rebuilds
-   `latest_rules(rules)` from the whole history and binds watch rows on each
-   matching object (`server/react/install_watches.cpp:205-252`). Instead, a
-   changed `(subject, term)` dispatches like any trigger (S3.4): look up
-   `Triggers[term]`, then run `by_material[material(subject)]` if enabled, the
-   matching `by_flag` entries, `by_model` and `by_instance`. Delete
-   `sync_rule_watches`, `rule_watch_terms` and the rule watch rows in
-   `plan_background` (`server/step/plans.cpp:130-143`). `latest_rules` may
-   remain only on rule activation and rule answer paths.
-
-Done when: the checks pass, `grep -rn "CauseToken\|MechanicalCauses\|
-TravelAccess\|refresh_dependencies\|sync_rule_watches" server tests` finds
-nothing, and `latest_rules` is called only from `server/react/activation.cpp`
-and `server/react/install_dispatch.cpp`.
 
 ## Not in this brief
 
 Do not touch these; they need a ruling from the owner first:
-- `AllocationRows` and `MeterRows` (with `self:meter`). They are coupled: each
-  allocation change also updates a meter (`server/react/values.cpp:379-420`).
-- `AssemblyMasses`, and where illuminance lives.
-- The `self:object` host call.
-- Whether `engine.transfer` and `engine.impulse` should exist at all, or be
-  replaced by events.
-- The rest of the bake `BINDINGS` declaration (character mass and size, door
-  motion, the tank's containment `shape`), and stair checks for fused solids.
-- The navigation corridor code and the fixture process layers.
-- The duplicate `validate_*` functions.
+- Where illuminance lives.
+- Stair checks for fused solids.
+- The fixture process layers.
 - The monorail. It is content that architects build later.
+- Any stakes mechanic: charging, the energy cost of materials, power
+  supply or paying for power. The prototype runs with stakes off. Do not
+  add to or extend these until the owner says so.
+- Paid elaboration (Technicals, "Money is issued"). Its design is still
+  open; a later brief will add it.
 - Terrain heightmaps.
 - Any check in `join_allowed`, such as a captcha or a puzzle.

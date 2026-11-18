@@ -116,8 +116,14 @@ step::NativeCompletion world_setting(const step::NativeCall &call, react::State 
       if ((!value && existing == world.values.end()) ||
           (value && existing != world.values.end() && *value == existing->second))
         continue;
+      // Only watched terms need per-object answers; most world settings have no watchers.
+      const auto trigger = react_state.triggers.find(term);
+      const bool watched =
+          trigger != react_state.triggers.end() &&
+          (!trigger->second.by_material.empty() || !trigger->second.by_flag.empty() ||
+           !trigger->second.by_model.empty() || !trigger->second.by_instance.empty());
       std::vector<std::pair<Handle, react::Answer>> before;
-      for (std::uint32_t slot = 1; slot < values.identity.model.size(); ++slot)
+      for (std::uint32_t slot = 1; watched && slot < values.identity.model.size(); ++slot)
         if (values.identity.model[slot]) {
           const auto object = values.identity.at(slot);
           before.emplace_back(object, react::read(values, object, term, call.step, call.hz));

@@ -32,13 +32,12 @@ void layout_and_pool() {
           "ways and lots have their specified rights");
   require(world.terrain == std::set<std::pair<std::int32_t, std::int32_t>>{{0, -1}, {0, 0}},
           "terrain covers every plot");
-  const auto first =
-      perm::plot_record(permissions.plots, permissions.grants, 4, land.port_spacing_m, 0);
+  const auto first = perm::plot_record(permissions.plots, permissions.grants, 4, land, 0);
   require(first["fronts"] == "street" && first["area_m2"] == 512 && first["port"] == 0,
           "lot record measures frontage, area and nearest port");
   for (PlotId id = 4; id <= 11; ++id)
-    require(perm::plot_record(permissions.plots, permissions.grants, id, land.port_spacing_m,
-                              0)["fronts"] == (id <= 7 ? "street" : "back way"),
+    require(perm::plot_record(permissions.plots, permissions.grants, id, land, 0)["fronts"] ==
+                (id <= 7 ? "street" : "back way"),
             "every surveyed lot fronts its row's street or back way, including alley corners");
   for (PlotId id = 4; id <= 7; ++id)
     perm::set_plot_owner(permissions.plots, id, 2);
@@ -52,6 +51,7 @@ void layout_and_pool() {
                       permissions.groups);
   bytes.resize(out.adapter().writtenBytesCount());
   perm::State restored;
+  restored.plots.cell_m = land.block_m;
   snap::Input in{bytes.data(), bytes.size()};
   perm::read_players(in, restored.players, restored.ledger, restored.plots, restored.groups);
   require(restored.plots.by_owner == permissions.plots.by_owner,
@@ -78,8 +78,9 @@ void terrain_supports_bodies_and_navigation() {
                              step::outdoor_lux(lighting), {}) == 120,
           "outdoor objects receive the world setting's 120 lux");
   scene.wait_navigation();
-  const auto route = space::path(scene.space_state, identity(scene.objects), body,
-                                 space::PointGoal{{20, 20, 0}, .1f}, {});
+  const auto route = space::shortest_open(space::routes(scene.space_state, identity(scene.objects),
+                                                        body, space::PointGoal{{20, 20, 0}, .1f}),
+                                          {});
   require(route.status == space::PathStatus::Ready, "navigation crosses terrain");
   require(scene.result.contacts.empty(), "terrain has no object contact events");
 }
